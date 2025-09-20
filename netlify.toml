@@ -3,10 +3,10 @@
   base = "."
   
   # Directory that contains the deploy-ready HTML files and assets
-  publish = "public/dist"
+  publish = "public"
   
-  # Build command - only build the client
-  command = "cd public && npm install && npm run build"
+  # No build command needed since files are already built
+  command = ""
 
 # Specific build environment
 [build.environment]
@@ -19,18 +19,6 @@
   to = "/index.html"
   status = 200
 
-# Environment variables (set these in Netlify dashboard)
+# Environment variables (set these in Netlify dashboard if needed)
 [build.environment]
   NODE_ENV = "production"
-  # NEXT_PUBLIC_API_URL = "your-api-url-here"
-  # NEXTAUTH_URL = "your-netlify-app-url"
-  # NEXTAUTH_SECRET = "your-secret-key"
-
-# Security headers
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Frame-Options = "DENY"
-    X-Content-Type-Options = "nosniff"
-    X-XSS-Protection = "1; mode=block"
-    Referrer-Policy = "strict-origin-when-cross-origin"
