@@ -1,0 +1,695 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SaaS Admin Console</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="css/main.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    .section { display: none; }
+    .section.active { display: block; }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">SaaS Admin</div>
+    <nav class="nav flex-column px-3 mt-3" id="sidebarNav">
+      <a class="nav-link py-2 active" data-target="section-dashboard" href="#">Dashboard</a>
+      <a class="nav-link py-2" data-target="section-businesses" href="#">Businesses</a>
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="subsGroup">
+          <span>Subscriptions</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="subsGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-subs-all" href="#">All Subscriptions</a>
+          <a class="nav-link py-1" data-target="section-plans" href="#">Plans & Pricing</a>
+          <a class="nav-link py-1" data-target="section-subs-new" href="#">New Subscription (Manual Add)</a>
+          <a class="nav-link py-1" data-target="section-invoices" href="#">Payments & Invoices</a>
+          <a class="nav-link py-1" data-target="section-renewal" href="#">Renewals & Expirations</a>
+          <a class="nav-link py-1" data-target="section-features" href="#">Feature Access Control</a>
+          <a class="nav-link py-1" data-target="section-payment-methods" href="#">Payment Methods</a>
+        </div>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <div class="content">
+    <header class="topbar">
+      <div class="d-flex align-items-center gap-2">
+        <button id="sidebarToggle" class="btn btn-outline-secondary btn-sm" title="Toggle menu">Menu</button>
+        <span id="pageTitle" class="fw-semibold d-none d-sm-inline">Dashboard</span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <div class="dropdown">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="notifBtn" aria-expanded="false" title="Notifications">🔔 <span id="notifDot" class="dot d-none"></span></button>
+          <div class="dropdown-menu dropdown-menu-end" id="notifMenu">
+            <div class="dropdown-header">Notifications</div>
+            <div class="dropdown-body" id="notifList">
+              <div class="text-muted small px-3 py-2">No new notifications</div>
+            </div>
+          </div>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm icon-btn" id="messagesBtn" href="mailto:support@example.com" title="Messages/Support">💬</a>
+        <button class="btn btn-outline-secondary btn-sm icon-btn" id="themeToggle" title="Switch theme">🌙</button>
+        <div class="dropdown">
+          <button class="btn btn-light btn-sm d-flex align-items-center gap-2" id="profileBtn" aria-expanded="false">
+            <span class="avatar" id="profileAvatar">👤</span>
+            <span id="profileName" class="d-none d-md-inline">Admin</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end" id="profileMenu">
+            <div class="dropdown-header">Account</div>
+            <a class="dropdown-item" href="#" id="myProfile">My Profile</a>
+            <a class="dropdown-item" href="#" id="mySettings">Settings</a>
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item text-danger" id="logoutAction">Logout</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container-fluid py-3">
+      <div id="alertBox" class="alert d-none" role="alert"></div>
+
+      <!-- Dashboard Section -->
+      <section id="section-dashboard" class="section active">
+        <!-- KPI cards -->
+        <div class="row g-3 mb-3">
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-primary kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Total Businesses</div>
+              <div class="fs-3 fw-semibold" id="kpiTotalBiz">—</div>
+            </div></div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-success kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Total Registered (30d)</div>
+              <div class="fs-3 fw-semibold" id="kpiRegistered">—</div>
+            </div></div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-warning kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Active Subscriptions</div>
+              <div class="fs-3 fw-semibold" id="kpiActiveSubs">—</div>
+            </div></div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-info kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Monthly Revenue</div>
+              <div class="fs-3 fw-semibold" id="kpiMonthlyRevenue">—</div>
+            </div></div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="row g-3 mb-3">
+          <div class="col-lg-8">
+            <div class="card shadow-sm h-100"><div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Monthly Revenue Growth</h6>
+              </div>
+              <div class="chart-box">
+                <canvas id="chartRevenue"></canvas>
+              </div>
+            </div></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="card shadow-sm h-100"><div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Businesses by Plan</h6>
+              </div>
+              <div class="chart-box">
+                <canvas id="chartPlans"></canvas>
+              </div>
+            </div></div>
+          </div>
+        </div>
+
+        <!-- Recent + small stats -->
+        <div class="row g-3">
+          <div class="col-lg-8">
+            <div class="card shadow-sm h-100"><div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Recent Registrations</h6>
+                <button class="btn btn-sm btn-outline-secondary" id="reloadRecent">Reload</button>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle" id="recentTable">
+                  <thead><tr><th>Name</th><th>Tier</th><th>Created</th></tr></thead>
+                  <tbody><tr><td colspan="3" class="text-muted">Loading...</td></tr></tbody>
+                </table>
+              </div>
+            </div></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="card shadow-sm h-100"><div class="card-body">
+                  <div class="text-muted small">Churn Rate</div>
+                  <div class="fs-3 fw-semibold" id="kpiChurn">—</div>
+                </div></div>
+              </div>
+              <div class="col-12">
+                <div class="card shadow-sm h-100"><div class="card-body">
+                  <div class="text-muted small">Server Uptime (hrs)</div>
+                  <div class="fs-3 fw-semibold" id="kpiUptime">—</div>
+                </div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Provision Tenant (Multi-step) -->
+      <section id="section-provision" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-3 step-indicator">
+              <div class="step" data-step="1">1</div>
+              <div class="step" data-step="2">2</div>
+              <div class="step" data-step="3">3</div>
+            </div>
+
+            <form id="provisionForm">
+              <!-- Step 1: Business -->
+              <div class="step-pane" data-step-pane="1">
+                <h5 class="mb-3">Business Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Business Name</label>
+                    <input type="text" id="pf_bizName" class="form-control" required />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Subscription Tier</label>
+                    <select id="pf_bizTier" class="form-select">
+                      <option value="free">Free</option>
+                      <option value="starter">Starter</option>
+                      <option value="pro">Pro</option>
+                    </select>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label">Limits (JSON)</label>
+                    <textarea id="pf_bizLimits" class="form-control" rows="3" placeholder='{"products":1000, "staff":10}'></textarea>
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between mt-3">
+                  <button class="btn btn-outline-secondary" data-cancel>Cancel</button>
+                  <button class="btn btn-primary" data-next>Next</button>
+                </div>
+              </div>
+
+              <!-- Step 2: Owner -->
+              <div class="step-pane d-none" data-step-pane="2">
+                <h5 class="mb-3">Owner Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label">First name</label>
+                    <input type="text" id="pf_ownerFname" class="form-control" required />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Middle name (optional)</label>
+                    <input type="text" id="pf_ownerMname" class="form-control" />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Last name</label>
+                    <input type="text" id="pf_ownerLname" class="form-control" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Owner Email</label>
+                    <input type="email" id="pf_ownerEmail" class="form-control" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Temporary Password</label>
+                    <input type="text" id="pf_ownerTempPass" class="form-control" value="ChangeMe123" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Business ID</label>
+                    <input type="text" id="pf_ownerBizId" class="form-control" placeholder="e.g., ACME-001" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Business Name (optional)</label>
+                    <input type="text" id="pf_ownerBizName" class="form-control" />
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between mt-3">
+                  <button class="btn btn-outline-secondary" data-prev>Back</button>
+                  <div>
+                    <button class="btn btn-outline-secondary me-2" data-cancel>Cancel</button>
+                    <button class="btn btn-primary" data-next>Next</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 3: Review & Provision -->
+              <div class="step-pane d-none" data-step-pane="3">
+                <h5 class="mb-3">Review</h5>
+                <div id="pf_review" class="border rounded p-3 bg-light"></div>
+                <div class="d-flex justify-content-between mt-3">
+                  <button class="btn btn-outline-secondary" data-prev>Back</button>
+                  <div>
+                    <button class="btn btn-outline-secondary me-2" data-cancel>Cancel</button>
+                    <button type="submit" class="btn btn-success">Provision Tenant</button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Subscriptions: All Subscriptions -->
+      <section id="section-subs-all" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+            <div>
+              <label class="form-label small mb-1">Status</label>
+              <select id="subsFilterStatus" class="form-select form-select-sm" style="min-width:150px">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="expired">Expired</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label small mb-1">Owner/Email</label>
+              <input id="subsFilterOwner" class="form-control form-control-sm" placeholder="Search owner/email" />
+            </div>
+            <div>
+              <label class="form-label small mb-1">From</label>
+              <input type="date" id="subsFilterFrom" class="form-control form-control-sm" />
+            </div>
+            <div>
+              <label class="form-label small mb-1">To</label>
+              <input type="date" id="subsFilterTo" class="form-control form-control-sm" />
+            </div>
+            <div class="ms-auto d-flex gap-2">
+              <button class="btn btn-outline-secondary btn-sm" id="subsFilterClear">Clear</button>
+              <button class="btn btn-primary btn-sm" id="subsFilterApply">Apply</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr><th>Business</th><th>Owner</th><th>Plan</th><th>Status</th><th>Start</th><th>Renew</th></tr>
+              </thead>
+              <tbody id="subsTable"><tr><td colspan="6" class="text-muted">No data</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: New Subscription (Manual Add) -->
+      <section id="section-subs-new" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>New Subscription (Manual Add)</h5>
+          <form id="subsNewForm" class="row g-3 mt-1">
+            <div class="col-md-4">
+              <label class="form-label">Business ID</label>
+              <input id="sn_business_id" class="form-control" required />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Owner Email</label>
+              <input id="sn_owner_email" type="email" class="form-control" required />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Plan</label>
+              <select id="sn_plan" class="form-select">
+                <option value="free">Free</option>
+                <option value="starter">Starter</option>
+                <option value="pro">Pro</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Billing Cycle</label>
+              <select id="sn_cycle" class="form-select">
+                <option value="monthly">Monthly</option>
+                <option value="termly">Termly</option>
+                <option value="annual">Annual</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Start Date</label>
+              <input id="sn_start" type="date" class="form-control" />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Amount (optional)</label>
+              <input id="sn_amount" type="number" class="form-control" />
+            </div>
+            <div class="col-12 d-flex justify-content-end gap-2">
+              <button class="btn btn-outline-secondary" type="reset">Reset</button>
+              <button class="btn btn-success" type="submit">Create Subscription</button>
+            </div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: Plans & Pricing -->
+      <section id="section-plans" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+              <h5 class="mb-0">Subscription Plans</h5>
+              <button class="btn btn-primary" onclick="showPlanForm()">
+                <i class="bi bi-plus-lg"></i> Add New Plan
+              </button>
+            </div>
+            
+            <div id="plansTableContainer">
+              <div class="table-responsive">
+                <table class="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Monthly</th>
+                      <th>Annual</th>
+                      <th>Staff</th>
+                      <th>Branches</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="plansTableBody">
+                    <tr><td colspan="7" class="text-muted text-center py-4">Loading plans...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Plan Form (initially hidden) -->
+            <div id="planFormContainer" style="display: none;">
+              <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                  <form id="planForm" class="needs-validation" novalidate>
+                    <input type="hidden" id="planId">
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label class="form-label">Plan Name *</label>
+                        <input type="text" class="form-control" id="planName" required>
+                        <div class="invalid-feedback">Please provide a plan name.</div>
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label">Status *</label>
+                        <select class="form-select" id="planStatus" required>
+                          <option value="Active">Active</option>
+                          <option value="Inactive">Inactive</option>
+                        </select>
+                      </div>
+                      
+                      <div class="col-md-4">
+                        <label class="form-label">Monthly Price ($) *</label>
+                        <div class="input-group">
+                          <span class="input-group-text">$</span>
+                          <input type="number" step="0.01" class="form-control" id="monthlyPrice" required>
+                        </div>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Termly Price ($)</label>
+                        <div class="input-group">
+                          <span class="input-group-text">$</span>
+                          <input type="number" step="0.01" class="form-control" id="termlyPrice">
+                        </div>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Annual Price ($) *</label>
+                        <div class="input-group">
+                          <span class="input-group-text">$</span>
+                          <input type="number" step="0.01" class="form-control" id="annualPrice" required>
+                        </div>
+                      </div>
+                      
+                      <div class="col-md-4">
+                        <label class="form-label">Max Staff *</label>
+                        <input type="number" class="form-control" id="maxStaff" min="1" required>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Max Students</label>
+                        <input type="number" class="form-control" id="maxStudents" min="0">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">Max Branches *</label>
+                        <input type="number" class="form-control" id="maxBranches" min="1" required>
+                      </div>
+                      
+                      <div class="col-12">
+                        <label class="form-label">Features *</label>
+                        <textarea class="form-control" id="planFeatures" rows="3" required 
+                          placeholder="Inventory, Sales, Reports, SMS, AI, etc."></textarea>
+                        <div class="form-text">Enter features separated by commas</div>
+                      </div>
+                      
+                      <div class="col-12 d-flex justify-content-end gap-2 pt-3">
+                        <button type="button" class="btn btn-outline-secondary" onclick="hidePlanForm()">
+                          Cancel
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                          <span class="spinner-border spinner-border-sm d-none" id="savePlanSpinner" role="status" aria-hidden="true"></span>
+                          Save Plan
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Subscriptions: Feature Access Control -->
+      <section id="section-features" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <h5 class="mb-0">Feature Access Control</h5>
+            <button id="btnNewFeature" class="btn btn-success btn-sm ms-auto">New Feature</button>
+          </div>
+          <div class="text-muted mb-2">Toggle features per plan. Sync with Features table.</div>
+          <div class="row g-4">
+            <div class="col-lg-5">
+              <h6 class="mb-2">Features</h6>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead><tr><th>Name</th><th>Code</th><th>Active</th><th></th></tr></thead>
+                  <tbody id="featuresTable"><tr><td colspan="4" class="text-muted">No features</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="col-lg-7">
+              <h6 class="mb-2">Plan × Feature Matrix</h6>
+              <div id="featureMatrix" class="table-responsive small">
+                <div class="text-muted">Loading matrix…</div>
+              </div>
+              <div class="d-flex justify-content-end mt-2">
+                <button id="btnSaveMatrix" class="btn btn-primary btn-sm">Save Changes</button>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- Modals: Plan -->
+      <!-- Add this to admin.html where you want the plans section -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Manage Subscription Plans</h5>
+      <button class="btn btn-primary" onclick="showPlanForm()">Add New Plan</button>
+  </div>
+  <div class="card-body">
+      <div id="plansTableContainer">
+          <table class="table table-hover" id="plansTable">
+              <thead>
+                  <tr>
+                      <th>Name</th>
+                      <th>Monthly Price</th>
+                      <th>Annual Price</th>
+                      <th>Max Staff</th>
+                      <th>Max Branches</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                  </tr>
+              </thead>
+              <tbody id="plansTableBody"></tbody>
+          </table>
+      </div>
+
+      <!-- Plan Form (initially hidden) -->
+      <div id="planFormContainer" style="display: none;">
+          <form id="planForm" class="mt-4">
+              <input type="hidden" id="planId">
+              <div class="row">
+                  <div class="col-md-6 mb-3">
+                      <label class="form-label">Plan Name *</label>
+                      <input type="text" class="form-control" id="planName" required>
+                  </div>
+                  <div class="col-md-6 mb-3">
+                      <label class="form-label">Status *</label>
+                      <select class="form-select" id="planStatus" required>
+                          <option value="Active">Active</option>
+                          <option value="Inactive">Inactive</option>
+                      </select>
+                  </div>
+              </div>
+              
+              <div class="row">
+                  <div class="col-md-4 mb-3">
+                      <label class="form-label">Monthly Price ($) *</label>
+                      <input type="number" step="0.01" class="form-control" id="monthlyPrice" required>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                      <label class="form-label">Termly Price ($)</label>
+                      <input type="number" step="0.01" class="form-control" id="termlyPrice">
+                  </div>
+                  <div class="col-md-4 mb-3">
+                      <label class="form-label">Annual Price ($) *</label>
+                      <input type="number" step="0.01" class="form-control" id="annualPrice" required>
+                  </div>
+              </div>
+              
+              <div class="row">
+                  <div class="col-md-4 mb-3">
+                      <label class="form-label">Max Staff *</label>
+                      <input type="number" class="form-control" id="maxStaff" required>
+                  </div>
+                  <div class="col-md-4 mb-3">
+                      <label class="form-label">Max Students</label>
+                      <input type="number" class="form-control" id="maxStudents">
+                  </div>
+                  <div class="col-md-4 mb-3">
+                      <label class="form-label">Max Branches *</label>
+                      <input type="number" class="form-control" id="maxBranches" required>
+                  </div>
+              </div>
+              
+              <div class="mb-3">
+                  <label class="form-label">Features (comma separated) *</label>
+                  <textarea class="form-control" id="planFeatures" rows="3" required></textarea>
+                  <div class="form-text">Example: Inventory, Sales, Reports, SMS, AI, etc.</div>
+              </div>
+              
+              <div class="d-flex justify-content-end gap-2">
+                  <button type="button" class="btn btn-secondary" onclick="hidePlanForm()">Cancel</button>
+                  <button type="submit" class="btn btn-primary">Save Plan</button>
+              </div>
+          </form>
+      </div>
+  </div>
+</div>
+
+      <!-- Modals: Feature -->
+      <div class="modal" id="featureModal" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header"><h6 class="modal-title">Feature</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+            <div class="modal-body">
+              <form id="featureForm" class="row g-3">
+                <input type="hidden" id="feature_id" />
+                <div class="col-12"><label class="form-label">Name</label><input id="feature_name" class="form-control" required /></div>
+                <div class="col-12"><label class="form-label">Code</label><input id="feature_code" class="form-control" placeholder="Auto if blank" /></div>
+                <div class="col-12"><label class="form-label">Description</label><textarea id="feature_desc" class="form-control" rows="2"></textarea></div>
+                <div class="col-12 form-check ms-1"><input id="feature_active" type="checkbox" class="form-check-input" checked /><label class="form-check-label">Active</label></div>
+              </form>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="featureSaveBtn" class="btn btn-primary btn-sm">Save</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Subscriptions: My Subscription -->
+      <section id="section-my-subscription" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>My Subscription</h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="p-3 border rounded h-100">
+                <div class="small text-muted">Current Plan</div>
+                <div class="fs-5" id="subPlan">—</div>
+                <div class="small text-muted mt-2">Billing cycle</div>
+                <div id="subCycle">—</div>
+                <div class="small text-muted mt-2">Renews on</div>
+                <div id="subRenew">—</div>
+              </div>
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+              <button class="btn btn-outline-secondary" id="editPlan">Edit plan</button>
+              <button class="btn btn-primary" id="upgradePlan">Upgrade</button>
+              <button class="btn btn-outline-primary" id="downgradePlan">Downgrade</button>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: Invoices & Payments -->
+      <section id="section-invoices" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Invoices & Payments</h5>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-secondary btn-sm" id="emailInvoice">Send via Email</button>
+            </div>
+          </div>
+          <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle"><thead><tr><th>#</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+              <tbody id="invoiceTable"><tr><td colspan="5" class="text-muted">No invoices</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- (Removed duplicate) Old 'Manage Features' section has been deactivated in favor of the advanced Feature Access Control above. -->
+
+      <!-- Subscriptions: Renewal Status -->
+      <section id="section-renewal" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Trial / Renewal Status</h5>
+          <div id="renewalStatus">—</div>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: Payment Methods -->
+      <section id="section-payment-methods" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Payment Methods</h5>
+          <div id="paymentMethodsList" class="row g-3"></div>
+        </div></div>
+      </section>
+
+      <!-- Businesses List -->
+      <section id="section-businesses" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h5 class="mb-0">All Businesses</h5>
+              <button class="btn btn-primary btn-sm" id="createBusinessBtn">Create</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table table-sm align-middle" id="businessesTable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Tier</th>
+                    <th>Active</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="4" class="text-muted">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Floating Action Button for quick Create -->
+  <button id="fabCreate" class="btn btn-primary fab d-none" title="Create Business">+ Create</button>
+
+  <script src="js/main.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

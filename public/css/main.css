@@ -1,0 +1,113 @@
+:root{
+  --sidebar-width:240px;
+  --brand-bg:#0b1220;
+  --sidebar-bg:#0f172a;
+  --sidebar-text:#e2e8f0;
+  --sidebar-hover:#1e293b;
+  --primary:#0d6efd;
+  --muted:#64748b;
+}
+
+/***** Layout *****/
+body{overflow-x:hidden;}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-width);background:var(--sidebar-bg);color:var(--sidebar-text);padding-top:60px;z-index:1040;transition:transform .25s ease;}
+.sidebar .brand{position:fixed;top:0;left:0;height:60px;width:var(--sidebar-width);display:flex;align-items:center;padding:0 16px;background:var(--brand-bg);font-weight:700;color:#fff}
+.sidebar .nav-link{color:#cbd5e1;border-radius:6px}
+.sidebar .nav-link.active,.sidebar .nav-link:hover{color:#fff;background:var(--sidebar-hover)}
+.sidebar .nav-group{margin-top:.25rem}
+.sidebar .nav-group .nav-group-toggle{background:transparent;border:0;text-align:left;color:#cbd5e1}
+.sidebar .nav-group .nav-group-toggle:hover,.sidebar .nav-group .nav-group-toggle:focus{background:var(--sidebar-hover);color:#fff}
+.sidebar .nav-group .chev{font-size:.8rem;transition:transform .2s ease}
+.sidebar .nav-group .nav-group-toggle.open .chev{transform:rotate(180deg)}
+.sidebar .nav-sub{padding-left:.75rem;margin-top:.25rem}
+.sidebar .nav-sub .nav-link{display:block;padding:.25rem .5rem;color:#cbd5e1}
+.sidebar .nav-sub .nav-link:hover{background:rgba(255,255,255,.06);color:#fff}
+.content{margin-left:var(--sidebar-width)}
+.topbar{position:sticky;top:0;z-index:1030;height:60px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+
+/***** Responsive *****/
+@media (max-width: 991px){
+  .sidebar{transform:translateX(-100%);}
+  .sidebar.open{transform:none;}
+  .content{margin-left:0}
+  .topbar{left:0}
+  #sidebarToggle{display:inline-flex !important}
+}
+
+/***** Utilities *****/
+#sidebarToggle{display:none;align-items:center;gap:.5rem}
+.table-wrap{max-height:60vh;overflow:auto}
+.step-indicator .step{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#e5e7eb;color:#111827;margin-right:8px}
+.step-indicator .step.active{background:var(--primary);color:#fff}
+
+/* Chart containers */
+.chart-box{position:relative;height:320px}
+@media (max-width: 991px){
+  .chart-box{height:220px}
+}
+
+.icon-btn{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center}
+
+/* Notification dot */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-left:4px;vertical-align:middle}
+body.dark .dot{background:#f87171}
+
+/* Simple dropdowns */
+.dropdown{position:relative}
+.dropdown-menu{position:absolute;right:0;top:100%;min-width:220px;background:#fff;border:1px solid #e5e7eb;border-radius:.375rem;box-shadow:0 10px 25px rgba(0,0,0,.08);padding:.25rem 0;display:none;z-index:1050}
+.dropdown-menu.show{display:block}
+.dropdown-header{padding:.5rem .75rem;font-weight:600;color:#334155;border-bottom:1px solid #eef2f7}
+.dropdown-item{width:100%;padding:.5rem .75rem;background:transparent;border:0;text-align:left}
+.dropdown-item:hover{background:#f8fafc}
+.dropdown-divider{height:1px;background:#eef2f7;margin:.25rem 0}
+
+/***** Cards *****/
+.card .text-muted.small{color:var(--muted)!important}
+.kpi-card{position:relative}
+.kpi-primary{border-left:4px solid var(--primary); background: rgba(13,110,253,.06)}
+.kpi-success{border-left:4px solid #22c55e; background: rgba(34,197,94,.06)}
+.kpi-warning{border-left:4px solid #f59e0b; background: rgba(245,158,11,.06)}
+.kpi-info{border-left:4px solid #06b6d4; background: rgba(6,182,212,.06)}
+
+/* Avatar */
+.avatar{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#e5e7eb;color:#111827;font-size:12px;font-weight:700}
+@media (min-width:768px){ .avatar{width:30px;height:30px;font-size:12px} }
+body.dark .avatar{background:#334155;color:#e2e8f0}
+
+/***** Floating Action Button *****/
+.fab{position:fixed;right:16px;bottom:16px;z-index:1050;border-radius:50px;padding:.75rem 1rem;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+
+/***** Toasts *****/
+.toast-container{position:fixed;right:16px;bottom:88px;z-index:1060;display:flex;flex-direction:column;gap:8px}
+.toast{background:#111827;color:#f8fafc;border:1px solid #1f2937;border-radius:.5rem;padding:.75rem 1rem;box-shadow:0 10px 25px rgba(0,0,0,.15);display:flex;align-items:center;gap:.75rem}
+.toast a{color:#93c5fd;text-decoration:underline}
+.toast .close{margin-left:auto;background:transparent;border:0;color:inherit;}
+body:not(.dark) .toast{background:#ffffff;color:#111827;border-color:#e5e7eb}
+body:not(.dark) .toast a{color:#2563eb}
+
+/***** Dark Theme *****/
+body.dark{color:#e5e7eb;background:#0b0f19}
+body.dark .topbar{background:#0f172a;border-bottom-color:#172033}
+body.dark .content{background:#0b0f19}
+body.dark .card{background:#0f172a;border-color:#172033}
+body.dark .card .text-muted.small{color:#93a4b8!important}
+body.dark .dropdown-menu{background:#101827;border-color:#1c2740}
+body.dark .dropdown-header{color:#cbd5e1;border-bottom-color:#1c2740}
+body.dark .dropdown-item{color:#e5e7eb}
+body.dark .dropdown-item:hover{background:#0b1220}
+body.dark .sidebar{background:#0a1224;color:#e2e8f0}
+body.dark .sidebar .brand{background:#07101f}
+body.dark .sidebar .nav-link.active, body.dark .sidebar .nav-link:hover{background:#13233e}
+body.dark .sidebar .nav-sub .nav-link:hover{background:#0f1b33}
+body.dark .kpi-primary{background:rgba(13,110,253,.12)}
+body.dark .kpi-success{background:rgba(34,197,94,.12)}
+body.dark .kpi-warning{background:rgba(245,158,11,.12)}
+body.dark .kpi-info{background:rgba(6,182,212,.12)}
+body.dark a{color:#93c5fd}
+body.dark .btn-outline-secondary{color:#cbd5e1;border-color:#1f2937}
+body.dark .btn-outline-secondary:hover{background:#111827}
+body.dark .btn-light{background:#0f172a;color:#e5e7eb;border-color:#172033}
+body.dark .btn-primary{background:#2563eb;border-color:#2563eb}
+/* Ensure white/light text in dark mode for common elements */
+body.dark .form-label, body.dark th, body.dark td, body.dark .nav-link, body.dark h1, body.dark h2, body.dark h3, body.dark h4, body.dark h5, body.dark h6 { color:#e5e7eb }
+body.dark .table{color:#e5e7eb}
