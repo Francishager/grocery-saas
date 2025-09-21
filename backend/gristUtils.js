@@ -7,11 +7,28 @@ const API_KEY = process.env.GRIST_API_KEY;
 const DOC_ID = process.env.GRIST_DOC_ID;
 const BASE_URL = `https://docs.getgrist.com/api/docs/${DOC_ID}/tables`;
 
-// Encryption/decryption wrappers
-function encryptRecord(fields) {
+// Configure plaintext tables and per-table sensitive fields
+const PLAIN_TABLES = new Set(
+  String(process.env.PLAIN_TABLES || 'Plans,Subscription,Features,Businesses,Branches,Invoices,Subscription_Features,Inventory,Sales,Reports')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+);
+
+const SENSITIVE_TABLE_FIELDS = {
+  Users: ['password_hash', 'password', 'otp_code', 'otp_expires'],
+};
+
+// Encryption wrapper: table-aware, only encrypt sensitive fields
+function encryptRecord(tableName, fields) {
   if (!fields || typeof fields !== 'object') return fields;
+  if (!tableName || PLAIN_TABLES.has(String(tableName))) return fields; // leave plaintext for UI tables
+  const sensitive = new Set(SENSITIVE_TABLE_FIELDS[tableName] || []);
+  if (sensitive.size === 0) return fields; // default: no encryption if no sensitive fields configured
   const out = {};
-  for (const [k, v] of Object.entries(fields)) out[k] = cryptoEncrypt(v);
+  for (const [k, v] of Object.entries(fields)) {
+    out[k] = sensitive.has(k) ? cryptoEncrypt(v) : v;
+  }
   return out;
 }
 
@@ -86,7 +103,7 @@ export async function addToGrist(tableName, data) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        records: [{ fields: encryptRecord(data) }]
+        records: [{ fields: encryptRecord(tableName, data) }]
       })
     });
 
@@ -118,7 +135,7 @@ export async function updateGristRecord(tableName, recordId, data) {
       body: JSON.stringify({
         records: [{ 
           id: recordId, 
-          fields: encryptRecord(data) 
+          fields: encryptRecord(tableName, data) 
         }]
       })
     });
@@ -169,7 +186,7 @@ export async function bulkAddToGrist(tableName, dataArray) {
   try {
     const url = `${BASE_URL}/${tableName}/records`;
 
-    const records = dataArray.map(data => ({ fields: encryptRecord(data) }));
+    const records = dataArray.map(data => ({ fields: encryptRecord(tableName, data) }));
 
     const res = await fetch(url, {
       method: 'POST',

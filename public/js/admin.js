@@ -51,14 +51,20 @@ function bsModal(id){
 }
 
 async function requireAdmin() {
-  const token = getToken();
-  const user = getUser();
+  // Prefer Store if available, fall back to localStorage
+  const token = (window.App?.Store?.get()?.token) || getToken();
+  const user = (window.App?.Store?.get()?.user) || getUser();
   if (!token || !user) { window.location.href = "index.html"; return; }
   try {
-    const resp = await fetch(`${API_URL}/validate-token`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!resp.ok) throw new Error("invalid token");
-    if (user.role !== "SaaS Admin") { window.location.href = "dashboard.html"; }
+    if (window.App?.API) {
+      await App.API.get('/validate-token', { ttl: 5000, skipCache: true });
+    } else {
+      const resp = await fetch(`${API_URL}/validate-token`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) throw new Error('invalid token');
+    }
+    if (String(user.role).toLowerCase() !== "saas admin") { window.location.href = "dashboard.html"; }
   } catch (e) {
+    try { window.App?.Store?.set?.({ token: '', user: null }); } catch {}
     localStorage.removeItem("token"); localStorage.removeItem("user"); window.location.href = "index.html";
   }
 }
@@ -71,7 +77,7 @@ function setActiveSection(id) {
   document.querySelectorAll('#sidebarNav .nav-link').forEach(a => a.classList.toggle('active', a.getAttribute('data-target') === id));
   const title = {
     'section-dashboard': 'Dashboard',
-    'section-provision': 'Provision Tenant',
+    'section-provision': 'Create Tenant',
     'section-businesses': 'Businesses',
     'section-subs-all': 'All Subscriptions',
     'section-subs-new': 'New Subscription',
@@ -83,16 +89,28 @@ function setActiveSection(id) {
     'section-payment-methods': 'Payment Methods'
   }[id] || 'SaaS Admin';
   document.getElementById('pageTitle').textContent = title;
-  if (id === 'section-dashboard') loadMetrics();
-  if (id === 'section-businesses') loadBusinesses();
-  if (id === 'section-subs-all') { ensureSubsFiltersBound(); loadAllSubscriptions(); }
-  if (id === 'section-subs-new') { ensureSubsNewBound(); }
-  if (id === 'section-plans') { if (typeof setupPlansUI==='function') setupPlansUI(); if (typeof loadPlansTable==='function') loadPlansTable(); }
+  if (id === 'section-dashboard') { if (window.App?.Admin?.Dashboard?.load) App.Admin.Dashboard.load(); }
+  if (id === 'section-businesses') { if (window.App?.Admin?.Businesses?.setupUI) App.Admin.Businesses.setupUI(); if (window.App?.Admin?.Businesses?.loadList) App.Admin.Businesses.loadList(); }
+  if (id === 'section-subs-all') { if (window.App?.Admin?.Subscriptions?.setupUI) App.Admin.Subscriptions.setupUI(); if (window.App?.Admin?.Subscriptions?.loadAll) App.Admin.Subscriptions.loadAll(); }
+  if (id === 'section-subs-new') { if (window.App?.Admin?.Subscriptions?.setupUI) App.Admin.Subscriptions.setupUI(); }
+  if (id === 'section-plans') {
+    // Prefer modular scripts
+    if (window.App?.Admin?.Plans?.setupUI) App.Admin.Plans.setupUI();
+    if (window.App?.Admin?.Plans?.loadTable) App.Admin.Plans.loadTable();
+    // Fallbacks
+    else { if (typeof setupPlansUI==='function') setupPlansUI(); if (typeof loadPlansTable==='function') loadPlansTable(); }
+  }
   if (id === 'section-my-subscription') loadMySubscription();
-  if (id === 'section-invoices') loadInvoices();
-  if (id === 'section-renewal') loadRenewal();
-  if (id === 'section-payment-methods') loadPaymentMethods();
-  if (id === 'section-features') { if (typeof setupFeaturesUI==='function') setupFeaturesUI(); if (typeof loadFeaturesTable==='function') loadFeaturesTable(); if (typeof loadMatrix==='function') loadMatrix(); }
+  if (id === 'section-provision') { if (window.App?.Admin?.Businesses?.setupUI) App.Admin.Businesses.setupUI(); }
+  if (id === 'section-invoices') { if (window.App?.Admin?.Billing?.loadInvoices) App.Admin.Billing.loadInvoices(); }
+  if (id === 'section-renewal') { if (window.App?.Admin?.Billing?.loadRenewal) App.Admin.Billing.loadRenewal(); }
+  if (id === 'section-payment-methods') { if (window.App?.Admin?.Billing?.loadPaymentMethods) App.Admin.Billing.loadPaymentMethods(); }
+  if (id === 'section-features') {
+    if (window.App?.Admin?.Features?.setupUI) App.Admin.Features.setupUI();
+    if (window.App?.Admin?.Features?.loadTable) App.Admin.Features.loadTable();
+    if (window.App?.Admin?.Features?.loadMatrix) App.Admin.Features.loadMatrix();
+    else { if (typeof setupFeaturesUI==='function') setupFeaturesUI(); if (typeof loadFeaturesTable==='function') loadFeaturesTable(); if (typeof loadMatrix==='function') loadMatrix(); }
+  }
   // Toggle FAB visibility
   const fab = document.getElementById('fabCreate');
   if (fab) fab.classList.toggle('d-none', id !== 'section-businesses');
@@ -220,7 +238,7 @@ async function submitProvision(e) {
       if (!brRes.ok) throw new Error(brJson.error || 'Failed to create branch');
     }
 
-    showToast('Tenant provisioned successfully', { linkText: 'View Businesses', onClick: ()=> setActiveSection('section-businesses') });
+    showToast('Tenant created successfully', { linkText: 'View Businesses', onClick: ()=> setActiveSection('section-businesses') });
     setActiveSection('section-businesses');
   } catch (err) {
     showAlert(err.message, 'danger');
@@ -232,9 +250,10 @@ async function loadBusinesses() {
   if (!tbody) return;
   tbody.innerHTML = `<tr><td colspan="4" class="text-muted">Loading...</td></tr>`;
   try {
-    const resp = await fetch(`${API_URL}/admin/businesses`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load businesses');
+    const data = await (window.App?.API ? App.API.get('/admin/businesses', { ttl: 30000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/businesses`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load businesses'); return j;
+    })());
     if (!Array.isArray(data) || data.length === 0) {
       tbody.innerHTML = `<tr><td colspan="4" class="text-muted">No businesses yet</td></tr>`; return;
     }
@@ -245,6 +264,7 @@ async function loadBusinesses() {
       const name = b.name || '—';
       return `<tr><td>${name}</td><td>${tier}</td><td>${active}</td><td>${created}</td></tr>`;
     }).join('');
+    if (window.App && App.ACL && App.ability) App.ACL.applyDomPermissions(App.ability, tbody);
   } catch (err) {
     showAlert(err.message, 'danger');
     tbody.innerHTML = `<tr><td colspan="4" class="text-danger">${err.message}</td></tr>`;
@@ -254,9 +274,10 @@ async function loadBusinesses() {
 // ---- Subscriptions wiring ----
 async function loadPlans(){
   try {
-    const resp = await fetch(`${API_URL}/admin/plans`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load plans');
+    const data = await (window.App?.API ? App.API.get('/admin/plans', { ttl: 30000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/plans`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load plans'); return j;
+    })());
     const list = document.getElementById('plansList');
     if (list) list.innerHTML = (data||[]).map(p=>{
       const feats = Array.isArray(p.features) ? p.features.map(f=>`<li>${f}</li>`).join('') : '';
@@ -267,14 +288,16 @@ async function loadPlans(){
         <button class="btn btn-outline-secondary btn-sm" data-plan="${p.id||p.name}">Select</button>
       </div></div></div>`;
     }).join('');
+    if (window.App && App.ACL && App.ability) App.ACL.applyDomPermissions(App.ability, list);
   } catch(e){ showAlert(e.message, 'danger'); }
 }
 
 async function loadMySubscription(){
   try {
-    const resp = await fetch(`${API_URL}/admin/subscription`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load subscription');
+    const data = await (window.App?.API ? App.API.get('/admin/subscription', { ttl: 15000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/subscription`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load subscription'); return j;
+    })());
     const plan = document.getElementById('subPlan'); if (plan) plan.textContent = (data.plan||'—').toString();
     const cyc = document.getElementById('subCycle'); if (cyc) cyc.textContent = (data.cycle||'—').toString();
     const ren = document.getElementById('subRenew'); if (ren) ren.textContent = data.renews_on ? new Date(data.renews_on).toLocaleDateString() : '—';
@@ -283,34 +306,38 @@ async function loadMySubscription(){
 
 async function loadInvoices(){
   try {
-    const resp = await fetch(`${API_URL}/admin/invoices`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load invoices');
+    const data = await (window.App?.API ? App.API.get('/admin/invoices', { ttl: 30000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/invoices`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load invoices'); return j;
+    })());
     const tbody = document.getElementById('invoiceTable');
     if (tbody) tbody.innerHTML = (data||[]).map(inv=>{
       const date = inv.date ? new Date(inv.date).toLocaleDateString() : '—';
       const amt = formatCurrency(inv.amount||0);
       const st = inv.status || '—';
-      return `<tr><td>${inv.id}</td><td>${date}</td><td>${amt}</td><td>${st}</td><td><button class="btn btn-sm btn-outline-secondary" data-email-invoice="${inv.id}">Email</button></td></tr>`;
+      return `<tr><td>${inv.id}</td><td>${date}</td><td>${amt}</td><td>${st}</td><td><button class="btn btn-sm btn-outline-secondary" data-email-invoice="${inv.id}" data-can="manage:all">Email</button></td></tr>`;
     }).join('');
     // Bind email buttons
     document.querySelectorAll('[data-email-invoice]').forEach(btn=>btn.addEventListener('click', async (e)=>{
       const id = e.currentTarget.getAttribute('data-email-invoice');
       try {
-        const r = await fetch(`${API_URL}/admin/invoices/${id}/email`, { method:'POST', headers: { Authorization: `Bearer ${getToken()}` } });
-        const dj = await r.json();
-        if (!r.ok) throw new Error(dj.error || 'Failed to email invoice');
+        const dj = await (window.App?.API ? App.API.post(`/admin/invoices/${id}/email`) : (async ()=>{
+          const r = await fetch(`${API_URL}/admin/invoices/${id}/email`, { method:'POST', headers: { Authorization: `Bearer ${getToken()}` } });
+          const dj = await r.json(); if (!r.ok) throw new Error(dj.error||'Failed to email invoice'); return dj;
+        })());
         showToast(dj.message || 'Invoice sent');
       } catch(err){ showAlert(err.message, 'danger'); }
     }));
+    if (window.App && App.ACL && App.ability && tbody) App.ACL.applyDomPermissions(App.ability, tbody);
   } catch(e){ showAlert(e.message, 'danger'); }
 }
 
 async function loadRenewal(){
   try {
-    const resp = await fetch(`${API_URL}/admin/renewal-status`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load renewal status');
+    const data = await (window.App?.API ? App.API.get('/admin/renewal-status', { ttl: 15000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/renewal-status`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load renewal status'); return j;
+    })());
     const el = document.getElementById('renewalStatus');
     if (el) {
       if (data.state === 'trial') el.textContent = `Trial: ${data.days_left} days left`;
@@ -322,14 +349,16 @@ async function loadRenewal(){
 
 async function loadPaymentMethods(){
   try {
-    const resp = await fetch(`${API_URL}/admin/payment-methods`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load payment methods');
+    const data = await (window.App?.API ? App.API.get('/admin/payment-methods', { ttl: 86400000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/payment-methods`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load payment methods'); return j;
+    })());
     const list = document.getElementById('paymentMethodsList');
     if (list) list.innerHTML = (data||[]).map(pm=>{
       const desc = pm.id === 'cash' ? 'Record cash payments' : (pm.id === 'mobile_money' ? 'MTN, Airtel etc.' : 'Secure card payments');
       return `<div class="col-md-4"><div class="card h-100"><div class="card-body"><h6>${pm.name}</h6><p class="small text-muted mb-2">${desc}</p><button class="btn btn-outline-secondary btn-sm" data-use-payment="${pm.id}">Use</button></div></div></div>`;
     }).join('');
+    if (window.App && App.ACL && App.ability) App.ACL.applyDomPermissions(App.ability, list);
   } catch(e){ showAlert(e.message, 'danger'); }
 }
 
@@ -360,7 +389,7 @@ function setupNav() {
   const createBtn = document.getElementById('createBusinessBtn');
   if (createBtn) createBtn.addEventListener('click', () => {
     setActiveSection('section-provision');
-    setActiveStep(1);
+    try { window.App?.Admin?.Businesses?.setupUI?.(); } catch {}
     const form = document.getElementById('provisionForm'); if (form) form.reset();
   });
 
@@ -368,7 +397,7 @@ function setupNav() {
   const fab = document.getElementById('fabCreate');
   if (fab) fab.addEventListener('click', () => {
     setActiveSection('section-provision');
-    setActiveStep(1);
+    try { window.App?.Admin?.Businesses?.setupUI?.(); } catch {}
     const form = document.getElementById('provisionForm'); if (form) form.reset();
   });
 }
@@ -447,9 +476,10 @@ function renderRecent(rows) {
 
 async function loadMetrics() {
   try {
-    const resp = await fetch(`${API_URL}/admin/metrics`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Failed to load metrics');
+    const data = await (window.App?.API ? App.API.get('/admin/metrics', { ttl: 15000 }) : (async ()=>{
+      const resp = await fetch(`${API_URL}/admin/metrics`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const j = await resp.json(); if (!resp.ok) throw new Error(j.error || 'Failed to load metrics'); return j;
+    })());
     renderKPIs(data.cards);
     renderCharts(data.charts);
     renderRecent(data.recent);
@@ -483,11 +513,20 @@ function setupToolbar() {
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) refreshBtn.addEventListener('click', () => {
     const active = document.querySelector('.section.active')?.id;
-    if (active === 'section-businesses') loadBusinesses();
-    if (active === 'section-dashboard') loadMetrics();
+    if (active === 'section-businesses') {
+      if (window.App?.Admin?.Businesses?.loadList) App.Admin.Businesses.loadList();
+      else if (typeof loadBusinesses==='function') loadBusinesses();
+    }
+    if (active === 'section-dashboard') {
+      if (window.App?.Admin?.Dashboard?.load) App.Admin.Dashboard.load();
+      else if (typeof loadMetrics==='function') loadMetrics();
+    }
   });
   const reloadRecent = document.getElementById('reloadRecent');
-  if (reloadRecent) reloadRecent.addEventListener('click', loadMetrics);
+  if (reloadRecent) reloadRecent.addEventListener('click', () => {
+    if (window.App?.Admin?.Dashboard?.load) App.Admin.Dashboard.load();
+    else if (typeof loadMetrics==='function') loadMetrics();
+  });
 
   // Theme toggle
   const themeBtn = document.getElementById('themeToggle');
@@ -541,8 +580,9 @@ function setupToolbar() {
 const upBtn = document.getElementById('upgradePlan');
 if (upBtn) upBtn.addEventListener('click', async ()=> {
   try {
-    const r = await fetch(`${API_URL}/admin/subscription/upgrade`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ plan: 'pro' }) });
-    const dj = await r.json(); if (!r.ok) throw new Error(dj.error || 'Upgrade failed');
+    const dj = await (window.App?.API ? App.API.post('/admin/subscription/upgrade', { body: { plan: 'pro' } }) : (async ()=>{
+      const r = await fetch(`${API_URL}/admin/subscription/upgrade`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ plan: 'pro' }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Upgrade failed'); return j; })());
     showToast(dj.message || 'Upgraded'); loadMySubscription();
   } catch(e){ showAlert(e.message, 'danger'); }
 });
@@ -550,8 +590,9 @@ if (upBtn) upBtn.addEventListener('click', async ()=> {
 const downBtn = document.getElementById('downgradePlan');
 if (downBtn) downBtn.addEventListener('click', async ()=> {
   try {
-    const r = await fetch(`${API_URL}/admin/subscription/downgrade`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ plan: 'starter' }) });
-    const dj = await r.json(); if (!r.ok) throw new Error(dj.error || 'Downgrade failed');
+    const dj = await (window.App?.API ? App.API.post('/admin/subscription/downgrade', { body: { plan: 'starter' } }) : (async ()=>{
+      const r = await fetch(`${API_URL}/admin/subscription/downgrade`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ plan: 'starter' }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Downgrade failed'); return j; })());
     showToast(dj.message || 'Downgraded'); loadMySubscription();
   } catch(e){ showAlert(e.message, 'danger'); }
 });
@@ -562,8 +603,9 @@ if (editBtn) editBtn.addEventListener('click', async ()=> {
     // demo toggle cycle
     const curr = document.getElementById('subCycle')?.textContent?.trim().toLowerCase();
     const nextCycle = curr === 'annual' ? 'monthly' : 'annual';
-    const r = await fetch(`${API_URL}/admin/subscription/edit`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ billing_cycle: nextCycle }) });
-    const dj = await r.json(); if (!r.ok) throw new Error(dj.error || 'Edit failed');
+    const dj = await (window.App?.API ? App.API.post('/admin/subscription/edit', { body: { billing_cycle: nextCycle } }) : (async ()=>{
+      const r = await fetch(`${API_URL}/admin/subscription/edit`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ billing_cycle: nextCycle }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Edit failed'); return j; })());
     showToast(`Billing cycle set to ${nextCycle}`); loadMySubscription();
   } catch(e){ showAlert(e.message, 'danger'); }
 });
@@ -575,33 +617,7 @@ if (editBtn) editBtn.addEventListener('click', async ()=> {
   }
 }
 
-function setActiveSection(sectionId) {
-  // Hide all sections
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  // Show target section
-  const target = document.getElementById(sectionId);
-  if (target) target.classList.add('active');
-
-  // Hide FAB on non-business sections
-  const fab = document.getElementById('fabCreate');
-  if (fab && sectionId !== 'section-businesses') {
-    fab.classList.add('d-none');
-  } else if (fab) {
-    fab.classList.remove('d-none');
-  }
-
-  // Load section-specific data
-  if (sectionId === 'section-dashboard') loadMetrics();
-  else if (sectionId === 'section-businesses') loadBusinesses();
-  else if (sectionId === 'section-plans') {
-    loadPlansTable();
-    if (typeof loadMatrix === 'function') loadMatrix();
-  }
-  else if (sectionId === 'section-features') {
-    loadFeaturesTable();
-    if (typeof loadMatrix === 'function') loadMatrix();
-  }
-}
+// [removed] legacy setActiveSection (modular routing handles navigation below)
 
 function setActiveStep(step) {
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
@@ -683,7 +699,7 @@ async function submitProvision(e) {
     const bJson = await bRes.json();
     if (!bRes.ok) throw new Error(bJson.error || 'Failed to create business');
 
-    showToast('Tenant provisioned successfully');
+    showToast('Tenant created successfully');
     setActiveSection('section-businesses');
   } catch (err) {
     showAlert(err.message, 'danger');
@@ -1015,18 +1031,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Set up navigation
     setupNav();
-    setupSteps();
     setupToolbar();
-    setupPlansUI();
-    setupFeaturesUI();
-    ensureSubsFiltersBound();
+    // Prefer modular setup
+    try { window.App?.Admin?.Plans?.setupUI?.(); } catch {}
+    try { window.App?.Admin?.Features?.setupUI?.(); } catch {}
+    try { window.App?.Admin?.Businesses?.setupUI?.(); } catch {}
+    try { window.App?.Admin?.Subscriptions?.setupUI?.(); } catch {}
     
-    // Load initial data
-    await loadMetrics();
-    await loadBusinesses();
-    await loadPlansTable();
-    await loadFeaturesTable();
-    await loadAllSubscriptions();
+    // Load initial data via modules
+    if (window.App?.Admin?.Dashboard?.load) await App.Admin.Dashboard.load();
+    if (window.App?.Admin?.Businesses?.loadList) await App.Admin.Businesses.loadList();
+    if (window.App?.Admin?.Plans?.loadTable) await App.Admin.Plans.loadTable(); else if (typeof loadPlansTable==='function') await loadPlansTable();
+    if (window.App?.Admin?.Features?.loadTable) await App.Admin.Features.loadTable(); else if (typeof loadFeaturesTable==='function') await loadFeaturesTable();
+    if (window.App?.Admin?.Subscriptions?.loadAll) await App.Admin.Subscriptions.loadAll();
     
     // Set dashboard as active by default
     setActiveSection('section-dashboard');
