@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import path from "path";
 import { sendMail } from "./mailer.js";
 import crudRouter from "./crudRouter.js";
+import { defineAbilityFor, authorize } from "./accessControl.js";
 
 dotenv.config();
 
@@ -205,6 +206,12 @@ function requireRole(roles) {
   }
 }
 
+// Compose auth + per-request ability
+const withAuthAndAbility = [
+  authenticateToken,
+  (req, res, next) => { try { req.ability = defineAbilityFor(req.user || {}); } catch {} next(); }
+];
+
 // === User Registration ===
 app.post("/register", async (req, res) => {
   try {
@@ -387,7 +394,7 @@ app.get("/reports/products", authenticateToken, requireRole(["Owner","Accountant
     .sort((a,b)=>b.profit - a.profit)
     .slice(0,5);
 
-  res.json(topProducts);
+  res.json(decryptDeep(topProducts));
 });
 
 app.get("/reports/staff", authenticateToken, requireRole(["Owner","Accountant"]), async (req,res)=>{
@@ -407,7 +414,7 @@ app.get("/reports/staff", authenticateToken, requireRole(["Owner","Accountant"])
     .sort((a,b)=>b.profit - a.profit)
     .slice(0,5);
 
-  res.json(leaderboard);
+  res.json(decryptDeep(leaderboard));
 });
 
 app.get("/reports/daily", authenticateToken, requireRole(["Owner","Accountant"]), async (req,res)=>{
@@ -458,7 +465,7 @@ app.get("/reports/monthly", authenticateToken, requireRole(["Owner","Accountant"
   const monthlyData = Object.entries(monthlyMap)
     .sort((a,b)=> a[0].localeCompare(b[0]))
     .map(([month,val])=>({month,...val}));
-  res.json(monthlyData);
+  res.json(decryptDeep(monthlyData));
 });
 
 // === Export Reports Placeholder ===
@@ -539,7 +546,7 @@ app.post("/sales", authenticateToken, requireRole(["Owner","Attendant"]), async 
       return res.status(500).json({ error: "Failed to create sale" });
     }
 
-    res.status(201).json({ message: "Sale recorded", saleId: result.data?.id, sale });
+    res.status(201).json(decryptDeep({ message: "Sale recorded", saleId: result.data?.id, sale }));
   } catch (err) {
     console.error("Sales create error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -585,12 +592,12 @@ app.post("/sales/checkout", authenticateToken, requireRole(["Owner","Attendant"]
     }
 
     const grandTotal = salesPayload.reduce((acc, s) => acc + s.total, 0);
-    res.status(201).json({
+    res.status(201).json(decryptDeep({
       message: "Checkout successful",
       count: salesPayload.length,
       total: grandTotal,
       sales: salesPayload,
-    });
+    }));
   } catch (err) {
     console.error("Sales checkout error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -599,7 +606,7 @@ app.post("/sales/checkout", authenticateToken, requireRole(["Owner","Attendant"]
 
 // === SaaS Admin endpoints (no direct access to business data) ===
 // Create a business
-app.post("/admin/businesses", authenticateToken, requireRole(["SaaS Admin"]), async (req, res) => {
+app.post("/admin/businesses", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const { name, subscription_tier = "free", limits = {} } = req.body;
     if (!name) return res.status(400).json({ error: "Business name is required" });
@@ -620,7 +627,7 @@ app.post("/admin/businesses", authenticateToken, requireRole(["SaaS Admin"]), as
 });
 
 // Create an owner account for a business
-app.post("/admin/owners", authenticateToken, requireRole(["SaaS Admin"]), async (req, res) => {
+app.post("/admin/owners", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const { email, password, fname, mname = "", lname, business_id, business_name = "" } = req.body;
     if (!email || !password || !fname || !lname || !business_id) {
@@ -656,7 +663,7 @@ app.post("/admin/owners", authenticateToken, requireRole(["SaaS Admin"]), async 
 });
 
 // === SaaS Admin: list businesses ===
-app.get("/admin/businesses", authenticateToken, requireRole(["SaaS Admin"]), async (req, res) => {
+app.get("/admin/businesses", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const businesses = await fetchFromGrist("Businesses");
     res.json(decryptDeep(businesses));
@@ -667,7 +674,7 @@ app.get("/admin/businesses", authenticateToken, requireRole(["SaaS Admin"]), asy
 });
 
 // === SaaS Admin: metrics for dashboard ===
-app.get("/admin/metrics", authenticateToken, requireRole(["SaaS Admin"]), async (req, res) => {
+app.get("/admin/metrics", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -776,7 +783,7 @@ app.get("/admin/metrics", authenticateToken, requireRole(["SaaS Admin"]), async 
 });
 
 // === SaaS Admin: Subscription plan changes ===
-app.post('/admin/subscription/upgrade', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.post('/admin/subscription/upgrade', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     const { plan = 'pro', billing_cycle = 'monthly' } = req.body || {};
     let subs = [];
@@ -804,7 +811,7 @@ app.post('/admin/subscription/upgrade', authenticateToken, requireRole(['SaaS Ad
   }
 });
 
-app.post('/admin/subscription/downgrade', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.post('/admin/subscription/downgrade', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     const { plan = 'starter', billing_cycle = 'monthly' } = req.body || {};
     let subs = [];
@@ -832,7 +839,7 @@ app.post('/admin/subscription/downgrade', authenticateToken, requireRole(['SaaS 
   }
 });
 
-app.post('/admin/subscription/edit', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.post('/admin/subscription/edit', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     const { plan, billing_cycle, status } = req.body || {};
     let subs = [];
@@ -859,7 +866,7 @@ app.post('/admin/subscription/edit', authenticateToken, requireRole(['SaaS Admin
 });
 
 // === SaaS Admin: My Subscription (summary) ===
-app.get('/admin/subscription', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.get('/admin/subscription', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     let subscriptions = [];
     try { subscriptions = await fetchFromGrist('Subscription'); } catch {}
@@ -876,7 +883,7 @@ app.get('/admin/subscription', authenticateToken, requireRole(['SaaS Admin']), a
 });
 
 // === SaaS Admin: Invoices & Payments ===
-app.get('/admin/invoices', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.get('/admin/invoices', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     let invoices = [];
     try { invoices = await fetchFromGrist('Invoices'); } catch {}
@@ -894,7 +901,7 @@ app.get('/admin/invoices', authenticateToken, requireRole(['SaaS Admin']), async
 });
 
 // Email an invoice (placeholder)
-app.post('/admin/invoices/:id/email', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.post('/admin/invoices/:id/email', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     const id = req.params.id;
     const email = req.user?.email || 'admin@example.com';
@@ -907,7 +914,7 @@ app.post('/admin/invoices/:id/email', authenticateToken, requireRole(['SaaS Admi
 });
 
 // === SaaS Admin: Manage Features (add-ons) ===
-app.post('/admin/features', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.post('/admin/features', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     const { features = {} } = req.body || {};
     res.json(decryptDeep({ message: 'Features saved', features }));
@@ -917,7 +924,7 @@ app.post('/admin/features', authenticateToken, requireRole(['SaaS Admin']), asyn
 });
 
 // === SaaS Admin: Renewal / Trial Status ===
-app.get('/admin/renewal-status', authenticateToken, requireRole(['SaaS Admin']), async (req, res) => {
+app.get('/admin/renewal-status', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     let subscriptions = [];
     try { subscriptions = await fetchFromGrist('Subscription'); } catch {}
@@ -936,7 +943,7 @@ app.get('/admin/renewal-status', authenticateToken, requireRole(['SaaS Admin']),
 });
 
 // === SaaS Admin: Payment Methods (static list) ===
-app.get('/admin/payment-methods', authenticateToken, requireRole(['SaaS Admin']), (req, res) => {
+app.get('/admin/payment-methods', ...withAuthAndAbility, requireRole(['SaaS Admin']), (req, res) => {
   res.json([
     { id: 'cash', name: 'Cash' },
     { id: 'mobile_money', name: 'Mobile Money' },
@@ -950,7 +957,7 @@ function generateOTP() {
 }
 
 // === SaaS Admin: provision tenant (business + owner, email OTP) ===
-app.post("/admin/provision-tenant", authenticateToken, requireRole(["SaaS Admin"]), async (req, res) => {
+app.post("/admin/provision-tenant", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const { business, owner } = req.body || {};
     if (!business?.name) return res.status(400).json({ error: "Business name is required" });
@@ -1044,7 +1051,7 @@ app.post("/auth/reset-password", async (req, res) => {
 });
 
 // Mount generic CRUD for SaaS Admin with plaintext guarantee
-app.use('/admin/crud', authenticateToken, requireRole(['SaaS Admin']), (req, res, next) => {
+app.use('/admin/crud', ...withAuthAndAbility, requireRole(['SaaS Admin']), (req, res, next) => {
   const sendJson = res.json.bind(res);
   res.json = (data) => sendJson(decryptDeep(data));
   next();

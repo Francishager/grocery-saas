@@ -36,6 +36,20 @@ function showToast(message, options = {}) {
   setTimeout(() => toast.remove(), options.timeout || 6000);
 }
 
+// Lightweight modal helper: uses Bootstrap if available, else falls back
+function bsModal(id){
+  const el = document.getElementById(id);
+  if (!el) return null;
+  if (window.bootstrap && bootstrap.Modal){
+    return new bootstrap.Modal(el);
+  }
+  // Fallback minimal modal controller
+  return {
+    show(){ el.classList.add('show'); el.style.display = 'block'; },
+    hide(){ el.classList.remove('show'); el.style.display = 'none'; }
+  };
+}
+
 async function requireAdmin() {
   const token = getToken();
   const user = getUser();
@@ -386,7 +400,7 @@ function setupSteps() {
 // ---- Dashboard Metrics ----
 let revenueChart, plansChart;
 function formatCurrency(n) {
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(n || 0)); } catch { return Number(n || 0).toLocaleString(); }
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 }
 
 function renderKPIs(cards) {
@@ -400,6 +414,7 @@ function renderKPIs(cards) {
 
 function renderCharts(charts) {
   const colors = (window.App && App.colors) ? App.colors : { primary: '#0d6efd', series: ['#0d6efd', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a78bfa', '#14b8a6'] };
+  // ...
   const revEl = document.getElementById('chartRevenue');
   const planEl = document.getElementById('chartPlans');
   if (!revEl || !planEl || typeof Chart === 'undefined') return;
@@ -552,20 +567,150 @@ if (editBtn) editBtn.addEventListener('click', async ()=> {
     showToast(`Billing cycle set to ${nextCycle}`); loadMySubscription();
   } catch(e){ showAlert(e.message, 'danger'); }
 });
+  const token = getToken();
+  const user = localStorage.getItem('user');
+  if (!token || !user) {
+    window.location.href = 'index.html';
+    return;
+  }
 }
 
-function setup() {
-  requireAdmin();
-  setupNav();
-  setupSteps();
-  setupToolbar();
-  // initial load
-  loadMetrics();
-  // Ensure FAB hidden on initial dashboard
-  const fab = document.getElementById('fabCreate'); if (fab) fab.classList.add('d-none');
+function setActiveSection(sectionId) {
+  // Hide all sections
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  // Show target section
+  const target = document.getElementById(sectionId);
+  if (target) target.classList.add('active');
+
+  // Hide FAB on non-business sections
+  const fab = document.getElementById('fabCreate');
+  if (fab && sectionId !== 'section-businesses') {
+    fab.classList.add('d-none');
+  } else if (fab) {
+    fab.classList.remove('d-none');
+  }
+
+  // Load section-specific data
+  if (sectionId === 'section-dashboard') loadMetrics();
+  else if (sectionId === 'section-businesses') loadBusinesses();
+  else if (sectionId === 'section-plans') {
+    loadPlansTable();
+    if (typeof loadMatrix === 'function') loadMatrix();
+  }
+  else if (sectionId === 'section-features') {
+    loadFeaturesTable();
+    if (typeof loadMatrix === 'function') loadMatrix();
+  }
 }
 
-document.addEventListener('DOMContentLoaded', setup);
+function setActiveStep(step) {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.step-pane').forEach(p => p.classList.add('d-none'));
+
+  const activeStep = document.querySelector(`[data-step="${step}"]`);
+  const activePane = document.querySelector(`[data-step-pane="${step}"]`);
+
+  if (activeStep) activeStep.classList.add('active');
+  if (activePane) activePane.classList.remove('d-none');
+}
+
+function renderReview() {
+  const review = document.getElementById('pf_review');
+  if (!review) return;
+
+  const data = {
+    business: document.getElementById('pf_bizName')?.value || '',
+    tier: document.getElementById('pf_bizTier')?.value || '',
+    limits: document.getElementById('pf_bizLimits')?.value || '',
+    owner: {
+      fname: document.getElementById('pf_ownerFname')?.value || '',
+      mname: document.getElementById('pf_ownerMname')?.value || '',
+      lname: document.getElementById('pf_ownerLname')?.value || '',
+      email: document.getElementById('pf_ownerEmail')?.value || '',
+      password: document.getElementById('pf_ownerTempPass')?.value || '',
+      bizId: document.getElementById('pf_ownerBizId')?.value || '',
+      bizName: document.getElementById('pf_ownerBizName')?.value || ''
+    }
+  };
+
+  review.innerHTML = `
+    <div class="row">
+      <div class="col-md-6"><strong>Business:</strong> ${data.business}</div>
+      <div class="col-md-6"><strong>Tier:</strong> ${data.tier}</div>
+    </div>
+    <div class="row mt-2">
+      <div class="col-12"><strong>Limits:</strong> <pre>${data.limits}</pre></div>
+    </div>
+    <div class="row mt-2">
+      <div class="col-12"><strong>Owner:</strong> ${data.owner.fname} ${data.owner.mname} ${data.owner.lname}</div>
+      <div class="col-12"><strong>Email:</strong> ${data.owner.email}</div>
+      <div class="col-12"><strong>Business ID:</strong> ${data.owner.bizId}</div>
+    </div>
+  `;
+}
+
+async function submitProvision(e) {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  const orig = btn?.textContent;
+  if (btn) { btn.textContent = 'Provisioning...'; btn.disabled = true; }
+
+  try {
+    const bizPayload = {
+      name: document.getElementById('pf_bizName')?.value?.trim(),
+      subscription_tier: document.getElementById('pf_bizTier')?.value,
+      limits: JSON.parse(document.getElementById('pf_bizLimits')?.value || '{}'),
+      owner: {
+        fname: document.getElementById('pf_ownerFname')?.value?.trim(),
+        mname: document.getElementById('pf_ownerMname')?.value?.trim(),
+        lname: document.getElementById('pf_ownerLname')?.value?.trim(),
+        email: document.getElementById('pf_ownerEmail')?.value?.trim(),
+        password: document.getElementById('pf_ownerTempPass')?.value,
+        business_id: document.getElementById('pf_ownerBizId')?.value?.trim(),
+        business_name: document.getElementById('pf_ownerBizName')?.value?.trim()
+      }
+    };
+
+    if (!bizPayload.name || !bizPayload.owner.email) {
+      throw new Error('Business name and owner email are required');
+    }
+
+    const bRes = await fetch(`${API_URL}/admin/businesses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+      body: JSON.stringify(bizPayload)
+    });
+    const bJson = await bRes.json();
+    if (!bRes.ok) throw new Error(bJson.error || 'Failed to create business');
+
+    showToast('Tenant provisioned successfully');
+    setActiveSection('section-businesses');
+  } catch (err) {
+    showAlert(err.message, 'danger');
+  } finally { if (btn) { btn.textContent = orig; btn.disabled = false; } }
+}
+
+async function loadBusinesses() {
+  const tbody = document.querySelector('#businessesTable tbody');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="4" class="text-muted">Loading...</td></tr>`;
+  try {
+    const resp = await fetch(`${API_URL}/admin/businesses`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Failed to load businesses');
+    if (!Array.isArray(data) || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-muted">No businesses yet</td></tr>`; return;
+    }
+    tbody.innerHTML = data.map(b => {
+      const active = (typeof b.is_active === 'boolean') ? (b.is_active ? 'Yes' : 'No') : '—';
+      const created = b.created_at ? new Date(b.created_at).toLocaleString() : '—';
+      return `<tr><td>${b.name||'—'}</td><td>${b.subscription_tier||'—'}</td><td>${active}</td><td>${created}</td></tr>`;
+    }).join('');
+  } catch (err) {
+    showAlert(err.message, 'danger');
+    tbody.innerHTML = `<tr><td colspan="4" class="text-danger">${err.message}</td></tr>`;
+  }
+}
 
 // ---- SaaS Admin: All Subscriptions ----
 function readSubsFilters(){
@@ -639,22 +784,21 @@ function ensureSubsNewBound(){
       if (!resp.ok) throw new Error(data.error || 'Failed to create subscription');
       showToast('Subscription created', { linkText: 'View All', onClick: ()=> setActiveSection('section-subs-all') });
       form.reset();
-    } catch(err){ showAlert(err.message, 'danger'); }
-    finally { if (btn){ btn.textContent = orig; btn.disabled = false; } }
+    } catch(err){ 
+      showAlert(err.message, 'danger'); 
+    } 
+    finally { 
+      if (btn){ 
+        btn.textContent = orig; 
+        btn.disabled = false; 
+      } 
+    }
   });
 }
 
 // ===== Advanced Plans & Features Managers (CRUD + Matrix) =====
 // Lightweight modal helper (no Bootstrap dependency required)
 let planModal, featureModal;
-function bsModal(id){
-  const el = document.getElementById(id);
-  if (!el) return null;
-  return {
-    show(){ el.style.display='block'; el.classList.add('show'); },
-    hide(){ el.classList.remove('show'); el.style.display='none'; }
-  };
-}
 
 // ---- Plans (Subscription table) ----
 function setupPlansUI(){
@@ -817,7 +961,7 @@ async function loadMatrix(){
         const checked = existing ? 'checked' : '';
         const limit = existing?.limit_value || '';
         const mapId = existing?.id || '';
-        return `<td class=\"text-center\">\n          <input type=\"checkbox\" class=\"form-check-input align-middle\" data-mx=\"${p.id}:${f.id}\" ${checked} />\n          <input type=\"text\" class=\"form-control form-control-sm mt-1\" placeholder=\"limit\" data-mx-limit=\"${p.id}:${f.id}\" value=\"${limit}\" />\n          <input type=\"hidden\" data-mx-id=\"${p.id}:${f.id}\" value=\"${mapId}\">\n        </td>`;
+        return `<td class=\"text-center\">\n          <input type=\"checkbox\" class=\"form-check-input align-middle\" data-mx=\"${p.id}:${f.id}\" ${checked} />\n          <input type=\"text\" class=\"form-control form-control-sm mt-1\" placeholder=\"limit\" data-mx-limit=\"${p.id}:${f.id}\" value=\"${limit}\">\n          <input type=\"hidden\" data-mx-id=\"${p.id}:${f.id}\" value=\"${mapId}\">\n        </td>`;
       }).join('')}</tr>`;
     }).join('')}</tbody>`;
     container.innerHTML = `<table class="table table-sm align-middle">${header}${body}</table>`;
@@ -841,409 +985,55 @@ async function saveMatrix(){
     }
     for (const op of ops){
       if (op.a==='c') await fetch(`${API_URL}/admin/crud/Subscription_Features`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${getToken()}` }, body: JSON.stringify(op.p) });
-      else if (op.a==='u') await fetch(`${API_URL}/admin/crud/Subscription_Features/${op.id}`, { method:'PATCH', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${getToken()}` }, body: JSON.stringify(op.p) });
+      else if (op.a==='u') await fetch(`${API_URL}/admin/crud/Subscription_Features/${op.id}`, { method:'PATCH', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${getToken()}` }, body: JSON.stringify({limit_value: op.p.limit_value}) });
       else if (op.a==='d') await fetch(`${API_URL}/admin/crud/Subscription_Features/${op.id}`, { method:'DELETE', headers:{ Authorization:`Bearer ${getToken()}` } });
     }
     showToast('Feature matrix saved'); await loadMatrix();
   }catch(e){ showAlert(e.message,'danger'); }
 }
 
-// Add this to admin.js
-
-// Global variables
-let plans = [];
-
-// DOM Ready
-document.addEventListener('DOMContentLoaded', function() {
-    loadPlans();
-    setupPlanForm();
+// Initialize the application when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log('Admin dashboard initializing...');
+  try {
+    // Check authentication first
+    await requireAdmin();
+    
+    // Sync auth into Store and initialize ACL (RBAC/ABAC)
+    try {
+      if (window.App && App.Store) {
+        App.Store.set({ user: getUser(), token: getToken() });
+      }
+      if (window.App && App.ACL) {
+        const ability = App.ACL.defineAbility(App.Store?.get()?.user, App.Store?.get()?.features || []);
+        App.ability = ability;
+        App.ACL.applyDomPermissions(ability, document);
+      }
+    } catch (aclErr) {
+      console.warn('ACL/Store init failed:', aclErr);
+    }
+    
+    // Set up navigation
+    setupNav();
+    setupSteps();
+    setupToolbar();
+    setupPlansUI();
+    setupFeaturesUI();
+    ensureSubsFiltersBound();
+    
+    // Load initial data
+    await loadMetrics();
+    await loadBusinesses();
+    await loadPlansTable();
+    await loadFeaturesTable();
+    await loadAllSubscriptions();
+    
+    // Set dashboard as active by default
+    setActiveSection('section-dashboard');
+    
+    console.log('Admin dashboard initialized successfully');
+  } catch (error) {
+    console.error('Error initializing admin dashboard:', error);
+    showAlert('Failed to initialize admin dashboard. Please check console for details.', 'danger');
+  }
 });
-
-// Load Plans
-async function loadPlans() {
-    try {
-        const response = await fetch('/api/plans');
-        if (!response.ok) throw new Error('Failed to load plans');
-        plans = await response.json();
-        renderPlansTable();
-    } catch (error) {
-        showAlert('Error loading plans: ' + error.message, 'danger');
-    }
-}
-
-// Render Plans Table
-function renderPlansTable() {
-    const tbody = document.getElementById('plansTableBody');
-    tbody.innerHTML = '';
-    
-    plans.forEach(plan => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${escapeHtml(plan.name)}</td>
-            <td>$${parseFloat(plan.price_monthly).toFixed(2)}</td>
-            <td>$${parseFloat(plan.price_annual).toFixed(2)}</td>
-            <td>${plan.max_staff}</td>
-            <td>${plan.max_branches}</td>
-            <td><span class="badge ${plan.status === 'Active' ? 'bg-success' : 'bg-secondary'}">${plan.status}</span></td>
-            <td>
-                <button class="btn btn-sm btn-outline-primary" onclick="editPlan(${plan.id})">
-                    <i class="bi bi-pencil"></i> Edit
-                </button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deletePlan(${plan.id})">
-                    <i class="bi bi-trash"></i>
-                </button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-// ===== Plan Management =====
-let plans = [];
-
-function setupPlans() {
-    const form = document.getElementById('planForm');
-    if (!form) return;
-
-    // Load plans if on the plans page
-    if (window.location.hash === '#section-plans') {
-        loadPlans();
-    }
-
-    // Handle form submission
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await savePlan();
-    });
-
-    // Add event listeners for plan actions
-    document.addEventListener('click', (e) => {
-        if (e.target.matches('[data-edit-plan]') || e.target.closest('[data-edit-plan]')) {
-            const planId = (e.target.dataset.editPlan || e.target.closest('[data-edit-plan]').dataset.editPlan);
-            editPlan(planId);
-        } else if (e.target.matches('[data-delete-plan]') || e.target.closest('[data-delete-plan]')) {
-            const planId = (e.target.dataset.deletePlan || e.target.closest('[data-delete-plan]').dataset.deletePlan);
-            deletePlan(planId);
-        }
-    });
-}
-
-// Load plans from server
-async function loadPlans() {
-    try {
-        const response = await fetch('/api/plans', {
-            headers: {
-                'Authorization': `Bearer ${getToken()}`
-            }
-        });
-        if (!response.ok) throw new Error('Failed to load plans');
-        
-        plans = await response.json();
-        renderPlansTable();
-    } catch (error) {
-        console.error('Error loading plans:', error);
-        showToast('Failed to load plans: ' + error.message, 'danger');
-    }
-}
-
-// Render plans in the table
-function renderPlansTable() {
-    const tbody = document.getElementById('plansTableBody');
-    if (!tbody) return;
-    
-    if (!plans || plans.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No plans found. Click "Add New Plan" to get started.</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = plans.map(plan => `
-        <tr>
-            <td>${escapeHtml(plan.name)}</td>
-            <td>$${parseFloat(plan.price_monthly || 0).toFixed(2)}</td>
-            <td>$${parseFloat(plan.price_annual || 0).toFixed(2)}</td>
-            <td>${plan.max_staff || 0}</td>
-            <td>${plan.max_branches || 0}</td>
-            <td>
-                <span class="badge ${plan.status === 'Active' ? 'bg-success' : 'bg-secondary'}">
-                    ${plan.status || 'Inactive'}
-                </span>
-            </td>
-            <td class="text-nowrap">
-                <button class="btn btn-sm btn-outline-primary me-1" data-edit-plan="${plan.id}">
-                    <i class="bi bi-pencil"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-danger" data-delete-plan="${plan.id}">
-                    <i class="bi bi-trash"></i>
-                </button>
-            </td>
-        </tr>
-    `).join('');
-}
-
-// Show plan form for editing or creating a new plan
-function showPlanForm(plan = null) {
-    const container = document.getElementById('planFormContainer');
-    const tableContainer = document.getElementById('plansTableContainer');
-    if (!container || !tableContainer) return;
-    
-    const form = document.getElementById('planForm');
-    form.reset();
-    form.classList.remove('was-validated');
-    
-    if (plan) {
-        // Editing existing plan
-        document.getElementById('planId').value = plan.id;
-        document.getElementById('planName').value = plan.name || '';
-        document.getElementById('planStatus').value = plan.status || 'Active';
-        document.getElementById('monthlyPrice').value = plan.price_monthly || '';
-        document.getElementById('termlyPrice').value = plan.price_termly || '';
-        document.getElementById('annualPrice').value = plan.price_annual || '';
-        document.getElementById('maxStaff').value = plan.max_staff || 1;
-        document.getElementById('maxStudents').value = plan.max_students || '';
-        document.getElementById('maxBranches').value = plan.max_branches || 1;
-        document.getElementById('planFeatures').value = plan.features || '';
-    } else {
-        // New plan
-        document.getElementById('planId').value = '';
-        document.getElementById('planStatus').value = 'Active';
-        document.getElementById('maxStaff').value = '1';
-        document.getElementById('maxBranches').value = '1';
-    }
-    
-    tableContainer.style.display = 'none';
-    container.style.display = 'block';
-    
-    // Focus on the first input
-    const firstInput = form.querySelector('input, select, textarea');
-    if (firstInput) firstInput.focus();
-}
-
-// Hide the plan form
-function hidePlanForm() {
-    const container = document.getElementById('planFormContainer');
-    const tableContainer = document.getElementById('plansTableContainer');
-    
-    if (container) container.style.display = 'none';
-    if (tableContainer) tableContainer.style.display = 'block';
-}
-
-// Save plan (create or update)
-async function savePlan() {
-    const form = document.getElementById('planForm');
-    if (!form) return;
-    
-    if (!form.checkValidity()) {
-        form.classList.add('was-validated');
-        return;
-    }
-    
-    const saveBtn = form.querySelector('button[type="submit"]');
-    const spinner = document.getElementById('savePlanSpinner');
-    const planId = document.getElementById('planId').value;
-    
-    try {
-        // Show loading state
-        saveBtn.disabled = true;
-        if (spinner) spinner.classList.remove('d-none');
-        
-        const planData = {
-            name: document.getElementById('planName').value.trim(),
-            status: document.getElementById('planStatus').value,
-            price_monthly: parseFloat(document.getElementById('monthlyPrice').value),
-            price_termly: document.getElementById('termlyPrice').value ? 
-                         parseFloat(document.getElementById('termlyPrice').value) : null,
-            price_annual: parseFloat(document.getElementById('annualPrice').value),
-            max_staff: parseInt(document.getElementById('maxStaff').value),
-            max_students: document.getElementById('maxStudents').value ? 
-                         parseInt(document.getElementById('maxStudents').value) : null,
-            max_branches: parseInt(document.getElementById('maxBranches').value),
-            features: document.getElementById('planFeatures').value.trim()
-        };
-        
-        const url = planId ? `/api/plans/${planId}` : '/api/plans';
-        const method = planId ? 'PUT' : 'POST';
-        
-        const response = await fetch(url, {
-            method: method,
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${getToken()}`
-            },
-            body: JSON.stringify(planData)
-        });
-        
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.message || 'Failed to save plan');
-        }
-        
-        showToast(`Plan ${planId ? 'updated' : 'created'} successfully`, 'success');
-        await loadPlans();
-        hidePlanForm();
-    } catch (error) {
-        console.error('Error saving plan:', error);
-        showToast(error.message || 'Failed to save plan', 'danger');
-    } finally {
-        if (saveBtn) saveBtn.disabled = false;
-        if (spinner) spinner.classList.add('d-none');
-    }
-}
-
-// Edit a plan
-function editPlan(planId) {
-    const plan = plans.find(p => p.id.toString() === planId.toString());
-    if (!plan) {
-        showToast('Plan not found', 'danger');
-        return;
-    }
-    showPlanForm(plan);
-}
-
-// Delete a plan
-async function deletePlan(planId) {
-    if (!confirm('Are you sure you want to delete this plan? This action cannot be undone.')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/plans/${planId}`, { 
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${getToken()}`
-            }
-        });
-        
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.message || 'Failed to delete plan');
-        }
-        
-        showToast('Plan deleted successfully', 'success');
-        await loadPlans();
-    } catch (error) {
-        console.error('Error deleting plan:', error);
-        showToast(error.message || 'Failed to delete plan', 'danger');
-    }
-}
-
-///
-// Show Plan Form
-function showPlanForm(plan = null) {
-    const form = document.getElementById('planForm');
-    form.reset();
-    
-    if (plan) {
-        document.getElementById('planId').value = plan.id;
-        document.getElementById('planName').value = plan.name;
-        document.getElementById('planStatus').value = plan.status;
-        document.getElementById('monthlyPrice').value = plan.price_monthly;
-        document.getElementById('termlyPrice').value = plan.price_termly || '';
-        document.getElementById('annualPrice').value = plan.price_annual;
-        document.getElementById('maxStaff').value = plan.max_staff;
-        document.getElementById('maxStudents').value = plan.max_students || '';
-        document.getElementById('maxBranches').value = plan.max_branches;
-        document.getElementById('planFeatures').value = plan.features || '';
-    }
-    
-    document.getElementById('plansTableContainer').style.display = 'none';
-    document.getElementById('planFormContainer').style.display = 'block';
-}
-
-// Hide Plan Form
-function hidePlanForm() {
-    document.getElementById('plansTableContainer').style.display = 'block';
-    document.getElementById('planFormContainer').style.display = 'none';
-}
-
-// Setup Plan Form Submit
-function setupPlanForm() {
-    const form = document.getElementById('planForm');
-    form.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        
-        const planData = {
-            name: document.getElementById('planName').value.trim(),
-            status: document.getElementById('planStatus').value,
-            price_monthly: parseFloat(document.getElementById('monthlyPrice').value),
-            price_termly: document.getElementById('termlyPrice').value ? 
-                         parseFloat(document.getElementById('termlyPrice').value) : null,
-            price_annual: parseFloat(document.getElementById('annualPrice').value),
-            max_staff: parseInt(document.getElementById('maxStaff').value),
-            max_students: document.getElementById('maxStudents').value ? 
-                         parseInt(document.getElementById('maxStudents').value) : null,
-            max_branches: parseInt(document.getElementById('maxBranches').value),
-            features: document.getElementById('planFeatures').value.trim()
-        };
-        
-        const planId = document.getElementById('planId').value;
-        const url = planId ? `/api/plans/${planId}` : '/api/plans';
-        const method = planId ? 'PUT' : 'POST';
-        
-        try {
-            const response = await fetch(url, {
-                method: method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(planData)
-            });
-            
-            if (!response.ok) throw new Error('Failed to save plan');
-            
-            showAlert(`Plan ${planId ? 'updated' : 'created'} successfully`, 'success');
-            await loadPlans();
-            hidePlanForm();
-        } catch (error) {
-            showAlert('Error: ' + error.message, 'danger');
-        }
-    });
-}
-
-// Edit Plan
-function editPlan(planId) {
-    const plan = plans.find(p => p.id === planId);
-    if (plan) showPlanForm(plan);
-}
-
-// Delete Plan
-async function deletePlan(planId) {
-    if (!confirm('Are you sure you want to delete this plan?')) return;
-    
-    try {
-        const response = await fetch(`/api/plans/${planId}`, { method: 'DELETE' });
-        if (!response.ok) throw new Error('Failed to delete plan');
-        
-        showAlert('Plan deleted successfully', 'success');
-        await loadPlans();
-    } catch (error) {
-        showAlert('Error: ' + error.message, 'danger');
-    }
-}
-
-// Helper function to escape HTML
-function escapeHtml(unsafe) {
-    return unsafe
-        .toString()
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-// Helper function to show alerts
-function showAlert(message, type = 'info') {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-    alertDiv.role = 'alert';
-    alertDiv.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    `;
-    
-    const container = document.querySelector('.container');
-    container.insertBefore(alertDiv, container.firstChild);
-    
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-        alertDiv.remove();
-    }, 5000);
-}
