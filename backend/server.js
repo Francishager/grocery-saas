@@ -956,8 +956,8 @@ function generateOTP() {
   return ("" + Math.floor(100000 + Math.random() * 900000));
 }
 
-// === SaaS Admin: provision tenant (business + owner, email OTP) ===
-app.post("/admin/provision-tenant", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
+// === SaaS Admin: create tenant (business + owner, email OTP) ===
+app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const { business, owner } = req.body || {};
     if (!business?.name) return res.status(400).json({ error: "Business name is required" });
@@ -968,8 +968,12 @@ app.post("/admin/provision-tenant", ...withAuthAndAbility, requireRole(["SaaS Ad
     // 1) Create business
     const bizPayload = {
       name: business.name,
-      subscription_tier: business.subscription_tier || "free",
-      limits_json: JSON.stringify(business.limits || {}),
+      subscription_id: business.subscription_id || null,
+      start_date: business.start_date || null,
+      end_date: business.end_date || null,
+      logo_url: business.logo_url || null,
+      fiscal_year_start: business.fiscal_year_start || null,
+      fiscal_year_end: business.fiscal_year_end || null,
       is_active: true,
       created_at: new Date().toISOString()
     };
@@ -992,6 +996,7 @@ app.post("/admin/provision-tenant", ...withAuthAndAbility, requireRole(["SaaS Ad
       fname: owner.fname,
       mname: owner.mname || "",
       lname: owner.lname,
+      phone_number: owner.phone_number || "",
       business_id: owner.business_id,
       business_name: business.name,
       is_active: true,
@@ -1002,6 +1007,14 @@ app.post("/admin/provision-tenant", ...withAuthAndAbility, requireRole(["SaaS Ad
     };
     const userRes = await addToGrist(USERS_TABLE, ownerPayload);
     if (!userRes.success) return res.status(500).json({ error: "Failed to create owner" });
+
+    // 2b) Update business with owner_id
+    try {
+      const ownerId = userRes.data?.id;
+      if (ownerId) {
+        await updateGristRecord("Businesses", bizRes.data?.id, { owner_id: ownerId, subscription_id: business.subscription_id || null });
+      }
+    } catch (e) { console.warn('Failed to patch business with owner_id:', e?.message); }
 
     // 3) Email OTP
     const resetHtml = `

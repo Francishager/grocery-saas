@@ -1,0 +1,11 @@
+{
+  "$id": "ProvisionPayload.schema.json",
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "business": { "$ref": "BusinessStep.schema.json" },
+    "owner": { "$ref": "OwnerStep.schema.json" }
+  },
+  "required": ["business", "owner"]
+}

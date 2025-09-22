@@ -45,6 +45,8 @@ const tables = {
       start_date: body.start_date || null,
       end_date: body.end_date || null,
       logo_url: body.logo_url || null,
+      fiscal_year_start: body.fiscal_year_start || null,
+      fiscal_year_end: body.fiscal_year_end || null,
       status: body.status || 'active',
       created_at: body.created_at || new Date().toISOString(),
     })
@@ -56,7 +58,11 @@ const tables = {
       branch_id: body.branch_id || null,
       business_id: body.business_id || null,
       name: body.name || '',
-      address: body.address || '',
+      // Accept both address and location for compatibility
+      address: body.address || body.location || '',
+      location: body.location || body.address || '',
+      opening_date: body.opening_date || null,
+      updated_at: body.updated_at || body.update_at || null,
       created_at: body.created_at || new Date().toISOString(),
     })
   },

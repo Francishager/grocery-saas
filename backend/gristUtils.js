@@ -7,27 +7,21 @@ const API_KEY = process.env.GRIST_API_KEY;
 const DOC_ID = process.env.GRIST_DOC_ID;
 const BASE_URL = `https://docs.getgrist.com/api/docs/${DOC_ID}/tables`;
 
-// Configure plaintext tables and per-table sensitive fields
-const PLAIN_TABLES = new Set(
-  String(process.env.PLAIN_TABLES || 'Plans,Subscription,Features,Businesses,Branches,Invoices,Subscription_Features,Inventory,Sales,Reports')
+// Encrypt-everything-by-default policy with a minimal whitelist of fields
+// that must remain plaintext to support server-side filtering and sorting.
+// Configure via UNENCRYPTED_FIELDS env var (comma-separated).
+const UNENCRYPTED_FIELDS = new Set(
+  String(process.env.UNENCRYPTED_FIELDS || 'business_id,created_at,updated_at,date')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)
 );
 
-const SENSITIVE_TABLE_FIELDS = {
-  Users: ['password_hash', 'password', 'otp_code', 'otp_expires'],
-};
-
-// Encryption wrapper: table-aware, only encrypt sensitive fields
 function encryptRecord(tableName, fields) {
   if (!fields || typeof fields !== 'object') return fields;
-  if (!tableName || PLAIN_TABLES.has(String(tableName))) return fields; // leave plaintext for UI tables
-  const sensitive = new Set(SENSITIVE_TABLE_FIELDS[tableName] || []);
-  if (sensitive.size === 0) return fields; // default: no encryption if no sensitive fields configured
   const out = {};
   for (const [k, v] of Object.entries(fields)) {
-    out[k] = sensitive.has(k) ? cryptoEncrypt(v) : v;
+    out[k] = UNENCRYPTED_FIELDS.has(k) ? v : cryptoEncrypt(v);
   }
   return out;
 }
@@ -54,6 +48,10 @@ export function decryptDeep(value) {
 export async function fetchFromGrist(tableName, businessId=null, start=null, end=null) {
   try {
     let url = `${BASE_URL}/${tableName}/records`;
+    const params = new URLSearchParams();
+    if (businessId) params.append('filter[business_id]', businessId);
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
 
     const res = await fetch(url, {
       headers: {
@@ -69,15 +67,15 @@ export async function fetchFromGrist(tableName, businessId=null, start=null, end
     let records = json.records.map(r => ({ id: r.id, ...decryptRecord(r.fields) }));
 
     // Filter by businessId if provided
-    if(businessId){
+    if (businessId) {
       records = records.filter(r => r.business_id === businessId);
     }
 
     // Filter by date range if provided
-    if(start && end && records.length > 0 && records[0].date){
+    if (start && end && records.length > 0 && records[0].date) {
       const startDate = new Date(start);
       const endDate = new Date(end);
-      records = records.filter(r=>{
+      records = records.filter(r => {
         const d = new Date(r.date);
         return d >= startDate && d <= endDate;
       });

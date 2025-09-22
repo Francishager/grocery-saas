@@ -19,6 +19,7 @@
     <nav class="nav flex-column px-3 mt-3" id="sidebarNav">
       <a class="nav-link py-2 active" data-target="section-dashboard" href="#">Dashboard</a>
       <a class="nav-link py-2" data-target="section-businesses" href="#">Businesses</a>
+      <a class="nav-link py-2" data-target="section-create-tenant" href="#">Create Tenant</a>
       <div class="nav-group">
         <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="subsGroup">
           <span>Subscriptions</span>
@@ -32,6 +33,65 @@
           <a class="nav-link py-1" data-target="section-renewal" href="#">Renewals & Expirations</a>
           <a class="nav-link py-1" data-target="section-features" href="#">Feature Access Control</a>
           <a class="nav-link py-1" data-target="section-payment-methods" href="#">Payment Methods</a>
+        </div>
+      </div>
+
+      <!-- Accounting -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="acctGroup">
+          <span>Accounting</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="acctGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-accounting-bank-accounts" href="#">Bank Accounts</a>
+          <a class="nav-link py-1" data-target="section-accounting-cash-accounts" href="#">Cash Accounts</a>
+          <a class="nav-link py-1" data-target="section-accounting-mobile-accounts" href="#">Mobile Money Accounts</a>
+          <a class="nav-link py-1" data-target="section-accounting-transactions" href="#">Transactions</a>
+          <a class="nav-link py-1" data-target="section-accounting-payables" href="#">Payables</a>
+          <a class="nav-link py-1" data-target="section-accounting-receivables" href="#">Receivables</a>
+          <a class="nav-link py-1" data-target="section-accounting-staff-tillsheets" href="#">Staff Till Sheets</a>
+        </div>
+      </div>
+
+      <!-- Reports -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="reportsGroup">
+          <span>Reports</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="reportsGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-reports-balance-sheet" href="#">Balance Sheet</a>
+          <a class="nav-link py-1" data-target="section-reports-trial-balance" href="#">Trial Balance</a>
+          <a class="nav-link py-1" data-target="section-reports-cash-flow" href="#">Cash Flow</a>
+          <a class="nav-link py-1" data-target="section-reports-sales" href="#">Sales</a>
+          <a class="nav-link py-1" data-target="section-reports-financial" href="#">Financial</a>
+          <a class="nav-link py-1" data-target="section-reports-expenses" href="#">Expenses</a>
+        </div>
+      </div>
+
+      <!-- Role & Permissions -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="rolesGroup">
+          <span>Role & Permissions</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="rolesGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-roles-roles" href="#">Roles</a>
+          <a class="nav-link py-1" data-target="section-roles-permissions" href="#">Permissions Matrix</a>
+          <a class="nav-link py-1" data-target="section-roles-audit" href="#">Audit Logs</a>
+        </div>
+      </div>
+
+      <!-- System Settings -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="sysGroup">
+          <span>System Settings</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="sysGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-settings-shop" href="#">Shop Settings</a>
+          <a class="nav-link py-1" data-target="section-settings-fiscal" href="#">Fiscal Year Settings</a>
+          <a class="nav-link py-1" data-target="section-settings-currencies" href="#">Currencies</a>
         </div>
       </div>
     </nav>
@@ -166,7 +226,7 @@
       </section>
 
       <!-- Create Tenant (Multi-step) -->
-      <section id="section-provision" class="section">
+      <section id="section-create-tenant" class="section">
         <div class="card shadow-sm">
           <div class="card-body">
             <div class="d-flex align-items-center mb-3 step-indicator">
@@ -175,7 +235,7 @@
               <div class="step" data-step="3">3</div>
             </div>
 
-            <form id="provisionForm">
+            <form id="tenantForm">
               <!-- Step 1: Business -->
               <div class="step-pane" data-step-pane="1">
                 <h5 class="mb-3">Business Details</h5>
@@ -192,9 +252,35 @@
                       <option value="pro">Pro</option>
                     </select>
                   </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Plan</label>
+                    <select id="pf_planId" class="form-select">
+                      <option value="">—</option>
+                    </select>
+                  </div>
                   <div class="col-12">
                     <label class="form-label">Limits (JSON)</label>
                     <textarea id="pf_bizLimits" class="form-control" rows="3" placeholder='{"products":1000, "staff":10}'></textarea>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Start Date</label>
+                    <input type="date" id="pf_startDate" class="form-control" />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">End Date</label>
+                    <input type="date" id="pf_endDate" class="form-control" />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Logo URL</label>
+                    <input type="url" id="pf_logoUrl" class="form-control" placeholder="https://..." />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Fiscal Year Start</label>
+                    <input type="date" id="pf_fiscalStart" class="form-control" />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Fiscal Year End</label>
+                    <input type="date" id="pf_fiscalEnd" class="form-control" />
                   </div>
                 </div>
                 <div class="d-flex justify-content-between mt-3">
@@ -224,6 +310,10 @@
                     <input type="email" id="pf_ownerEmail" class="form-control" required />
                   </div>
                   <div class="col-md-6">
+                    <label class="form-label">Phone Number</label>
+                    <input type="text" id="pf_ownerPhone" class="form-control" />
+                  </div>
+                  <div class="col-md-6">
                     <label class="form-label">Temporary Password</label>
                     <input type="text" id="pf_ownerTempPass" class="form-control" value="ChangeMe123" required />
                   </div>
@@ -245,10 +335,27 @@
                 </div>
               </div>
 
-              <!-- Step 3: Review & Provision -->
+              <!-- Step 3: Review & Create -->
               <div class="step-pane d-none" data-step-pane="3">
                 <h5 class="mb-3">Review</h5>
-                <div id="pf_review" class="border rounded p-3 bg-light"></div>
+                <div id="pf_review" class="border rounded p-3 bg-light mb-3"></div>
+                <div class="border rounded p-3">
+                  <h6 class="mb-3">Optional: First Branch</h6>
+                  <div class="row g-3">
+                    <div class="col-md-4">
+                      <label class="form-label">Branch Name</label>
+                      <input type="text" id="pf_branchName" class="form-control" />
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Location / Address</label>
+                      <input type="text" id="pf_branchLocation" class="form-control" />
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Opening Date</label>
+                      <input type="date" id="pf_branchOpening" class="form-control" />
+                    </div>
+                  </div>
+                </div>
                 <div class="d-flex justify-content-between mt-3">
                   <button class="btn btn-outline-secondary" data-prev>Back</button>
                   <div>
@@ -533,6 +640,128 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- Accounting Sections -->
+      <section id="section-accounting-bank-accounts" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Bank Accounts</h5>
+          <div class="text-muted">Placeholder — configure and list bank accounts here.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-cash-accounts" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Cash Accounts</h5>
+          <div class="text-muted">Placeholder — manage cash accounts.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-mobile-accounts" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Mobile Money Accounts</h5>
+          <div class="text-muted">Placeholder — mobile money accounts setup.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-transactions" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Transactions</h5>
+          <div class="text-muted">Placeholder — transactions table.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-payables" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Payables</h5>
+          <div class="text-muted">Placeholder — supplier payables.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-receivables" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Receivables</h5>
+          <div class="text-muted">Placeholder — customer receivables.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-staff-tillsheets" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Staff Till Sheets</h5>
+          <div class="text-muted">Placeholder — staff till sheets management.</div>
+        </div></div>
+      </section>
+
+      <!-- Reports Sections -->
+      <section id="section-reports-balance-sheet" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Balance Sheet</h5>
+          <div class="text-muted">Placeholder — balance sheet report.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-trial-balance" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Trial Balance</h5>
+          <div class="text-muted">Placeholder — trial balance report.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-cash-flow" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Cash Flow</h5>
+          <div class="text-muted">Placeholder — cash flow statement.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-sales" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Sales Reports</h5>
+          <div class="text-muted">Placeholder — sales analytics and summaries.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-financial" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Financial Reports</h5>
+          <div class="text-muted">Placeholder — financial reporting.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-expenses" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Expense Reports</h5>
+          <div class="text-muted">Placeholder — expense breakdowns.</div>
+        </div></div>
+      </section>
+
+      <!-- Role & Permissions Sections -->
+      <section id="section-roles-roles" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Roles</h5>
+          <div class="text-muted">Placeholder — define and manage roles.</div>
+        </div></div>
+      </section>
+      <section id="section-roles-permissions" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Permissions Matrix</h5>
+          <div class="text-muted">Placeholder — map permissions to roles.</div>
+        </div></div>
+      </section>
+      <section id="section-roles-audit" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Audit Logs</h5>
+          <div class="text-muted">Placeholder — record and view audit trails.</div>
+        </div></div>
+      </section>
+
+      <!-- System Settings Sections -->
+      <section id="section-settings-shop" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Shop Settings</h5>
+          <div class="text-muted">Placeholder — shop/system settings.</div>
+        </div></div>
+      </section>
+      <section id="section-settings-fiscal" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Fiscal Year Settings</h5>
+          <div class="text-muted">Placeholder — fiscal year start/end configuration.</div>
+        </div></div>
+      </section>
+      <section id="section-settings-currencies" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Currencies</h5>
+          <div class="text-muted">Placeholder — currency list and defaults.</div>
+        </div></div>
       </section>
 
     </main>

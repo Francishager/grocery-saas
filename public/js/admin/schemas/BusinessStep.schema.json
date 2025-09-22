@@ -1,0 +1,33 @@
+{
+  "$id": "BusinessStep.schema.json",
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "minLength": 2 },
+    "subscription_tier": {
+      "type": "string",
+      "enum": ["free", "starter", "pro", "enterprise"]
+    },
+    "limits": {
+      "type": "object",
+      "description": "Arbitrary limits JSON (will be stringified into limits_json)",
+      "additionalProperties": true,
+      "properties": {
+        "max_staff": { "type": "integer", "minimum": 0 },
+        "max_branches": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "subscription_id": { "type": ["integer", "string", "null"] },
+    "logo_url": { "type": ["string", "null"], "format": "uri" },
+    "start_date": { "type": ["string", "null"], "format": "date" },
+    "end_date": { "type": ["string", "null"], "format": "date" },
+    "fiscal_year_start": { "type": ["string", "null"], "format": "date" },
+    "fiscal_year_end": { "type": ["string", "null"], "format": "date" }
+  },
+  "required": ["name"],
+  "anyOf": [
+    { "required": ["subscription_id"] },
+    { "required": ["subscription_tier"] }
+  ]
+}
