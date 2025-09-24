@@ -5,13 +5,16 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
-    "build": "npm run build:client && npm run build:server",
-    "build:client": "cd public && npm install && npm run build",
-    "build:server": "npm install",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "start": "node backend/server.js",
+  "dev": "nodemon backend/server.js",
+  "build": "npm run build:client && npm run build:server",
+  "build:client": "cd public && npm install && npm run build",
+  "build:server": "npm install",
+  "predeploy": "npm run build",
+  "deploy": "gh-pages -d dist",
+  "test": "echo \"Error: no test specified\" && exit 1"
+},
+
   "keywords": [],
   "author": "",
   "license": "ISC",
