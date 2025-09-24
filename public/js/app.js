@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:3000";
+const API_URL = (window.APP_CONFIG?.API_URL) || ( /^(localhost|127\.0\.0\.1)$/i.test(location.hostname) ? 'http://localhost:3000' : '' );
 
 // ===== Session =====
 function getUser() {
@@ -65,6 +65,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (path.includes("inventory.html")) {
       loadInventory();
     }
+  }
+  if (!API_URL && !/^(localhost|127\.0\.0\.1)$/i.test(location.hostname)){
+    console.warn('Backend API URL is not configured. Append ?api=https://your-api.example.com to the URL or set localStorage.API_URL.');
   }
 });
 
