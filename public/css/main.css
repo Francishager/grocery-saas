@@ -10,7 +10,7 @@
 
 /***** Layout *****/
 body{overflow-x:hidden;}
-.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-width);background:var(--sidebar-bg);color:var(--sidebar-text);padding-top:60px;z-index:1040;transition:transform .25s ease;}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-width);background:var(--sidebar-bg);color:var(--sidebar-text);padding-top:60px;z-index:1040;transition:transform .25s ease;overflow-y:auto;overflow-x:hidden;}
 .sidebar .brand{position:fixed;top:0;left:0;height:60px;width:var(--sidebar-width);display:flex;align-items:center;padding:0 16px;background:var(--brand-bg);font-weight:700;color:#fff}
 .sidebar .nav-link{color:#cbd5e1;border-radius:6px}
 .sidebar .nav-link.active,.sidebar .nav-link:hover{color:#fff;background:var(--sidebar-hover)}

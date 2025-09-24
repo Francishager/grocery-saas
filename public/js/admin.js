@@ -87,11 +87,14 @@ function setActiveSection(id) {
     'section-features': 'Manage Features',
     'section-renewal': 'Renewal Status',
     'section-payment-methods': 'Payment Methods',
+    // Stock & Sales
+    'section-stock': 'Stock & Sales',
     // Accounting
+    'section-accounting-core': 'Accounting',
     'section-accounting-bank-accounts': 'Bank Accounts',
     'section-accounting-cash-accounts': 'Cash Accounts',
     'section-accounting-mobile-accounts': 'Mobile Money Accounts',
-    'section-accounting-transactions': 'Transactions',
+    'section-accounting-transactions': 'Transaction Accounts',
     'section-accounting-payables': 'Payables',
     'section-accounting-receivables': 'Receivables',
     'section-accounting-staff-tillsheets': 'Staff Till Sheets',
@@ -112,6 +115,7 @@ function setActiveSection(id) {
     'section-settings-currencies': 'Currencies'
   }[id] || 'SaaS Admin';
   document.getElementById('pageTitle').textContent = title;
+  if (id === 'section-stock') { if (window.App?.Admin?.Stock?.setupUI) App.Admin.Stock.setupUI(); }
   if (id === 'section-dashboard') { if (window.App?.Admin?.Dashboard?.load) App.Admin.Dashboard.load(); }
   if (id === 'section-businesses') { if (window.App?.Admin?.Businesses?.setupUI) App.Admin.Businesses.setupUI(); if (window.App?.Admin?.Businesses?.loadList) App.Admin.Businesses.loadList(); }
   if (id === 'section-subs-all') { if (window.App?.Admin?.Subscriptions?.setupUI) App.Admin.Subscriptions.setupUI(); if (window.App?.Admin?.Subscriptions?.loadAll) App.Admin.Subscriptions.loadAll(); }
@@ -130,6 +134,10 @@ function setActiveSection(id) {
     if (window.App?.Admin?.Features?.setupUI) App.Admin.Features.setupUI();
     if (window.App?.Admin?.Features?.loadTable) App.Admin.Features.loadTable();
     if (window.App?.Admin?.Features?.loadMatrix) App.Admin.Features.loadMatrix();
+  }
+  // Lazy init Accounting UI when any accounting section is visited
+  if (id && id.indexOf('section-accounting-') === 0) {
+    if (window.App?.Admin?.Accounting?.setupUI) App.Admin.Accounting.setupUI();
   }
   // Toggle FAB visibility
   const fab = document.getElementById('fabCreate');

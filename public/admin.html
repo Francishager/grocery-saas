@@ -43,13 +43,22 @@
           <span class="chev">▼</span>
         </button>
         <div id="acctGroup" class="nav-sub d-none">
-          <a class="nav-link py-1" data-target="section-accounting-bank-accounts" href="#">Bank Accounts</a>
-          <a class="nav-link py-1" data-target="section-accounting-cash-accounts" href="#">Cash Accounts</a>
-          <a class="nav-link py-1" data-target="section-accounting-mobile-accounts" href="#">Mobile Money Accounts</a>
-          <a class="nav-link py-1" data-target="section-accounting-transactions" href="#">Transactions</a>
+          <a class="nav-link py-1" data-target="section-accounting-core" href="#">Accounting</a>
+          <a class="nav-link py-1" data-target="section-accounting-transactions" href="#">Transaction Accounts</a>
           <a class="nav-link py-1" data-target="section-accounting-payables" href="#">Payables</a>
           <a class="nav-link py-1" data-target="section-accounting-receivables" href="#">Receivables</a>
           <a class="nav-link py-1" data-target="section-accounting-staff-tillsheets" href="#">Staff Till Sheets</a>
+        </div>
+      </div>
+
+      <!-- Stock & Sales -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="stockGroup">
+          <span>Stock & Sales</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="stockGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-stock" href="#">Stock & Sales</a>
         </div>
       </div>
 
@@ -219,6 +228,108 @@
                   <div class="text-muted small">Server Uptime (hrs)</div>
                   <div class="fs-3 fw-semibold" id="kpiUptime">—</div>
                 </div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stock & Sales Section -->
+      <section id="section-stock" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between">
+              <h5 class="mb-0">Stock & Sales</h5>
+              <div class="d-flex align-items-center gap-2">
+                <input id="stockBizId" class="form-control form-control-sm" placeholder="Business ID (optional)" style="max-width:220px" />
+                <button id="stockBizApply" class="btn btn-outline-secondary btn-sm">Apply</button>
+              </div>
+            </div>
+            <ul class="nav nav-tabs mt-3" id="stockTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-products-tab" data-bs-toggle="tab" data-bs-target="#tab-products" type="button" role="tab">Products</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-suppliers-tab" data-bs-toggle="tab" data-bs-target="#tab-suppliers" type="button" role="tab">Suppliers</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-purchases-tab" data-bs-toggle="tab" data-bs-target="#tab-purchases" type="button" role="tab">Purchases</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-sales-tab" data-bs-toggle="tab" data-bs-target="#tab-sales" type="button" role="tab">Sales</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-inventory-tab" data-bs-toggle="tab" data-bs-target="#tab-inventory" type="button" role="tab">Inventory</button>
+              </li>
+            </ul>
+            <div class="tab-content mt-3" id="stockTabsContent">
+              <div class="tab-pane fade show active" id="tab-products" role="tabpanel" aria-labelledby="tab-products-tab">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="d-flex gap-2">
+                    <input id="prodSearch" class="form-control form-control-sm" placeholder="Search name/SKU" />
+                    <select id="prodFilterCategory" class="form-select form-select-sm" style="min-width:180px"><option value="">All Categories</option></select>
+                  </div>
+                  <button class="btn btn-primary btn-sm" id="btnAddProduct">+ Add Product</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Product Name</th><th>SKU/Code</th><th>Category</th><th>Unit</th><th>Selling Price</th><th>Cost Price</th><th>Current Stock</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="productsTable"><tr><td colspan="9" class="text-muted">No products</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-suppliers" role="tabpanel" aria-labelledby="tab-suppliers-tab">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="d-flex gap-2">
+                    <input id="supSearch" class="form-control form-control-sm" placeholder="Search suppliers" />
+                  </div>
+                  <button class="btn btn-primary btn-sm" id="btnAddSupplier">+ Add Supplier</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Name</th><th>Contact Person</th><th>Phone</th><th>Email</th><th>Address</th><th>Outstanding Balance</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="suppliersTable"><tr><td colspan="8" class="text-muted">No suppliers</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-purchases" role="tabpanel" aria-labelledby="tab-purchases-tab">
+                <div class="d-flex justify-content-between mb-2">
+                  <h6 class="mb-0">Purchases</h6>
+                  <button class="btn btn-success btn-sm" id="btnNewPurchase">+ New Purchase</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Date</th><th>Supplier</th><th>Products Bought</th><th>Total</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="purchasesTable"><tr><td colspan="6" class="text-muted">No purchases</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-sales" role="tabpanel" aria-labelledby="tab-sales-tab">
+                <div class="d-flex justify-content-between mb-2">
+                  <h6 class="mb-0">Sales</h6>
+                  <button class="btn btn-success btn-sm" id="btnRecordSale">Record Sale</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Date</th><th>Invoice No</th><th>User</th><th>Products Sold</th><th>Total</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="salesTable"><tr><td colspan="7" class="text-muted">No sales</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-inventory" role="tabpanel" aria-labelledby="tab-inventory-tab">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="d-flex gap-2">
+                    <select id="invFilterCategory" class="form-select form-select-sm" style="min-width:180px"><option value="">All Categories</option></select>
+                    <select id="invFilterStatus" class="form-select form-select-sm" style="min-width:150px"><option value="">All</option><option value="low">Low Stock</option><option value="inactive">Inactive</option></select>
+                  </div>
+                  <button class="btn btn-outline-secondary btn-sm" id="btnAdjustStock">Adjust Stock</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Product Name</th><th>Current Stock</th><th>Last Purchase Cost</th><th>Selling Price</th><th>Reorder Level</th><th>Total Value</th></tr></thead>
+                    <tbody id="inventoryTable"><tr><td colspan="6" class="text-muted">No inventory</td></tr></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -643,6 +754,47 @@
       </section>
 
       <!-- Accounting Sections -->
+      <section id="section-accounting-core" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5>Accounting</h5>
+            <ul class="nav nav-tabs mt-2" id="acctCoreTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-coa-tab" data-bs-toggle="tab" data-bs-target="#tab-coa" type="button" role="tab">Chart of Accounts</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-categories-tab" data-bs-toggle="tab" data-bs-target="#tab-categories" type="button" role="tab">Account Categories</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-entries-tab" data-bs-toggle="tab" data-bs-target="#tab-entries" type="button" role="tab">Register Journal Entries</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-ledgers-tab" data-bs-toggle="tab" data-bs-target="#tab-ledgers" type="button" role="tab">Journal Ledgers</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-tax-tab" data-bs-toggle="tab" data-bs-target="#tab-tax" type="button" role="tab">Tax Management</button>
+              </li>
+            </ul>
+            <div class="tab-content mt-3" id="acctCoreTabsContent">
+              <div class="tab-pane fade show active" id="tab-coa" role="tabpanel" aria-labelledby="tab-coa-tab">
+                <div class="text-muted">Placeholder — chart of accounts table.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-categories" role="tabpanel" aria-labelledby="tab-categories-tab">
+                <div class="text-muted">Placeholder — category accounts management.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-entries" role="tabpanel" aria-labelledby="tab-entries-tab">
+                <div class="text-muted">Placeholder — register journal entries.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-ledgers" role="tabpanel" aria-labelledby="tab-ledgers-tab">
+                <div class="text-muted">Placeholder — journal ledgers view.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-tax" role="tabpanel" aria-labelledby="tab-tax-tab">
+                <div class="text-muted">Placeholder — tax management settings and reports.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
       <section id="section-accounting-bank-accounts" class="section">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Bank Accounts</h5>
@@ -662,10 +814,33 @@
         </div></div>
       </section>
       <section id="section-accounting-transactions" class="section">
-        <div class="card shadow-sm"><div class="card-body">
-          <h5>Transactions</h5>
-          <div class="text-muted">Placeholder — transactions table.</div>
-        </div></div>
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5>Transaction Accounts</h5>
+            <ul class="nav nav-tabs mt-2" id="acctTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-bank-tab" data-bs-toggle="tab" data-bs-target="#tab-bank" type="button" role="tab">Bank Accounts</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-cash-tab" data-bs-toggle="tab" data-bs-target="#tab-cash" type="button" role="tab">Cash Accounts</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-mobile-tab" data-bs-toggle="tab" data-bs-target="#tab-mobile" type="button" role="tab">Mobile Money Accounts</button>
+              </li>
+            </ul>
+            <div class="tab-content mt-3" id="acctTabsContent">
+              <div class="tab-pane fade show active" id="tab-bank" role="tabpanel" aria-labelledby="tab-bank-tab">
+                <div class="text-muted">Placeholder — bank accounts list.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-cash" role="tabpanel" aria-labelledby="tab-cash-tab">
+                <div class="text-muted">Placeholder — cash accounts list.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-mobile" role="tabpanel" aria-labelledby="tab-mobile-tab">
+                <div class="text-muted">Placeholder — mobile money accounts list.</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
       <section id="section-accounting-payables" class="section">
         <div class="card shadow-sm"><div class="card-body">
@@ -785,6 +960,9 @@
   <script src="js/admin/subscriptions.js"></script>
   <script src="js/admin/billing.js"></script>
   <script src="js/admin/dashboard.js"></script>
+  <script src="js/ui/table.js"></script>
+  <script src="js/admin/accounting.js"></script>
+  <script src="js/admin/stock.js"></script>
   <script src="js/admin.js"></script>
 </body>
 </html>
