@@ -1,10 +1,14 @@
-const API_URL = "http://localhost:3000";
+const API_URL = (window.APP_CONFIG?.API_URL) || ( /^(localhost|127\.0\.0\.1)$/i.test(location.hostname) ? 'http://localhost:3000' : '' );
 let cart = [];
 const token = localStorage.getItem("token");
 const user = JSON.parse(localStorage.getItem("user"));
 
 if (!token || !user || !["Owner","Attendant","SaaS Admin"].includes(user.role)) {
   window.location.href = "index.html";
+}
+
+if (!API_URL) {
+  alert('Backend API URL is not configured. Append ?api=https://your-api.example.com to the URL or set localStorage.API_URL.');
 }
 
 async function authFetch(url, options = {}) {

@@ -1,7 +1,7 @@
 (function(){
   const App = window.App || {};
-  // Derive API base from current origin for portability
-  App.API_URL = window.location.origin;
+  // Derive API base from current origin for portability, unless provided by config.js
+  if (!App.API_URL) App.API_URL = window.location.origin;
   // Chart color palette
   App.colors = {
     primary: '#0d6efd',
