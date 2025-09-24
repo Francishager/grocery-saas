@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:3000";
+const API_URL = (window.APP_CONFIG?.API_URL) || ( /^(localhost|127\.0\.0\.1)$/i.test(location.hostname) ? 'http://localhost:3000' : '' );
 const user = JSON.parse(localStorage.getItem("user"));
 const token = localStorage.getItem("token");
 
@@ -10,6 +10,11 @@ if(!user || !["Owner","Accountant","SaaS Admin"].includes(user.role)){
 
 if (!token) {
   window.location.href = "index.html";
+}
+
+// Require API URL in production (GitHub Pages)
+if (!API_URL) {
+  alert('Backend API URL is not configured. Append ?api=https://your-api.example.com to the URL or set localStorage.API_URL.');
 }
 
 async function authFetch(url, options = {}) {

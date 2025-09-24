@@ -12,6 +12,15 @@
   // Business context
   const LS_BIZ = 'stock_business_id';
   function getBiz(){ return ($('stockBizId')?.value?.trim()) || localStorage.getItem(LS_BIZ) || 'default'; }
+
+// Active branch helper for COA per-branch balances
+function getActiveBranch(){
+  try{
+    const u = (window.App?.Store?.get?.()?.user) || JSON.parse(localStorage.getItem('user')||'null');
+    const br = u?.branch_name || u?.branch || u?.branchName || u?.branch_id || localStorage.getItem('stock_branch') || 'Default';
+    return String(br || 'Default');
+  }catch{ return 'Default'; }
+}
   function setBiz(b){ localStorage.setItem(LS_BIZ, b || 'default'); const inp = $('stockBizId'); if (inp) inp.value = b; }
   function key(ns){ return `stock:${getBiz()}:${ns}`; }
 
@@ -35,6 +44,139 @@
     const pOut = getSales().flatMap(s=> s.lines||[]).filter(l=> l.product_id===product_id).reduce((a,l)=> a + Number(l.qty||0), 0);
     const adj = getAdjustments().filter(a=> a.product_id===product_id).reduce((a,x)=> a + Number(x.delta||0), 0);
     return pIn - pOut + adj;
+  }
+
+  // ---------- Product picker (typeahead + scan) ----------
+  function bindProductPicker(row, opts){
+    const input = row.querySelector('[data-col="product_name"]');
+    const hidden = row.querySelector('[data-col="product"]');
+    const suggest = row.querySelector('[data-col="suggest"]');
+    const scanBtn = row.querySelector('[data-scan]');
+    if (!input || !hidden || !suggest) return;
+
+    function choose(prod){
+      if (!prod) return;
+      input.value = `${prod.name}${prod.sku ? ' ('+prod.sku+')' : ''}`;
+      hidden.value = prod.id;
+      suggest.style.display = 'none'; suggest.innerHTML = '';
+      if (opts?.onSelect) opts.onSelect(prod);
+    }
+
+    function renderSuggest(q){
+      const ql = String(q||'').toLowerCase();
+      const items = getProducts().filter(p=> p.active!==false).filter(p=> !ql || [p.name, p.sku].some(v=> String(v||'').toLowerCase().includes(ql))).slice(0, 12);
+      if (!ql || items.length===0){ suggest.style.display='none'; suggest.innerHTML=''; return; }
+      suggest.innerHTML = items.map(p=> `<button type="button" class="list-group-item list-group-item-action" data-id="${p.id}">${p.name}${p.sku? ' <span class="text-muted">('+p.sku+')</span>':''}</button>`).join('');
+      suggest.style.display = '';
+      Array.from(suggest.querySelectorAll('[data-id]')).forEach(btn=> btn.addEventListener('mousedown', (e)=>{
+        e.preventDefault(); const id = e.currentTarget.getAttribute('data-id'); const p = getProducts().find(x=> x.id===id); choose(p);
+      }));
+    }
+
+    input.addEventListener('input', ()=>{ hidden.value=''; renderSuggest(input.value); });
+    input.addEventListener('focus', ()=>{ renderSuggest(input.value); });
+    input.addEventListener('blur', ()=> setTimeout(()=>{ suggest.style.display='none'; }, 150));
+
+    if (scanBtn){
+      scanBtn.addEventListener('click', async ()=>{
+        try{
+          const code = await startBarcodeScan();
+          if (!code) return;
+          const prod = getProducts().find(p=> String(p.sku||'').toLowerCase() === String(code||'').toLowerCase());
+          if (prod) choose(prod); else showAlert(`No product found for code: ${code}`, 'warning');
+        }catch(err){ showAlert(err?.message||'Scan failed','danger'); }
+      });
+    }
+
+    if (opts?.presetId){ const p = getProducts().find(x=> x.id===opts.presetId); if (p) choose(p); }
+  }
+
+  async function startBarcodeScan(){
+    const supportsDetector = 'BarcodeDetector' in window;
+    const supportsCamera = !!(navigator.mediaDevices?.getUserMedia);
+    if (!(supportsDetector && supportsCamera)){
+      const v = prompt('Enter barcode / SKU');
+      return v ? v.trim() : null;
+    }
+    const det = new window.BarcodeDetector({ formats: ['qr_code','ean_13','code_128','upc_a','upc_e','ean_8'] });
+    return new Promise(async (resolve)=>{
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2000; display:flex; align-items:center; justify-content:center;';
+      overlay.innerHTML = '<div style="background:#000;border-radius:8px; padding:8px; position:relative"><video playsinline autoplay muted style="max-width:90vw; max-height:70vh;"></video><div class="text-center text-light small mt-1">Align barcode within the frame</div><button type="button" class="btn btn-sm btn-light position-absolute" style="right:8px; top:8px">Cancel</button></div>';
+      document.body.appendChild(overlay);
+      const video = overlay.querySelector('video');
+      const cancelBtn = overlay.querySelector('button');
+      let running = true;
+      cancelBtn.addEventListener('click', ()=>{ running=false; cleanup(); resolve(null); });
+      let stream = null;
+      async function cleanup(){ try{ if (stream){ stream.getTracks().forEach(t=> t.stop()); } }catch{} document.body.removeChild(overlay); }
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = stream; await video.play();
+        async function loop(){
+          if (!running) return;
+          try{
+            const codes = await det.detect(video);
+            if (codes && codes.length){ running=false; const code = codes[0].rawValue; cleanup(); resolve(code); return; }
+          }catch{}
+          requestAnimationFrame(loop);
+        }
+        loop();
+      }catch(err){ cleanup(); const v = prompt('Enter barcode / SKU'); resolve(v ? v.trim() : null); }
+    });
+  }
+
+  // ---------- Minimal COA posting (localStorage balances) ----------
+  function updateCoaBalance(code, delta, branch){
+    try{
+      const aggKey = 'coa_balances'; const brKey = 'coa_balances_by_branch';
+      const agg = JSON.parse(localStorage.getItem(aggKey)||'{}');
+      const br = JSON.parse(localStorage.getItem(brKey)||'{}');
+      agg[code] = Number(agg[code]||0) + Number(delta||0);
+      const b = branch || 'Default'; const map = br[code] || {}; map[b] = Number(map[b]||0) + Number(delta||0); br[code] = map;
+      localStorage.setItem(aggKey, JSON.stringify(agg));
+      localStorage.setItem(brKey, JSON.stringify(br));
+    }catch{}
+  }
+
+  function postPurchaseToCoa(pur){
+    if (!pur) return;
+    const branch = getActiveBranch();
+    const total = Number(pur.total||0);
+    const paid = Number(pur.paid_amount||0);
+    const unpaid = Math.max(0, total - (pur.status==='paid' ? total : paid));
+    // Debit Inventory / Stock (1003)
+    updateCoaBalance('1003', total, branch);
+    // Credit cash/bank for paid
+    const method = (pur.method||'cash');
+    const cashCode = method==='bank' ? '1001' : '1000';
+    if (paid>0) updateCoaBalance(cashCode, -paid, branch);
+    // Credit Accounts Payable (2000) for unpaid portion
+    if (unpaid>0) updateCoaBalance('2000', unpaid, branch);
+  }
+
+  function postSaleToCoa(sale){
+    if (!sale) return;
+    const branch = getActiveBranch();
+    const total = Number(sale.total||0);
+    const paid = Number(sale.paid_amount||0);
+    const unpaid = Math.max(0, total - (sale.status==='paid' ? total : paid));
+    // Credit Sales Revenue (4000)
+    updateCoaBalance('4000', total, branch);
+    // Debit cash/bank for paid portion
+    const method = (sale.method||'cash');
+    const cashCode = method==='bank' ? '1001' : '1000';
+    if (paid>0) updateCoaBalance(cashCode, paid, branch);
+    // Debit Accounts Receivable (1002) for unpaid portion
+    if (unpaid>0) updateCoaBalance('1002', unpaid, branch);
+    // COGS: debit expense (use 5008) and credit Inventory (1003)
+    try{
+      const cogs = (sale.lines||[]).reduce((sum, l)=> sum + Number(l.qty||0) * Number(lastPurchaseCost(l.product_id)||0), 0);
+      if (cogs>0){
+        updateCoaBalance('5008', cogs, branch); // COGS as expense
+        updateCoaBalance('1003', -cogs, branch); // reduce inventory
+      }
+    }catch{}
   }
   function lastPurchaseCost(product_id){
     const purchases = getPurchases().slice().reverse();
@@ -128,7 +270,7 @@
             <form id="productForm" class="row g-3">
               <input type="hidden" id="prod_id" />
               <div class="col-md-6"><label class="form-label">Product Name</label><input id="prod_name" class="form-control" required /></div>
-              <div class="col-md-3"><label class="form-label">SKU/Code</label><input id="prod_sku" class="form-control" /></div>
+              <div class="col-md-3"><label class="form-label">SKU/Code</label><div class="input-group"><input id="prod_sku" class="form-control" /><button class="btn btn-outline-secondary" type="button" id="prod_sku_scan">Scan</button></div></div>
               <div class="col-md-3"><label class="form-label">Category</label><input id="prod_category" class="form-control" /></div>
               <div class="col-md-3"><label class="form-label">Unit</label><input id="prod_unit" class="form-control" placeholder="pcs, kg" /></div>
               <div class="col-md-3"><label class="form-label">Selling Price</label><input id="prod_sell" type="number" step="0.01" class="form-control" required /></div>
@@ -142,6 +284,7 @@
       </div>`;
     document.body.appendChild(div.firstElementChild);
     $('prodSaveBtn').addEventListener('click', saveProductModal);
+    const skuScan = $('prod_sku_scan'); if (skuScan){ skuScan.addEventListener('click', async ()=>{ try{ const code = await startBarcodeScan(); if (code) $('prod_sku').value = code; }catch(e){ showAlert(e?.message||'Scan failed','danger'); } }); }
   }
 
   function openProductModal(prod){ ensureProductModal(); $('prod_id').value = prod?.id||''; $('prod_name').value = prod?.name||''; $('prod_sku').value = prod?.sku||''; $('prod_category').value = prod?.category||''; $('prod_unit').value = prod?.unit||''; $('prod_sell').value = prod?.selling_price||''; $('prod_cost').value = prod?.cost_price||''; $('prod_reorder').value = prod?.reorder_level||0; $('prod_active').checked = (prod?.active!==false); bsModal('productModal')?.show(); }
@@ -271,7 +414,16 @@
     const tbody = $('pur_lines')?.querySelector('tbody'); if (!tbody) return;
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td><select class="form-select form-select-sm" data-col="product"></select></td>
+      <td>
+        <div class="d-flex gap-2 align-items-center">
+          <div class="flex-grow-1 position-relative">
+            <input type="text" class="form-control form-control-sm" placeholder="Search product by name or SKU" data-col="product_name" />
+            <input type="hidden" data-col="product" />
+            <div class="list-group position-absolute w-100" style="z-index:1055; max-height:180px; overflow:auto; display:none" data-col="suggest"></div>
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" type="button" data-scan>Scan</button>
+        </div>
+      </td>
       <td><input type="number" step="1" class="form-control form-control-sm" data-col="qty" value="${Number(line?.qty||1)}" /></td>
       <td><input type="number" step="0.01" class="form-control form-control-sm" data-col="unit_cost" value="${Number(line?.unit_cost||0)}" /></td>
       <td><input type="number" step="0.01" class="form-control form-control-sm" data-col="discount" value="${Number(line?.discount||0)}" /></td>
@@ -279,13 +431,9 @@
       <td class="text-end" data-col="line_total">0</td>
       <td class="text-end"><button class="btn btn-outline-danger btn-sm" data-del-line>×</button></td>`;
     tbody.appendChild(row);
-    // Fill products (active only)
-    const sel = row.querySelector('select[data-col="product"]');
-    const prods = getProducts().filter(p=> p.active!==false);
-    sel.innerHTML = '<option value="">— Select Product —</option>' + prods.map(p=>`<option value="${p.id}">${p.name} (${p.sku||''})</option>`).join('');
-    if (line?.product_id) sel.value = line.product_id;
-    // bind change events
-    row.querySelectorAll('input,select').forEach(inp=> inp.addEventListener('input', updatePurchaseTotals));
+    // bind typeahead product picker and totals
+    bindProductPicker(row, { presetId: line?.product_id, onSelect: (prod)=>{ const uc = row.querySelector('[data-col="unit_cost"]'); if (uc && !Number(uc.value||0)) uc.value = Number(prod?.cost_price||0); updatePurchaseTotals(); } });
+    row.querySelectorAll('input').forEach(inp=> inp.addEventListener('input', updatePurchaseTotals));
     row.querySelector('[data-del-line]').addEventListener('click', ()=>{ row.remove(); updatePurchaseTotals(); });
     updatePurchaseTotals();
   }
@@ -345,6 +493,9 @@
     const payment_details = readPayDetails('pur', method);
     const purchase = { id: uid(), date, supplier_id, lines, subtotal, tax, total, status, paid_amount, method, payment_details, business_id, created_at: nowIso() };
     const list = getPurchases(); list.push(purchase); savePurchases(list);
+
+    // Minimal COA posting
+    try { postPurchaseToCoa(purchase); } catch(e){}
 
     // Update supplier outstanding for credit/partial
     if (status==='credit' || status==='partial'){
@@ -423,7 +574,16 @@
     const tbody = $('sale_lines')?.querySelector('tbody'); if (!tbody) return;
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td><select class="form-select form-select-sm" data-col="product"></select></td>
+      <td>
+        <div class="d-flex gap-2 align-items-center">
+          <div class="flex-grow-1 position-relative">
+            <input type="text" class="form-control form-control-sm" placeholder="Search product by name or SKU" data-col="product_name" />
+            <input type="hidden" data-col="product" />
+            <div class="list-group position-absolute w-100" style="z-index:1055; max-height:180px; overflow:auto; display:none" data-col="suggest"></div>
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" type="button" data-scan>Scan</button>
+        </div>
+      </td>
       <td><input type="number" step="1" class="form-control form-control-sm" data-col="qty" value="${Number(line?.qty||1)}" /></td>
       <td><input type="number" step="0.01" class="form-control form-control-sm" data-col="price" value="${Number(line?.price||0)}" /></td>
       <td><input type="number" step="0.01" class="form-control form-control-sm" data-col="discount" value="${Number(line?.discount||0)}" /></td>
@@ -431,19 +591,10 @@
       <td class="text-end" data-col="line_total">0</td>
       <td class="text-end"><button class="btn btn-outline-danger btn-sm" data-del-line>×</button></td>`;
     tbody.appendChild(row);
-    // Fill products (active only)
-    const sel = row.querySelector('select[data-col="product"]');
-    const prods = getProducts().filter(p=> p.active!==false);
-    sel.innerHTML = '<option value="">— Select Product —</option>' + prods.map(p=>`<option value="${p.id}">${p.name} (${p.sku||''})</option>`).join('');
-    if (line?.product_id) sel.value = line.product_id;
-    // default price suggestion
+    // bind typeahead product picker and totals
     const priceInput = row.querySelector('[data-col="price"]');
-    sel.addEventListener('change', ()=>{
-      const pr = getProducts().find(x=> x.id===sel.value);
-      if (pr && !line){ priceInput.value = Number(pr.selling_price||0); }
-      updateSaleTotals();
-    });
-    row.querySelectorAll('input,select').forEach(inp=> inp.addEventListener('input', updateSaleTotals));
+    bindProductPicker(row, { presetId: line?.product_id, onSelect: (prod)=>{ if (priceInput && !Number(priceInput.value||0)) priceInput.value = Number(prod?.selling_price||0); updateSaleTotals(); } });
+    row.querySelectorAll('input').forEach(inp=> inp.addEventListener('input', updateSaleTotals));
     row.querySelector('[data-del-line]').addEventListener('click', ()=>{ row.remove(); updateSaleTotals(); });
     updateSaleTotals();
   }
@@ -507,6 +658,9 @@
       const ar = load('receivables'); ar.push({ id: uid(), date, customer, sale_id: sale.id, amount: total - (status==='paid' ? total : paid_amount) }); save('receivables', ar);
     }
 
+    // Minimal COA posting
+    try { postSaleToCoa(sale); } catch(e){}
+
     bsModal('saleModal')?.hide(); renderSalesTable(); renderInventoryTable(); showToast('Sale recorded');
   }
 
@@ -551,9 +705,10 @@
       <td>${r.reorder}</td>
       <td>${fmt(r.totalVal)}</td>
     </tr>`).join('');
+    updateLowStockNotifications();
   }
 
-  function ensureModals(){ ensureProductModal(); ensureSupplierModal(); ensurePurchaseModal(); ensureSaleModal(); }
+  function ensureModals(){ ensureProductModal(); ensureSupplierModal(); ensurePurchaseModal(); ensureSaleModal(); ensureAdjustModal(); }
 
   // Payment detail helpers (mobile money / bank)
   function togglePayDetails(prefix){
@@ -569,6 +724,85 @@
       name: $(prefix+"_pay_name")?.value?.trim()||null,
       method
     };
+  }
+
+  // ---------- Stock Adjustment (minimal) ----------
+  function ensureAdjustModal(){
+    if ($('adjustModal')) return;
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <div class="modal" id="adjustModal" tabindex="-1">
+        <div class="modal-dialog"><div class="modal-content">
+          <div class="modal-header"><h6 class="modal-title">Stock Adjustment</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Product</label>
+                <select id="adj_product" class="form-select"></select>
+              </div>
+              <div class="col-md-4"><label class="form-label">Current Stock</label><input id="adj_current" class="form-control" disabled /></div>
+              <div class="col-md-4"><label class="form-label">Mode</label><select id="adj_mode" class="form-select"><option value="add">Add</option><option value="subtract">Subtract</option><option value="set">Set exact</option></select></div>
+              <div class="col-md-4"><label class="form-label" id="adj_qty_label">Quantity</label><input id="adj_qty" type="number" step="1" class="form-control" value="0" /></div>
+              <div class="col-md-8"><label class="form-label">Reason</label><input id="adj_reason" class="form-control" placeholder="Counting correction, damage, etc." /></div>
+              <div class="col-md-4"><label class="form-label">Date</label><input id="adj_date" type="date" class="form-control" /></div>
+              <div class="col-12 text-muted small" id="adj_preview">—</div>
+            </div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary btn-sm" id="adjSaveBtn">Save Adjustment</button></div>
+        </div></div>
+      </div>`;
+    document.body.appendChild(div.firstElementChild);
+    $('adjSaveBtn').addEventListener('click', saveAdjustModal);
+    $('adj_mode').addEventListener('change', ()=>{ $('adj_qty_label').textContent = $('adj_mode').value==='set' ? 'New Stock Level' : 'Quantity'; recalcAdjustPreview(); });
+    $('adj_qty').addEventListener('input', recalcAdjustPreview);
+    $('adj_product').addEventListener('change', recalcAdjustPreview);
+  }
+
+  function openAdjustModal(){
+    ensureAdjustModal();
+    const sel = $('adj_product');
+    const prods = getProducts().filter(p=> p.active!==false);
+    sel.innerHTML = '<option value="">— Select Product —</option>' + prods.map(p=>`<option value="${p.id}">${p.name} (${p.sku||''})</option>`).join('');
+    const d = $('adj_date'); if (d) d.valueAsDate = new Date();
+    $('adj_current').value = '';
+    $('adj_mode').value = 'add';
+    $('adj_qty').value = '0';
+    $('adj_reason').value = '';
+    $('adj_preview').textContent = '—';
+    bsModal('adjustModal')?.show();
+  }
+
+  function recalcAdjustPreview(){
+    const pid = $('adj_product').value||'';
+    const prod = getProducts().find(p=> p.id===pid);
+    const current = prod ? computeStock(prod.id) : 0;
+    $('adj_current').value = String(current);
+    const mode = $('adj_mode').value; const qty = Number($('adj_qty').value||0);
+    let delta = 0; if (mode==='add') delta = qty; else if (mode==='subtract') delta = -qty; else if (mode==='set') delta = (qty - current);
+    const newStock = current + delta;
+    $('adj_preview').textContent = prod ? `Will set ${prod.name} stock from ${current} to ${newStock} (delta ${delta})` : '—';
+  }
+
+  function saveAdjustModal(){
+    const product_id = $('adj_product').value||''; if (!product_id){ showAlert('Select product','danger'); return; }
+    const mode = $('adj_mode').value; const qty = Number($('adj_qty').value||0); const date = $('adj_date').value || new Date().toISOString().slice(0,10); const reason = $('adj_reason').value?.trim()||null; const business_id = localStorage.getItem(LS_BIZ)||'default';
+    const current = computeStock(product_id);
+    let delta = 0; if (mode==='add') delta = qty; else if (mode==='subtract') delta = -qty; else if (mode==='set') delta = (qty - current);
+    if (!delta){ showAlert('Quantity change is zero','warning'); return; }
+    const user = (window.App?.Store?.get()?.user) || JSON.parse(localStorage.getItem('user')||'null');
+    const user_name = [user?.fname, user?.lname].filter(Boolean).join(' ') || user?.email || 'User';
+    const adj = { id: uid(), date, product_id, delta: Number(delta), reason, business_id, user_id: user?.id||null, user_name, created_at: nowIso() };
+    const list = getAdjustments(); list.push(adj); saveAdjustments(list);
+    bsModal('adjustModal')?.hide(); renderInventoryTable(); showToast('Stock adjusted');
+  }
+
+  // ---------- Notifications: Low stock ----------
+  function updateLowStockNotifications(){
+    const dot = $('notifDot'); const list = $('notifList'); if (!dot || !list) return;
+    const lows = getProducts().filter(p=> p.active!==false).map(p=> ({ p, stock: computeStock(p.id), reorder: Number(p.reorder_level||0) })).filter(x=> x.stock <= x.reorder && x.reorder>0);
+    if (lows.length===0){ dot.classList.add('d-none'); list.innerHTML = '<div class="text-muted small px-3 py-2">No new notifications</div>'; return; }
+    dot.classList.remove('d-none');
+    list.innerHTML = lows.slice(0, 10).map(x=> `<div class="dropdown-item small">Low stock: <strong>${x.p.name}</strong> — ${x.stock} (reorder ${x.reorder})</div>`).join('') + (lows.length>10 ? `<div class="dropdown-item text-muted small">+ ${lows.length-10} more…</div>` : '');
   }
 
   Admin.Stock = { setupUI, refreshAll };

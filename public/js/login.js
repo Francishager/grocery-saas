@@ -1,13 +1,20 @@
-const API_URL = "http://localhost:3000";
+const API_URL = (window.APP_CONFIG?.API_URL) || ( /^(localhost|127\.0\.0\.1)$/i.test(location.hostname) ? 'http://localhost:3000' : '' );
 
 // Handle login form submission
 document.addEventListener("DOMContentLoaded", function() {
-    const loginForm = document.getElementById("loginForm");
-    const loginError = document.getElementById("loginError");
+  const loginForm = document.getElementById("loginForm");
+  const loginError = document.getElementById("loginError");
 
-    if (loginForm) {
+  if (loginForm) {
+        // If no API configured (on production/Pages), show guidance and block submission
+        if (!API_URL) {
+            showError("Backend API URL is not configured. Add ?api=https://your-api.example.com to the page URL or set localStorage.API_URL.");
+            const submitBtn = loginForm.querySelector('button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+            return;
+        }
         loginForm.addEventListener("submit", async function(e) {
-            e.preventDefault();
+          e.preventDefault();
             
             const email = document.getElementById("email").value.trim();
             const password = document.getElementById("password").value;
@@ -60,8 +67,8 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     }
     
-    // Check if user is already logged in
-    checkExistingSession();
+    // Check if user is already logged in (only if API configured)
+    if (API_URL) checkExistingSession();
 });
 
 function showError(message) {
@@ -79,6 +86,7 @@ function redirectBasedOnRole(role) {
 }
 
 async function checkExistingSession() {
+    if (!API_URL) return;
     const token = localStorage.getItem("token");
     const user = localStorage.getItem("user");
     
