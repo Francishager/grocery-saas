@@ -359,6 +359,38 @@ app.post("/logout", (req, res) => {
   res.json({ message: "Logged out successfully" });
 });
 
+// === Auth: request password reset (generate OTP and email) ===
+app.post('/auth/request-reset', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const users = await fetchFromGrist(USERS_TABLE);
+    const u = users.find(x => x.email === email);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp_expires = new Date(Date.now() + 24*60*60*1000).toISOString();
+    const payload = { otp_code: otp, otp_expires, force_password_reset: true };
+    try {
+      await updateGristRecord(USERS_TABLE, u.id, payload);
+    } catch (e) {
+      console.error('Failed to update reset OTP:', e?.message);
+      return res.status(500).json({ error: 'Failed to set reset token' });
+    }
+
+    const html = `
+      <p>Hello ${u.fname || ''} ${u.lname || ''},</p>
+      <p>Your password reset code (OTP) is: <b>${otp}</b></p>
+      <p>This OTP expires in 24 hours.</p>
+    `;
+    try { await sendMail(email, 'Password reset code (OTP)', html); } catch (e) { console.warn('Email send failed:', e?.message); }
+    res.json({ message: 'Reset code sent if account exists' });
+  } catch (e) {
+    console.error('request-reset error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // === Dashboard KPIs & Low Stock ===
 app.get("/dashboard/kpis", authenticateToken, requireRole(["Owner","Accountant"]), async (req,res)=>{
   // Resolve businessId from authenticated user; allow SaaS Admin to override via query
