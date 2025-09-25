@@ -7,6 +7,7 @@
 
   const isLocal = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
   const isGhPages = (location.hostname === 'francishager.github.io' && location.pathname.startsWith('/grocery-saas'));
+  const isNetlify = /\.netlify\.app$/i.test(location.hostname);
   const fromQuery = (getQueryParam('api') || '').trim();
   const fromStorage = (localStorage.getItem('API_URL') || '').trim();
   const preset = (window.APP_CONFIG.API_URL || '').trim();
@@ -15,7 +16,7 @@
     try { localStorage.setItem('API_URL', fromQuery); } catch {}
   }
 
-  const domainDefault = isGhPages ? 'https://grocery-saas.onrender.com' : '';
+  const domainDefault = (isGhPages || isNetlify) ? 'https://grocery-saas.onrender.com' : '';
   const api = fromQuery || fromStorage || preset || (isLocal ? 'http://localhost:3000' : domainDefault);
   window.APP_CONFIG.API_URL = api;
   // Expose to App namespace for js/api.js consumers

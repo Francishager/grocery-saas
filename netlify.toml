@@ -12,13 +12,10 @@
 [build.environment]
   NODE_VERSION = "18"
   NPM_VERSION = "9"
+  NODE_ENV = "production"
 
 # Redirects configuration for SPA
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-
-# Environment variables (set these in Netlify dashboard if needed)
-[build.environment]
-  NODE_ENV = "production"
