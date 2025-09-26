@@ -2,6 +2,7 @@ const API_URL = (window.APP_CONFIG?.API_URL) || ( /^(localhost|127\.0\.0\.1)$/i.
 let cart = [];
 const token = localStorage.getItem("token");
 const user = JSON.parse(localStorage.getItem("user"));
+let myProfile = null; // will include txn_account_code if set
 
 if (!token || !user || !["Owner","Attendant","SaaS Admin"].includes(user.role)) {
   window.location.href = "index.html";
@@ -28,6 +29,27 @@ async function authFetch(url, options = {}) {
   }
   return res;
 }
+
+// Load current user profile to ensure a transaction account is assigned
+(async function ensureTxnAccount(){
+  try{
+    const res = await authFetch(`${API_URL}/me/profile`);
+    myProfile = await res.json();
+    const code = myProfile?.txn_account_code || myProfile?.txn_acct || myProfile?.transaction_account || '';
+    if (!code || String(code).trim() === ''){
+      const msg = 'Transaction account is required to perform sales. Please contact your admin to assign a transaction account.';
+      try{
+        const container = document.querySelector('.container');
+        if (container){
+          const alert = document.createElement('div');
+          alert.className = 'alert alert-warning mt-3';
+          alert.textContent = msg;
+          container.prepend(alert);
+        } else { alert(msg); }
+      }catch{ alert(msg); }
+    }
+  }catch(err){ console.warn('Failed to load profile:', err?.message); }
+})();
 
 // Search Inventory
 document.getElementById("searchItem").addEventListener("input", async (e) => {
@@ -95,6 +117,13 @@ function removeItem(index) {
 
 async function checkout() {
   const paymentMode = document.getElementById("paymentMode").value;
+
+  // Enforce transaction account presence client-side as well
+  const code = myProfile?.txn_account_code || myProfile?.txn_acct || myProfile?.transaction_account || '';
+  if (!code || String(code).trim() === ''){
+    alert('Transaction account is required to perform sales. Please contact your admin to assign a transaction account.');
+    return;
+  }
 
   let res = await authFetch(`${API_URL}/sales/checkout`, {
     method: "POST",

@@ -33,6 +33,7 @@ const tables = {
       otp_expires: body.otp_expires || null,
       last_login: body.last_login || null,
       is_active: typeof body.is_active === 'boolean' ? body.is_active : true,
+      txn_account_code: body.txn_account_code || null,
     })
   },
   Businesses: {

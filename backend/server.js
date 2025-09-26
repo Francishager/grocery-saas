@@ -685,6 +685,21 @@ app.post("/sales", authenticateToken, requireRole(["Owner","Attendant"]), async 
     const business_id = req.user?.business_id;
     const staff_name = `${req.user?.fname || ''} ${req.user?.lname || ''}`.trim();
 
+    // Require a transaction account for the acting user
+    try {
+      const users = await fetchFromGrist(USERS_TABLE);
+      const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
+      const txn = me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
+      if (!txn || String(txn).trim() === '') {
+        return res.status(400).json({ error: 'Transaction account required for this user. Ask an admin to assign a transaction account before performing sales.' });
+      }
+      // Optionally attach for downstream posting
+      req.user.txn_account_code = txn;
+    } catch (e) {
+      console.warn('txn account verification failed:', e?.message);
+      return res.status(500).json({ error: 'Unable to verify transaction account' });
+    }
+
     const { product_id, product_name, quantity, unit_price, discount = 0, tax = 0, cost_of_goods = 0, notes = "" } = req.body;
     if (!product_id || !product_name || !quantity || !unit_price) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -723,6 +738,20 @@ app.post("/sales/checkout", authenticateToken, requireRole(["Owner","Attendant"]
   try {
     const business_id = req.user?.business_id;
     const staff_name = `${req.user?.fname || ''} ${req.user?.lname || ''}`.trim();
+
+    // Require a transaction account for the acting user
+    try {
+      const users = await fetchFromGrist(USERS_TABLE);
+      const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
+      const txn = me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
+      if (!txn || String(txn).trim() === '') {
+        return res.status(400).json({ error: 'Transaction account required for this user. Ask an admin to assign a transaction account before performing sales.' });
+      }
+      req.user.txn_account_code = txn;
+    } catch (e) {
+      console.warn('txn account verification failed:', e?.message);
+      return res.status(500).json({ error: 'Unable to verify transaction account' });
+    }
 
     const { cart = [], payment_mode = "" } = req.body || {};
     if (!Array.isArray(cart) || cart.length === 0) {
@@ -1233,6 +1262,19 @@ app.get('/me/features', authenticateToken, async (req, res) => {
     if (!effective.length) effective = planCodes.length ? planCodes : roleBaseline;
 
     res.json(decryptDeep({ features: effective }));
+  } catch (e) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// === Current User: Profile (safe) ===
+app.get('/me/profile', authenticateToken, async (req, res) => {
+  try {
+    const users = await fetchFromGrist(USERS_TABLE);
+    const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    const { password_hash, password, ...safe } = me;
+    res.json(decryptDeep(safe));
   } catch (e) {
     res.status(500).json({ error: 'Internal server error' });
   }

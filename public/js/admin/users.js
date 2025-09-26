@@ -13,13 +13,11 @@
   }
 
   async function loadList(){
-    const tbody = document.getElementById('usersTable'); if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Loading...</td></tr>`;
     try{
       const data = await (root.API ? root.API.get('/admin/crud/Users', { ttl: 15000 }) : (async()=>{
         const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Users`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
         const j = await r.json(); if (!r.ok) throw new Error(j.error||'Failed to load users'); return j; })());
-      if (!Array.isArray(data) || data.length===0){ tbody.innerHTML = `<tr><td colspan="6" class="text-muted">No users</td></tr>`; return; }
+      if (!Array.isArray(data) || data.length===0){    tbody.innerHTML = `<tr><td colspan="7" class="text-muted">No users</td></tr>`; return; }
       const rows = data.slice().sort((a,b)=> String(b.created_at||'').localeCompare(String(a.created_at||'')));
       tbody.innerHTML = rows.map(u=>{
         const name = [u.fname, u.mname, u.lname].filter(Boolean).join(' ') || '—';
@@ -32,6 +30,7 @@
           <td>${email}</td>
           <td>${role}</td>
           <td>${bid}</td>
+          <td>${u.txn_account_code || '—'}</td>
           <td>${created}</td>
           <td class="text-end"></td>
         </tr>`;
@@ -66,6 +65,7 @@
                     <option value="Accountant">Accountant</option>
                   </select>
                 </div>
+                <div class="col-md-6"><label class="form-label">Transaction Account</label><input id="us_txn" class="form-control" placeholder="e.g. 1010-TILL-A" /></div>
                 <div class="col-12 form-text">Password setup is handled via OTP email after account creation.</div>
               </form>
               <div id="userMsg" class="alert d-none mt-2" role="alert"></div>
@@ -105,6 +105,7 @@
         email: document.getElementById('us_email')?.value?.trim(),
         phone_number: document.getElementById('us_phone')?.value?.trim(),
         role: document.getElementById('us_role')?.value || 'Cashier',
+        txn_account_code: document.getElementById('us_txn')?.value?.trim() || null,
       };
       if (!payload.business_id || !payload.fname || !payload.lname || !payload.email) { showMsg('danger','Please fill required fields'); return; }
       if (root.API) await root.API.post('/admin/crud/Users', { body: payload, skipCache: true });
