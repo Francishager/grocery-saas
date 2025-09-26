@@ -957,7 +957,7 @@
           <div class="table-responsive">
             <table class="table table-sm align-middle">
               <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Business ID</th><th>Txn Account</th><th>Created</th><th class="text-end">Actions</th></tr></thead>
-              <tbody id="usersTable"><tr><td colspan="6" class="text-muted">Loading...</td></tr></tbody>
+              <tbody id="usersTable"><tr><td colspan="7" class="text-muted">Loading...</td></tr></tbody>
             </table>
           </div>
         </div></div>

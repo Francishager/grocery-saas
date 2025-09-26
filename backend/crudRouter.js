@@ -1,5 +1,5 @@
 import express from 'express';
-import { fetchFromGrist, addToGrist, updateGristRecord, deleteFromGrist } from './gristUtils.js';
+import { fetchFromGrist, addToGrist, updateGristRecord, deleteFromGrist, fetchTableColumns } from './gristUtils.js';
 
 const router = express.Router();
 
@@ -33,7 +33,10 @@ const tables = {
       otp_expires: body.otp_expires || null,
       last_login: body.last_login || null,
       is_active: typeof body.is_active === 'boolean' ? body.is_active : true,
-      txn_account_code: body.txn_account_code || null,
+      // Preferred field name
+      txn_account: body.txn_account || body.txn_account_code || null,
+      // Backward compatible alias
+      txn_account_code: body.txn_account || body.txn_account_code || null,
     })
   },
   Businesses: {
@@ -75,6 +78,7 @@ const tables = {
       price: Number(body.price || 0),
       billing_cycle: body.billing_cycle || 'monthly',
       is_active: typeof body.is_active === 'boolean' ? body.is_active : true,
+      description: body.description || '',
       // Optional plan-level limits
       limit_max_staff: (body.limit_max_staff !== undefined && body.limit_max_staff !== null) ? Number(body.limit_max_staff) : undefined,
       limit_max_branches: (body.limit_max_branches !== undefined && body.limit_max_branches !== null) ? Number(body.limit_max_branches) : undefined,
@@ -146,7 +150,7 @@ router.post('/:table', async (req, res) => {
     const cfg = getConfig(req.params.table);
     if (!cfg) return res.status(400).json({ error: 'Unknown table' });
     const tableKey = String(req.params.table || '').toLowerCase();
-    const payload = { ...cfg.defaults(req.body || {}), ...cfg.sanitize(req.body || {}) };
+    let payload = { ...cfg.defaults(req.body || {}), ...cfg.sanitize(req.body || {}) };
 
     // Validate business date fields when creating Businesses
     if (tableKey === 'businesses') {
@@ -194,6 +198,14 @@ router.post('/:table', async (req, res) => {
       }
     } catch (limitErr) { console.warn('Plan limit enforcement warning:', limitErr?.message); }
 
+    // Filter to existing columns to avoid unknown column errors in Grist
+    try {
+      const cols = await fetchTableColumns(cfg.name);
+      if (Array.isArray(cols) && cols.length){
+        const allowed = new Set(cols.map(String));
+        payload = Object.fromEntries(Object.entries(payload).filter(([k]) => allowed.has(String(k))));
+      }
+    } catch {}
     const r = await addToGrist(cfg.name, payload);
     if (!r.success) return res.status(500).json({ error: r.error || 'Failed to create' });
     res.status(201).json(r.data);
@@ -205,7 +217,7 @@ router.patch('/:table/:id', async (req, res) => {
   try {
     const cfg = getConfig(req.params.table);
     if (!cfg) return res.status(400).json({ error: 'Unknown table' });
-    const upd = cfg.sanitize(req.body || {});
+    let upd = cfg.sanitize(req.body || {});
     const tableKey = String(req.params.table || '').toLowerCase();
     if (tableKey === 'businesses') {
       try {
@@ -221,6 +233,14 @@ router.patch('/:table/:id', async (req, res) => {
         if (fs && fe && fe < fs) return res.status(400).json({ error: 'Fiscal Year End must be on or after Fiscal Year Start' });
       } catch (ve) { return res.status(400).json({ error: 'Invalid date(s) supplied' }); }
     }
+    // Filter to existing columns to avoid unknown column errors in Grist
+    try {
+      const cols = await fetchTableColumns(cfg.name);
+      if (Array.isArray(cols) && cols.length){
+        const allowed = new Set(cols.map(String));
+        upd = Object.fromEntries(Object.entries(upd).filter(([k]) => allowed.has(String(k))));
+      }
+    } catch {}
     const r = await updateGristRecord(cfg.name, Number(req.params.id), upd);
     if (!r.success) return res.status(500).json({ error: r.error || 'Failed to update' });
     res.json(r.data);

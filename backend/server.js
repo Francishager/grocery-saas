@@ -3,7 +3,7 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-import { fetchFromGrist, addToGrist, updateGristRecord, bulkAddToGrist, decryptDeep } from "./gristUtils.js";
+import { fetchFromGrist, addToGrist, updateGristRecord, bulkAddToGrist, decryptDeep, fetchTableColumns } from "./gristUtils.js";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
@@ -19,6 +19,8 @@ const __dirname = path.dirname(__filename);
 
 // Configurable table names
 const USERS_TABLE = process.env.USERS_TABLE || "Users";
+const SUBSCRIPTIONS_TABLE = process.env.SUBSCRIPTIONS_TABLE || 'Subscription';
+const BUSINESSES_TABLE = process.env.BUSINESSES_TABLE || 'Businesses';
 
 // Validate required environment variables at startup
 function validateEnv() {
@@ -66,6 +68,91 @@ app.use((req, res, next) => {
   next();
 });
 
+// === Purchases: create purchase (Owner, Manager, Accountant) ===
+app.post('/purchases', authenticateToken, requireRole(['Owner','Manager','Accountant']), async (req, res) => {
+  try {
+    const business_id = req.user?.business_id;
+    const staff_name = `${req.user?.fname || ''} ${req.user?.lname || ''}`.trim();
+
+    // Require a transaction account for the acting user
+    try {
+      const users = await fetchFromGrist(USERS_TABLE);
+      const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
+      const txn = me?.txn_account || me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
+      if (!txn || String(txn).trim() === '') {
+        return res.status(400).json({ error: 'Transaction account required for this user. Ask an admin to assign a transaction account before recording purchases.' });
+      }
+      req.user.txn_account_code = txn;
+    } catch (e) {
+      console.warn('txn account verification failed:', e?.message);
+      return res.status(500).json({ error: 'Unable to verify transaction account' });
+    }
+
+    const { product_id, product_name, quantity, unit_cost, vendor_name = '', invoice_no = '', date = new Date().toISOString(), notes = '' } = req.body || {};
+    if (!product_id || !product_name || !quantity || !unit_cost) return res.status(400).json({ error: 'Missing required fields' });
+    const total_cost = Number(unit_cost) * Number(quantity);
+    const rec = { business_id, product_id, product_name, quantity: Number(quantity), unit_cost: Number(unit_cost), total_cost, vendor_name, invoice_no, date, staff_name };
+    const result = await addToGrist('Purchases', rec);
+    if (!result.success) return res.status(500).json({ error: 'Failed to record purchase' });
+    res.status(201).json(decryptDeep(result.data));
+  } catch (err) {
+    console.error('Create purchase error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// === Purchases: checkout multiple items ===
+app.post('/purchases/checkout', authenticateToken, requireRole(['Owner','Manager','Accountant']), async (req, res) => {
+  try {
+    const business_id = req.user?.business_id;
+    const staff_name = `${req.user?.fname || ''} ${req.user?.lname || ''}`.trim();
+
+    // Require a transaction account for the acting user
+    try {
+      const users = await fetchFromGrist(USERS_TABLE);
+      const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
+      const txn = me?.txn_account || me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
+      if (!txn || String(txn).trim() === '') {
+        return res.status(400).json({ error: 'Transaction account required for this user. Ask an admin to assign a transaction account before recording purchases.' });
+      }
+      req.user.txn_account_code = txn;
+    } catch (e) {
+      console.warn('txn account verification failed:', e?.message);
+      return res.status(500).json({ error: 'Unable to verify transaction account' });
+    }
+
+    const { items = [], vendor_name = '', invoice_no = '', date = new Date().toISOString() } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'No purchase items' });
+
+    const rows = items.map(it => {
+      const quantity = Number(it.qty || it.quantity || 1);
+      const unit_cost = Number(it.unit_cost || it.cost_price || it.cost_of_goods || 0);
+      const total_cost = quantity * unit_cost;
+      return {
+        business_id,
+        product_id: it.id || it.product_id,
+        product_name: it.name || it.product_name,
+        quantity,
+        unit_cost,
+        total_cost,
+        vendor_name,
+        invoice_no,
+        date,
+        staff_name,
+      };
+    });
+
+    const result = await import('./gristUtils.js').then(m => m.bulkAddToGrist('Purchases', rows));
+    if (!result.success) return res.status(500).json({ error: 'Failed to record purchases' });
+    const grand = rows.reduce((sum, r) => sum + r.total_cost, 0);
+    res.status(201).json(decryptDeep({ message: 'Purchases recorded', count: rows.length, total_cost: grand, purchases: rows }));
+  } catch (err) {
+    console.error('Purchases checkout error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// moved below after withAuthAndAbility definition
 // Clear auth cookie
 app.post('/logout', (req, res) => {
   try {
@@ -337,6 +424,40 @@ const withAuthAndAbility = [
   authenticateToken,
   (req, res, next) => { try { req.ability = defineAbilityFor(req.user || {}); } catch {} next(); }
 ];
+
+// === SaaS Admin: schema check diagnostics ===
+app.get('/admin/schema-check', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    const spec = {
+      Users: ['business_id','fname','mname','lname','phone_number','email','role','password_hash','otp_code','otp_expires','last_login','is_active','txn_account','txn_account_code','created_at'],
+      Businesses: ['name','business_id','owner_id','subscription_id','start_date','end_date','logo_url','fiscal_year_start','fiscal_year_end','status','is_active','created_at'],
+      Branches: ['branch_id','business_id','name','address','location','opening_date','updated_at','created_at'],
+      Subscription: ['name','price','billing_cycle','is_active','limit_max_staff','limit_max_branches','created_at','description'],
+      Features: ['name','code','description','is_active'],
+      Subscription_Features: ['subscription_id','feature_id','limit_value'],
+      Sales: ['business_id','product_id','product_name','quantity','unit_price','discount','tax','total','cost_of_goods','staff_name','date','payment_mode'],
+      Purchases: ['business_id','product_id','product_name','quantity','unit_cost','total_cost','vendor_name','invoice_no','date','staff_name'],
+    };
+    const tables = await Promise.all(Object.keys(spec).map(async (t) => {
+      const cols = await fetchTableColumns(t);
+      const expected = new Set(spec[t]);
+      const got = new Set(cols);
+      const present = cols.length > 0;
+      const missingColumns = present ? Array.from(expected).filter(c => !got.has(c)) : Array.from(expected);
+      const extraColumns = present ? Array.from(got).filter(c => !expected.has(c)) : [];
+      return { table: t, present, columns: cols, missingColumns, extraColumns };
+    }));
+    const ok = tables.every(t => t.present);
+    const lines = [
+      `Grist Schema Diagnostics`,
+      `- Status: ${ok ? 'OK' : 'Issues found'}`,
+      ...tables.map(t => `- ${t.table}: ${t.present ? 'present' : 'missing'}; missing=[${t.missingColumns.join(', ')}]`)
+    ];
+    res.json({ ok, tables, report: lines.join('\n') });
+  } catch (e) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // === User Registration ===
 app.post("/register", async (req, res) => {
@@ -639,8 +760,8 @@ app.get("/reports/export", authenticateToken, requireRole(["Owner","Accountant"]
   res.json({message:`Export ${type} not implemented yet`});
 });
 
-// === Inventory: list items (Owner only) ===
-app.get("/inventory", authenticateToken, requireRole(["Owner"]), async (req, res) => {
+// === Inventory: list items (Owner/Manager/Accountant) ===
+app.get("/inventory", authenticateToken, requireRole(["Owner","Manager","Accountant"]), async (req, res) => {
   try {
     const businessId = req.user?.business_id;
     let items = await fetchFromGrist("Inventory", businessId);
@@ -660,7 +781,7 @@ app.get("/inventory", authenticateToken, requireRole(["Owner"]), async (req, res
 });
 
 // Compatibility route to support existing frontend `/inventory/:businessId?q=` usage
-app.get("/inventory/:businessId", authenticateToken, requireRole(["Owner"]), async (req, res) => {
+app.get("/inventory/:businessId", authenticateToken, requireRole(["Owner","Manager","Accountant"]), async (req, res) => {
   try {
     const businessId = req.user?.business_id; // enforce owner's own business
     let items = await fetchFromGrist("Inventory", businessId);
@@ -689,7 +810,7 @@ app.post("/sales", authenticateToken, requireRole(["Owner","Attendant"]), async 
     try {
       const users = await fetchFromGrist(USERS_TABLE);
       const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
-      const txn = me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
+      const txn = me?.txn_account || me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
       if (!txn || String(txn).trim() === '') {
         return res.status(400).json({ error: 'Transaction account required for this user. Ask an admin to assign a transaction account before performing sales.' });
       }
@@ -743,7 +864,7 @@ app.post("/sales/checkout", authenticateToken, requireRole(["Owner","Attendant"]
     try {
       const users = await fetchFromGrist(USERS_TABLE);
       const me = (users || []).find(u => String(u.id) === String(req.user?.id) || String(u.email) === String(req.user?.email));
-      const txn = me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
+      const txn = me?.txn_account || me?.txn_account_code || me?.txn_acct || me?.transaction_account || null;
       if (!txn || String(txn).trim() === '') {
         return res.status(400).json({ error: 'Transaction account required for this user. Ask an admin to assign a transaction account before performing sales.' });
       }
@@ -981,7 +1102,7 @@ app.post('/admin/subscription/upgrade', ...withAuthAndAbility, requireRole(['Saa
   try {
     const { plan = 'pro', billing_cycle = 'monthly' } = req.body || {};
     let subs = [];
-    try { subs = await fetchFromGrist('Subscription'); } catch {}
+    try { subs = await fetchFromGrist(SUBSCRIPTIONS_TABLE); } catch {}
     const latest = subs.sort((a,b)=> new Date(b.updated_at||b.renewed_at||b.created_at||0) - new Date(a.updated_at||a.renewed_at||a.created_at||0))[0];
     const payload = {
       plan,
@@ -992,10 +1113,10 @@ app.post('/admin/subscription/upgrade', ...withAuthAndAbility, requireRole(['Saa
       is_active: true
     };
     if (latest && latest.id) {
-      const r = await updateGristRecord('Subscription', latest.id, payload);
+      const r = await updateGristRecord(SUBSCRIPTIONS_TABLE, latest.id, payload);
       if (!r.success) return res.status(500).json({ error: 'Failed to update subscription' });
     } else {
-      const add = await addToGrist('Subscription', { ...payload, start_date: new Date().toISOString(), created_at: new Date().toISOString() });
+      const add = await addToGrist(SUBSCRIPTIONS_TABLE, { ...payload, start_date: new Date().toISOString(), created_at: new Date().toISOString() });
       if (!add.success) return res.status(500).json({ error: 'Failed to create subscription' });
     }
     res.json(decryptDeep({ message: 'Subscription upgraded', plan, billing_cycle }));
@@ -1009,7 +1130,7 @@ app.post('/admin/subscription/downgrade', ...withAuthAndAbility, requireRole(['S
   try {
     const { plan = 'starter', billing_cycle = 'monthly' } = req.body || {};
     let subs = [];
-    try { subs = await fetchFromGrist('Subscription'); } catch {}
+    try { subs = await fetchFromGrist(SUBSCRIPTIONS_TABLE); } catch {}
     const latest = subs.sort((a,b)=> new Date(b.updated_at||b.renewed_at||b.created_at||0) - new Date(a.updated_at||a.renewed_at||a.created_at||0))[0];
     const payload = {
       plan,
@@ -1037,7 +1158,7 @@ app.post('/admin/subscription/edit', ...withAuthAndAbility, requireRole(['SaaS A
   try {
     const { plan, billing_cycle, status } = req.body || {};
     let subs = [];
-    try { subs = await fetchFromGrist('Subscription'); } catch {}
+    try { subs = await fetchFromGrist(SUBSCRIPTIONS_TABLE); } catch {}
     const latest = subs.sort((a,b)=> new Date(b.updated_at||b.renewed_at||b.created_at||0) - new Date(a.updated_at||a.renewed_at||a.created_at||0))[0];
     const payload = {
       ...(plan ? { plan } : {}),
@@ -1046,11 +1167,11 @@ app.post('/admin/subscription/edit', ...withAuthAndAbility, requireRole(['SaaS A
       updated_at: new Date().toISOString()
     };
     if (!latest || !latest.id) {
-      const add = await addToGrist('Subscription', { plan: plan || 'free', billing_cycle: billing_cycle || 'monthly', status: status || 'active', start_date: new Date().toISOString(), created_at: new Date().toISOString(), is_active: true });
+      const add = await addToGrist(SUBSCRIPTIONS_TABLE, { plan: plan || 'free', billing_cycle: billing_cycle || 'monthly', status: status || 'active', start_date: new Date().toISOString(), created_at: new Date().toISOString(), is_active: true });
       if (!add.success) return res.status(500).json({ error: 'Failed to create subscription' });
       return res.json(decryptDeep({ message: 'Subscription created' }));
     }
-    const r = await updateGristRecord('Subscription', latest.id, payload);
+    const r = await updateGristRecord(SUBSCRIPTIONS_TABLE, latest.id, payload);
     if (!r.success) return res.status(500).json({ error: 'Failed to update subscription' });
     res.json(decryptDeep({ message: 'Subscription updated' }));
   } catch (e) {
@@ -1103,7 +1224,7 @@ app.get('/admin/subscriptions', ...withAuthAndAbility, requireRole(['SaaS Admin'
   try {
     // Optional filters ignored for now; return decrypted rows
     let rows = [];
-    try { rows = await fetchFromGrist('Subscription'); } catch {}
+    try { rows = await fetchFromGrist(SUBSCRIPTIONS_TABLE); } catch {}
     return res.json(decryptDeep(rows));
   } catch (e) { res.status(500).json({ error: 'Failed to load subscriptions' }); }
 });
@@ -1122,7 +1243,7 @@ app.post('/admin/subscriptions', ...withAuthAndAbility, requireRole(['SaaS Admin
       status: 'active',
       created_at: new Date().toISOString()
     };
-    const result = await addToGrist('Subscription', payload);
+    const result = await addToGrist(SUBSCRIPTIONS_TABLE, payload);
     if (!result.success) return res.status(500).json({ error: result.error || 'Failed to create subscription' });
     return res.json(decryptDeep(result.data));
   } catch (e) { res.status(500).json({ error: 'Failed to create subscription' }); }
@@ -1284,7 +1405,7 @@ app.get('/me/profile', authenticateToken, async (req, res) => {
 app.get('/admin/renewal-status', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     let subscriptions = [];
-    try { subscriptions = await fetchFromGrist('Subscription'); } catch {}
+    try { subscriptions = await fetchFromGrist(SUBSCRIPTIONS_TABLE); } catch {}
     const now = Date.now();
     let status = { state: 'trial', days_left: 14 };
     if (subscriptions.length) {

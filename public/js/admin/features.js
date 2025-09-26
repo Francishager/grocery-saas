@@ -22,6 +22,7 @@
       key: 'stock_sales', label: 'Stock & Sales', items: [
         { code: 'inventory', name: 'Inventory' },
         { code: 'sales', name: 'Sales' },
+        { code: 'purchases', name: 'Purchases' },
       ]
     },
     {

@@ -2,9 +2,9 @@ const API_URL = (window.APP_CONFIG?.API_URL) || ( /^(localhost|127\.0\.0\.1)$/i.
 let cart = [];
 const token = localStorage.getItem("token");
 const user = JSON.parse(localStorage.getItem("user"));
-let myProfile = null; // will include txn_account_code if set
+let myProfile = null; // will include txn_account/txn_account_code if set
 
-if (!token || !user || !["Owner","Attendant","SaaS Admin"].includes(user.role)) {
+if (!token || !user || !["Owner","Manager","Accountant","SaaS Admin"].includes(user.role)) {
   window.location.href = "index.html";
 }
 
@@ -37,7 +37,7 @@ async function authFetch(url, options = {}) {
     myProfile = await res.json();
     const code = myProfile?.txn_account || myProfile?.txn_account_code || myProfile?.txn_acct || myProfile?.transaction_account || '';
     if (!code || String(code).trim() === ''){
-      const msg = 'Transaction account is required to perform sales. Please contact your admin to assign a transaction account.';
+      const msg = 'Transaction account is required to record purchases. Please contact your admin to assign a transaction account.';
       try{
         const container = document.querySelector('.container');
         if (container){
@@ -52,51 +52,56 @@ async function authFetch(url, options = {}) {
 })();
 
 // Search Inventory
-document.getElementById("searchItem").addEventListener("input", async (e) => {
-  let res = await authFetch(`${API_URL}/inventory/${user.business_id}?q=${encodeURIComponent(e.target.value)}`);
-  let items = await res.json();
+const searchEl = document.getElementById("searchItem");
+if (searchEl){
+  searchEl.addEventListener("input", async (e) => {
+    let res = await authFetch(`${API_URL}/inventory/${user.business_id}?q=${encodeURIComponent(e.target.value)}`);
+    let items = await res.json();
 
-  const list = document.getElementById("itemList");
-  list.innerHTML = "";
-  items.forEach(item => {
-    let li = document.createElement("li");
-    li.className = "list-group-item d-flex justify-content-between align-items-center";
-    const name = item.name || item.product_name;
-    const price = item.selling_price || item.unit_price || 0;
-    li.innerHTML = `${name} - ${price} 
-      <button class="btn btn-sm btn-primary">Add</button>`;
-    li.querySelector("button").onclick = () => addToCart(item);
-    list.appendChild(li);
+    const list = document.getElementById("itemList");
+    list.innerHTML = "";
+    items.forEach(item => {
+      let li = document.createElement("li");
+      li.className = "list-group-item d-flex justify-content-between align-items-center";
+      const name = item.name || item.product_name;
+      const cost = item.cost_price || item.cost_of_goods || item.unit_cost || item.unit_price || item.selling_price || 0;
+      li.innerHTML = `${name} - ${cost} <button class="btn btn-sm btn-primary">Add</button>`;
+      li.querySelector("button").onclick = () => addToCart(item);
+      list.appendChild(li);
+    });
   });
-});
+}
 
 function addToCart(item) {
   const found = cart.find(c => c.id === item.id);
+  const name = item.name || item.product_name;
+  const cost = item.cost_price || item.cost_of_goods || item.unit_cost || item.unit_price || item.selling_price || 0;
   if (found) {
     found.qty++;
+    found.unit_cost = cost; // reflect latest cost
   } else {
-    const name = item.name || item.product_name;
-    const price = item.selling_price || item.unit_price || 0;
-    cart.push({ ...item, name, selling_price: price, qty: 1 });
+    cart.push({ ...item, name, unit_cost: cost, qty: 1 });
   }
   renderCart();
 }
 
 function renderCart() {
   const table = document.getElementById("cartTable");
+  if (!table) return;
   table.innerHTML = "";
   let total = 0;
 
   cart.forEach((c, i) => {
-    let lineTotal = c.qty * (c.selling_price || 0);
+    const unit = Number(c.unit_cost || 0);
+    let lineTotal = c.qty * unit;
     total += lineTotal;
 
     table.innerHTML += `
       <tr>
         <td>${c.name}</td>
         <td><input type="number" value="${c.qty}" min="1" class="form-control form-control-sm" onchange="updateQty(${i}, this.value)"></td>
-        <td>${c.selling_price}</td>
-        <td>${lineTotal}</td>
+        <td><input type="number" value="${unit}" min="0" step="0.01" class="form-control form-control-sm" onchange="updateCost(${i}, this.value)"></td>
+        <td>${lineTotal.toFixed(2)}</td>
         <td><button class="btn btn-sm btn-danger" onclick="removeItem(${i})">x</button></td>
       </tr>
     `;
@@ -106,7 +111,12 @@ function renderCart() {
 }
 
 function updateQty(index, qty) {
-  cart[index].qty = parseInt(qty);
+  cart[index].qty = Math.max(1, parseInt(qty || 1));
+  renderCart();
+}
+
+function updateCost(index, cost) {
+  cart[index].unit_cost = Math.max(0, Number(cost || 0));
   renderCart();
 }
 
@@ -115,59 +125,48 @@ function removeItem(index) {
   renderCart();
 }
 
-async function checkout() {
-  const paymentMode = document.getElementById("paymentMode").value;
+async function checkoutPurchase() {
+  const vendor_name = document.getElementById("vendorName")?.value?.trim() || '';
+  const invoice_no = document.getElementById("invoiceNo")?.value?.trim() || '';
 
-  // Enforce transaction account presence client-side as well
   const code = myProfile?.txn_account || myProfile?.txn_account_code || myProfile?.txn_acct || myProfile?.transaction_account || '';
   if (!code || String(code).trim() === ''){
-    alert('Transaction account is required to perform sales. Please contact your admin to assign a transaction account.');
+    alert('Transaction account is required to record purchases. Please contact your admin to assign a transaction account.');
     return;
   }
 
-  let res = await authFetch(`${API_URL}/sales/checkout`, {
+  const items = cart.map(c => ({ id: c.id, name: c.name, qty: c.qty, unit_cost: Number(c.unit_cost || 0) }));
+  if (!items.length){ alert('Cart is empty.'); return; }
+
+  let res = await authFetch(`${API_URL}/purchases/checkout`, {
     method: "POST",
-    body: JSON.stringify({ business_id: user.business_id, cart, payment_mode: paymentMode })
+    body: JSON.stringify({ business_id: user.business_id, items, vendor_name, invoice_no })
   });
 
-  const sale = await res.json();
+  const out = await res.json();
   if (!res.ok){
-    alert(sale?.error || 'Checkout failed');
+    alert(out?.error || 'Failed to record purchases');
     return;
   }
 
-  // Show receipt
-  let receiptHTML = `
-    <h6>Business: ${user.business_name}</h6>
-    <p>Date: ${new Date().toLocaleString()}</p>
-    <table class="table table-sm">
-      <thead><tr><th>Item</th><th>Qty</th><th>Price</th></tr></thead>
-      <tbody>
-        ${cart.map(c => `<tr><td>${c.name}</td><td>${c.qty}</td><td>${c.selling_price || 0}</td></tr>`).join("")}
-      </tbody>
-    </table>
-    <p><b>Total:</b> ${document.getElementById("cartTotal").innerText}</p>
-    <p><b>Payment:</b> ${paymentMode}</p>
-  `;
-
-  document.getElementById("receiptContent").innerHTML = receiptHTML;
-  new bootstrap.Modal(document.getElementById("receiptModal")).show();
-
-  // Reset cart
+  // Success
+  showToast?.('Purchases recorded');
   cart = [];
   renderCart();
 }
 
 function printReceipt() {
-  let content = document.getElementById("receiptContent").innerHTML;
+  let html = `Vendor: ${document.getElementById('vendorName')?.value || ''}<br>Invoice: ${document.getElementById('invoiceNo')?.value || ''}<br>`;
+  html += document.querySelector('.table')?.outerHTML || '';
   let w = window.open("", "Print");
-  w.document.write(content);
+  w.document.write(html);
   w.print();
   w.close();
 }
 
 // Expose for inline handlers
 window.updateQty = updateQty;
+window.updateCost = updateCost;
 window.removeItem = removeItem;
-window.checkout = checkout;
+window.checkoutPurchase = checkoutPurchase;
 window.printReceipt = printReceipt;

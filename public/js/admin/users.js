@@ -17,7 +17,8 @@
       const data = await (root.API ? root.API.get('/admin/crud/Users', { ttl: 15000 }) : (async()=>{
         const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Users`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
         const j = await r.json(); if (!r.ok) throw new Error(j.error||'Failed to load users'); return j; })());
-      if (!Array.isArray(data) || data.length===0){    tbody.innerHTML = `<tr><td colspan="7" class="text-muted">No users</td></tr>`; return; }
+      const tbody = document.getElementById('usersTable'); if (!tbody) return;
+      if (!Array.isArray(data) || data.length===0){ tbody.innerHTML = `<tr><td colspan="7" class="text-muted">No users</td></tr>`; return; }
       const rows = data.slice().sort((a,b)=> String(b.created_at||'').localeCompare(String(a.created_at||'')));
       tbody.innerHTML = rows.map(u=>{
         const name = [u.fname, u.mname, u.lname].filter(Boolean).join(' ') || '—';
@@ -25,17 +26,29 @@
         const role = u.role || '—';
         const bid = u.business_id || '—';
         const created = fmtDate(u.created_at);
+        const txn = u.txn_account || u.txn_account_code || '—';
         return `<tr>
           <td>${name}</td>
           <td>${email}</td>
           <td>${role}</td>
           <td>${bid}</td>
-          <td>${u.txn_account_code || '—'}</td>
+          <td>${txn}</td>
           <td>${created}</td>
-          <td class="text-end"></td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary" data-edit-user="${u.id}">Edit</button>
+          </td>
         </tr>`;
       }).join('');
       try { if (root.ACL && root.ability) root.ACL.applyDomPermissions(root.ability, tbody); } catch {}
+      // Bind edit buttons
+      tbody.querySelectorAll('[data-edit-user]')?.forEach(btn=>{
+        if (btn._bound) return; btn._bound = true;
+        btn.addEventListener('click', (e)=>{
+          const id = e.currentTarget.getAttribute('data-edit-user');
+          const user = rows.find(x=> String(x.id) === String(id));
+          openEdit(user);
+        });
+      });
     } catch(e){ tbody.innerHTML = `<tr><td colspan="6" class="text-danger">${e.message}</td></tr>`; }
   }
 
@@ -46,9 +59,10 @@
       <div class="modal" id="userModal" tabindex="-1">
         <div class="modal-dialog">
           <div class="modal-content">
-            <div class="modal-header"><h6 class="modal-title">Create User</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+            <div class="modal-header"><h6 class="modal-title" id="userModalTitle">Create User</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
             <div class="modal-body">
               <form id="userForm" class="row g-3">
+                <input type="hidden" id="us_id" />
                 <div class="col-12">
                   <label class="form-label small">Business</label>
                   <select id="us_business_id" class="form-select" required></select>
@@ -90,8 +104,27 @@
         return `<option value="${code}">${code} — ${name}</option>`;
       }).join('') : '');
     } catch(e){ console.warn('fill businesses failed', e?.message); }
+    document.getElementById('userModalTitle').textContent = 'Create User';
+    const form = document.getElementById('userForm'); if (form) form.reset();
+    const idEl = document.getElementById('us_id'); if (idEl) idEl.value = '';
     bsModal('userModal')?.show();
     const msg = document.getElementById('userMsg'); if (msg) msg.classList.add('d-none');
+  }
+
+  function openEdit(u){
+    ensureModal();
+    const msg = document.getElementById('userMsg'); if (msg) msg.classList.add('d-none');
+    document.getElementById('userModalTitle').textContent = 'Edit User';
+    const idEl = document.getElementById('us_id'); if (idEl) idEl.value = u?.id || '';
+    document.getElementById('us_business_id').innerHTML = `<option value="${u.business_id||''}">${u.business_id||'—'}</option>`;
+    document.getElementById('us_fname').value = u?.fname || '';
+    document.getElementById('us_mname').value = u?.mname || '';
+    document.getElementById('us_lname').value = u?.lname || '';
+    document.getElementById('us_email').value = u?.email || '';
+    document.getElementById('us_phone').value = u?.phone_number || '';
+    document.getElementById('us_role').value = u?.role || 'Cashier';
+    document.getElementById('us_txn').value = u?.txn_account || u?.txn_account_code || '';
+    bsModal('userModal')?.show();
   }
 
   async function saveUser(){
@@ -105,16 +138,22 @@
         email: document.getElementById('us_email')?.value?.trim(),
         phone_number: document.getElementById('us_phone')?.value?.trim(),
         role: document.getElementById('us_role')?.value || 'Cashier',
-        txn_account_code: document.getElementById('us_txn')?.value?.trim() || null,
+        // Preferred name for backend
+        txn_account: document.getElementById('us_txn')?.value?.trim() || null,
       };
       if (!payload.business_id || !payload.fname || !payload.lname || !payload.email) { showMsg('danger','Please fill required fields'); return; }
-      if (root.API) await root.API.post('/admin/crud/Users', { body: payload, skipCache: true });
-      else {
-        const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Users`, { method:'POST', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(payload) });
-        const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j?.error||'Failed to create user');
+      const id = document.getElementById('us_id')?.value?.trim();
+      if (root.API){
+        if (id) await root.API.patch(`/admin/crud/Users/${id}`, { body: payload, skipCache: true });
+        else await root.API.post('/admin/crud/Users', { body: payload, skipCache: true });
+      } else {
+        const url = id ? `${root.API_URL||window.location.origin}/admin/crud/Users/${id}` : `${root.API_URL||window.location.origin}/admin/crud/Users`;
+        const method = id ? 'PATCH' : 'POST';
+        const r = await fetch(url, { method, headers: { 'Content-Type':'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(payload) });
+        const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j?.error||'Failed to save user');
       }
       bsModal('userModal')?.hide();
-      showToast('User created');
+      showToast(id ? 'User updated' : 'User created');
       loadList();
       try { root.API?.invalidate?.('/admin/crud/Users'); } catch {}
     } catch(e){
