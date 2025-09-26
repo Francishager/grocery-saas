@@ -37,7 +37,11 @@
       return can.get(String(action))?.has(String(subject)) || false;
     }
 
-    function hasFeature(code){ return feat.has(String(code)); }
+    function hasFeature(code){
+      const c = String(code);
+      if (feat.has('all')) return true;
+      return feat.has(c);
+    }
 
     return { can: canDo, hasFeature };
   }
@@ -58,10 +62,16 @@
       if (!visible) el.classList.add('d-none'); else el.classList.remove('d-none');
     });
 
-    // Hide elements behind feature flags: data-feature="code"
+    // Hide elements behind feature flags: data-feature="code" or "code1,code2" (OR)
     ctx.querySelectorAll('[data-feature]')?.forEach(el=>{
-      const code = el.getAttribute('data-feature');
-      if (!ability.hasFeature(code)) el.classList.add('d-none'); else el.classList.remove('d-none');
+      const expr = (el.getAttribute('data-feature') || '').trim();
+      const codes = expr.split(',').map(s=>s.trim()).filter(Boolean);
+      let visible = false;
+      if (codes.length === 0) { visible = true; }
+      else {
+        for (const c of codes){ if (ability.hasFeature(c)) { visible = true; break; } }
+      }
+      if (!visible) el.classList.add('d-none'); else el.classList.remove('d-none');
     });
   }
 

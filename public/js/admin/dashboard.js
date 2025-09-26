@@ -20,6 +20,9 @@
     const revEl = document.getElementById('chartRevenue');
     const planEl = document.getElementById('chartPlans');
     if (!revEl || !planEl || typeof Chart === 'undefined') return;
+    // Destroy existing chart instances if present
+    try { if (root.charts?.revenueChart) { root.charts.revenueChart.destroy(); root.charts.revenueChart = null; } } catch {}
+    try { if (root.charts?.plansChart) { root.charts.plansChart.destroy(); root.charts.plansChart = null; } } catch {}
     const rev = charts?.revenue || { labels: [], data: [] };
     const pln = charts?.plans || { labels: [], data: [] };
     const revenueChart = new Chart(revEl.getContext('2d'), {

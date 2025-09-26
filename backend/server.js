@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { fetchFromGrist, addToGrist, updateGristRecord, bulkAddToGrist, decryptDeep } from "./gristUtils.js";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 import { sendMail } from "./mailer.js";
 import crudRouter from "./crudRouter.js";
 import { defineAbilityFor, authorize } from "./accessControl.js";
@@ -32,14 +33,142 @@ function validateEnv() {
 validateEnv();
 
 const app = express();
-app.use(cors());
+// Configure CORS: allow credentials and restrict to configured origins if provided
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // allow same-origin or mobile apps
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS: Origin not allowed'), false);
+  },
+  credentials: true
+}));
 app.use(express.json());
+
+// Basic security headers (does not prevent copying but improves security posture)
+app.use((req, res, next) => {
+  res.set('X-Frame-Options', 'DENY');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  // Avoid caching sensitive admin UI and scripts
+  if (req.path === '/admin' || req.path === '/admin.html' || req.path === '/js/admin.js' || req.path.startsWith('/js/admin/')) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
+
+// Clear auth cookie
+app.post('/logout', (req, res) => {
+  try {
+    const sameSite = (process.env.COOKIE_SAMESITE || 'Lax').toLowerCase();
+    const isNone = sameSite === 'none';
+    const secureFlag = (process.env.COOKIE_SECURE === 'true' || isNone) ? '; Secure' : '';
+    const sameSiteAttr = isNone ? 'SameSite=None' : 'SameSite=Lax';
+    res.setHeader('Set-Cookie', `token=; HttpOnly; Path=/; Max-Age=0; ${sameSiteAttr}${secureFlag}`);
+  } catch {}
+  res.json({ message: 'Logged out' });
+});
 
 const PORT = process.env.PORT || 3000;
 
 // Serve static frontend from ../public
 const publicDir = path.join(__dirname, "..", "public");
+
+// Protected SaaS Admin console routes BEFORE static to prevent static bypass
+app.get("/admin", (req, res) => {
+  try {
+    const raw = req.headers.cookie || '';
+    let tok = null;
+    for (const part of raw.split(';')) { const [k, ...v] = part.trim().split('='); if (k === 'token') { tok = decodeURIComponent(v.join('=')); break; } }
+    if (!tok) return res.redirect('/');
+    const payload = jwt.verify(tok, process.env.JWT_SECRET);
+    if (payload?.role !== 'SaaS Admin') return res.redirect('/dashboard');
+  } catch {
+    return res.redirect('/');
+  }
+  res.type('html');
+  const adminNoExt = path.join(publicDir, 'admin');
+  const adminHtml = path.join(publicDir, 'admin.html');
+  const target = fs.existsSync(adminNoExt) ? adminNoExt : adminHtml;
+  res.sendFile(target);
+});
+
+app.get("/admin.html", (req, res) => {
+  try {
+    const raw = req.headers.cookie || '';
+    let tok = null;
+    for (const part of raw.split(';')) { const [k, ...v] = part.trim().split('='); if (k === 'token') { tok = decodeURIComponent(v.join('=')); break; } }
+    if (!tok) return res.redirect('/');
+    const payload = jwt.verify(tok, process.env.JWT_SECRET);
+    if (payload?.role !== 'SaaS Admin') return res.redirect('/dashboard');
+  } catch {
+    return res.redirect('/');
+  }
+  res.type('html');
+  const adminNoExt = path.join(publicDir, 'admin');
+  const adminHtml = path.join(publicDir, 'admin.html');
+  const target = fs.existsSync(adminNoExt) ? adminNoExt : adminHtml;
+  res.sendFile(target);
+});
+
+// Protect admin JS assets; require valid JWT cookie and SaaS Admin role before serving
+app.use((req, res, next) => {
+  try {
+    if (req.method === 'GET' && req.path && (req.path === '/js/admin.js' || req.path.startsWith('/js/admin/'))) {
+      const raw = req.headers.cookie || '';
+      let tok = null;
+      for (const part of raw.split(';')) {
+        const [k, ...v] = part.trim().split('=');
+        if (k === 'token') { tok = decodeURIComponent(v.join('=')); break; }
+      }
+      if (!tok) return res.status(401).send('Unauthorized');
+      const payload = jwt.verify(tok, process.env.JWT_SECRET);
+      if ((payload?.role || '') !== 'SaaS Admin') return res.status(403).send('Forbidden');
+    }
+  } catch { return res.status(401).send('Unauthorized'); }
+  next();
+});
+// If obfuscation is enabled, transparently serve /js/admin/* from /js/admin-obf/* when available
+if (process.env.OBFUSCATE_ADMIN === 'true') {
+  const obfDir = path.join(publicDir, 'js', 'admin-obf');
+  // Map /js/admin/* to obfuscated versions when present
+  app.use('/js/admin', (req, res, next) => {
+    const rel = (req.path || '').replace(/^\/js\/admin\//, '');
+    const fp = path.join(obfDir, rel);
+    if (fs.existsSync(fp)) return res.sendFile(fp);
+    next();
+  });
+  // Map /js/admin.js to obfuscated version when present
+  app.get('/js/admin.js', (req, res, next) => {
+    const fp = path.join(obfDir, 'admin.js');
+    if (fs.existsSync(fp)) return res.sendFile(fp);
+    next();
+  });
+}
 app.use(express.static(publicDir));
+
+// Simple file-backed store for business feature overrides (keyed by business_id string)
+const dataDir = path.join(__dirname, 'data');
+const bizSettingsPath = path.join(dataDir, 'business-settings.json');
+function ensureBizSettings(){
+  try { if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true }); } catch {}
+  try { if (!fs.existsSync(bizSettingsPath)) fs.writeFileSync(bizSettingsPath, JSON.stringify({}), 'utf-8'); } catch {}
+}
+function readBizSettings(){
+  try { ensureBizSettings(); return JSON.parse(fs.readFileSync(bizSettingsPath, 'utf-8') || '{}'); } catch { return {}; }
+}
+function writeBizSettings(obj){
+  try { ensureBizSettings(); fs.writeFileSync(bizSettingsPath, JSON.stringify(obj, null, 2), 'utf-8'); return true; } catch { return false; }
+}
 
 // Root route -> index.html
 app.get("/", (req, res) => {
@@ -59,10 +188,7 @@ app.get("/reports", (req, res) => {
   res.sendFile(path.join(publicDir, "reports.html"));
 });
 
-// SaaS Admin console
-app.get("/admin", (req, res) => {
-  res.sendFile(path.join(publicDir, "admin.html"));
-});
+// (duplicate admin cookie helper and routes removed; consolidated earlier)
 
 // Login alias
 app.get(["/login", "/signin"], (req, res) => {
@@ -318,6 +444,16 @@ app.post("/login", async (req, res) => {
 
     const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '24h' });
 
+    // Set httpOnly JWT cookie for browser navigation protection
+    try {
+      const maxAgeSec = 24 * 60 * 60; // 1 day
+      const sameSite = (process.env.COOKIE_SAMESITE || 'Lax').toLowerCase();
+      const isNone = sameSite === 'none';
+      const secureFlag = (process.env.COOKIE_SECURE === 'true' || isNone) ? '; Secure' : '';
+      const sameSiteAttr = isNone ? 'SameSite=None' : 'SameSite=Lax';
+      res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=${maxAgeSec}; ${sameSiteAttr}${secureFlag}`);
+    } catch {}
+
     // Remove password hash from response
     const { _hash, ...userResponse } = user;
 
@@ -354,10 +490,7 @@ app.get("/validate-token", authenticateToken, (req, res) => {
   res.json({ valid: true, user: req.user });
 });
 
-// === Logout (client-side token removal) ===
-app.post("/logout", (req, res) => {
-  res.json({ message: "Logged out successfully" });
-});
+// (duplicate /logout removed; cookie-clearing version defined earlier)
 
 // === Auth: request password reset (generate OTP and email) ===
 app.post('/auth/request-reset', async (req, res) => {
@@ -897,6 +1030,75 @@ app.post('/admin/subscription/edit', ...withAuthAndAbility, requireRole(['SaaS A
   }
 });
 
+// === SaaS Admin: Maintenance — Rehydrate Features (persist plaintext for name/code/description) ===
+app.post('/admin/maintenance/features/rehydrate', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    if (!process.env.ENCRYPTION_KEY || String(process.env.ENCRYPTION_KEY).trim() === '') {
+      return res.status(400).json({ error: 'ENCRYPTION_KEY is not set. Set it in .env and restart the server.' });
+    }
+
+    let features = [];
+    try { features = await fetchFromGrist('Features'); } catch (e) {
+      return res.status(500).json({ error: 'Failed to load Features' });
+    }
+
+    // If any field still looks encrypted, the key is likely wrong; bail to avoid persisting enc:v1 as plaintext
+    const looksEncrypted = (v) => typeof v === 'string' && v.startsWith('enc:v1:');
+    const anyEncrypted = features.some(f => looksEncrypted(f?.name) || looksEncrypted(f?.code));
+    if (anyEncrypted) {
+      return res.status(400).json({ error: 'Decryption failed. Ensure ENCRYPTION_KEY is correct before running rehydrate.' });
+    }
+
+    let updated = 0; const errors = [];
+    for (const f of features) {
+      try {
+        const fields = {};
+        if (typeof f.name !== 'undefined') fields.name = f.name;
+        if (typeof f.code !== 'undefined') fields.code = f.code;
+        if (typeof f.description !== 'undefined') fields.description = f.description;
+        if (Object.keys(fields).length === 0) continue;
+        const r = await updateGristRecord('Features', f.id, fields);
+        if (!r.success) { errors.push({ id: f.id, error: r.error || 'update failed' }); }
+        else { updated += 1; }
+      } catch (e) { errors.push({ id: f?.id, error: e?.message || 'update threw' }); }
+    }
+
+    return res.json(decryptDeep({ message: 'Rehydrated Features (plaintext persisted for name/code/description)', total: features.length, updated, errors }));
+  } catch (e) {
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// === SaaS Admin: Subscriptions list & creation (for admin UI) ===
+app.get('/admin/subscriptions', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    // Optional filters ignored for now; return decrypted rows
+    let rows = [];
+    try { rows = await fetchFromGrist('Subscription'); } catch {}
+    return res.json(decryptDeep(rows));
+  } catch (e) { res.status(500).json({ error: 'Failed to load subscriptions' }); }
+});
+
+app.post('/admin/subscriptions', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    const { business_id, owner_email, plan, billing_cycle = 'monthly', start_date, amount } = req.body || {};
+    if (!business_id || !owner_email) return res.status(400).json({ error: 'business_id and owner_email are required' });
+    const payload = {
+      business_id,
+      owner_email,
+      plan: plan || 'starter',
+      billing_cycle,
+      start_date: start_date || new Date().toISOString(),
+      amount: typeof amount === 'number' ? amount : 0,
+      status: 'active',
+      created_at: new Date().toISOString()
+    };
+    const result = await addToGrist('Subscription', payload);
+    if (!result.success) return res.status(500).json({ error: result.error || 'Failed to create subscription' });
+    return res.json(decryptDeep(result.data));
+  } catch (e) { res.status(500).json({ error: 'Failed to create subscription' }); }
+});
+
 // === SaaS Admin: My Subscription (summary) ===
 app.get('/admin/subscription', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
@@ -955,6 +1157,87 @@ app.post('/admin/features', ...withAuthAndAbility, requireRole(['SaaS Admin']), 
   }
 });
 
+// === SaaS Admin: Per-Business Feature Overrides ===
+app.get('/admin/business-feature-flags/:business_id', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    const business_id = String(req.params.business_id || '').trim();
+    if (!business_id) return res.status(400).json({ error: 'business_id required' });
+    const all = readBizSettings();
+    const record = all[business_id] || { features: [] };
+    res.json(decryptDeep(record));
+  } catch (e) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/admin/business-feature-flags/:business_id', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    const business_id = String(req.params.business_id || '').trim();
+    if (!business_id) return res.status(400).json({ error: 'business_id required' });
+    const { features } = req.body || {};
+    if (!Array.isArray(features)) return res.status(400).json({ error: 'features must be an array of feature codes' });
+    const all = readBizSettings();
+    all[business_id] = { features: features.map(String) };
+    if (!writeBizSettings(all)) return res.status(500).json({ error: 'Failed to persist settings' });
+    res.json(decryptDeep({ message: 'Business features saved', business_id, features: all[business_id].features }));
+  } catch (e) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// === Current User: Effective Features ===
+app.get('/me/features', authenticateToken, async (req, res) => {
+  try {
+    const role = String(req.user?.role || '').toLowerCase();
+    const business_id = req.user?.business_id || null;
+    // SaaS Admins do not directly use business features
+    if (role === 'saas admin') {
+      return res.json(decryptDeep({ features: [] }));
+    }
+    // 1) Role baseline
+    let roleBaseline = [];
+    if (role === 'owner') roleBaseline = ['inventory','sales','reports'];
+    else if (role === 'accountant') roleBaseline = ['reports'];
+    else if (role === 'attendant') roleBaseline = ['sales'];
+
+    // 2) Plan-feature mapping for the business (if any)
+    let planCodes = [];
+    if (business_id) {
+      try {
+        const businesses = await fetchFromGrist('Businesses');
+        const biz = (businesses||[]).find(b => String(b.business_id||b.id||'') === String(business_id) || String(b.id||'') === String(business_id));
+        const subscription_id = biz?.subscription_id;
+        if (subscription_id){
+          const maps = await fetchFromGrist('Subscription_Features');
+          const features = await fetchFromGrist('Features');
+          const byId = new Map((features||[]).map(f=>[String(f.id), f]));
+          planCodes = (maps||[])
+            .filter(m => String(m.subscription_id) === String(subscription_id))
+            .map(m => byId.get(String(m.feature_id))?.code)
+            .filter(Boolean);
+        }
+      } catch (e) { /* fallback silently */ }
+    }
+
+    // 3) Business overrides (if present) take precedence (exact set)
+    let effective = [];
+    if (business_id) {
+      const all = readBizSettings();
+      const rec = all[business_id];
+      if (rec && Array.isArray(rec.features) && rec.features.length) {
+        effective = rec.features;
+      }
+    }
+
+    // 4) If no overrides, prefer planCodes if available; else roleBaseline
+    if (!effective.length) effective = planCodes.length ? planCodes : roleBaseline;
+
+    res.json(decryptDeep({ features: effective }));
+  } catch (e) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // === SaaS Admin: Renewal / Trial Status ===
 app.get('/admin/renewal-status', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
@@ -988,18 +1271,89 @@ function generateOTP() {
   return ("" + Math.floor(100000 + Math.random() * 900000));
 }
 
+// Helper: generate a temporary password
+function generateTempPassword(len = 12) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  return out;
+}
+
+function makeBizCodeBase(name){
+  const cleaned = String(name || '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+  const base = cleaned.slice(0, 4) || 'BIZ';
+  return base;
+}
+
+function getEmailContent(locale, { ownerFname, businessName, businessId, tempPassword, otp, loginUrl }){
+  const loc = (locale || process.env.DEFAULT_LOCALE || 'en-US').toLowerCase();
+  if (loc.startsWith('lg')){
+    const subject = `Akatabo ko kusettinga akawandiikiddwa - ${businessName}`;
+    const html = `
+      <p>Gyebale ko ${ownerFname},</p>
+      <p>Akasawo ko ak'Obusuubuzi <b>${businessName}</b> kakolebwa.</p>
+      <p><b>Business ID:</b> ${businessId}</p>
+      <p><b>Temporary Password:</b> ${tempPassword}</p>
+      <p>Kozesa OTP eno okusobola okuteeka akasimu aka passwaadi emu empya: <b>${otp}</b> (ezaalawo mu masaa 24).</p>
+      <p>Weyingire wano: <a href="${loginUrl}">${loginUrl}</a></p>
+      <p>Olina okusabibwa okuddamu okuteeka passwaadi empya oluvannyuma lw’okuyingira okusooka.</p>
+      <p>Webale,<br/>SaaS Admin</p>
+    `;
+    return { subject, html };
+  }
+  if (loc.startsWith('sw')){
+    const subject = `Akaunti ya biashara imeundwa - ${businessName}`;
+    const html = `
+      <p>Habari ${ownerFname},</p>
+      <p>Akaunti ya biashara <b>${businessName}</b> imeundwa.</p>
+      <p><b>Business ID:</b> ${businessId}</p>
+      <p><b>Nenosiri la muda:</b> ${tempPassword}</p>
+      <p>Tumia OTP hii kuweka nenosiri jipya kabla ya kuingia mara ya kwanza: <b>${otp}</b> (inaisha baada ya saa 24).</p>
+      <p>Kiungo cha akaunti: <a href="${loginUrl}">${loginUrl}</a></p>
+      <p>Kwa usalama, utahitajika kuweka nenosiri jipya mara ya kwanza unapojaribu kuingia.</p>
+      <p>Asante,<br/>SaaS Admin</p>
+    `;
+    return { subject, html };
+  }
+  const subject = `Your business account is ready - ${businessName}`;
+  const html = `
+    <p>Hello ${ownerFname},</p>
+    <p>Your business <b>${businessName}</b> has been provisioned.</p>
+    <p><b>Business ID:</b> ${businessId}</p>
+    <p><b>Temporary Password:</b> ${tempPassword}</p>
+    <p>Use this One-Time Password (OTP) to set your password before first login: <b>${otp}</b> (expires in 24 hours).</p>
+    <p>Account link: <a href="${loginUrl}">${loginUrl}</a></p>
+    <p>For security, you will be required to reset your password when you first sign in.</p>
+    <p>Regards,<br/>SaaS Admin</p>
+  `;
+  return { subject, html };
+}
+
 // === SaaS Admin: create tenant (business + owner, email OTP) ===
 app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
     const { business, owner } = req.body || {};
     if (!business?.name) return res.status(400).json({ error: "Business name is required" });
-    if (!owner?.email || !owner?.fname || !owner?.lname || !owner?.business_id) {
-      return res.status(400).json({ error: "owner.email, owner.fname, owner.lname, owner.business_id are required" });
+    if (!owner?.email || !owner?.fname || !owner?.lname) {
+      return res.status(400).json({ error: "owner.email, owner.fname, owner.lname are required" });
     }
+
+    // 0) Generate unique Business ID (tenant code)
+    const businesses = await fetchFromGrist("Businesses");
+    const users = await fetchFromGrist(USERS_TABLE);
+    const taken = new Set([
+      ...(Array.isArray(businesses) ? businesses.map(b => String(b.business_id || '')) : []),
+      ...(Array.isArray(users) ? users.map(u => String(u.business_id || '')) : [])
+    ].filter(Boolean));
+    const base = makeBizCodeBase(business.name);
+    let candidate = `${base}-001`;
+    let i = 1;
+    while (taken.has(candidate)) { i++; candidate = `${base}-${String(i).padStart(3,'0')}`; if (i > 9999) break; }
 
     // 1) Create business
     const bizPayload = {
       name: business.name,
+      business_id: candidate,
       subscription_id: business.subscription_id || null,
       start_date: business.start_date || null,
       end_date: business.end_date || null,
@@ -1012,12 +1366,13 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
     const bizRes = await addToGrist("Businesses", bizPayload);
     if (!bizRes.success) return res.status(500).json({ error: "Failed to create business" });
 
-    // 2) Create owner with forced reset
+    // 2) Create owner with temporary password and forced reset
     const existing = await fetchFromGrist(USERS_TABLE);
     if (existing.find(u => u.email === owner.email)) {
       return res.status(409).json({ error: "Owner email already exists" });
     }
-    const password_hash = await bcrypt.hash(owner.temp_password || "ChangeMe123", 12);
+    const tempPassword = generateTempPassword(12);
+    const password_hash = await bcrypt.hash(tempPassword, 12);
     const otp = generateOTP();
     const otp_expires = new Date(Date.now() + 24*60*60*1000).toISOString();
     const ownerPayload = {
@@ -1029,7 +1384,7 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
       mname: owner.mname || "",
       lname: owner.lname,
       phone_number: owner.phone_number || "",
-      business_id: owner.business_id,
+      business_id: candidate,
       business_name: business.name,
       is_active: true,
       created_at: new Date().toISOString(),
@@ -1048,17 +1403,20 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
       }
     } catch (e) { console.warn('Failed to patch business with owner_id:', e?.message); }
 
-    // 3) Email OTP
-    const resetHtml = `
-      <p>Hello ${owner.fname},</p>
-      <p>Your account has been created for business <b>${business.name}</b>.</p>
-      <p>Use this One-Time Password (OTP) to set your password: <b>${otp}</b></p>
-      <p>This OTP expires in 24 hours.</p>
-      <p>Login: ${owner.email}</p>
-    `;
-    try { await sendMail(owner.email, "Set your password (OTP)", resetHtml); } catch (e) { console.warn("Email send failed:", e?.message); }
+    // 3) Email Owner with account details and next steps
+    const frontUrl = (process.env.FRONTEND_ORIGIN || process.env.APP_URL || process.env.PUBLIC_URL || '').trim() || `http://localhost:${PORT}`;
+    const loginUrl = `${frontUrl}/`;
+    const { subject, html } = getEmailContent(owner.locale || business.locale || process.env.DEFAULT_LOCALE, {
+      ownerFname: owner.fname,
+      businessName: business.name,
+      businessId: candidate,
+      tempPassword,
+      otp,
+      loginUrl
+    });
+    try { await sendMail(owner.email, subject, html); } catch (e) { console.warn("Email send failed:", e?.message); }
 
-    res.status(201).json(decryptDeep({ message: "Tenant provisioned", business: bizPayload, owner: { email: owner.email } }));
+    res.status(201).json(decryptDeep({ message: "Tenant provisioned", business: bizPayload, owner: { email: owner.email }, business_id: candidate }));
   } catch (e) {
     console.error("Provision tenant error:", e);
     res.status(500).json({ error: "Internal server error" });

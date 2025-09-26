@@ -40,6 +40,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     headers: {
                         "Content-Type": "application/json"
                     },
+                    credentials: 'include',
                     body: JSON.stringify({ email, password })
                 });
                 
@@ -79,7 +80,7 @@ function showError(message) {
 
 function redirectBasedOnRole(role) {
     if (role === "SaaS Admin") {
-        window.location.href = "admin.html";
+        window.location.href = "admin";
     } else {
         window.location.href = "dashboard.html";
     }
@@ -129,6 +130,7 @@ function getStoredToken() {
 
 // Utility function to logout
 function logout() {
+    try { fetch(`${API_URL}/logout`, { method: 'POST', credentials: 'include' }).catch(()=>{}); } catch {}
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     window.location.href = "index.html";

@@ -10,6 +10,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "cd public && npm install && npm run build",
     "build:server": "npm install",
+    "obfuscate:admin": "node scripts/obfuscate-admin.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -28,6 +29,7 @@
     "nodemailer": "^7.0.6"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "javascript-obfuscator": "^4.1.3"
   }
 }

@@ -8,18 +8,8 @@
     "mname": { "type": "string" },
     "lname": { "type": "string", "minLength": 1 },
     "email": { "type": "string", "format": "email" },
-    "business_id": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{2,31}$",
-      "description": "Tenant code used for ABAC across tables, e.g., DEMO-001"
-    },
     "business_name": { "type": "string" },
-    "temp_password": {
-      "type": "string",
-      "minLength": 8,
-      "description": "Optional temp password; OTP is still emailed and force reset is enabled"
-    },
     "phone_number": { "type": "string" }
   },
-  "required": ["fname", "lname", "email", "business_id"]
+  "required": ["fname", "lname", "email"]
 }

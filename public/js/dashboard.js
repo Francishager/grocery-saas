@@ -49,10 +49,11 @@ async function loadKPIs(){
   try {
     const res = await authFetch(`${API_URL}/dashboard/kpis?businessId=${user.business_id}`);
     const data = await res.json();
-    document.getElementById("kpiTotalSales").textContent = `$${data.total_sales.toFixed(2)}`;
-    document.getElementById("kpiTotalProfit").textContent = `$${data.total_profit.toFixed(2)}`;
-    document.getElementById("kpiTotalDiscount").textContent = `$${data.total_discount.toFixed(2)}`;
-    document.getElementById("kpiTotalTax").textContent = `$${data.total_tax.toFixed(2)}`;
+    const fmt = (n)=>{ try { return (window.App?.I18n?.formatCurrency) ? App.I18n.formatCurrency(n) : `$${Number(n||0).toFixed(2)}`; } catch { return `$${Number(n||0).toFixed(2)}`; } };
+    document.getElementById("kpiTotalSales").textContent = fmt(data.total_sales);
+    document.getElementById("kpiTotalProfit").textContent = fmt(data.total_profit);
+    document.getElementById("kpiTotalDiscount").textContent = fmt(data.total_discount);
+    document.getElementById("kpiTotalTax").textContent = fmt(data.total_tax);
 
     window.lowStockData = data.low_stock; // Save for low stock list
   } catch (err) {

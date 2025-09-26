@@ -13,13 +13,84 @@
 
 <!-- Navbar -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <a class="navbar-brand fw-bold" href="#">Grocery SaaS</a>
-    <ul class="navbar-nav ms-auto">
-      <li class="nav-item"><a href="reports.html" class="nav-link">Reports</a></li>
-      <li class="nav-item"><a href="logout.html" class="nav-link">Logout</a></li>
-    </ul>
-  </div>
-</nav>
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="#">Grocery SaaS</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navBarMain" aria-controls="navBarMain" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navBarMain">
+        <ul class="navbar-nav ms-auto align-items-center gap-2">
+          <!-- Mobile icon dropdowns -->
+          <li class="nav-item dropdown d-md-none">
+            <a class="nav-link" href="#" id="langIconBtn" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Language">🌐</a>
+            <div class="dropdown-menu dropdown-menu-end" id="langMenuMobile" style="max-height:60vh; overflow:auto"></div>
+          </li>
+          <li class="nav-item dropdown d-md-none">
+            <a class="nav-link" href="#" id="currencyIconBtn" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Currency">💱</a>
+            <div class="dropdown-menu dropdown-menu-end" id="currencyMenuMobile" style="max-height:60vh; overflow:auto"></div>
+          </li>
+          <!-- Desktop selectors -->
+          <li class="nav-item d-none d-md-inline-flex">
+            <select id="langSelect" class="form-select form-select-sm" title="Language">
+              <option value="en-US">English</option>
+              <option value="lg-UG">Luganda</option>
+              <option value="sw-KE">Swahili</option>
+            </select>
+          </li>
+          <li class="nav-item d-none d-md-inline-flex">
+            <select id="currencySelect" class="form-select form-select-sm" title="Currency">
+              <option value="USD">USD — US Dollar</option>
+              <option value="EUR">EUR — Euro</option>
+              <option value="GBP">GBP — British Pound</option>
+              <option value="JPY">JPY — Japanese Yen</option>
+              <option value="CNY">CNY — Chinese Yuan</option>
+              <option value="UGX">UGX — Ugandan Shilling</option>
+              <option value="KES">KES — Kenyan Shilling</option>
+              <option value="TZS">TZS — Tanzanian Shilling</option>
+              <option value="RWF">RWF — Rwandan Franc</option>
+              <option value="BIF">BIF — Burundian Franc</option>
+              <option value="GHS">GHS — Ghanaian Cedi</option>
+              <option value="NGN">NGN — Nigerian Naira</option>
+              <option value="XOF">XOF — CFA Franc (West)</option>
+              <option value="XAF">XAF — CFA Franc (Central)</option>
+              <option value="ZAR">ZAR — South African Rand</option>
+              <option value="ZMW">ZMW — Zambian Kwacha</option>
+              <option value="BWP">BWP — Botswana Pula</option>
+              <option value="NAD">NAD — Namibian Dollar</option>
+              <option value="MUR">MUR — Mauritian Rupee</option>
+              <option value="MAD">MAD — Moroccan Dirham</option>
+              <option value="EGP">EGP — Egyptian Pound</option>
+              <option value="TND">TND — Tunisian Dinar</option>
+              <option value="DZD">DZD — Algerian Dinar</option>
+              <option value="SDG">SDG — Sudanese Pound</option>
+              <option value="ETB">ETB — Ethiopian Birr</option>
+              <option value="SOS">SOS — Somali Shilling</option>
+              <option value="DJF">DJF — Djiboutian Franc</option>
+              <option value="KMF">KMF — Comorian Franc</option>
+              <option value="SCR">SCR — Seychellois Rupee</option>
+              <option value="MZN">MZN — Mozambican Metical</option>
+              <option value="MRU">MRU — Mauritanian Ouguiya</option>
+              <option value="LSL">LSL — Lesotho Loti</option>
+              <option value="SZL">SZL — Eswatini Lilangeni</option>
+              <option value="GMD">GMD — Gambian Dalasi</option>
+              <option value="SLE">SLE — Sierra Leonean Leone</option>
+              <option value="LRD">LRD — Liberian Dollar</option>
+              <option value="GNF">GNF — Guinean Franc</option>
+              <option value="CVE">CVE — Cape Verdean Escudo</option>
+              <option value="CDF">CDF — Congolese Franc</option>
+              <option value="ZWL">ZWL — Zimbabwean Dollar</option>
+              <option value="MWK">MWK — Malawian Kwacha</option>
+              <option value="AOA">AOA — Angolan Kwanza</option>
+              <option value="LYD">LYD — Libyan Dinar</option>
+              <option value="ERN">ERN — Eritrean Nakfa</option>
+            </select>
+          </li>
+          <li class="nav-item"><a href="reports.html" class="nav-link">Reports</a></li>
+          <li class="nav-item"><a href="logout.html" class="nav-link">Logout</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
 
 <div class="container mt-4">
 
@@ -103,14 +174,15 @@
 
   <!-- Export Buttons -->
   <div class="d-flex justify-content-end mt-4">
-    <button class="btn btn-outline-success me-2" onclick="exportDashboard('excel')">Export Excel</button>
-    <button class="btn btn-outline-danger" onclick="exportDashboard('pdf')">Export PDF</button>
+    <button id="btnExportExcel" class="btn btn-outline-success me-2" onclick="exportDashboard('excel')" data-i18n="actions.exportExcel">Export Excel</button>
+    <button id="btnExportPDF" class="btn btn-outline-danger" onclick="exportDashboard('pdf')" data-i18n="actions.exportPDF">Export PDF</button>
   </div>
 
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="config.js"></script>
+<script src="js/i18n.js"></script>
 <script src="js/dashboard.js"></script>
 </body>
 </html>

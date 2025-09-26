@@ -23,11 +23,31 @@
         <span id="sidebarUserName" class="fw-semibold small">User</span>
         <span id="sidebarUserRole" class="text-muted xsmall">—</span>
       </div>
+
+      <!-- Modals: Assign Plan to Business -->
+      <div class="modal" id="assignPlanModal" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header"><h6 class="modal-title">Assign Plan</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+            <div class="modal-body">
+              <input type="hidden" id="ap_business_id" />
+              <div class="mb-2"><span class="small text-muted">Business</span><div id="ap_business_name" class="fw-semibold">—</div></div>
+              <div class="mb-2">
+                <label class="form-label">Plan</label>
+                <select id="ap_planId" class="form-select">
+                  <option value="">—</option>
+                </select>
+              </div>
+              <div class="form-text">Assigning a plan links the business to a subscription for feature mapping and billing cycle.</div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="ap_save" class="btn btn-primary btn-sm">Save</button></div>
+          </div>
+        </div>
+      </div>
     </div>
     <nav class="nav flex-column px-3 mt-3" id="sidebarNav">
       <a class="nav-link py-2 active" data-target="section-dashboard" href="#">Dashboard</a>
       <a class="nav-link py-2" data-target="section-businesses" href="#">Businesses</a>
-      <a class="nav-link py-2" data-target="section-create-tenant" href="#">Create Tenant</a>
       <div class="nav-group">
         <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="subsGroup">
           <span>Subscriptions</span>
@@ -36,31 +56,30 @@
         <div id="subsGroup" class="nav-sub d-none">
           <a class="nav-link py-1" data-target="section-subs-all" href="#">All Subscriptions</a>
           <a class="nav-link py-1" data-target="section-plans" href="#">Plans & Pricing</a>
-          <a class="nav-link py-1" data-target="section-subs-new" href="#">New Subscription (Manual Add)</a>
           <a class="nav-link py-1" data-target="section-invoices" href="#">Payments & Invoices</a>
           <a class="nav-link py-1" data-target="section-renewal" href="#">Renewals & Expirations</a>
-          <a class="nav-link py-1" data-target="section-features" href="#">Feature Access Control</a>
+          <a class="nav-link py-1" data-target="section-features" href="#">Business Feature Overrides</a>
           <a class="nav-link py-1" data-target="section-payment-methods" href="#">Payment Methods</a>
         </div>
       </div>
 
       <!-- Accounting -->
-      <div class="nav-group">
+      <div class="nav-group" data-feature="accounting,payables,receivables,staff_tillsheets,transaction_accounts,bank_accounts,cash_accounts,mobile_accounts">
         <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="acctGroup">
           <span>Accounting</span>
           <span class="chev">▼</span>
         </button>
         <div id="acctGroup" class="nav-sub d-none">
-          <a class="nav-link py-1" data-target="section-accounting-core" href="#">Accounting</a>
-          <a class="nav-link py-1" data-target="section-accounting-transactions" href="#">Transaction Accounts</a>
-          <a class="nav-link py-1" data-target="section-accounting-payables" href="#">Payables</a>
-          <a class="nav-link py-1" data-target="section-accounting-receivables" href="#">Receivables</a>
-          <a class="nav-link py-1" data-target="section-accounting-staff-tillsheets" href="#">Staff Till Sheets</a>
+          <a class="nav-link py-1" data-target="section-accounting-core" href="#" data-feature="accounting">Accounting</a>
+          <a class="nav-link py-1" data-target="section-accounting-transactions" href="#" data-feature="transaction_accounts">Transaction Accounts</a>
+          <a class="nav-link py-1" data-target="section-accounting-payables" href="#" data-feature="payables">Payables</a>
+          <a class="nav-link py-1" data-target="section-accounting-receivables" href="#" data-feature="receivables">Receivables</a>
+          <a class="nav-link py-1" data-target="section-accounting-staff-tillsheets" href="#" data-feature="staff_tillsheets">Staff Till Sheets</a>
         </div>
       </div>
 
       <!-- Stock & Sales -->
-      <div class="nav-group">
+      <div class="nav-group" data-feature="inventory,sales">
         <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="stockGroup">
           <span>Stock & Sales</span>
           <span class="chev">▼</span>
@@ -71,7 +90,7 @@
       </div>
 
       <!-- Reports -->
-      <div class="nav-group">
+      <div class="nav-group" data-feature="reports">
         <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="reportsGroup">
           <span>Reports</span>
           <span class="chev">▼</span>
@@ -96,6 +115,7 @@
           <a class="nav-link py-1" data-target="section-roles-roles" href="#">Roles</a>
           <a class="nav-link py-1" data-target="section-roles-permissions" href="#">Permissions Matrix</a>
           <a class="nav-link py-1" data-target="section-roles-audit" href="#">Audit Logs</a>
+          <a class="nav-link py-1" data-target="section-users" href="#">Users</a>
         </div>
       </div>
 
@@ -122,6 +142,14 @@
         <span id="pageTitle" class="fw-semibold d-none d-sm-inline">Dashboard</span>
       </div>
       <div class="d-flex align-items-center gap-2">
+        <div class="dropdown d-md-none">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="langIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Language">🌐</button>
+          <div class="dropdown-menu dropdown-menu-end" id="langMenuMobile" style="max-height:60vh; overflow:auto"></div>
+        </div>
+        <div class="dropdown d-md-none">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="currencyIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Currency">💱</button>
+          <div class="dropdown-menu dropdown-menu-end" id="currencyMenuMobile" style="max-height:60vh; overflow:auto"></div>
+        </div>
         <div class="dropdown">
           <button class="btn btn-outline-secondary btn-sm icon-btn" id="notifBtn" aria-expanded="false" title="Notifications">🔔 <span id="notifDot" class="dot d-none"></span></button>
           <div class="dropdown-menu dropdown-menu-end" id="notifMenu">
@@ -133,6 +161,59 @@
         </div>
         <a class="btn btn-outline-secondary btn-sm icon-btn" id="messagesBtn" href="mailto:support@example.com" title="Messages/Support">💬</a>
         <button class="btn btn-outline-secondary btn-sm icon-btn" id="themeToggle" title="Switch theme">🌙</button>
+        <div class="d-none d-md-flex align-items-center gap-2">
+          <select id="langSelect" class="form-select form-select-sm" title="Language">
+            <option value="en-US">English</option>
+            <option value="lg-UG">Luganda</option>
+            <option value="sw-KE">Swahili</option>
+          </select>
+          <select id="currencySelect" class="form-select form-select-sm" title="Currency">
+            <option value="USD">USD — US Dollar</option>
+            <option value="EUR">EUR — Euro</option>
+            <option value="GBP">GBP — British Pound</option>
+            <option value="JPY">JPY — Japanese Yen</option>
+            <option value="CNY">CNY — Chinese Yuan</option>
+            <option value="UGX">UGX — Ugandan Shilling</option>
+            <option value="KES">KES — Kenyan Shilling</option>
+            <option value="TZS">TZS — Tanzanian Shilling</option>
+            <option value="RWF">RWF — Rwandan Franc</option>
+            <option value="BIF">BIF — Burundian Franc</option>
+            <option value="GHS">GHS — Ghanaian Cedi</option>
+            <option value="NGN">NGN — Nigerian Naira</option>
+            <option value="XOF">XOF — CFA Franc (West)</option>
+            <option value="XAF">XAF — CFA Franc (Central)</option>
+            <option value="ZAR">ZAR — South African Rand</option>
+            <option value="ZMW">ZMW — Zambian Kwacha</option>
+            <option value="BWP">BWP — Botswana Pula</option>
+            <option value="NAD">NAD — Namibian Dollar</option>
+            <option value="MUR">MUR — Mauritian Rupee</option>
+            <option value="MAD">MAD — Moroccan Dirham</option>
+            <option value="EGP">EGP — Egyptian Pound</option>
+            <option value="TND">TND — Tunisian Dinar</option>
+            <option value="DZD">DZD — Algerian Dinar</option>
+            <option value="SDG">SDG — Sudanese Pound</option>
+            <option value="ETB">ETB — Ethiopian Birr</option>
+            <option value="SOS">SOS — Somali Shilling</option>
+            <option value="DJF">DJF — Djiboutian Franc</option>
+            <option value="KMF">KMF — Comorian Franc</option>
+            <option value="SCR">SCR — Seychellois Rupee</option>
+            <option value="MZN">MZN — Mozambican Metical</option>
+            <option value="MRU">MRU — Mauritanian Ouguiya</option>
+            <option value="LSL">LSL — Lesotho Loti</option>
+            <option value="SZL">SZL — Eswatini Lilangeni</option>
+            <option value="GMD">GMD — Gambian Dalasi</option>
+            <option value="SLE">SLE — Sierra Leonean Leone</option>
+            <option value="LRD">LRD — Liberian Dollar</option>
+            <option value="GNF">GNF — Guinean Franc</option>
+            <option value="CVE">CVE — Cape Verdean Escudo</option>
+            <option value="CDF">CDF — Congolese Franc</option>
+            <option value="ZWL">ZWL — Zimbabwean Dollar</option>
+            <option value="MWK">MWK — Malawian Kwacha</option>
+            <option value="AOA">AOA — Angolan Kwanza</option>
+            <option value="LYD">LYD — Libyan Dinar</option>
+            <option value="ERN">ERN — Eritrean Nakfa</option>
+          </select>
+        </div>
         <div class="dropdown">
           <button class="btn btn-light btn-sm d-flex align-items-center gap-2" id="profileBtn" aria-expanded="false">
             <span class="avatar" id="profileAvatar">👤</span>
@@ -243,7 +324,7 @@
       </section>
 
       <!-- Stock & Sales Section -->
-      <section id="section-stock" class="section">
+      <section id="section-stock" class="section" data-feature="inventory,sales">
         <div class="card shadow-sm">
           <div class="card-body">
             <div class="d-flex align-items-center justify-content-between">
@@ -377,30 +458,6 @@
                       <option value="">—</option>
                     </select>
                   </div>
-                  <div class="col-12">
-                    <label class="form-label">Limits (JSON)</label>
-                    <textarea id="pf_bizLimits" class="form-control" rows="3" placeholder='{"products":1000, "staff":10}'></textarea>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">Start Date</label>
-                    <input type="date" id="pf_startDate" class="form-control" />
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">End Date</label>
-                    <input type="date" id="pf_endDate" class="form-control" />
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label">Logo URL</label>
-                    <input type="url" id="pf_logoUrl" class="form-control" placeholder="https://..." />
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">Fiscal Year Start</label>
-                    <input type="date" id="pf_fiscalStart" class="form-control" />
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">Fiscal Year End</label>
-                    <input type="date" id="pf_fiscalEnd" class="form-control" />
-                  </div>
                 </div>
                 <div class="d-flex justify-content-between mt-3">
                   <button class="btn btn-outline-secondary" data-cancel>Cancel</button>
@@ -431,14 +488,6 @@
                   <div class="col-md-6">
                     <label class="form-label">Phone Number</label>
                     <input type="text" id="pf_ownerPhone" class="form-control" />
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label">Temporary Password</label>
-                    <input type="text" id="pf_ownerTempPass" class="form-control" value="ChangeMe123" required />
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label">Business ID</label>
-                    <input type="text" id="pf_ownerBizId" class="form-control" placeholder="e.g., ACME-001" required />
                   </div>
                   <div class="col-md-6">
                     <label class="form-label">Business Name (optional)</label>
@@ -529,50 +578,7 @@
         </div></div>
       </section>
 
-      <!-- Subscriptions: New Subscription (Manual Add) -->
-      <section id="section-subs-new" class="section">
-        <div class="card shadow-sm"><div class="card-body">
-          <h5>New Subscription (Manual Add)</h5>
-          <form id="subsNewForm" class="row g-3 mt-1">
-            <div class="col-md-4">
-              <label class="form-label">Business ID</label>
-              <input id="sn_business_id" class="form-control" required />
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Owner Email</label>
-              <input id="sn_owner_email" type="email" class="form-control" required />
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Plan</label>
-              <select id="sn_plan" class="form-select">
-                <option value="free">Free</option>
-                <option value="starter">Starter</option>
-                <option value="pro">Pro</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Billing Cycle</label>
-              <select id="sn_cycle" class="form-select">
-                <option value="monthly">Monthly</option>
-                <option value="termly">Termly</option>
-                <option value="annual">Annual</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Start Date</label>
-              <input id="sn_start" type="date" class="form-control" />
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Amount (optional)</label>
-              <input id="sn_amount" type="number" class="form-control" />
-            </div>
-            <div class="col-12 d-flex justify-content-end gap-2">
-              <button class="btn btn-outline-secondary" type="reset">Reset</button>
-              <button class="btn btn-success" type="submit">Create Subscription</button>
-            </div>
-          </form>
-        </div></div>
-      </section>
+      
 
       <!-- Subscriptions: Plans & Pricing -->
       <section id="section-plans" class="section">
@@ -593,12 +599,14 @@
                       <th>Name</th>
                       <th>Price</th>
                       <th>Billing Cycle</th>
+                      <th>Max Staff</th>
+                      <th>Max Branches</th>
                       <th>Status</th>
                       <th class="text-end">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="plansTable">
-                    <tr><td colspan="5" class="text-muted text-center py-4">Loading plans...</td></tr>
+                    <tr><td colspan="7" class="text-muted text-center py-4">Loading plans...</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -607,56 +615,85 @@
         </div>
       </section>
 
-      <!-- Subscriptions: Feature Access Control -->
+      <!-- Subscriptions: Feature Catalog & Business Feature Overrides -->
       <section id="section-features" class="section">
         <div class="card shadow-sm"><div class="card-body">
           <div class="d-flex align-items-center mb-2">
-            <h5 class="mb-0">Feature Access Control</h5>
-            <button id="btnNewFeature" class="btn btn-success btn-sm ms-auto">New Feature</button>
+            <h5 class="mb-0">Feature Catalog</h5>
           </div>
-          <div class="text-muted mb-2">Toggle features per plan. Sync with Features table.</div>
-          <div class="row g-4">
-            <div class="col-lg-5">
-              <h6 class="mb-2">Features</h6>
-              <div class="table-responsive">
-                <table class="table table-sm align-middle">
-                  <thead><tr><th>Name</th><th>Code</th><th>Active</th><th></th></tr></thead>
-                  <tbody id="featuresTable"><tr><td colspan="4" class="text-muted">No features</td></tr></tbody>
-                </table>
-              </div>
+          <div class="card border-0 bg-light">
+            <div class="card-body">
+              <div id="featureCatalogList" class="row g-2"></div>
+              <div class="text-muted small mt-2">These are the business-designed features available in the platform. They can be assigned to subscription plans and overridden per business as needed.</div>
             </div>
-            <div class="col-lg-7">
-              <h6 class="mb-2">Plan × Feature Matrix</h6>
-              <div id="featureMatrix" class="table-responsive small">
-                <div class="text-muted">Loading matrix…</div>
+          </div>
+          <hr class="my-4">
+          <div class="d-flex align-items-center mb-2">
+            <h5 class="mb-0">Business Feature Overrides</h5>
+          </div>
+          <div class="card border-0 bg-light">
+            <div class="card-body">
+              <div class="d-flex flex-wrap align-items-end gap-2">
+                <div style="max-width: 260px;">
+                  <label class="form-label small">Business ID</label>
+                  <input id="bizFeatBizId" class="form-control form-control-sm" placeholder="e.g., DEMO-001" />
+                </div>
+                <button id="btnLoadBizFeatures" class="btn btn-outline-secondary btn-sm">Load</button>
+                <button id="btnSaveBizFeatures" class="btn btn-primary btn-sm">Save</button>
               </div>
-              <div class="d-flex justify-content-end mt-2">
-                <button id="btnSaveMatrix" class="btn btn-primary btn-sm">Save Changes</button>
-              </div>
+              <div class="row g-2 mt-3" id="bizFeatList"></div>
+              <div class="text-muted small mt-2">If empty, users inherit role defaults and plan mapping. Use overrides to allow only some features (e.g., accounting, stock &amp; sales, reports).</div>
             </div>
           </div>
         </div></div>
       </section>
 
-      <!-- Modals: Plan -->
-      <div class="modal" id="planModal" tabindex="-1">
-        <div class="modal-dialog">
-          <div class="modal-content">
-            <div class="modal-header"><h6 class="modal-title">Plan</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-            <div class="modal-body">
-              <form id="planForm" class="row g-3">
-                <input type="hidden" id="plan_id" />
-                <div class="col-12"><label class="form-label">Name</label><input id="plan_name" class="form-control" required /></div>
-                <div class="col-12"><label class="form-label">Price</label><input id="plan_price" type="number" step="0.01" class="form-control" required /></div>
-                <div class="col-12"><label class="form-label">Billing Cycle</label><select id="plan_cycle" class="form-select"><option value="monthly">Monthly</option><option value="annual">Annual</option></select></div>
-                <div class="col-12"><label class="form-label">Description</label><textarea id="plan_desc" class="form-control" rows="2"></textarea></div>
-                <div class="col-12 form-check ms-1"><input id="plan_active" type="checkbox" class="form-check-input" checked /><label class="form-check-label">Active</label></div>
-              </form>
+      <!-- Plan Editor Page -->
+      <section id="section-plan-editor" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="mb-0">Plan Editor</h5>
+              <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary btn-sm" id="planBackBtn" type="button">Back</button>
+              </div>
             </div>
-            <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="planSaveBtn" class="btn btn-primary btn-sm">Save</button></div>
+            <form id="planForm" class="row g-3">
+              <input type="hidden" id="plan_id" />
+              <div class="row">
+                <div class="col-md-6"><label class="form-label">Name</label><input id="plan_name" class="form-control" required /></div>
+                <div class="col-md-6"><label class="form-label">Price</label><input id="plan_price" type="number" step="0.01" class="form-control" required /></div>
+              </div>
+              <div class="col-md-6"><label class="form-label">Billing Cycle</label><select id="plan_cycle" class="form-select"><option value="monthly">Monthly</option><option value="termly">Termly</option><option value="annual">Annual</option></select></div>
+              <div class="col-12">
+                <label class="form-label">Features for this plan</label>
+                <div class="row g-2" id="planFeatureList"><div class="text-muted small">Loading features...</div></div>
+                <div class="form-text">Tick to include features in this plan. Catalog-defined features are synced to plan mappings.</div>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Plan Limits</label>
+                <div class="row g-2">
+                  <div class="col-md-4">
+                    <label class="form-label small">Max Staff</label>
+                    <input id="plan_limit_max_staff" type="number" min="0" class="form-control" placeholder="e.g., 10" />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Max Branches</label>
+                    <input id="plan_limit_max_branches" type="number" min="0" class="form-control" placeholder="e.g., 3" />
+                  </div>
+                </div>
+                <div class="form-text">Limits are applied to businesses subscribed to this plan.</div>
+              </div>
+              <div class="col-12"><label class="form-label">Description</label><textarea id="plan_desc" class="form-control" rows="2"></textarea></div>
+              <div class="col-12 form-check ms-1"><input id="plan_active" type="checkbox" class="form-check-input" checked /><label class="form-check-label">Active</label></div>
+              <div class="col-12 d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="planCancelBtn">Cancel</button>
+                <button class="btn btn-primary btn-sm" type="button" id="planSaveBtn">Save</button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
+      </section>
 
       <!-- Modals: Feature -->
       <div class="modal" id="featureModal" tabindex="-1">
@@ -740,20 +777,22 @@
           <div class="card-body">
             <div class="d-flex align-items-center justify-content-between mb-2">
               <h5 class="mb-0">All Businesses</h5>
-              <button class="btn btn-primary btn-sm" id="createBusinessBtn">Create</button>
+              <button class="btn btn-primary btn-sm" id="createBusinessBtn">Create Tenant</button>
             </div>
             <div class="table-wrap">
               <table class="table table-sm align-middle" id="businessesTable">
                 <thead>
                   <tr>
                     <th>Name</th>
+                    <th>Business ID</th>
                     <th>Tier</th>
                     <th>Active</th>
                     <th>Created</th>
+                    <th class="text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td colspan="4" class="text-muted">Loading...</td></tr>
+                  <tr><td colspan="6" class="text-muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -762,7 +801,7 @@
       </section>
 
       <!-- Accounting Sections -->
-      <section id="section-accounting-core" class="section">
+      <section id="section-accounting-core" class="section" data-feature="accounting">
         <div class="card shadow-sm">
           <div class="card-body">
             <h5>Accounting</h5>
@@ -803,25 +842,25 @@
           </div>
         </div>
       </section>
-      <section id="section-accounting-bank-accounts" class="section">
+      <section id="section-accounting-bank-accounts" class="section" data-feature="bank_accounts">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Bank Accounts</h5>
           <div class="text-muted">Placeholder — configure and list bank accounts here.</div>
         </div></div>
       </section>
-      <section id="section-accounting-cash-accounts" class="section">
+      <section id="section-accounting-cash-accounts" class="section" data-feature="cash_accounts">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Cash Accounts</h5>
           <div class="text-muted">Placeholder — manage cash accounts.</div>
         </div></div>
       </section>
-      <section id="section-accounting-mobile-accounts" class="section">
+      <section id="section-accounting-mobile-accounts" class="section" data-feature="mobile_accounts">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Mobile Money Accounts</h5>
           <div class="text-muted">Placeholder — mobile money accounts setup.</div>
         </div></div>
       </section>
-      <section id="section-accounting-transactions" class="section">
+      <section id="section-accounting-transactions" class="section" data-feature="transaction_accounts">
         <div class="card shadow-sm">
           <div class="card-body">
             <h5>Transaction Accounts</h5>
@@ -850,19 +889,19 @@
           </div>
         </div>
       </section>
-      <section id="section-accounting-payables" class="section">
+      <section id="section-accounting-payables" class="section" data-feature="payables">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Payables</h5>
           <div class="text-muted">Placeholder — supplier payables.</div>
         </div></div>
       </section>
-      <section id="section-accounting-receivables" class="section">
+      <section id="section-accounting-receivables" class="section" data-feature="receivables">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Receivables</h5>
           <div class="text-muted">Placeholder — customer receivables.</div>
         </div></div>
       </section>
-      <section id="section-accounting-staff-tillsheets" class="section">
+      <section id="section-accounting-staff-tillsheets" class="section" data-feature="staff_tillsheets">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Staff Till Sheets</h5>
           <div class="text-muted">Placeholder — staff till sheets management.</div>
@@ -870,31 +909,31 @@
       </section>
 
       <!-- Reports Sections -->
-      <section id="section-reports-balance-sheet" class="section">
+      <section id="section-reports-balance-sheet" class="section" data-feature="balance_sheet">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Balance Sheet</h5>
           <div class="text-muted">Placeholder — balance sheet report.</div>
         </div></div>
       </section>
-      <section id="section-reports-trial-balance" class="section">
+      <section id="section-reports-trial-balance" class="section" data-feature="trial_balance">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Trial Balance</h5>
           <div class="text-muted">Placeholder — trial balance report.</div>
         </div></div>
       </section>
-      <section id="section-reports-cash-flow" class="section">
+      <section id="section-reports-cash-flow" class="section" data-feature="cash_flow">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Cash Flow</h5>
           <div class="text-muted">Placeholder — cash flow statement.</div>
         </div></div>
       </section>
-      <section id="section-reports-sales" class="section">
+      <section id="section-reports-sales" class="section" data-feature="sales_financial">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Sales Reports</h5>
           <div class="text-muted">Placeholder — sales analytics and summaries.</div>
         </div></div>
       </section>
-      <section id="section-reports-financial" class="section">
+      <section id="section-reports-financial" class="section" data-feature="sales_financial">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Financial Reports</h5>
           <div class="text-muted">Placeholder — financial reporting.</div>
@@ -908,6 +947,21 @@
       </section>
 
       <!-- Role & Permissions Sections -->
+      <!-- Users Management -->
+      <section id="section-users" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h5 class="mb-0">Users</h5>
+            <button class="btn btn-primary btn-sm" id="btnNewUser">+ Create User</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Business ID</th><th>Created</th><th class="text-end">Actions</th></tr></thead>
+              <tbody id="usersTable"><tr><td colspan="6" class="text-muted">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
       <section id="section-roles-roles" class="section">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Roles</h5>
@@ -931,13 +985,51 @@
       <section id="section-settings-shop" class="section">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Shop Settings</h5>
-          <div class="text-muted">Placeholder — shop/system settings.</div>
+          <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label small">Business</label>
+              <select id="shopBizSelect" class="form-select"></select>
+            </div>
+            <div class="col-md-6 d-flex gap-2">
+              <button id="shopLoad" class="btn btn-outline-secondary btn-sm">Load</button>
+              <button id="shopSave" class="btn btn-primary btn-sm">Save</button>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Start Date</label>
+              <input type="date" id="shopStartDate" class="form-control" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">End Date</label>
+              <input type="date" id="shopEndDate" class="form-control" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Logo URL</label>
+              <input type="url" id="shopLogoUrl" class="form-control" placeholder="https://..." />
+            </div>
+          </div>
         </div></div>
       </section>
       <section id="section-settings-fiscal" class="section">
         <div class="card shadow-sm"><div class="card-body">
           <h5>Fiscal Year Settings</h5>
-          <div class="text-muted">Placeholder — fiscal year start/end configuration.</div>
+          <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label small">Business</label>
+              <select id="fiscalBizSelect" class="form-select"></select>
+            </div>
+            <div class="col-md-6 d-flex gap-2">
+              <button id="fiscalLoad" class="btn btn-outline-secondary btn-sm">Load</button>
+              <button id="fiscalSave" class="btn btn-primary btn-sm">Save</button>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Fiscal Year Start</label>
+              <input type="date" id="fiscalStart" class="form-control" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Fiscal Year End</label>
+              <input type="date" id="fiscalEnd" class="form-control" />
+            </div>
+          </div>
         </div></div>
       </section>
       <section id="section-settings-currencies" class="section">
@@ -951,7 +1043,7 @@
   </div>
   
   <!-- Floating Action Button for quick Create -->
-  <button id="fabCreate" class="btn btn-primary fab d-none" title="Create Business">+ Create</button>
+  <button id="fabCreate" class="btn btn-primary fab d-none" title="Create Tenant">Create Tenant</button>
 
   <!-- Bootstrap JS Bundle (for modals, dropdowns, etc.) -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -961,14 +1053,18 @@
   <!-- App core and modules -->
   <script src="js/main.js"></script>
   <script src="js/store.js"></script>
+  <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/acl.js"></script>
   <script src="js/branding.js"></script>
+  <script src="js/feature-gate.js"></script>
   <!-- Modular admin scripts -->
-  <script src="js/admin/plans.js"></script>
   <script src="js/admin/features.js"></script>
+  <script src="js/admin/plans.js"></script>
+  <script src="js/admin/settings.js"></script>
   <script src="js/admin/businesses.js"></script>
   <script src="js/admin/subscriptions.js"></script>
+  <script src="js/admin/users.js"></script>
   <script src="js/admin/billing.js"></script>
   <script src="js/admin/dashboard.js"></script>
   <script src="js/ui/table.js"></script>

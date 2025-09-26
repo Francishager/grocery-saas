@@ -74,6 +74,9 @@ const tables = {
       price: Number(body.price || 0),
       billing_cycle: body.billing_cycle || 'monthly',
       is_active: typeof body.is_active === 'boolean' ? body.is_active : true,
+      // Optional plan-level limits
+      limit_max_staff: (body.limit_max_staff !== undefined && body.limit_max_staff !== null) ? Number(body.limit_max_staff) : undefined,
+      limit_max_branches: (body.limit_max_branches !== undefined && body.limit_max_branches !== null) ? Number(body.limit_max_branches) : undefined,
       created_at: body.created_at || new Date().toISOString(),
     })
   },
@@ -141,7 +144,55 @@ router.post('/:table', async (req, res) => {
   try {
     const cfg = getConfig(req.params.table);
     if (!cfg) return res.status(400).json({ error: 'Unknown table' });
+    const tableKey = String(req.params.table || '').toLowerCase();
     const payload = { ...cfg.defaults(req.body || {}), ...cfg.sanitize(req.body || {}) };
+
+    // Validate business date fields when creating Businesses
+    if (tableKey === 'businesses') {
+      try {
+        const s = payload.start_date ? new Date(payload.start_date) : null;
+        const e = payload.end_date ? new Date(payload.end_date) : null;
+        if (s && isNaN(s.getTime())) return res.status(400).json({ error: 'Invalid Start Date' });
+        if (e && isNaN(e.getTime())) return res.status(400).json({ error: 'Invalid End Date' });
+        if (s && e && e < s) return res.status(400).json({ error: 'End Date must be on or after Start Date' });
+        const fs = payload.fiscal_year_start ? new Date(payload.fiscal_year_start) : null;
+        const fe = payload.fiscal_year_end ? new Date(payload.fiscal_year_end) : null;
+        if (fs && isNaN(fs.getTime())) return res.status(400).json({ error: 'Invalid Fiscal Year Start' });
+        if (fe && isNaN(fe.getTime())) return res.status(400).json({ error: 'Invalid Fiscal Year End' });
+        if (fs && fe && fe < fs) return res.status(400).json({ error: 'Fiscal Year End must be on or after Fiscal Year Start' });
+      } catch (ve) { return res.status(400).json({ error: 'Invalid date(s) supplied' }); }
+    }
+
+    // Enforce plan limits when creating Branches or Users
+    try {
+      if ((tableKey === 'branches' || tableKey === 'users') && payload?.business_id) {
+        // Find business and its plan
+        const businesses = await fetchFromGrist(BUSINESSES_TABLE);
+        const biz = (businesses || []).find(b => String(b.id) === String(payload.business_id) || String(b.business_id||'') === String(payload.business_id));
+        const planId = biz?.subscription_id;
+        if (planId) {
+          const subs = await fetchFromGrist(SUBSCRIPTIONS_TABLE);
+          const plan = (subs || []).find(p => String(p.id) === String(planId));
+          const limitStaff = Number(plan?.limit_max_staff);
+          const limitBranches = Number(plan?.limit_max_branches);
+          if (tableKey === 'branches' && Number.isFinite(limitBranches)) {
+            const branches = await fetchFromGrist(BRANCHES_TABLE);
+            const count = (branches || []).filter(r => String(r.business_id) === String(payload.business_id)).length;
+            if (count >= limitBranches) {
+              return res.status(400).json({ error: `Branch limit reached for this plan (${limitBranches}). Upgrade plan to add more branches.` });
+            }
+          }
+          if (tableKey === 'users' && Number.isFinite(limitStaff)) {
+            const users = await fetchFromGrist(USERS_TABLE);
+            const count = (users || []).filter(u => String(u.business_id) === String(payload.business_id) && String(u.role||'').toLowerCase() !== 'saas admin').length;
+            if (count >= limitStaff) {
+              return res.status(400).json({ error: `Staff limit reached for this plan (${limitStaff}). Upgrade plan to add more staff.` });
+            }
+          }
+        }
+      }
+    } catch (limitErr) { console.warn('Plan limit enforcement warning:', limitErr?.message); }
+
     const r = await addToGrist(cfg.name, payload);
     if (!r.success) return res.status(500).json({ error: r.error || 'Failed to create' });
     res.status(201).json(r.data);
@@ -154,6 +205,21 @@ router.patch('/:table/:id', async (req, res) => {
     const cfg = getConfig(req.params.table);
     if (!cfg) return res.status(400).json({ error: 'Unknown table' });
     const upd = cfg.sanitize(req.body || {});
+    const tableKey = String(req.params.table || '').toLowerCase();
+    if (tableKey === 'businesses') {
+      try {
+        const s = upd.start_date ? new Date(upd.start_date) : null;
+        const e = upd.end_date ? new Date(upd.end_date) : null;
+        if (s && isNaN(s.getTime())) return res.status(400).json({ error: 'Invalid Start Date' });
+        if (e && isNaN(e.getTime())) return res.status(400).json({ error: 'Invalid End Date' });
+        if (s && e && e < s) return res.status(400).json({ error: 'End Date must be on or after Start Date' });
+        const fs = upd.fiscal_year_start ? new Date(upd.fiscal_year_start) : null;
+        const fe = upd.fiscal_year_end ? new Date(upd.fiscal_year_end) : null;
+        if (fs && isNaN(fs.getTime())) return res.status(400).json({ error: 'Invalid Fiscal Year Start' });
+        if (fe && isNaN(fe.getTime())) return res.status(400).json({ error: 'Invalid Fiscal Year End' });
+        if (fs && fe && fe < fs) return res.status(400).json({ error: 'Fiscal Year End must be on or after Fiscal Year Start' });
+      } catch (ve) { return res.status(400).json({ error: 'Invalid date(s) supplied' }); }
+    }
     const r = await updateGristRecord(cfg.name, Number(req.params.id), upd);
     if (!r.success) return res.status(500).json({ error: r.error || 'Failed to update' });
     res.json(r.data);

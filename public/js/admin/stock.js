@@ -5,7 +5,7 @@
   // Helpers
   const $ = (id)=> document.getElementById(id);
   const el = (t, c)=>{ const e = document.createElement(t); if (c) e.className = c; return e; };
-  const fmt = (n)=> new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n||0));
+  const fmt = (n)=> { try { if (window.App?.I18n?.formatCurrency) return App.I18n.formatCurrency(n); } catch {} return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n||0)); };
   const nowIso = ()=> new Date().toISOString();
   const uid = ()=> Math.random().toString(36).slice(2)+Date.now().toString(36);
 

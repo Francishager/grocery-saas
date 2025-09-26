@@ -75,16 +75,17 @@ function setActiveSection(id) {
   const target = document.getElementById(id);
   if (target) target.classList.add('active');
   document.querySelectorAll('#sidebarNav .nav-link').forEach(a => a.classList.toggle('active', a.getAttribute('data-target') === id));
+  try { localStorage.setItem('admin_active_section', id); } catch {}
   const title = {
     'section-dashboard': 'Dashboard',
     'section-create-tenant': 'Create Tenant',
     'section-businesses': 'Businesses',
     'section-subs-all': 'All Subscriptions',
-    'section-subs-new': 'New Subscription',
     'section-plans': 'Plans & Pricing',
+    'section-plan-editor': 'Plan Editor',
     'section-my-subscription': 'My Subscription',
     'section-invoices': 'Invoices & Payments',
-    'section-features': 'Manage Features',
+    'section-features': 'Business Feature Overrides',
     'section-renewal': 'Renewal Status',
     'section-payment-methods': 'Payment Methods',
     // Stock & Sales
@@ -113,13 +114,15 @@ function setActiveSection(id) {
     'section-settings-shop': 'Shop Settings',
     'section-settings-fiscal': 'Fiscal Year Settings',
     'section-settings-currencies': 'Currencies'
-  }[id] || 'SaaS Admin';
-  document.getElementById('pageTitle').textContent = title;
+  };
+  const i18 = (window.App && App.I18n) ? App.I18n : null;
+  const resolvedTitle = i18 ? (i18.t('nav', id) || title[id] || 'SaaS Admin') : (title[id] || 'SaaS Admin');
+  document.getElementById('pageTitle').textContent = resolvedTitle;
   if (id === 'section-stock') { if (window.App?.Admin?.Stock?.setupUI) App.Admin.Stock.setupUI(); }
   if (id === 'section-dashboard') { if (window.App?.Admin?.Dashboard?.load) App.Admin.Dashboard.load(); }
   if (id === 'section-businesses') { if (window.App?.Admin?.Businesses?.setupUI) App.Admin.Businesses.setupUI(); if (window.App?.Admin?.Businesses?.loadList) App.Admin.Businesses.loadList(); }
   if (id === 'section-subs-all') { if (window.App?.Admin?.Subscriptions?.setupUI) App.Admin.Subscriptions.setupUI(); if (window.App?.Admin?.Subscriptions?.loadAll) App.Admin.Subscriptions.loadAll(); }
-  if (id === 'section-subs-new') { if (window.App?.Admin?.Subscriptions?.setupUI) App.Admin.Subscriptions.setupUI(); }
+  if (id === 'section-users') { if (window.App?.Admin?.Users?.setupUI) App.Admin.Users.setupUI(); if (window.App?.Admin?.Users?.loadList) App.Admin.Users.loadList(); }
   if (id === 'section-plans') {
     // Prefer modular scripts
     if (window.App?.Admin?.Plans?.setupUI) App.Admin.Plans.setupUI();
@@ -130,10 +133,14 @@ function setActiveSection(id) {
   if (id === 'section-invoices') { if (window.App?.Admin?.Billing?.loadInvoices) App.Admin.Billing.loadInvoices(); }
   if (id === 'section-renewal') { if (window.App?.Admin?.Billing?.loadRenewal) App.Admin.Billing.loadRenewal(); }
   if (id === 'section-payment-methods') { if (window.App?.Admin?.Billing?.loadPaymentMethods) App.Admin.Billing.loadPaymentMethods(); }
+  if (id === 'section-settings-shop' || id === 'section-settings-fiscal') { if (window.App?.Admin?.Settings?.setupUI) App.Admin.Settings.setupUI(); }
   if (id === 'section-features') {
     if (window.App?.Admin?.Features?.setupUI) App.Admin.Features.setupUI();
-    if (window.App?.Admin?.Features?.loadTable) App.Admin.Features.loadTable();
-    if (window.App?.Admin?.Features?.loadMatrix) App.Admin.Features.loadMatrix();
+    // Seed the catalog into Features table (idempotent), then render catalog list
+    (async ()=>{
+      try { if (window.App?.Admin?.Features?.ensureCatalogSeed) await App.Admin.Features.ensureCatalogSeed(); } catch(e){ console.warn('Catalog seed failed:', e); }
+      try { if (window.App?.Admin?.Features?.renderCatalog) App.Admin.Features.renderCatalog(); } catch(e){ console.warn('Catalog render failed:', e); }
+    })();
   }
   // Lazy init Accounting UI when any accounting section is visited
   if (id && id.indexOf('section-accounting-') === 0) {
@@ -222,7 +229,10 @@ function setupNav() {
 // ---- Dashboard Metrics ----
 let revenueChart, plansChart;
 function formatCurrency(n) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+  try {
+    if (window.App?.I18n?.formatCurrency) return App.I18n.formatCurrency(n);
+  } catch {}
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n||0));
 }
 
 function renderKPIs(cards) {
@@ -429,14 +439,11 @@ function renderReview() {
   const data = {
     business: document.getElementById('pf_bizName')?.value || '',
     tier: document.getElementById('pf_bizTier')?.value || '',
-    limits: document.getElementById('pf_bizLimits')?.value || '',
     owner: {
       fname: document.getElementById('pf_ownerFname')?.value || '',
       mname: document.getElementById('pf_ownerMname')?.value || '',
       lname: document.getElementById('pf_ownerLname')?.value || '',
       email: document.getElementById('pf_ownerEmail')?.value || '',
-      password: document.getElementById('pf_ownerTempPass')?.value || '',
-      bizId: document.getElementById('pf_ownerBizId')?.value || '',
       bizName: document.getElementById('pf_ownerBizName')?.value || ''
     }
   };
@@ -447,12 +454,8 @@ function renderReview() {
       <div class="col-md-6"><strong>Tier:</strong> ${data.tier}</div>
     </div>
     <div class="row mt-2">
-      <div class="col-12"><strong>Limits:</strong> <pre>${data.limits}</pre></div>
-    </div>
-    <div class="row mt-2">
       <div class="col-12"><strong>Owner:</strong> ${data.owner.fname} ${data.owner.mname} ${data.owner.lname}</div>
       <div class="col-12"><strong>Email:</strong> ${data.owner.email}</div>
-      <div class="col-12"><strong>Business ID:</strong> ${data.owner.bizId}</div>
     </div>
   `;
 }
@@ -467,14 +470,11 @@ async function submitProvision(e) {
     const bizPayload = {
       name: document.getElementById('pf_bizName')?.value?.trim(),
       subscription_tier: document.getElementById('pf_bizTier')?.value,
-      limits: JSON.parse(document.getElementById('pf_bizLimits')?.value || '{}'),
       owner: {
         fname: document.getElementById('pf_ownerFname')?.value?.trim(),
         mname: document.getElementById('pf_ownerMname')?.value?.trim(),
         lname: document.getElementById('pf_ownerLname')?.value?.trim(),
         email: document.getElementById('pf_ownerEmail')?.value?.trim(),
-        password: document.getElementById('pf_ownerTempPass')?.value,
-        business_id: document.getElementById('pf_ownerBizId')?.value?.trim(),
         business_name: document.getElementById('pf_ownerBizName')?.value?.trim()
       }
     };
@@ -567,9 +567,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.App?.Admin?.Plans?.loadTable) await App.Admin.Plans.loadTable();
     if (window.App?.Admin?.Features?.loadTable) await App.Admin.Features.loadTable();
     if (window.App?.Admin?.Subscriptions?.loadAll) await App.Admin.Subscriptions.loadAll();
-    
-    // Set dashboard as active by default
-    setActiveSection('section-dashboard');
+    // Ensure Plan modal bindings are available even before visiting the section
+    try { if (window.App?.Admin?.Plans?.setupUI) App.Admin.Plans.setupUI(); } catch {}
+
+    // Restore last active section; default to dashboard if none
+    const last = (()=>{ try { return localStorage.getItem('admin_active_section'); } catch { return null; } })();
+    const initial = (last && document.getElementById(last)) ? last : 'section-dashboard';
+    setActiveSection(initial);
     
     console.log('Admin dashboard initialized successfully');
   } catch (error) {

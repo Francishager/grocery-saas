@@ -7,11 +7,21 @@ const API_KEY = process.env.GRIST_API_KEY;
 const DOC_ID = process.env.GRIST_DOC_ID;
 const BASE_URL = `https://docs.getgrist.com/api/docs/${DOC_ID}/tables`;
 
-// Encrypt-everything-by-default policy with a minimal whitelist of fields
-// that must remain plaintext to support server-side filtering and sorting.
-// Configure via UNENCRYPTED_FIELDS env var (comma-separated).
+// Encrypt-everything-by-default policy with a whitelist of fields that must remain
+// plaintext to support server-side filtering, sorting, and clean UI display.
+// You can override with UNENCRYPTED_FIELDS env var (comma-separated).
+// Expanded defaults include common presentational and relational fields.
 const UNENCRYPTED_FIELDS = new Set(
-  String(process.env.UNENCRYPTED_FIELDS || 'business_id,created_at,updated_at,date')
+  String(process.env.UNENCRYPTED_FIELDS || [
+    'business_id','branch_id','owner_id',
+    'created_at','updated_at','date',
+    // Presentational fields
+    'name','code','description','status','is_active',
+    // Plan/Subscription fields
+    'price','price_monthly','price_termly','price_annual','billing_cycle',
+    // Subscription_Features mapping fields
+    'subscription_id','feature_id','limit_value'
+  ].join(','))
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)
