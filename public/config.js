@@ -16,7 +16,8 @@
     try { localStorage.setItem('API_URL', fromQuery); } catch {}
   }
 
-  const domainDefault = (isGhPages || isNetlify) ? 'https://grocery-saas.onrender.com' : '';
+  // Default to Render backend for any non-local deployment unless overridden by query/localStorage/preset
+  const domainDefault = 'https://grocery-saas.onrender.com';
   const api = fromQuery || fromStorage || preset || (isLocal ? 'http://localhost:3000' : domainDefault);
   window.APP_CONFIG.API_URL = api;
   // Expose to App namespace for js/api.js consumers
