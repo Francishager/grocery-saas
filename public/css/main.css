@@ -54,12 +54,20 @@ body.dark .dot{background:#f87171}
 
 /* Simple dropdowns */
 .dropdown{position:relative}
-.dropdown-menu{position:absolute;right:0;top:100%;min-width:220px;background:#fff;border:1px solid #e5e7eb;border-radius:.375rem;box-shadow:0 10px 25px rgba(0,0,0,.08);padding:.25rem 0;display:none;z-index:1050}
+.dropdown-menu{position:absolute;right:0;top:100%;min-width:220px;background:#fff;border:1px solid #e5e7eb;border-radius:.375rem;box-shadow:0 10px 25px rgba(0,0,0,.08);padding:.25rem 0;display:none;z-index:2000}
 .dropdown-menu.show{display:block}
 .dropdown-header{padding:.5rem .75rem;font-weight:600;color:#334155;border-bottom:1px solid #eef2f7}
 .dropdown-item{width:100%;padding:.5rem .75rem;background:transparent;border:0;text-align:left}
 .dropdown-item:hover{background:#f8fafc}
 .dropdown-divider{height:1px;background:#eef2f7;margin:.25rem 0}
+
+/* Ensure plan actions dropdown is not clipped inside responsive table */
+#plansTableContainer .table-responsive{overflow:visible}
+#plansTableContainer .dropdown-menu{z-index:2000}
+
+/* Ensure businesses dropdown is visible inside table wrap */
+#section-businesses .table-wrap{overflow:visible}
+#section-businesses .dropdown-menu{z-index:2000}
 
 /***** Cards *****/
 .card .text-muted.small{color:var(--muted)!important}

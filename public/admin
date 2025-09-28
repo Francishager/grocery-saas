@@ -24,26 +24,6 @@
         <span id="sidebarUserRole" class="text-muted xsmall">—</span>
       </div>
 
-      <!-- Modals: Assign Plan to Business -->
-      <div class="modal" id="assignPlanModal" tabindex="-1">
-        <div class="modal-dialog">
-          <div class="modal-content">
-            <div class="modal-header"><h6 class="modal-title">Assign Plan</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-            <div class="modal-body">
-              <input type="hidden" id="ap_business_id" />
-              <div class="mb-2"><span class="small text-muted">Business</span><div id="ap_business_name" class="fw-semibold">—</div></div>
-              <div class="mb-2">
-                <label class="form-label">Plan</label>
-                <select id="ap_planId" class="form-select">
-                  <option value="">—</option>
-                </select>
-              </div>
-              <div class="form-text">Assigning a plan links the business to a subscription for feature mapping and billing cycle.</div>
-            </div>
-            <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="ap_save" class="btn btn-primary btn-sm">Save</button></div>
-          </div>
-        </div>
-      </div>
     </div>
     <nav class="nav flex-column px-3 mt-3" id="sidebarNav">
       <a class="nav-link py-2 active" data-target="section-dashboard" href="#">Dashboard</a>
@@ -133,6 +113,81 @@
       </div>
     </nav>
   </aside>
+  
+  <!-- Modals: Assign Plan to Business (moved outside sidebar) -->
+  <div class="modal" id="assignPlanModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">Assign Plan</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="ap_business_id" />
+          <div class="mb-2"><span class="small text-muted">Business</span><div id="ap_business_name" class="fw-semibold">—</div></div>
+          <div class="mb-2">
+            <label class="form-label">Plan</label>
+            <select id="ap_planId" class="form-select">
+              <option value="">—</option>
+            </select>
+          </div>
+          <div class="form-text">Assigning a plan links the business to a subscription for feature mapping and billing cycle.</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="ap_save" class="btn btn-primary btn-sm">Save</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals: Edit Business (moved outside sidebar) -->
+  <div class="modal" id="businessEditModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">Edit Business</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="be_id" />
+          <div class="mb-2">
+            <label for="be_name" class="form-label">Name</label>
+            <input id="be_name" class="form-control" placeholder="Business Name" />
+          </div>
+          <div class="mb-2">
+            <label for="be_code" class="form-label">Business ID</label>
+            <input id="be_code" class="form-control" placeholder="Auto-generated" readonly />
+          </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="be_save" class="btn btn-primary btn-sm">Save</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals: Invite Owner (moved outside sidebar) -->
+  <div class="modal" id="inviteOwnerModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">Invite Owner</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="io_biz_id" />
+          <div class="mb-2"><span class="small text-muted">Business</span><div id="io_biz_name" class="fw-semibold">—</div></div>
+          <form id="inviteOwnerForm" class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">First Name</label>
+              <input id="io_fname" class="form-control" required />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Last Name</label>
+              <input id="io_lname" class="form-control" required />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Email</label>
+              <input id="io_email" type="email" class="form-control" required />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Phone (optional)</label>
+              <input id="io_phone" class="form-control" />
+            </div>
+          </form>
+          <div class="form-text">This will create an Owner user for the business and send a temporary password and OTP to complete setup.</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="io_save" class="btn btn-primary btn-sm">Send Invite</button></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Main content -->
   <div class="content">

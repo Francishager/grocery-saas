@@ -20,40 +20,46 @@ const tables = {
       created_at: new Date().toISOString(),
       is_active: body.is_active !== false,
     }),
-    sanitize: (body) => ({
-      business_id: body.business_id || null,
-      fname: body.fname || '',
-      mname: body.mname || '',
-      lname: body.lname || '',
-      phone_number: body.phone_number || '',
-      email: body.email || '',
-      role: body.role || 'Owner',
-      // password_hash should be set via auth flow
-      otp_code: body.otp_code || null,
-      otp_expires: body.otp_expires || null,
-      last_login: body.last_login || null,
-      is_active: typeof body.is_active === 'boolean' ? body.is_active : true,
-      // Preferred field name
-      txn_account: body.txn_account || body.txn_account_code || null,
-      // Backward compatible alias
-      txn_account_code: body.txn_account || body.txn_account_code || null,
-    })
+    sanitize: (body) => {
+      const out = {};
+      if ('business_id' in body) out.business_id = body.business_id || null;
+      if ('fname' in body) out.fname = body.fname || '';
+      if ('mname' in body) out.mname = body.mname || '';
+      if ('lname' in body) out.lname = body.lname || '';
+      if ('phone_number' in body) out.phone_number = body.phone_number || '';
+      if ('email' in body) out.email = body.email || '';
+      if ('role' in body) out.role = body.role || 'Owner';
+      if ('password_hash' in body) out.password_hash = body.password_hash; // allow direct set when explicitly provided
+      if ('otp_code' in body) out.otp_code = body.otp_code || null;
+      if ('otp_expires' in body) out.otp_expires = body.otp_expires || null;
+      if ('last_login' in body) out.last_login = body.last_login || null;
+      if ('is_active' in body) out.is_active = typeof body.is_active === 'boolean' ? body.is_active : true;
+      if ('txn_account' in body || 'txn_account_code' in body) {
+        const val = body.txn_account || body.txn_account_code || null;
+        out.txn_account = val; out.txn_account_code = val;
+      }
+      if ('business_name' in body) out.business_name = body.business_name || '';
+      return out;
+    }
   },
   Businesses: {
     name: BUSINESSES_TABLE,
     defaults: (body) => ({ status: body.status || 'active', created_at: new Date().toISOString() }),
-    sanitize: (body) => ({
-      name: body.name || '',
-      owner_id: body.owner_id || null,
-      subscription_id: body.subscription_id || null,
-      start_date: body.start_date || null,
-      end_date: body.end_date || null,
-      logo_url: body.logo_url || null,
-      fiscal_year_start: body.fiscal_year_start || null,
-      fiscal_year_end: body.fiscal_year_end || null,
-      status: body.status || 'active',
-      created_at: body.created_at || new Date().toISOString(),
-    })
+    sanitize: (body) => {
+      const out = {};
+      if ('name' in body) out.name = body.name || '';
+      if ('owner_id' in body) out.owner_id = body.owner_id || null;
+      if ('subscription_id' in body) out.subscription_id = body.subscription_id || null;
+      if ('start_date' in body) out.start_date = body.start_date || null;
+      if ('end_date' in body) out.end_date = body.end_date || null;
+      if ('logo_url' in body) out.logo_url = body.logo_url || null;
+      if ('fiscal_year_start' in body) out.fiscal_year_start = body.fiscal_year_start || null;
+      if ('fiscal_year_end' in body) out.fiscal_year_end = body.fiscal_year_end || null;
+      if ('status' in body) out.status = body.status || 'active';
+      if ('created_at' in body) out.created_at = body.created_at || new Date().toISOString();
+      if ('business_id' in body) out.business_id = body.business_id; // allow setting code when explicitly provided
+      return out;
+    }
   },
   Branches: {
     name: BRANCHES_TABLE,

@@ -3,7 +3,7 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-import { fetchFromGrist, addToGrist, updateGristRecord, bulkAddToGrist, decryptDeep, fetchTableColumns } from "./gristUtils.js";
+import { fetchFromGrist, addToGrist, updateGristRecord, bulkAddToGrist, decryptDeep, fetchTableColumns, deleteFromGrist, listGristTables } from "./gristUtils.js";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
@@ -33,6 +33,24 @@ function validateEnv() {
   }
 }
 validateEnv();
+
+// Startup diagnostics: verify Grist table names exist
+(async () => {
+  try {
+    const tables = await listGristTables();
+    if (Array.isArray(tables) && tables.length) {
+      if (!tables.includes(BUSINESSES_TABLE)) {
+        console.warn(`[Startup] Grist table not found: ${BUSINESSES_TABLE}. Available: ${tables.join(', ')}`);
+      }
+      if (!tables.includes(USERS_TABLE)) {
+        console.warn(`[Startup] Grist table not found: ${USERS_TABLE}.`);
+      }
+      if (!tables.includes(SUBSCRIPTIONS_TABLE)) {
+        console.warn(`[Startup] Grist table not found: ${SUBSCRIPTIONS_TABLE}.`);
+      }
+    }
+  } catch (e) { console.warn('Startup table check failed:', e?.message); }
+})();
 
 const app = express();
 // Configure CORS: allow credentials and restrict to configured origins if provided
@@ -67,7 +85,7 @@ app.use((req, res, next) => {
   }
   next();
 });
-
+ 
 // === Purchases: create purchase (Owner, Manager, Accountant) ===
 app.post('/purchases', authenticateToken, requireRole(['Owner','Manager','Accountant']), async (req, res) => {
   try {
@@ -932,7 +950,7 @@ app.post("/admin/businesses", ...withAuthAndAbility, requireRole(["SaaS Admin"])
       created_at: new Date().toISOString(),
       is_active: true
     };
-    const result = await addToGrist("Businesses", business);
+    const result = await addToGrist(BUSINESSES_TABLE, business);
     if (!result.success) return res.status(500).json({ error: "Failed to create business" });
     res.status(201).json(decryptDeep({ message: "Business created", business }));
   } catch (e) {
@@ -980,7 +998,7 @@ app.post("/admin/owners", ...withAuthAndAbility, requireRole(["SaaS Admin"]), as
 // === SaaS Admin: list businesses ===
 app.get("/admin/businesses", ...withAuthAndAbility, requireRole(["SaaS Admin"]), async (req, res) => {
   try {
-    const businesses = await fetchFromGrist("Businesses");
+    const businesses = await fetchFromGrist(BUSINESSES_TABLE);
     res.json(decryptDeep(businesses));
   } catch (e) {
     console.error("List businesses error:", e);
@@ -995,7 +1013,7 @@ app.get("/admin/metrics", ...withAuthAndAbility, requireRole(["SaaS Admin"]), as
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     // Fetch core tables
-    const businesses = await fetchFromGrist("Businesses");
+    const businesses = await fetchFromGrist(BUSINESSES_TABLE);
     let subscriptions = [];
     try { subscriptions = await fetchFromGrist("Subscription"); } catch {}
 
@@ -1141,10 +1159,10 @@ app.post('/admin/subscription/downgrade', ...withAuthAndAbility, requireRole(['S
       is_active: true
     };
     if (latest && latest.id) {
-      const r = await updateGristRecord('Subscription', latest.id, payload);
+      const r = await updateGristRecord(SUBSCRIPTIONS_TABLE, latest.id, payload);
       if (!r.success) return res.status(500).json({ error: 'Failed to update subscription' });
     } else {
-      const add = await addToGrist('Subscription', { ...payload, start_date: new Date().toISOString(), created_at: new Date().toISOString() });
+      const add = await addToGrist(SUBSCRIPTIONS_TABLE, { ...payload, start_date: new Date().toISOString(), created_at: new Date().toISOString() });
       if (!add.success) return res.status(500).json({ error: 'Failed to create subscription' });
     }
     res.json(decryptDeep({ message: 'Subscription downgraded', plan, billing_cycle }));
@@ -1253,8 +1271,8 @@ app.post('/admin/subscriptions', ...withAuthAndAbility, requireRole(['SaaS Admin
 app.get('/admin/subscription', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
   try {
     let subscriptions = [];
-    try { subscriptions = await fetchFromGrist('Subscription'); } catch {}
-    const businesses = await fetchFromGrist('Businesses');
+    try { subscriptions = await fetchFromGrist(SUBSCRIPTIONS_TABLE); } catch {}
+    const businesses = await fetchFromGrist(BUSINESSES_TABLE);
     const latest = subscriptions.sort((a,b)=> new Date(b.updated_at||b.renewed_at||b.created_at||0) - new Date(a.updated_at||a.renewed_at||a.created_at||0))[0];
     const plan = latest?.plan || latest?.subscription_plan || latest?.tier || (businesses[0]?.subscription_tier) || 'free';
     const cycle = latest?.billing_cycle || 'monthly';
@@ -1354,7 +1372,7 @@ app.get('/me/features', authenticateToken, async (req, res) => {
     let planCodes = [];
     if (business_id) {
       try {
-        const businesses = await fetchFromGrist('Businesses');
+        const businesses = await fetchFromGrist(BUSINESSES_TABLE);
         const biz = (businesses||[]).find(b => String(b.business_id||b.id||'') === String(business_id) || String(b.id||'') === String(business_id));
         const subscription_id = biz?.subscription_id;
         if (subscription_id){
@@ -1427,6 +1445,102 @@ app.get('/admin/payment-methods', ...withAuthAndAbility, requireRole(['SaaS Admi
     { id: 'mobile_money', name: 'Mobile Money' },
     { id: 'card', name: 'Visa / MasterCard' }
   ]);
+});
+
+// === SaaS Admin: invite owner for an existing business ===
+app.post('/admin/invite-owner', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    const { business_id, email, fname, lname, phone_number = '', locale } = req.body || {};
+    if (!business_id || !email || !fname || !lname) {
+      return res.status(400).json({ error: 'business_id, email, fname, lname are required' });
+    }
+    const businesses = await fetchFromGrist(BUSINESSES_TABLE);
+    const biz = (businesses || []).find(b => String(b.business_id) === String(business_id));
+    if (!biz) return res.status(404).json({ error: 'Business not found' });
+
+    const existing = await fetchFromGrist(USERS_TABLE);
+    if ((existing || []).find(u => u.email === email)) {
+      return res.status(409).json({ error: 'User already exists' });
+    }
+
+    const tempPassword = generateTempPassword(12);
+    const password_hash = await bcrypt.hash(tempPassword, 12);
+    const otp = generateOTP();
+    const otp_expires = new Date(Date.now() + 24*60*60*1000).toISOString();
+    let ownerPayload = {
+      email,
+      password_hash,
+      password: password_hash,
+      role: 'Owner',
+      fname,
+      mname: '',
+      lname,
+      phone_number,
+      business_id,
+      business_name: biz.name || '',
+      is_active: true,
+      created_at: new Date().toISOString(),
+      force_password_reset: true,
+      otp_code: otp,
+      otp_expires,
+    };
+    // Filter to existing columns to avoid Grist schema errors
+    try {
+      const cols = await fetchTableColumns(USERS_TABLE);
+      if (Array.isArray(cols) && cols.length){
+        const allowed = new Set(cols.map(String));
+        ownerPayload = Object.fromEntries(Object.entries(ownerPayload).filter(([k]) => allowed.has(String(k))));
+      }
+    } catch {}
+    const userRes = await addToGrist(USERS_TABLE, ownerPayload);
+    if (!userRes.success) return res.status(500).json({ error: 'Failed to create owner' });
+
+    // Patch business with owner_id
+    try { await updateGristRecord(BUSINESSES_TABLE, biz.id, { owner_id: userRes.data?.id }); } catch (e) { console.warn('invite-owner: patch business failed:', e?.message); }
+
+    // Send invite email
+    try {
+      const frontUrl = (process.env.FRONTEND_ORIGIN || process.env.APP_URL || process.env.PUBLIC_URL || '').trim() || `http://localhost:${PORT}`;
+      const loginUrl = `${frontUrl}/`;
+      const { subject, html } = getEmailContent(locale || process.env.DEFAULT_LOCALE, {
+        ownerFname: fname,
+        businessName: biz.name || business_id,
+        businessId: business_id,
+        tempPassword,
+        otp,
+        loginUrl,
+      });
+      await sendMail(email, subject, html);
+    } catch (e) { console.warn('invite-owner: email send failed:', e?.message); }
+
+    res.status(201).json(decryptDeep({ message: 'Owner invited', email, business_id }));
+  } catch (e) {
+    console.error('Invite owner error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// === SaaS Admin: re-invite owner (send fresh OTP) ===
+app.post('/admin/reinvite-owner/:business_id', ...withAuthAndAbility, requireRole(['SaaS Admin']), async (req, res) => {
+  try {
+    const business_id = String(req.params.business_id || '').trim();
+    if (!business_id) return res.status(400).json({ error: 'business_id required' });
+    const users = await fetchFromGrist(USERS_TABLE);
+    const owner = (users || []).find(u => String(u.business_id) === business_id && String(u.role||'').toLowerCase() === 'owner');
+    if (!owner) return res.status(404).json({ error: 'Owner not found for business' });
+    const otp = generateOTP();
+    const otp_expires = new Date(Date.now() + 24*60*60*1000).toISOString();
+    try { await updateGristRecord(USERS_TABLE, owner.id, { otp_code: otp, otp_expires, force_password_reset: true }); } catch (e) {
+      console.warn('reinvite-owner: set OTP failed:', e?.message);
+      return res.status(500).json({ error: 'Failed to set reset token' });
+    }
+    // Send reset email (simpler content)
+    try { await sendMail(owner.email, 'Password reset code (OTP)', `<p>Hello ${owner.fname||''},</p><p>Your password reset code is: <b>${otp}</b></p><p>This OTP expires in 24 hours.</p>`); } catch (e) { console.warn('reinvite-owner: email send failed:', e?.message); }
+    res.json(decryptDeep({ message: 'Owner re-invited', email: owner.email, business_id }));
+  } catch (e) {
+    console.error('Reinvite owner error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Helper: generate 6-digit OTP
@@ -1502,7 +1616,7 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
     }
 
     // 0) Generate unique Business ID (tenant code)
-    const businesses = await fetchFromGrist("Businesses");
+    const businesses = await fetchFromGrist(BUSINESSES_TABLE);
     const users = await fetchFromGrist(USERS_TABLE);
     const taken = new Set([
       ...(Array.isArray(businesses) ? businesses.map(b => String(b.business_id || '')) : []),
@@ -1512,6 +1626,11 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
     let candidate = `${base}-001`;
     let i = 1;
     while (taken.has(candidate)) { i++; candidate = `${base}-${String(i).padStart(3,'0')}`; if (i > 9999) break; }
+
+    // Pre-check owner email to avoid creating a business without an owner
+    if ((users || []).find(u => u.email === owner.email)) {
+      return res.status(409).json({ error: "Owner email already exists" });
+    }
 
     // 1) Create business
     const bizPayload = {
@@ -1526,23 +1645,27 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
       is_active: true,
       created_at: new Date().toISOString()
     };
-    const bizRes = await addToGrist("Businesses", bizPayload);
+    // Filter business payload to existing columns
+    try {
+      const colsBiz = await fetchTableColumns(BUSINESSES_TABLE);
+      if (Array.isArray(colsBiz) && colsBiz.length){
+        const allowed = new Set(colsBiz.map(String));
+        bizPayload = Object.fromEntries(Object.entries(bizPayload).filter(([k]) => allowed.has(String(k))));
+      }
+    } catch {}
+    const bizRes = await addToGrist(BUSINESSES_TABLE, bizPayload);
     if (!bizRes.success) return res.status(500).json({ error: "Failed to create business" });
 
     // 2) Create owner with temporary password and forced reset
-    const existing = await fetchFromGrist(USERS_TABLE);
-    if (existing.find(u => u.email === owner.email)) {
-      return res.status(409).json({ error: "Owner email already exists" });
-    }
     const tempPassword = generateTempPassword(12);
     const password_hash = await bcrypt.hash(tempPassword, 12);
     const otp = generateOTP();
     const otp_expires = new Date(Date.now() + 24*60*60*1000).toISOString();
-    const ownerPayload = {
+    let ownerPayload = {
       email: owner.email,
       password_hash,
       password: password_hash, // compatibility
-      role: "Owner",
+      role: 'Owner',
       fname: owner.fname,
       mname: owner.mname || "",
       lname: owner.lname,
@@ -1555,14 +1678,26 @@ app.post(["/admin/create-tenant", "/admin/provision-tenant"], ...withAuthAndAbil
       otp_code: otp,
       otp_expires
     };
+    // Filter to existing user columns to avoid schema errors
+    try {
+      const cols = await fetchTableColumns(USERS_TABLE);
+      if (Array.isArray(cols) && cols.length){
+        const allowed = new Set(cols.map(String));
+        ownerPayload = Object.fromEntries(Object.entries(ownerPayload).filter(([k]) => allowed.has(String(k))));
+      }
+    } catch {}
     const userRes = await addToGrist(USERS_TABLE, ownerPayload);
-    if (!userRes.success) return res.status(500).json({ error: "Failed to create owner" });
+    if (!userRes.success) {
+      // Rollback the business so we don't leave an orphan
+      try { await deleteFromGrist(BUSINESSES_TABLE, bizRes.data?.id); } catch (rb) { console.warn('Rollback business failed:', rb?.message); }
+      return res.status(500).json({ error: "Failed to create owner" });
+    }
 
     // 2b) Update business with owner_id
     try {
       const ownerId = userRes.data?.id;
       if (ownerId) {
-        await updateGristRecord("Businesses", bizRes.data?.id, { owner_id: ownerId, subscription_id: business.subscription_id || null });
+        await updateGristRecord(BUSINESSES_TABLE, bizRes.data?.id, { owner_id: ownerId, subscription_id: business.subscription_id || null });
       }
     } catch (e) { console.warn('Failed to patch business with owner_id:', e?.message); }
 

@@ -46,6 +46,21 @@ function encryptRecord(tableName, fields) {
   return out;
 }
 
+// List Grist tables for diagnostics
+export async function listGristTables() {
+  try {
+    const url = `https://docs.getgrist.com/api/docs/${DOC_ID}/tables`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${API_KEY}` } });
+    if (!res.ok) return [];
+    const json = await res.json().catch(()=>null);
+    const list = Array.isArray(json?.tables) ? json.tables : (Array.isArray(json) ? json : []);
+    return list.map(t => t.id || t.tableId || t.name).filter(Boolean);
+  } catch (e) {
+    console.warn('listGristTables failed:', e?.message);
+    return [];
+  }
+}
+
 // Fetch Grist table columns for diagnostics
 export async function fetchTableColumns(tableName) {
   try {
@@ -141,13 +156,17 @@ export async function addToGrist(tableName, data) {
       })
     });
 
+    const text = await res.text();
     if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`HTTP error! status: ${res.status}, message: ${errorText}`);
+      throw new Error(`HTTP error! status: ${res.status}, message: ${text}`);
     }
-
-    const json = await res.json();
-    return { success: true, data: { id: json.records[0]?.id, ...decryptRecord(json.records[0]?.fields || {}) } };
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (json && Array.isArray(json.records) && json.records.length) {
+      return { success: true, data: { id: json.records[0]?.id, ...decryptRecord(json.records[0]?.fields || {}) } };
+    }
+    // Fallback: return decrypted payload when API returned empty body
+    return { success: true, data: decryptRecord(data) };
 
   } catch(err) {
     console.error("Error adding to Grist table:", tableName, err);
@@ -174,13 +193,17 @@ export async function updateGristRecord(tableName, recordId, data) {
       })
     });
 
+    const text = await res.text();
     if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`HTTP error! status: ${res.status}, message: ${errorText}`);
+      throw new Error(`HTTP error! status: ${res.status}, message: ${text}`);
     }
-
-    const json = await res.json();
-    return { success: true, data: { id: json.records[0]?.id, ...decryptRecord(json.records[0]?.fields || {}) } };
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (json && Array.isArray(json.records) && json.records.length) {
+      return { success: true, data: { id: json.records[0]?.id, ...decryptRecord(json.records[0]?.fields || {}) } };
+    }
+    // Fallback: return minimal data when API returned empty body
+    return { success: true, data: { id: recordId, ...decryptRecord(data) } };
 
   } catch(err) {
     console.error("Error updating Grist record:", tableName, recordId, err);
@@ -199,7 +222,7 @@ export async function deleteFromGrist(tableName, recordId) {
         "Authorization": `Bearer ${API_KEY}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify([recordId])
+      body: JSON.stringify({ ids: [Number(recordId)] })
     });
 
     if (!res.ok) {

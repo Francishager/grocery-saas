@@ -156,18 +156,25 @@ async function fetchPlanMaps(planId){
           <td>${(p.limit_max_branches ?? '—')}</td>
           <td>${active}</td>
           <td class="text-end">
-            <button class="btn btn-sm btn-outline-primary" data-edit-plan="${p.id}" data-can="manage:all">Edit</button>
-            <button class="btn btn-sm btn-outline-danger ms-1" data-del-plan="${p.id}" data-can="manage:all">Delete</button>
+            <div class="dropdown">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Actions">⋮</button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="#" data-edit-plan="${p.id}" data-can="manage:all">Edit</a></li>
+                <li><a class="dropdown-item text-danger" href="#" data-del-plan="${p.id}" data-can="manage:all">Delete</a></li>
+              </ul>
+            </div>
           </td>
         </tr>`;
       }).join('');
       if (root.ACL && root.ability) root.ACL.applyDomPermissions(root.ability, tbody);
       tbody.querySelectorAll('[data-edit-plan]').forEach(b=>b.addEventListener('click',(e)=>{
+        e.preventDefault();
         const id = e.currentTarget.getAttribute('data-edit-plan');
         const p = items.find(x=>String(x.id)===String(id));
         openForm(p);
       }));
       tbody.querySelectorAll('[data-del-plan]').forEach(b=>b.addEventListener('click', async (e)=>{
+        e.preventDefault();
         const id = e.currentTarget.getAttribute('data-del-plan');
         if (!confirm('Delete this plan?')) return;
         try {

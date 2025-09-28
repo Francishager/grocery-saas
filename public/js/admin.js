@@ -43,11 +43,82 @@ function bsModal(id){
   if (window.bootstrap && bootstrap.Modal){
     return new bootstrap.Modal(el);
   }
-  // Fallback minimal modal controller
-  return {
-    show(){ el.classList.add('show'); el.style.display = 'block'; },
-    hide(){ el.classList.remove('show'); el.style.display = 'none'; }
+  // Fallback minimal modal controller with ARIA + focus management
+  let prevFocus = null;
+  let keyHandler = null;
+  let backdrop = null;
+  const focusableSelector = 'a[href], area[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const getFocusable = () => Array.from(el.querySelectorAll(focusableSelector)).filter(n=> n.offsetParent !== null);
+  const setBackgroundInert = (on) => {
+    try {
+      Array.from(document.body.children).forEach(node => {
+        if (node === el) return;
+        if (on) node.setAttribute('inert', ''); else node.removeAttribute('inert');
+      });
+    } catch {}
   };
+  const addDismissHandlers = ()=>{
+    try {
+      el.querySelectorAll('[data-bs-dismiss="modal"]').forEach(btn => {
+        if (btn._boundDismiss) return; btn._boundDismiss = true;
+        btn.addEventListener('click', (e) => { e.preventDefault(); api.hide(); });
+      });
+    } catch {}
+  };
+  const api = {
+    show(){
+      // ARIA & role
+      el.setAttribute('role', 'dialog');
+      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+      el.removeAttribute('aria-hidden');
+      el.setAttribute('aria-modal', 'true');
+      // Backdrop
+      try {
+        backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop show';
+        document.body.appendChild(backdrop);
+      } catch {}
+      // Visual
+      el.classList.add('show');
+      el.style.display = 'block';
+      try { document.body.classList.add('modal-open'); } catch {}
+      // Focus
+      try {
+        prevFocus = document.activeElement;
+        const f = getFocusable();
+        if (f.length) f[0].focus(); else el.focus();
+        keyHandler = (ev)=>{ if (ev.key === 'Escape') { ev.preventDefault(); api.hide(); } };
+        document.addEventListener('keydown', keyHandler, true);
+      } catch {}
+      // Prevent interacting with background
+      setBackgroundInert(true);
+      addDismissHandlers();
+    },
+    hide(){
+      // Move focus OUT first to avoid aria-hidden warning
+      try {
+        const current = document.activeElement;
+        if (el.contains(current)) {
+          if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
+          else if (typeof document.body.focus === 'function') document.body.focus();
+        }
+      } catch {}
+      // ARIA
+      el.setAttribute('aria-hidden', 'true');
+      el.removeAttribute('aria-modal');
+      // Visual
+      el.classList.remove('show');
+      el.style.display = 'none';
+      try { document.body.classList.remove('modal-open'); } catch {}
+      // Backdrop
+      try { if (backdrop && backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); backdrop = null; } catch {}
+      // Restore background interactivity
+      setBackgroundInert(false);
+      // Cleanup key handler
+      try { if (keyHandler) document.removeEventListener('keydown', keyHandler, true); } catch {}
+    }
+  };
+  return api;
 }
 
 async function requireAdmin() {

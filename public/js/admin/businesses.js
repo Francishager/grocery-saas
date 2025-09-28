@@ -202,16 +202,37 @@
     if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Loading...</td></tr>`;
     try {
-      const data = await (root.API ? root.API.get('/admin/businesses', { ttl: 30000 }) : (async ()=>{
-        const resp = await fetch(`${root.API_URL||window.location.origin}/admin/businesses`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-        const j = await resp.json(); if (!resp.ok) throw new Error(j.error||'Failed to load businesses'); return j; })());
+      const [data, plans] = await (root.API
+        ? Promise.all([
+            root.API.get('/admin/businesses', { ttl: 30000 }),
+            root.API.get('/admin/crud/Subscription', { ttl: 30000 })
+          ])
+        : (async ()=>{
+            const [respBiz, respPlans] = await Promise.all([
+              fetch(`${root.API_URL||window.location.origin}/admin/businesses`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+              fetch(`${root.API_URL||window.location.origin}/admin/crud/Subscription`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+            ]);
+            const jb = await respBiz.json(); if (!respBiz.ok) throw new Error(jb.error||'Failed to load businesses');
+            const jp = await respPlans.json().catch(()=>([]));
+            return [jb, Array.isArray(jp) ? jp : []];
+          })());
       if (!Array.isArray(data) || data.length === 0) { tbody.innerHTML = `<tr><td colspan="6" class="text-muted">No businesses yet</td></tr>`; return; }
+      const planMap = new Map();
+      try { (plans||[]).forEach(p => { const label = `${p.name||p.code||'Plan'}${p.billing_cycle?` (${p.billing_cycle})`:''}`; planMap.set(String(p.id), label); }); } catch {}
       tbody.innerHTML = data.map(b => {
-        const active = (typeof b.is_active === 'boolean') ? (b.is_active ? 'Yes' : 'No') : '—';
         const created = b.created_at ? new Date(b.created_at).toLocaleString() : '—';
-        const tier = b.subscription_tier || '—';
+        const planLabel = planMap.get(String(b.subscription_id)) || b.subscription_tier || '—';
+        const statusStr = (b.status || '').toString().toLowerCase();
+        const active = (typeof b.is_active === 'boolean') ? (b.is_active ? 'Yes' : 'No') : (statusStr ? (statusStr === 'active' ? 'Yes' : 'No') : '—');
+        const tier = planLabel;
         const name = b.name || '—';
         const bizid = b.business_id || '—';
+        const planId = b.subscription_id || '';
+        const btnLabel = planId ? 'Change Plan' : 'Assign Plan';
+        const hasOwner = !!b.owner_id;
+        const inviteItem = hasOwner
+          ? `<li><a class="dropdown-item" href="#" data-reinvite-owner="${bizid}" data-biz-name="${name}">Re-invite Owner</a></li>`
+          : `<li><a class="dropdown-item" href="#" data-invite-owner="${bizid}" data-biz-name="${name}">Invite Owner</a></li>`;
         return `<tr>
           <td>${name}</td>
           <td>${bizid}</td>
@@ -219,7 +240,15 @@
           <td>${active}</td>
           <td>${created}</td>
           <td class="text-end">
-            <button class="btn btn-sm btn-outline-primary" data-assign-plan="${b.id}" data-biz-name="${name}">Assign Plan</button>
+            <div class="dropdown">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Actions">⋮</button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="#" data-assign-plan="${b.id}" data-biz-name="${name}" data-plan-id="${planId}">${btnLabel}</a></li>
+                <li><a class="dropdown-item" href="#" data-edit-business="${b.id}" data-biz-name="${name}" data-biz-code="${bizid}">Edit</a></li>
+                <li><a class="dropdown-item text-danger" href="#" data-del-business="${b.id}" data-biz-name="${name}">Delete</a></li>
+                ${inviteItem}
+              </ul>
+            </div>
           </td>
         </tr>`;
       }).join('');
@@ -228,9 +257,63 @@
       tbody.querySelectorAll('[data-assign-plan]')?.forEach(btn=>{
         if (btn._bound) return; btn._bound = true;
         btn.addEventListener('click', async (e)=>{
+          e.preventDefault();
           const id = e.currentTarget.getAttribute('data-assign-plan');
           const name = e.currentTarget.getAttribute('data-biz-name') || '—';
-          openAssignPlan(id, name);
+          const planId = e.currentTarget.getAttribute('data-plan-id') || '';
+          openAssignPlan(id, name, planId);
+        });
+      });
+      // Bind Edit business
+      tbody.querySelectorAll('[data-edit-business]')?.forEach(btn=>{
+        if (btn._bound) return; btn._bound = true;
+        btn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          const id = e.currentTarget.getAttribute('data-edit-business');
+          const name = e.currentTarget.getAttribute('data-biz-name') || '';
+          const code = e.currentTarget.getAttribute('data-biz-code') || '';
+          openBusinessEdit({ id, name, business_id: code });
+        });
+      });
+      // Bind Delete business
+      tbody.querySelectorAll('[data-del-business]')?.forEach(btn=>{
+        if (btn._bound) return; btn._bound = true;
+        btn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          const id = e.currentTarget.getAttribute('data-del-business');
+          const name = e.currentTarget.getAttribute('data-biz-name') || '';
+          if (!confirm(`Delete business "${name}"? This does not delete related users/branches.`)) return;
+          try {
+            if (root.API) await root.API.delete(`/admin/crud/Businesses/${id}`);
+            else {
+              const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Businesses/${id}`, { method:'DELETE', headers:{ Authorization:`Bearer ${localStorage.getItem('token')}` } });
+              const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j?.error||'Failed to delete business');
+            }
+            showToast('Business deleted');
+            try { root.API?.invalidate?.('/admin/crud/Businesses'); } catch {}
+            loadList();
+          } catch(err){ showAlert(err.message, 'danger'); }
+        });
+      });
+      // Bind Invite Owner
+      tbody.querySelectorAll('[data-invite-owner]')?.forEach(btn=>{
+        if (btn._bound) return; btn._bound = true;
+        btn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          const business_id = e.currentTarget.getAttribute('data-invite-owner');
+          const name = e.currentTarget.getAttribute('data-biz-name') || '';
+          openInviteOwner({ business_id, name });
+        });
+      });
+      // Bind Re-invite Owner
+      tbody.querySelectorAll('[data-reinvite-owner]')?.forEach(btn=>{
+        if (btn._bound) return; btn._bound = true;
+        btn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          const business_id = e.currentTarget.getAttribute('data-reinvite-owner');
+          const name = e.currentTarget.getAttribute('data-biz-name') || '';
+          // Open the Invite Owner form prefilled with current owner details (if any)
+          openInviteOwner({ business_id, name, prefill: true });
         });
       });
     } catch (err) {
@@ -252,6 +335,12 @@
     if (!assignModal) assignModal = bsModal('assignPlanModal');
     const saveBtn = document.getElementById('ap_save');
     if (saveBtn && !saveBtn._bound){ saveBtn._bound = true; saveBtn.addEventListener('click', saveAssignPlan); }
+    // Business edit modal controls
+    const beSave = document.getElementById('be_save');
+    if (beSave && !beSave._bound){ beSave._bound = true; beSave.addEventListener('click', saveBusinessEdit); }
+    // Invite owner modal controls
+    const ioSave = document.getElementById('io_save');
+    if (ioSave && !ioSave._bound){ ioSave._bound = true; ioSave.addEventListener('click', saveInviteOwner); }
     setupWizard();
     try { fillPlanDropdown(); } catch {}
   }
@@ -272,11 +361,12 @@
     } catch(e){ console.warn('Plan dropdown load failed:', e?.message); }
   }
 
-  async function openAssignPlan(businessId, businessName){
+  async function openAssignPlan(businessId, businessName, currentPlanId){
     try {
       document.getElementById('ap_business_id').value = businessId;
       document.getElementById('ap_business_name').textContent = businessName || '—';
       await fillPlanDropdown('ap_planId');
+      try { if (currentPlanId) { const sel = document.getElementById('ap_planId'); if (sel) sel.value = String(currentPlanId); } } catch {}
       assignModal?.show();
     } catch (e){ console.warn('openAssignPlan failed:', e?.message); }
   }
@@ -290,12 +380,108 @@
       if (root.API) await root.API.patch(`/admin/crud/Businesses/${id}`, { body: payload });
       else {
         const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Businesses/${id}`, { method:'PATCH', headers: { 'Content-Type':'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(payload) });
-        const j = await r.json(); if (!r.ok) throw new Error(j.error||'Failed to assign plan');
+        const t = await r.text(); let j = {}; try { j = t ? JSON.parse(t) : {}; } catch {}
+        if (!r.ok) throw new Error(j.error||'Failed to assign plan');
       }
       assignModal?.hide(); showToast('Plan assigned to business');
       try { root.API?.invalidate?.('/admin/crud/Businesses'); } catch {}
       try { loadList(); } catch {}
     } catch (e){ showAlert(e.message,'danger'); }
+  }
+
+  function openBusinessEdit(biz){
+    try {
+      document.getElementById('be_id').value = biz?.id || '';
+      document.getElementById('be_name').value = biz?.name || '';
+      document.getElementById('be_code').value = biz?.business_id || '';
+      bsModal('businessEditModal')?.show();
+    } catch (e){ console.warn('openBusinessEdit failed:', e?.message); }
+  }
+
+  async function saveBusinessEdit(){
+    try{
+      const id = document.getElementById('be_id')?.value;
+      const name = document.getElementById('be_name')?.value?.trim();
+      if (!id) return;
+      const payload = { name };
+      if (root.API) await root.API.patch(`/admin/crud/Businesses/${id}`, { body: payload });
+      else {
+        const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Businesses/${id}`, { method:'PATCH', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(payload) });
+        const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j?.error||'Failed to save business');
+      }
+      bsModal('businessEditModal')?.hide(); showToast('Business updated');
+      try { root.API?.invalidate?.('/admin/crud/Businesses'); } catch {}
+      loadList();
+    } catch(e){ showAlert(e.message,'danger'); }
+  }
+
+  async function openInviteOwner({ business_id, name, prefill=false }){
+    try{
+      document.getElementById('io_biz_id').value = business_id || '';
+      document.getElementById('io_biz_name').textContent = name || '—';
+      const form = document.getElementById('inviteOwnerForm'); if (form) form.reset();
+      if (prefill && business_id) {
+        try {
+          const users = await (root.API
+            ? root.API.get('/admin/crud/Users', { ttl: 10000 })
+            : (async ()=>{
+                const r = await fetch(`${root.API_URL||window.location.origin}/admin/crud/Users`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+                const j = await r.json(); if (!r.ok) throw new Error(j.error||'Failed to load users'); return j;
+              })());
+          const owner = (users||[]).find(u => String(u.business_id) === String(business_id) && String(u.role||'').toLowerCase() === 'owner');
+          if (owner) {
+            const set = (id,val)=>{ const el=document.getElementById(id); if (el) el.value = val || ''; };
+            set('io_email', owner.email);
+            set('io_fname', owner.fname);
+            set('io_lname', owner.lname);
+            set('io_phone', owner.phone_number);
+          }
+        } catch (pe) { console.warn('Prefill owner failed:', pe?.message); }
+      }
+      bsModal('inviteOwnerModal')?.show();
+    } catch(e){ console.warn('openInviteOwner failed:', e?.message); }
+  }
+
+  async function saveInviteOwner(){
+    try{
+      const business_id = document.getElementById('io_biz_id')?.value?.trim();
+      const email = document.getElementById('io_email')?.value?.trim();
+      const fname = document.getElementById('io_fname')?.value?.trim();
+      const lname = document.getElementById('io_lname')?.value?.trim();
+      const phone_number = document.getElementById('io_phone')?.value?.trim();
+      if (!business_id || !email || !fname || !lname) return showAlert('Please complete required fields','danger');
+      const payload = { business_id, email, fname, lname, phone_number };
+      if (root.API) {
+        try {
+          await root.API.post('/admin/invite-owner', { body: payload });
+          bsModal('inviteOwnerModal')?.hide(); showToast('Owner invited');
+        } catch (err) {
+          const msg = String(err?.message||'');
+          if (msg.includes('409') || /exists/i.test(msg)) {
+            try {
+              await root.API.post(`/admin/reinvite-owner/${encodeURIComponent(business_id)}`);
+              bsModal('inviteOwnerModal')?.hide(); showToast('Owner re-invited');
+            } catch (e2) { showAlert(e2.message||'Failed to re-invite owner','danger'); }
+          } else {
+            showAlert(err.message||'Failed to invite owner','danger');
+          }
+        }
+      } else {
+        const r = await fetch(`${root.API_URL||window.location.origin}/admin/invite-owner`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(payload) });
+        if (!r.ok) {
+          const t = await r.text(); let j = {}; try { j = t ? JSON.parse(t) : {}; } catch {}
+          if (r.status === 409 || /exists/i.test(j?.error||'')) {
+            const rr = await fetch(`${root.API_URL||window.location.origin}/admin/reinvite-owner/${encodeURIComponent(business_id)}`, { method:'POST', headers:{ Authorization:`Bearer ${localStorage.getItem('token')}` } });
+            const jj = await rr.json().catch(()=>({})); if (!rr.ok) throw new Error(jj?.error||'Failed to re-invite owner');
+            bsModal('inviteOwnerModal')?.hide(); showToast('Owner re-invited');
+          } else {
+            throw new Error(j?.error||'Failed to invite owner');
+          }
+        } else {
+          bsModal('inviteOwnerModal')?.hide(); showToast('Owner invited');
+        }
+      }
+    } catch(e){ showAlert(e.message,'danger'); }
   }
 
   Admin.Businesses = { setupUI, loadList, submit };
