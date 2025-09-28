@@ -197,12 +197,12 @@
         <span id="pageTitle" class="fw-semibold d-none d-sm-inline">Dashboard</span>
       </div>
       <div class="d-flex align-items-center gap-2">
-        <div class="dropdown d-md-none">
+        <div class="dropdown d-none d-md-flex">
           <button class="btn btn-outline-secondary btn-sm icon-btn" id="langIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Language">🌐</button>
           <div class="dropdown-menu dropdown-menu-end" id="langMenuMobile" style="max-height:60vh; overflow:auto"></div>
         </div>
-        <div class="dropdown d-md-none">
-          <button class="btn btn-outline-secondary btn-sm icon-btn" id="currencyIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Currency">💱</button>
+        <div class="dropdown d-none d-md-flex">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="currencyIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Currency">💰</button>
           <div class="dropdown-menu dropdown-menu-end" id="currencyMenuMobile" style="max-height:60vh; overflow:auto"></div>
         </div>
         <div class="dropdown">
@@ -216,7 +216,7 @@
         </div>
         <a class="btn btn-outline-secondary btn-sm icon-btn" id="messagesBtn" href="mailto:support@example.com" title="Messages/Support">💬</a>
         <button class="btn btn-outline-secondary btn-sm icon-btn" id="themeToggle" title="Switch theme">🌙</button>
-        <div class="d-none d-md-flex align-items-center gap-2">
+        <div class="d-md-none align-items-center gap-2">
           <select id="langSelect" class="form-select form-select-sm" title="Language">
             <option value="en-US">English</option>
             <option value="lg-UG">Luganda</option>

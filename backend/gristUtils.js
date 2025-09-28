@@ -214,9 +214,22 @@ export async function updateGristRecord(tableName, recordId, data) {
 // Delete a record from a Grist table
 export async function deleteFromGrist(tableName, recordId) {
   try {
-    const url = `${BASE_URL}/${tableName}/records`;
+    // Prefer single-record endpoint to avoid issues with DELETE bodies across proxies
+    const urlSingle = `${BASE_URL}/${tableName}/records/${encodeURIComponent(recordId)}`;
+    const resSingle = await fetch(urlSingle, {
+      method: 'DELETE',
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`
+      }
+    });
 
-    const res = await fetch(url, {
+    if (resSingle.ok || resSingle.status === 204) {
+      return { success: true };
+    }
+
+    // Fallback to batch delete with JSON body (Grist supports this format)
+    const urlBatch = `${BASE_URL}/${tableName}/records`;
+    const resBatch = await fetch(urlBatch, {
       method: 'DELETE',
       headers: {
         "Authorization": `Bearer ${API_KEY}`,
@@ -225,9 +238,9 @@ export async function deleteFromGrist(tableName, recordId) {
       body: JSON.stringify({ ids: [Number(recordId)] })
     });
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`HTTP error! status: ${res.status}, message: ${errorText}`);
+    if (!resBatch.ok) {
+      const errorText = await resBatch.text();
+      throw new Error(`HTTP error! status: ${resBatch.status}, message: ${errorText}`);
     }
 
     return { success: true };
