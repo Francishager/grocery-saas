@@ -185,81 +185,8 @@ app.post('/logout', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Serve static frontend from ../public
-const publicDir = path.join(__dirname, "..", "public");
-
-// Protected SaaS Admin console routes BEFORE static to prevent static bypass
-app.get("/admin", (req, res) => {
-  try {
-    const raw = req.headers.cookie || '';
-    let tok = null;
-    for (const part of raw.split(';')) { const [k, ...v] = part.trim().split('='); if (k === 'token') { tok = decodeURIComponent(v.join('=')); break; } }
-    if (!tok) return res.redirect('/');
-    const payload = jwt.verify(tok, process.env.JWT_SECRET);
-    if (payload?.role !== 'SaaS Admin') return res.redirect('/dashboard');
-  } catch {
-    return res.redirect('/');
-  }
-  res.type('html');
-  const adminNoExt = path.join(publicDir, 'admin');
-  const adminHtml = path.join(publicDir, 'admin.html');
-  const target = fs.existsSync(adminNoExt) ? adminNoExt : adminHtml;
-  res.sendFile(target);
-});
-
-app.get("/admin.html", (req, res) => {
-  try {
-    const raw = req.headers.cookie || '';
-    let tok = null;
-    for (const part of raw.split(';')) { const [k, ...v] = part.trim().split('='); if (k === 'token') { tok = decodeURIComponent(v.join('=')); break; } }
-    if (!tok) return res.redirect('/');
-    const payload = jwt.verify(tok, process.env.JWT_SECRET);
-    if (payload?.role !== 'SaaS Admin') return res.redirect('/dashboard');
-  } catch {
-    return res.redirect('/');
-  }
-  res.type('html');
-  const adminNoExt = path.join(publicDir, 'admin');
-  const adminHtml = path.join(publicDir, 'admin.html');
-  const target = fs.existsSync(adminNoExt) ? adminNoExt : adminHtml;
-  res.sendFile(target);
-});
-
-// Protect admin JS assets; require valid JWT cookie and SaaS Admin role before serving
-app.use((req, res, next) => {
-  try {
-    if (req.method === 'GET' && req.path && (req.path === '/js/admin.js' || req.path.startsWith('/js/admin/'))) {
-      const raw = req.headers.cookie || '';
-      let tok = null;
-      for (const part of raw.split(';')) {
-        const [k, ...v] = part.trim().split('=');
-        if (k === 'token') { tok = decodeURIComponent(v.join('=')); break; }
-      }
-      if (!tok) return res.status(401).send('Unauthorized');
-      const payload = jwt.verify(tok, process.env.JWT_SECRET);
-      if ((payload?.role || '') !== 'SaaS Admin') return res.status(403).send('Forbidden');
-    }
-  } catch { return res.status(401).send('Unauthorized'); }
-  next();
-});
-// If obfuscation is enabled, transparently serve /js/admin/* from /js/admin-obf/* when available
-if (process.env.OBFUSCATE_ADMIN === 'true') {
-  const obfDir = path.join(publicDir, 'js', 'admin-obf');
-  // Map /js/admin/* to obfuscated versions when present
-  app.use('/js/admin', (req, res, next) => {
-    const rel = (req.path || '').replace(/^\/js\/admin\//, '');
-    const fp = path.join(obfDir, rel);
-    if (fs.existsSync(fp)) return res.sendFile(fp);
-    next();
-  });
-  // Map /js/admin.js to obfuscated version when present
-  app.get('/js/admin.js', (req, res, next) => {
-    const fp = path.join(obfDir, 'admin.js');
-    if (fs.existsSync(fp)) return res.sendFile(fp);
-    next();
-  });
-}
-app.use(express.static(publicDir));
+// Backend is API-only - frontend is served separately by Vite
+// All static file serving removed - use frontend dev server or build
 
 // Simple file-backed store for business feature overrides (keyed by business_id string)
 const dataDir = path.join(__dirname, 'data');
@@ -275,29 +202,18 @@ function writeBizSettings(obj){
   try { ensureBizSettings(); fs.writeFileSync(bizSettingsPath, JSON.stringify(obj, null, 2), 'utf-8'); return true; } catch { return false; }
 }
 
-// Root route -> index.html
+// API health check at root
 app.get("/", (req, res) => {
-  res.sendFile(path.join(publicDir, "index.html"));
-});
-
-// Deep link routes for static pages
-app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(publicDir, "dashboard.html"));
-});
-
-app.get("/sales", (req, res) => {
-  res.sendFile(path.join(publicDir, "sales.html"));
-});
-
-app.get("/reports", (req, res) => {
-  res.sendFile(path.join(publicDir, "reports.html"));
-});
-
-// (duplicate admin cookie helper and routes removed; consolidated earlier)
-
-// Login alias
-app.get(["/login", "/signin"], (req, res) => {
-  res.sendFile(path.join(publicDir, "index.html"));
+  res.json({ 
+    message: "Grocery SaaS API", 
+    version: "1.0.0",
+    endpoints: {
+      auth: "/api/auth",
+      invitations: "/api/invitations",
+      tenants: "/api/tenants",
+      platform: "/api/platform",
+    }
+  });
 });
 
 // === Dev seed endpoint (guarded by ENABLE_SEED) ===
