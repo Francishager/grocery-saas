@@ -1,0 +1,5 @@
+# SPA fallback - redirect all routes to index.html
+/*    /index.html   200
+
+# API proxy (optional - if you want to proxy API calls)
+# /api/*  https://grocery-saas-backend.up.railway.app/api/:splat  200
