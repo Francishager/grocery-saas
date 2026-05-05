@@ -10,6 +10,10 @@ export interface User {
   institutionId?: string
   branchId?: string
   preferences?: Record<string, any>
+  /** Whether this user is a platform-level user (SaaS Admin) */
+  isPlatformUser?: boolean
+  /** Tenant ID for business users */
+  tenantId?: string
 }
 
 export interface AuthTokens {
@@ -44,6 +48,10 @@ export interface JWTAuthContextValue {
   hasPermission: (permission: string) => boolean
   /** Check if user has role */
   hasRole: (role: string) => boolean
+  /** Check if user is SaaS Admin (platform user) */
+  isPlatformUser: () => boolean
+  /** Check if user can access business data */
+  canAccessBusinessData: () => boolean
   /** Clear error */
   clearError: () => void
   /** Set tokens manually */
@@ -256,6 +264,19 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     return user.role === role
   }, [user])
 
+  const isPlatformUser = useCallback((): boolean => {
+    if (!user) return false
+    return user.isPlatformUser === true || user.role === 'saas_admin'
+  }, [user])
+
+  const canAccessBusinessData = useCallback((): boolean => {
+    if (!user) return false
+    // Platform users (SaaS Admin) cannot access business data
+    if (isPlatformUser()) return false
+    // Business users must have a tenant ID
+    return !!user.tenantId || !!user.institutionId
+  }, [user, isPlatformUser])
+
   const clearError = useCallback(() => {
     setError(null)
   }, [])
@@ -292,6 +313,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     updateUser,
     hasPermission,
     hasRole,
+    isPlatformUser,
+    canAccessBusinessData,
     clearError,
     setTokens: setTokensManually,
   }

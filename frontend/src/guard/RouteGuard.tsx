@@ -1,6 +1,7 @@
 import React from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { businessDataPermissions } from '@/components/Constants/permissions'
 
 export interface RouteGuardProps {
   /** Children to render if access is granted */
@@ -27,6 +28,10 @@ export interface RouteGuardProps {
   checkInstitution?: boolean
   /** Whether to check branch access */
   checkBranch?: boolean
+  /** Whether this route accesses business data (blocks SaaS Admin) */
+  accessesBusinessData?: boolean
+  /** Whether this is a platform-level route (SaaS Admin only) */
+  platformOnly?: boolean
 }
 
 /**
@@ -45,8 +50,10 @@ export const RouteGuard: React.FC<RouteGuardProps> = ({
   loadingComponent,
   checkInstitution = false,
   checkBranch = false,
+  accessesBusinessData = false,
+  platformOnly = false,
 }) => {
-  const { isAuthenticated, loading, hasPermission, hasRole, user } = useJWTAuth()
+  const { isAuthenticated, loading, hasPermission, hasRole, user, isPlatformUser, canAccessBusinessData } = useJWTAuth()
   const location = useLocation()
 
   // Show loading state
@@ -57,6 +64,42 @@ export const RouteGuard: React.FC<RouteGuardProps> = ({
   // Not authenticated - redirect to login
   if (!isAuthenticated) {
     return <Navigate to={loginPath} state={{ from: location }} replace />
+  }
+
+  // Check if route is platform-only (SaaS Admin only)
+  if (platformOnly && !isPlatformUser()) {
+    return unauthorizedComponent ? (
+      <>{unauthorizedComponent}</>
+    ) : (
+      <Navigate to={unauthorizedPath} replace />
+    )
+  }
+
+  // Check if route accesses business data (block SaaS Admin)
+  if (accessesBusinessData && !canAccessBusinessData()) {
+    return unauthorizedComponent ? (
+      <>{unauthorizedComponent}</>
+    ) : (
+      <Navigate to={unauthorizedPath} replace />
+    )
+  }
+
+  // Auto-detect business data access from permission
+  if (permission && businessDataPermissions.includes(permission) && !canAccessBusinessData()) {
+    return unauthorizedComponent ? (
+      <>{unauthorizedComponent}</>
+    ) : (
+      <Navigate to={unauthorizedPath} replace />
+    )
+  }
+
+  // Auto-detect business data access from permissions array
+  if (permissions && permissions.some((p) => businessDataPermissions.includes(p)) && !canAccessBusinessData()) {
+    return unauthorizedComponent ? (
+      <>{unauthorizedComponent}</>
+    ) : (
+      <Navigate to={unauthorizedPath} replace />
+    )
   }
 
   // Check institution access

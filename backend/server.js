@@ -1758,4 +1758,19 @@ app.use('/admin/crud', ...withAuthAndAbility, requireRole(['SaaS Admin']), (req,
   next();
 }, crudRouter);
 
+// === Platform Admin Routes (SaaS Admin) ===
+import invitationsRouter from './routes/invitations.js';
+import tenantsRouter from './routes/tenants.js';
+import acceptInvitationRouter from './routes/acceptInvitation.js';
+import platformRouter from './routes/platform.js';
+
+// Public routes
+app.use('/api/invitations/accept', acceptInvitationRouter);
+app.use('/api/invitations/token', invitationsRouter);
+
+// Protected platform routes
+app.use('/api/invitations', invitationsRouter);
+app.use('/api/tenants', tenantsRouter);
+app.use('/api/platform', platformRouter);
+
 app.listen(PORT,()=>console.log(`Backend running on http://localhost:${PORT}`));
