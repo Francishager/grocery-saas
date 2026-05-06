@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { X, Mail, User, Phone, Building, Send, Loader2 } from 'lucide-react'
-import { InviteService, InvitationCreateInput } from '@/services/InviteService'
+import InviteService, { InvitationCreateInput } from '@/services/InviteService'
 
 export interface InviteBusinessOwnerModalProps {
   isOpen: boolean

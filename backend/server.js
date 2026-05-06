@@ -1689,4 +1689,8 @@ app.use('/api/invitations', invitationsRouter);
 app.use('/api/tenants', tenantsRouter);
 app.use('/api/platform', platformRouter);
 
-app.listen(PORT,()=>console.log(`Backend running on http://localhost:${PORT}`));
+// Start server - bind to 0.0.0.0 for Railway/cloud deployment
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(Number(PORT), HOST, () => {
+  console.log(`Backend running on http://${HOST}:${PORT}`);
+});

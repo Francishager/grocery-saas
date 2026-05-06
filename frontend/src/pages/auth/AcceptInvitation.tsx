@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { 
   Building, User, Mail, Lock, Phone, 
   Loader2, CheckCircle, AlertCircle, Eye, EyeOff 
@@ -7,9 +7,8 @@ import {
 import InviteService from '@/services/InviteService'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
-export const AcceptInvitation: React.FC = () => {
+const AcceptInvitation: React.FC = () => {
   const { token } = useParams<{ token: string }>()
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { setTokens, updateUser } = useJWTAuth()
 
