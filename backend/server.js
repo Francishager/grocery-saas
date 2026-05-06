@@ -1796,6 +1796,11 @@ import tenantsRouter from './routes/tenants.js';
 import acceptInvitationRouter from './routes/acceptInvitation.js';
 import platformRouter from './routes/platform.js';
 
+// New feature routes
+import receivablesRouter from './routes/receivables.js';
+import payablesRouter from './routes/payables.js';
+import expensesRouter from './routes/expenses.js';
+
 // Public routes
 app.use('/api/invitations/accept', acceptInvitationRouter);
 app.use('/api/invitations/token', invitationsRouter);
@@ -1804,6 +1809,11 @@ app.use('/api/invitations/token', invitationsRouter);
 app.use('/api/invitations', invitationsRouter);
 app.use('/api/tenants', tenantsRouter);
 app.use('/api/platform', platformRouter);
+
+// New feature routes
+app.use('/api/receivables', receivablesRouter);
+app.use('/api/payables', payablesRouter);
+app.use('/api/expenses', expensesRouter);
 
 // Start server - bind to 0.0.0.0 for Railway/cloud deployment
 const HOST = process.env.HOST || '0.0.0.0';

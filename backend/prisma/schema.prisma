@@ -12,20 +12,30 @@ datasource db {
 
 // Tenant/Business - each business is a tenant in the SaaS
 model Tenant {
-  id          String   @id @default(cuid())
+  id          String       @id @default(cuid())
   name        String
-  slug        String   @unique
-  email       String   @unique
+  slug        String       @unique
+  email       String       @unique
   phone       String?
   address     String?
   logo        String?
   status      TenantStatus @default(active)
   planId      String?
-  plan        Plan?   @relation(fields: [planId], references: [id])
+  plan        Plan?        @relation(fields: [planId], references: [id])
   users       User[]
   invitations Invitation[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // New relations
+  customers        Customer[]
+  suppliers        Supplier[]
+  usageLimit       UsageLimit?       @relation(fields: [usageLimitId], references: [id])
+  features         TenantFeature[]
+  cashAccounts     CashAccount[]
+  expenses         Expense[]
+  cashTransactions CashTransaction[]
+  usageLimitId     String?
 
   @@map("tenants")
 }
@@ -39,74 +49,80 @@ enum TenantStatus {
 
 // Subscription Plans
 model Plan {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  slug        String   @unique
-  price       Float
-  currency    String   @default("USD")
-  billingCycle String  @default("monthly") // monthly, yearly
-  features    Json     // Array of feature strings
-  maxUsers    Int      @default(5)
-  maxProducts Int      @default(100)
-  isDefault   Boolean  @default(false)
-  tenants     Tenant[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String   @unique
+  slug         String   @unique
+  price        Float
+  currency     String   @default("USD")
+  billingCycle String   @default("monthly") // monthly, yearly
+  features     Json // Array of feature strings
+  maxUsers     Int      @default(5)
+  maxProducts  Int      @default(100)
+  isDefault    Boolean  @default(false)
+  tenants      Tenant[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@map("plans")
 }
 
 // Users - can be SaaS Admin or tenant users
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  password    String
-  fname       String?
-  lname       String?
-  phone       String?
-  avatar      String?
-  role        UserRole @default(attendant)
-  tenantId    String?
-  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  isActive    Boolean  @default(true)
-  lastLogin   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String
+  fname     String?
+  lname     String?
+  phone     String?
+  avatar    String?
+  role      UserRole  @default(attendant)
+  tenantId  String?
+  tenant    Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  isActive  Boolean   @default(true)
+  lastLogin DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  // Relations
+  // Legacy relations (keep for compatibility)
   sales       Sale[]
   purchases   Purchase[]
   invitations Invitation[] @relation("CreatedBy")
+
+  // New relations
+  saleRecords       SaleRecord[]
+  supplierPurchases SupplierPurchase[]
+  expenses          Expense[]
+  cashTransactions  CashTransaction[]
 
   @@map("users")
 }
 
 enum UserRole {
-  saas_admin    // Platform admin
-  owner         // Business owner
-  manager       // Business manager
-  accountant    // Business accountant
-  attendant     // Sales attendant
+  saas_admin // Platform admin
+  owner // Business owner
+  manager // Business manager
+  accountant // Business accountant
+  attendant // Sales attendant
 }
 
 // Invitations for new business owners
 model Invitation {
-  id          String   @id @default(cuid())
+  id          String           @id @default(cuid())
   email       String
   name        String?
   phone       String?
-  token       String   @unique
+  token       String           @unique
   status      InvitationStatus @default(pending)
   planId      String?
   message     String?
   tenantId    String?
-  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  tenant      Tenant?          @relation(fields: [tenantId], references: [id])
   createdById String
-  createdBy   User     @relation("CreatedBy", fields: [createdById], references: [id])
+  createdBy   User             @relation("CreatedBy", fields: [createdById], references: [id])
   expiresAt   DateTime
   acceptedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   @@map("invitations")
 }
@@ -120,25 +136,30 @@ enum InvitationStatus {
 
 // Products/Inventory
 model Product {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   sku         String?
   barcode     String?
   description String?
   price       Float
   cost        Float?
-  quantity    Int      @default(0)
-  minStock    Int      @default(10)
+  quantity    Int       @default(0)
+  minStock    Int       @default(10)
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id])
   tenantId    String
-  isActive    Boolean  @default(true)
+  isActive    Boolean   @default(true)
   image       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  saleItems   SaleItem[]
+  // Legacy relations (keep for compatibility)
+  saleItems     SaleItem[]
   purchaseItems PurchaseItem[]
+
+  // New relations
+  saleRecordItems       SaleRecordItem[]
+  supplierPurchaseItems SupplierPurchaseItem[]
 
   @@unique([tenantId, sku])
   @@map("products")
@@ -146,13 +167,13 @@ model Product {
 
 // Categories
 model Category {
-  id          String   @id @default(cuid())
-  name        String
-  slug        String
-  tenantId    String
-  products    Product[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String    @id @default(cuid())
+  name      String
+  slug      String
+  tenantId  String
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@unique([tenantId, slug])
   @@map("categories")
@@ -160,21 +181,21 @@ model Category {
 
 // Sales/Orders
 model Sale {
-  id          String   @id @default(cuid())
-  receiptNo   String
-  tenantId    String
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  total       Float
-  subtotal    Float
-  tax         Float    @default(0)
-  discount    Float    @default(0)
+  id            String     @id @default(cuid())
+  receiptNo     String
+  tenantId      String
+  userId        String
+  user          User       @relation(fields: [userId], references: [id])
+  total         Float
+  subtotal      Float
+  tax           Float      @default(0)
+  discount      Float      @default(0)
   paymentMethod String
-  status      SaleStatus @default(completed)
-  notes       String?
-  items       SaleItem[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status        SaleStatus @default(completed)
+  notes         String?
+  items         SaleItem[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   @@unique([tenantId, receiptNo])
   @@map("sales")
@@ -189,48 +210,413 @@ enum SaleStatus {
 
 // Sale Items
 model SaleItem {
-  id          String   @id @default(cuid())
-  saleId      String
-  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id])
-  quantity    Int
-  price       Float
-  discount    Float    @default(0)
-  total       Float
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
+  discount  Float    @default(0)
+  total     Float
+  createdAt DateTime @default(now())
 
   @@map("sale_items")
 }
 
 // Purchases
 model Purchase {
-  id          String   @id @default(cuid())
-  refNo       String?
-  tenantId    String
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  supplier    String?
-  total       Float
-  notes       String?
-  items       PurchaseItem[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String         @id @default(cuid())
+  refNo     String?
+  tenantId  String
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  supplier  String?
+  total     Float
+  notes     String?
+  items     PurchaseItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   @@map("purchases")
 }
 
 // Purchase Items
 model PurchaseItem {
-  id          String   @id @default(cuid())
-  purchaseId  String
-  purchase    Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id])
-  quantity    Int
-  cost        Float
-  total       Float
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  quantity   Int
+  cost       Float
+  total      Float
+  createdAt  DateTime @default(now())
 
   @@map("purchase_items")
 }
+
+// =====================================================
+// RECEIVABLES - Customer Credit System
+// =====================================================
+
+// Customers
+model Customer {
+  id          String         @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  tenantId    String
+  creditLimit Float          @default(0)
+  balance     Float          @default(0) // Current outstanding balance
+  status      CustomerStatus @default(active)
+  trustScore  Int            @default(50) // 0-100, affects credit eligibility
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  sales    SaleRecord[]
+  payments CustomerPayment[]
+  invoices Invoice[]
+  Tenant   Tenant            @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, phone])
+  @@map("customers")
+}
+
+enum CustomerStatus {
+  active
+  inactive
+  blocked
+}
+
+// Sales Records (includes credit sales)
+model SaleRecord {
+  id            String            @id @default(cuid())
+  receiptNo     String
+  tenantId      String
+  customerId    String?
+  customer      Customer?         @relation(fields: [customerId], references: [id])
+  userId        String
+  total         Float
+  subtotal      Float
+  tax           Float             @default(0)
+  discount      Float             @default(0)
+  amountPaid    Float             @default(0)
+  balance       Float             @default(0) // Remaining balance for credit sales
+  paymentMethod String
+  paymentStatus PaymentStatus     @default(paid)
+  status        SaleRecordStatus  @default(completed)
+  dueDate       DateTime?
+  notes         String?
+  items         SaleRecordItem[]
+  payments      CustomerPayment[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  User          User              @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, receiptNo])
+  @@map("sale_records")
+}
+
+enum PaymentStatus {
+  paid // Fully paid
+  partial // Partially paid
+  unpaid // Not paid at all (credit sale)
+  overdue // Past due date
+}
+
+enum SaleRecordStatus {
+  pending
+  completed
+  cancelled
+  refunded
+}
+
+// Sale Record Items
+model SaleRecordItem {
+  id        String     @id @default(cuid())
+  saleId    String
+  sale      SaleRecord @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product    @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
+  discount  Float      @default(0)
+  total     Float
+  createdAt DateTime   @default(now())
+
+  @@map("sale_record_items")
+}
+
+// Customer Payments
+model CustomerPayment {
+  id            String      @id @default(cuid())
+  tenantId      String
+  customerId    String
+  customer      Customer    @relation(fields: [customerId], references: [id])
+  saleId        String?
+  sale          SaleRecord? @relation(fields: [saleId], references: [id])
+  amount        Float
+  paymentMethod String // cash, mobile_money, bank_transfer
+  reference     String? // Transaction reference
+  notes         String?
+  createdAt     DateTime    @default(now())
+
+  @@map("customer_payments")
+}
+
+// Invoices
+model Invoice {
+  id         String        @id @default(cuid())
+  invoiceNo  String
+  tenantId   String
+  customerId String
+  customer   Customer      @relation(fields: [customerId], references: [id])
+  saleId     String?
+  total      Float
+  amountPaid Float         @default(0)
+  balance    Float
+  status     InvoiceStatus @default(unpaid)
+  dueDate    DateTime
+  sentAt     DateTime?
+  paidAt     DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([tenantId, invoiceNo])
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  unpaid
+  partial
+  paid
+  cancelled
+  overdue
+}
+
+// =====================================================
+// PAYABLES - Supplier Management
+// =====================================================
+
+// Suppliers
+model Supplier {
+  id        String         @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  tenantId  String
+  balance   Float          @default(0) // Amount owed to supplier
+  status    SupplierStatus @default(active)
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  purchases SupplierPurchase[]
+  payments  SupplierPayment[]
+  Tenant    Tenant             @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, phone])
+  @@map("suppliers")
+}
+
+enum SupplierStatus {
+  active
+  inactive
+  blocked
+}
+
+// Supplier Purchases
+model SupplierPurchase {
+  id            String                 @id @default(cuid())
+  refNo         String?
+  tenantId      String
+  supplierId    String
+  supplier      Supplier               @relation(fields: [supplierId], references: [id])
+  userId        String
+  total         Float
+  amountPaid    Float                  @default(0)
+  balance       Float                  @default(0)
+  paymentStatus PaymentStatus          @default(unpaid)
+  dueDate       DateTime?
+  notes         String?
+  items         SupplierPurchaseItem[]
+  payments      SupplierPayment[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  User          User                   @relation(fields: [userId], references: [id])
+
+  @@map("supplier_purchases")
+}
+
+// Supplier Purchase Items
+model SupplierPurchaseItem {
+  id         String           @id @default(cuid())
+  purchaseId String
+  purchase   SupplierPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product          @relation(fields: [productId], references: [id])
+  quantity   Int
+  cost       Float
+  total      Float
+  createdAt  DateTime         @default(now())
+
+  @@map("supplier_purchase_items")
+}
+
+// Supplier Payments
+model SupplierPayment {
+  id            String            @id @default(cuid())
+  tenantId      String
+  supplierId    String
+  supplier      Supplier          @relation(fields: [supplierId], references: [id])
+  purchaseId    String?
+  purchase      SupplierPurchase? @relation(fields: [purchaseId], references: [id])
+  amount        Float
+  paymentMethod String
+  reference     String?
+  notes         String?
+  createdAt     DateTime          @default(now())
+
+  @@map("supplier_payments")
+}
+
+// =====================================================
+// EXPENSES
+// =====================================================
+
+model Expense {
+  id            String   @id @default(cuid())
+  tenantId      String
+  category      String // rent, transport, salaries, utilities, etc.
+  description   String
+  amount        Float
+  paymentMethod String
+  reference     String?
+  notes         String?
+  userId        String // Who recorded it
+  date          DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  Tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  User          User     @relation(fields: [userId], references: [id])
+
+  @@map("expenses")
+}
+
+// =====================================================
+// CASH FLOW & ACCOUNTS
+// =====================================================
+
+model CashAccount {
+  id              String            @id @default(cuid())
+  tenantId        String
+  name            String // "Cash Box", "Mobile Money", "Bank Account"
+  type            String // cash, mobile_money, bank
+  balance         Float             @default(0)
+  currency        String            @default("UGX")
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  Tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  CashTransaction CashTransaction[]
+
+  @@unique([tenantId, name])
+  @@map("cash_accounts")
+}
+
+model CashTransaction {
+  id           String      @id @default(cuid())
+  tenantId     String
+  accountId    String
+  account      CashAccount @relation(fields: [accountId], references: [id])
+  type         String // income, expense, transfer
+  amount       Float
+  balanceAfter Float
+  reference    String? // Sale ID, Purchase ID, etc.
+  description  String?
+  userId       String
+  createdAt    DateTime    @default(now())
+  Tenant       Tenant      @relation(fields: [tenantId], references: [id])
+  User         User        @relation(fields: [userId], references: [id])
+
+  @@map("cash_transactions")
+}
+
+// =====================================================
+// FEATURE ACCESS CONTROL
+// =====================================================
+
+// System Features
+model Feature {
+  id          String   @id @default(cuid())
+  name        String   @unique // "pos", "inventory", "credit", "reports", etc.
+  displayName String
+  description String?
+  category    String // "core", "advanced", "integration"
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  planFeatures   PlanFeature[]
+  tenantFeatures TenantFeature[]
+
+  @@map("features")
+}
+
+// Plan Features (which features each plan includes)
+model PlanFeature {
+  id        String   @id @default(cuid())
+  planId    String
+  featureId String
+  feature   Feature  @relation(fields: [featureId], references: [id])
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([planId, featureId])
+  @@map("plan_features")
+}
+
+// Tenant Feature Overrides (manual overrides per tenant)
+model TenantFeature {
+  id        String   @id @default(cuid())
+  tenantId  String
+  featureId String
+  feature   Feature  @relation(fields: [featureId], references: [id])
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  Tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, featureId])
+  @@map("tenant_features")
+}
+
+// Usage Limits per Tenant
+model UsageLimit {
+  id           String   @id @default(cuid())
+  tenantId     String   @unique
+  maxProducts  Int      @default(100)
+  maxUsers     Int      @default(5)
+  maxBranches  Int      @default(1)
+  maxCustomers Int      @default(100)
+  maxSuppliers Int      @default(50)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  Tenant       Tenant[]
+
+  @@map("usage_limits")
+}
+
+// =====================================================
+// UPDATE EXISTING MODELS
+// =====================================================
+
+// Update Product to include new relations
+// Update Sale to use SaleRecord instead
+// Update Purchase to use SupplierPurchase instead
