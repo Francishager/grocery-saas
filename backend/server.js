@@ -80,6 +80,126 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// === Auth Routes (Prisma-based) ===
+// Login endpoint
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password required" });
+    }
+
+    // Find user in database
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { tenant: true }
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // Compare password
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // Generate JWT tokens
+    const accessToken = jwt.sign(
+      { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role,
+        tenantId: user.tenantId,
+        isPlatformUser: user.role === 'saas_admin'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: user.id, type: 'refresh' },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() }
+    });
+
+    // Return user without password
+    const { password: _, ...userWithoutPassword } = user;
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: `${user.fname || ''} ${user.lname || ''}`.trim(),
+        role: user.role,
+        tenantId: user.tenantId,
+        isPlatformUser: user.role === 'saas_admin',
+        permissions: []
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
+        expiresIn: 86400, // 24 hours in seconds
+        tokenType: 'Bearer'
+      }
+    });
+
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Logout endpoint
+app.post("/api/auth/logout", async (req, res) => {
+  res.json({ message: "Logged out successfully" });
+});
+
+// Get current user
+app.get("/api/auth/me", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ message: "No token provided" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      include: { tenant: true }
+    });
+
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: `${user.fname || ''} ${user.lname || ''}`.trim(),
+        role: user.role,
+        tenantId: user.tenantId,
+        isPlatformUser: user.role === 'saas_admin',
+        permissions: []
+      }
+    });
+  } catch (error) {
+    res.status(401).json({ message: "Invalid token" });
+  }
+});
+
 // Basic security headers (does not prevent copying but improves security posture)
 app.use((req, res, next) => {
   res.set('X-Frame-Options', 'DENY');

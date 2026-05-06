@@ -38,8 +38,9 @@ class InviteService {
   private apiEndpoint: string
   private apiKey?: string
 
-  constructor(apiEndpoint: string = '/api/invitations', apiKey?: string) {
-    this.apiEndpoint = apiEndpoint
+  constructor(apiEndpoint?: string, apiKey?: string) {
+    const baseUrl = import.meta.env.VITE_API_URL || ''
+    this.apiEndpoint = apiEndpoint || `${baseUrl}/api/invitations`
     this.apiKey = apiKey
   }
 
