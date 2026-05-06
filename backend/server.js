@@ -46,6 +46,23 @@ validateEnv();
 })();
 
 const app = express();
+
+// Health check at root - must be before any middleware that might fail
+app.get("/", (req, res) => {
+  res.status(200).json({ 
+    status: "ok",
+    message: "Grocery SaaS API", 
+    version: "1.0.0",
+    missingEnvVars: missingEnvVars.length > 0 ? missingEnvVars : undefined,
+    endpoints: {
+      auth: "/api/auth",
+      invitations: "/api/invitations",
+      tenants: "/api/tenants",
+      platform: "/api/platform",
+    }
+  });
+});
+
 // Configure CORS: allow credentials and restrict to configured origins if provided
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN || '')
   .split(',')
@@ -194,23 +211,6 @@ function readBizSettings(){
 function writeBizSettings(obj){
   try { ensureBizSettings(); fs.writeFileSync(bizSettingsPath, JSON.stringify(obj, null, 2), 'utf-8'); return true; } catch { return false; }
 }
-
-// API health check at root
-app.get("/", (req, res) => {
-  const healthy = missingEnvVars.length === 0;
-  res.status(healthy ? 200 : 503).json({ 
-    status: healthy ? "ok" : "degraded",
-    message: "Grocery SaaS API", 
-    version: "1.0.0",
-    missingEnvVars: missingEnvVars.length > 0 ? missingEnvVars : undefined,
-    endpoints: {
-      auth: "/api/auth",
-      invitations: "/api/invitations",
-      tenants: "/api/tenants",
-      platform: "/api/platform",
-    }
-  });
-});
 
 // === Dev seed endpoint (guarded by ENABLE_SEED) ===
 app.post("/seed/dev-user", async (req, res) => {
@@ -1687,6 +1687,21 @@ app.use('/api/platform', platformRouter);
 
 // Start server - bind to 0.0.0.0 for Railway/cloud deployment
 const HOST = process.env.HOST || '0.0.0.0';
-app.listen(Number(PORT), HOST, () => {
-  console.log(`Backend running on http://${HOST}:${PORT}`);
+const server = app.listen(Number(PORT), HOST, () => {
+  console.log(`✅ Backend running on http://${HOST}:${PORT}`);
+});
+
+server.on('error', (err) => {
+  console.error('❌ Server error:', err);
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
