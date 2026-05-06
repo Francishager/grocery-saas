@@ -14,30 +14,67 @@ import {
   Mail,
   ChevronDown,
   ChevronRight,
+  Users,
+  CreditCard,
+  Wallet,
+  DollarSign,
+  FileText as FileTextIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useAuthStore, isSaaSAdmin } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 // Regular business nav items
 const businessNavItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['Owner', 'Manager', 'Accountant', 'Attendant'] },
-  { to: '/sales', label: 'Sales', icon: ShoppingCart, roles: ['Owner', 'Manager', 'Attendant'] },
-  { to: '/inventory', label: 'Inventory', icon: Package, roles: ['Owner', 'Manager', 'Accountant'] },
-  { to: '/purchases', label: 'Purchases', icon: FileText, roles: ['Owner', 'Manager', 'Accountant'] },
-  { to: '/reports', label: 'Reports', icon: TrendingUp, roles: ['Owner', 'Accountant'] },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['Owner', 'Manager', 'Accountant', 'Attendant'], feature: 'pos' },
+  { to: '/sales', label: 'Sales', icon: ShoppingCart, roles: ['Owner', 'Manager', 'Attendant'], feature: 'pos' },
+  { to: '/inventory', label: 'Inventory', icon: Package, roles: ['Owner', 'Manager', 'Accountant'], feature: 'inventory' },
+  { to: '/purchases', label: 'Purchases', icon: FileText, roles: ['Owner', 'Manager', 'Accountant'], feature: 'inventory' },
+  { to: '/reports', label: 'Reports', icon: TrendingUp, roles: ['Owner', 'Accountant'], feature: 'reports' },
 ]
 
 // SaaS Admin nav items with dropdowns
 const saasAdminNavItems = [
-  { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard, feature: 'platform' },
   { 
     label: 'Tenants', 
     icon: Building2,
+    feature: 'platform',
     children: [
-      { to: '/admin/tenants', label: 'All Tenants', icon: Building2 },
-      { to: '/admin/invitations', label: 'Invitations', icon: Mail },
+      { to: '/admin/tenants', label: 'All Tenants', icon: Building2, feature: 'platform' },
+      { to: '/admin/invitations', label: 'Invitations', icon: Mail, feature: 'platform' },
+    ]
+  },
+  {
+    label: 'Receivables',
+    icon: CreditCard,
+    feature: 'credit',
+    children: [
+      { to: '/receivables/customers', label: 'Customers', icon: Users, feature: 'customers' },
+      { to: '/receivables/sales', label: 'Credit Sales', icon: ShoppingCart, feature: 'credit' },
+      { to: '/receivables/payments', label: 'Payments', icon: DollarSign, feature: 'credit' },
+    ]
+  },
+  {
+    label: 'Payables',
+    icon: Wallet,
+    feature: 'suppliers',
+    children: [
+      { to: '/receivables/suppliers', label: 'Suppliers', icon: Building2, feature: 'suppliers' },
+      { to: '/receivables/purchases', label: 'Purchases', icon: FileTextIcon, feature: 'suppliers' },
+      { to: '/receivables/payments', label: 'Payments', icon: DollarSign, feature: 'suppliers' },
+    ]
+  },
+  {
+    label: 'Expenses',
+    icon: FileTextIcon,
+    feature: 'expenses',
+    children: [
+      { to: '/expenses/expenses', label: 'Expenses', icon: FileTextIcon, feature: 'expenses' },
+      { to: '/expenses/accounts', label: 'Cash Accounts', icon: Wallet, feature: 'expenses' },
+      { to: '/expenses/transactions', label: 'Transactions', icon: DollarSign, feature: 'cash_flow' },
     ]
   },
 ]
@@ -122,6 +159,7 @@ function CollapsibleMenuItem({ item, sidebarOpen, onNavigate }: {
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { user, logout } = useAuthStore()
+  const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -129,11 +167,34 @@ export function Layout() {
     navigate('/login')
   }
 
-  // Determine which nav items to show based on user role
+  // Determine which nav items to show based on user role and features
   const isSaasAdmin = user && isSaaSAdmin(user)
-  const navItems = isSaasAdmin ? saasAdminNavItems : businessNavItems.filter(
-    (item) => user && item.roles.includes(user.role)
-  )
+  const navItems = isSaasAdmin ? saasAdminNavItems : businessNavItems
+
+  // Filter nav items based on feature access and user role
+  const filteredNavItems = navItems
+    .map(item => {
+      // Check if user can access this feature
+      if (item.feature && !canAccessFeature(item.feature, user?.role)) {
+        return null // Hide the item completely
+      }
+      
+      // For dropdowns, filter children
+      if (item.children) {
+        const filteredChildren = item.children.filter(child => 
+          !child.feature || canAccessFeature(child.feature, user?.role)
+        )
+        
+        if (filteredChildren.length === 0) {
+          return null // Hide parent if no children are accessible
+        }
+        
+        return { ...item, children: filteredChildren }
+      }
+      
+      return item
+    })
+    .filter(item => item !== null) // Remove null items
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -173,7 +234,7 @@ export function Layout() {
 
           {/* Navigation */}
           <nav className="flex-1 space-y-1 p-4">
-            {navItems.map((item, index) => (
+            {filteredNavItems.map((item, index) => (
               <CollapsibleMenuItem
                 key={item.to || index}
                 item={item}

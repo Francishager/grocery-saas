@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Layout } from '@/components/layout/Layout'
 import { RouteGuard } from '@/guard/RouteGuard'
+import AppRouter from './AppRouter'
 
 // Pages
 import LoginPage from '@/pages/auth/LoginPage'
@@ -34,14 +35,7 @@ function PublicRoute({ children, redirectTo = '/dashboard' }: { children: React.
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/login" element={
-          <PublicRoute>
-            <LoginPage />
-          </PublicRoute>
-        } />
-        <Route path="/saas/login" element={
+      <AppRouter />
           <PublicRoute redirectTo="/saas/dashboard">
             <SaaSAdminLoginPage />
           </PublicRoute>
