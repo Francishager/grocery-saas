@@ -1,0 +1,236 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Tenant/Business - each business is a tenant in the SaaS
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  email       String   @unique
+  phone       String?
+  address     String?
+  logo        String?
+  status      TenantStatus @default(active)
+  planId      String?
+  plan        Plan?   @relation(fields: [planId], references: [id])
+  users       User[]
+  invitations Invitation[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  active
+  suspended
+  cancelled
+  trial
+}
+
+// Subscription Plans
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  price       Float
+  currency    String   @default("USD")
+  billingCycle String  @default("monthly") // monthly, yearly
+  features    Json     // Array of feature strings
+  maxUsers    Int      @default(5)
+  maxProducts Int      @default(100)
+  isDefault   Boolean  @default(false)
+  tenants     Tenant[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("plans")
+}
+
+// Users - can be SaaS Admin or tenant users
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  fname       String?
+  lname       String?
+  phone       String?
+  avatar      String?
+  role        UserRole @default(attendant)
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  isActive    Boolean  @default(true)
+  lastLogin   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  sales       Sale[]
+  purchases   Purchase[]
+  invitations Invitation[] @relation("CreatedBy")
+
+  @@map("users")
+}
+
+enum UserRole {
+  saas_admin    // Platform admin
+  owner         // Business owner
+  manager       // Business manager
+  accountant    // Business accountant
+  attendant     // Sales attendant
+}
+
+// Invitations for new business owners
+model Invitation {
+  id          String   @id @default(cuid())
+  email       String
+  name        String?
+  phone       String?
+  token       String   @unique
+  status      InvitationStatus @default(pending)
+  planId      String?
+  message     String?
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  createdById String
+  createdBy   User     @relation("CreatedBy", fields: [createdById], references: [id])
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("invitations")
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  expired
+  cancelled
+}
+
+// Products/Inventory
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  sku         String?
+  barcode     String?
+  description String?
+  price       Float
+  cost        Float?
+  quantity    Int      @default(0)
+  minStock    Int      @default(10)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  tenantId    String
+  isActive    Boolean  @default(true)
+  image       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  saleItems   SaleItem[]
+  purchaseItems PurchaseItem[]
+
+  @@unique([tenantId, sku])
+  @@map("products")
+}
+
+// Categories
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String
+  tenantId    String
+  products    Product[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, slug])
+  @@map("categories")
+}
+
+// Sales/Orders
+model Sale {
+  id          String   @id @default(cuid())
+  receiptNo   String
+  tenantId    String
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  total       Float
+  subtotal    Float
+  tax         Float    @default(0)
+  discount    Float    @default(0)
+  paymentMethod String
+  status      SaleStatus @default(completed)
+  notes       String?
+  items       SaleItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, receiptNo])
+  @@map("sales")
+}
+
+enum SaleStatus {
+  pending
+  completed
+  cancelled
+  refunded
+}
+
+// Sale Items
+model SaleItem {
+  id          String   @id @default(cuid())
+  saleId      String
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Int
+  price       Float
+  discount    Float    @default(0)
+  total       Float
+  createdAt   DateTime @default(now())
+
+  @@map("sale_items")
+}
+
+// Purchases
+model Purchase {
+  id          String   @id @default(cuid())
+  refNo       String?
+  tenantId    String
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  supplier    String?
+  total       Float
+  notes       String?
+  items       PurchaseItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("purchases")
+}
+
+// Purchase Items
+model PurchaseItem {
+  id          String   @id @default(cuid())
+  purchaseId  String
+  purchase    Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Int
+  cost        Float
+  total       Float
+  createdAt   DateTime @default(now())
+
+  @@map("purchase_items")
+}

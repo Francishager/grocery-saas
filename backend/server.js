@@ -10,6 +10,7 @@ import fs from "fs";
 import { sendMail } from "./mailer.js";
 import crudRouter from "./crudRouter.js";
 import { defineAbilityFor, authorize } from "./accessControl.js";
+import prisma from "./src/db.js";
 
 dotenv.config();
 
@@ -17,39 +18,31 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Configurable table names
-const USERS_TABLE = process.env.USERS_TABLE || "Users";
-const SUBSCRIPTIONS_TABLE = process.env.SUBSCRIPTIONS_TABLE || 'Subscription';
-const BUSINESSES_TABLE = process.env.BUSINESSES_TABLE || 'Businesses';
+// Track missing env vars for healthcheck
+let missingEnvVars = [];
 
-// Validate required environment variables at startup
+// Validate required environment variables at startup (non-blocking for deployment)
 function validateEnv() {
-  const required = ["GRIST_API_KEY", "GRIST_DOC_ID", "JWT_SECRET"];
-  const missing = required.filter((k) => !process.env[k] || String(process.env[k]).trim() === "");
-  if (missing.length) {
-    console.error("Missing required environment variables:", missing.join(", "));
-    console.error("Please create/update your .env with the required keys.");
-    process.exit(1);
+  const required = ["DATABASE_URL", "JWT_SECRET"];
+  missingEnvVars = required.filter((k) => !process.env[k] || String(process.env[k]).trim() === "");
+  if (missingEnvVars.length) {
+    console.warn("⚠️ Missing required environment variables:", missingEnvVars.join(", "));
+    console.warn("⚠️ Server will start but API calls requiring these vars will fail.");
+    console.warn("⚠️ Please set these environment variables in your deployment platform.");
+  } else {
+    console.log("✅ All required environment variables are set.");
   }
 }
 validateEnv();
 
-// Startup diagnostics: verify Grist table names exist
+// Test database connection
 (async () => {
   try {
-    const tables = await listGristTables();
-    if (Array.isArray(tables) && tables.length) {
-      if (!tables.includes(BUSINESSES_TABLE)) {
-        console.warn(`[Startup] Grist table not found: ${BUSINESSES_TABLE}. Available: ${tables.join(', ')}`);
-      }
-      if (!tables.includes(USERS_TABLE)) {
-        console.warn(`[Startup] Grist table not found: ${USERS_TABLE}.`);
-      }
-      if (!tables.includes(SUBSCRIPTIONS_TABLE)) {
-        console.warn(`[Startup] Grist table not found: ${SUBSCRIPTIONS_TABLE}.`);
-      }
-    }
-  } catch (e) { console.warn('Startup table check failed:', e?.message); }
+    await prisma.$connect();
+    console.log("✅ Database connected successfully");
+  } catch (e) {
+    console.warn("⚠️ Database connection failed:", e.message);
+  }
 })();
 
 const app = express();
@@ -204,9 +197,12 @@ function writeBizSettings(obj){
 
 // API health check at root
 app.get("/", (req, res) => {
-  res.json({ 
+  const healthy = missingEnvVars.length === 0;
+  res.status(healthy ? 200 : 503).json({ 
+    status: healthy ? "ok" : "degraded",
     message: "Grocery SaaS API", 
     version: "1.0.0",
+    missingEnvVars: missingEnvVars.length > 0 ? missingEnvVars : undefined,
     endpoints: {
       auth: "/api/auth",
       invitations: "/api/invitations",
