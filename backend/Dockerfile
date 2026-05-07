@@ -50,8 +50,8 @@ USER app
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node --eval "require('http').createServer((req, res) => res.end('OK')).listen(3000)" || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD node --eval "require('http').get('http://localhost:3000', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
