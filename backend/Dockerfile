@@ -24,7 +24,7 @@ FROM base AS runner
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup --system --group app && adduser --system --group app app
+RUN addgroup -S app && adduser -S -G app app
 
 # Copy built application
 COPY --from=builder --chown=app:app /app/node_modules ./node_modules
