@@ -3,7 +3,6 @@ import { Toaster } from '@/components/ui/toaster'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Layout } from '@/components/layout/Layout'
 import { RouteGuard } from '@/guard/RouteGuard'
-import AppRouter from './AppRouter'
 
 // Pages
 import LoginPage from '@/pages/auth/LoginPage'
@@ -17,7 +16,7 @@ import InventoryPage from '@/pages/InventoryPage'
 import PurchasesPage from '@/pages/PurchasesPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AdminPage from '@/pages/admin/AdminPage'
-import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
+import SaaSAdminDashboard from '@/pages/admin/SaaSAdminDashboard'
 
 // Public Route Component (redirects if already logged in)
 function PublicRoute({ children, redirectTo = '/dashboard' }: { children: React.ReactNode, redirectTo?: string }) {
@@ -35,7 +34,14 @@ function PublicRoute({ children, redirectTo = '/dashboard' }: { children: React.
 function App() {
   return (
     <BrowserRouter>
-      <AppRouter />
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/login" element={
+          <PublicRoute redirectTo="/dashboard">
+            <LoginPage />
+          </PublicRoute>
+        } />
+        <Route path="/saas/login" element={
           <PublicRoute redirectTo="/saas/dashboard">
             <SaaSAdminLoginPage />
           </PublicRoute>
