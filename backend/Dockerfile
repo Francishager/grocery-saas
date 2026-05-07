@@ -13,6 +13,13 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
+# Copy source files
+COPY *.js ./
+COPY *.ts ./
+COPY middleware ./middleware
+COPY routes ./routes
+COPY src ./src
+
 # Install dependencies
 RUN npm ci --only=production && npm cache clean --force
 
@@ -30,7 +37,11 @@ RUN addgroup -S app && adduser -S -G app app
 COPY --from=builder --chown=app:app /app/node_modules ./node_modules
 COPY --from=builder --chown=app:app /app/package*.json ./
 COPY --from=builder --chown=app:app /app/prisma ./prisma/
-COPY --from=builder --chown=app:app /app/dist ./dist/
+COPY --from=builder --chown=app:app /app/*.js ./
+COPY --from=builder --chown=app:app /app/*.ts ./
+COPY --from=builder --chown=app:app /app/middleware ./middleware
+COPY --from=builder --chown=app:app /app/routes ./routes
+COPY --from=builder --chown=app:app /app/src ./src
 
 # Switch to non-root user
 USER app
