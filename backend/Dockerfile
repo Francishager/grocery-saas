@@ -30,6 +30,9 @@ RUN npx prisma generate
 FROM base AS runner
 WORKDIR /app
 
+# Install OpenSSL for Prisma
+RUN apk add --no-cache openssl
+
 # Create non-root user
 RUN addgroup -S app && adduser -S -G app app
 
