@@ -1794,7 +1794,7 @@ app.use('/admin/crud', ...withAuthAndAbility, requireRole(['SaaS Admin']), (req,
 import invitationsRouter from './routes/invitations.js';
 import tenantsRouter from './routes/tenants.js';
 import acceptInvitationRouter from './routes/acceptInvitation.js';
-import platformRouter from './routes/platform.js';
+import platformRouter from './routes/platform-new.js';
 
 // New feature routes
 import receivablesRouter from './routes/receivables.js';

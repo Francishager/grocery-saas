@@ -78,7 +78,7 @@ export default function ReceivablesPage() {
   const [payments, setPayments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'sales' | 'payments'>('customers')
   const [summary, setSummary] = useState<any>(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -98,7 +98,7 @@ export default function ReceivablesPage() {
       const API_URL = import.meta.env.VITE_API_URL || ''
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
-        ...(statusFilter && { status: statusFilter })
+        ...(statusFilter !== 'all' && { status: statusFilter })
       })
       
       const response = await fetch(`${API_URL}/api/receivables/customers?${params}`)
@@ -351,7 +351,7 @@ export default function ReceivablesPage() {
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All Status</SelectItem>
+            <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="inactive">Inactive</SelectItem>
             <SelectItem value="blocked">Blocked</SelectItem>

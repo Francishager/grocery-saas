@@ -82,7 +82,7 @@ export default function SaaSAdminDashboard() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -104,10 +104,14 @@ export default function SaaSAdminDashboard() {
       const API_URL = import.meta.env.VITE_API_URL || ''
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
-        ...(statusFilter && { status: statusFilter })
+        ...(statusFilter !== 'all' && { status: statusFilter })
       })
       
-      const response = await fetch(`${API_URL}/api/platform/tenants?${params}`)
+      const response = await fetch(`${API_URL}/api/platform/tenants?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
       if (response.ok) {
         const data = await response.json()
         setTenants(data.tenants)
@@ -126,7 +130,11 @@ export default function SaaSAdminDashboard() {
   const loadPlans = async () => {
     try {
       const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/platform/plans`)
+      const response = await fetch(`${API_URL}/api/platform/plans`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
       if (response.ok) {
         const data = await response.json()
         setPlans(data)
@@ -143,7 +151,11 @@ export default function SaaSAdminDashboard() {
   const loadTenantFeatures = async (tenantId: string) => {
     try {
       const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/platform/tenant/${tenantId}/features`)
+      const response = await fetch(`${API_URL}/api/platform/tenant/${tenantId}/features`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
       if (response.ok) {
         const data = await response.json()
         setTenantFeatures(data.features)
@@ -343,7 +355,7 @@ export default function SaaSAdminDashboard() {
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="suspended">Suspended</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>

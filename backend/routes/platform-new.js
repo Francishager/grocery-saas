@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authorize } from '../accessControl.js'
+import { authenticateToken, requirePlatformAdmin } from '../middleware/auth.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -10,7 +10,7 @@ const prisma = new PrismaClient()
 // === FEATURE ACCESS CONTROL ===
 
 // Get all features (for SaaS Admin)
-router.get('/features', authorize(['saas_admin']), async (req, res) => {
+router.get('/features', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { category } = req.query
     const where = category ? { category } : {}
@@ -28,7 +28,7 @@ router.get('/features', authorize(['saas_admin']), async (req, res) => {
 })
 
 // Get tenant's accessible features
-router.get('/tenant/:tenantId/features', authorize(['saas_admin']), async (req, res) => {
+router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenantId } = req.params
 
@@ -103,7 +103,7 @@ router.get('/tenant/:tenantId/features', authorize(['saas_admin']), async (req, 
 })
 
 // Update tenant feature override
-router.post('/tenant/:tenantId/features/:featureName', authorize(['saas_admin']), async (req, res) => {
+router.post('/tenant/:tenantId/features/:featureName', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenantId, featureName } = req.params
     const { enabled } = req.body
@@ -146,7 +146,7 @@ router.post('/tenant/:tenantId/features/:featureName', authorize(['saas_admin'])
 // === PLAN MANAGEMENT ===
 
 // Get all plans with features
-router.get('/plans', authorize(['saas_admin']), async (req, res) => {
+router.get('/plans', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const plans = await prisma.plan.findMany({
       include: {
@@ -170,7 +170,7 @@ router.get('/plans', authorize(['saas_admin']), async (req, res) => {
 })
 
 // Create new plan
-router.post('/plans', authorize(['saas_admin']), async (req, res) => {
+router.post('/plans', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { name, slug, price, currency = 'USD', billingCycle = 'monthly', maxUsers = 5, maxProducts = 100, features = [] } = req.body
 
@@ -223,7 +223,7 @@ router.post('/plans', authorize(['saas_admin']), async (req, res) => {
 })
 
 // Update plan
-router.put('/plans/:id', authorize(['saas_admin']), async (req, res) => {
+router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { id } = req.params
     const { name, price, currency, billingCycle, maxUsers, maxProducts, features = [] } = req.body
@@ -272,7 +272,7 @@ router.put('/plans/:id', authorize(['saas_admin']), async (req, res) => {
 // === TENANT MANAGEMENT ===
 
 // Get all tenants with usage stats
-router.get('/tenants', authorize(['saas_admin']), async (req, res) => {
+router.get('/tenants', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 50, search, status } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -330,7 +330,7 @@ router.get('/tenants', authorize(['saas_admin']), async (req, res) => {
 })
 
 // Update tenant usage limits
-router.put('/tenants/:tenantId/limits', authorize(['saas_admin']), async (req, res) => {
+router.put('/tenants/:tenantId/limits', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenantId } = req.params
     const { maxProducts, maxUsers, maxBranches, maxCustomers, maxSuppliers } = req.body
@@ -365,7 +365,7 @@ router.put('/tenants/:tenantId/limits', authorize(['saas_admin']), async (req, r
 })
 
 // Suspend/activate tenant
-router.put('/tenants/:tenantId/status', authorize(['saas_admin']), async (req, res) => {
+router.put('/tenants/:tenantId/status', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenantId } = req.params
     const { status } = req.body
@@ -388,7 +388,7 @@ router.put('/tenants/:tenantId/status', authorize(['saas_admin']), async (req, r
 // === USAGE ANALYTICS ===
 
 // Get platform usage analytics
-router.get('/analytics/usage', authorize(['saas_admin']), async (req, res) => {
+router.get('/analytics/usage', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { startDate, endDate } = req.query
 
