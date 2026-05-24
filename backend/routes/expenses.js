@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authorize, requireTenant } from '../accessControl.js'
+import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -10,7 +10,7 @@ const prisma = new PrismaClient()
 // === EXPENSES ===
 
 // Get all expenses for tenant
-router.get('/expenses', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, category, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -55,7 +55,7 @@ router.get('/expenses', authorize(['owner', 'manager', 'accountant']), requireTe
 })
 
 // Create new expense
-router.post('/expenses', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { 
       category, 
@@ -92,7 +92,7 @@ router.post('/expenses', authorize(['owner', 'manager', 'accountant']), requireT
 })
 
 // Update expense
-router.put('/expenses/:id', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
     const { category, description, amount, paymentMethod, reference, notes, date } = req.body
@@ -132,7 +132,7 @@ router.put('/expenses/:id', authorize(['owner', 'manager', 'accountant']), requi
 // === CASH ACCOUNTS ===
 
 // Get all cash accounts
-router.get('/cash-accounts', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const accounts = await prisma.cashAccount.findMany({
       where: {
@@ -150,7 +150,7 @@ router.get('/cash-accounts', authorize(['owner', 'manager', 'accountant']), requ
 })
 
 // Create cash account
-router.post('/cash-accounts', authorize(['owner', 'manager']), requireTenant, async (req, res) => {
+router.post('/cash-accounts', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
     const { name, type, currency = 'UGX' } = req.body
 
@@ -185,7 +185,7 @@ router.post('/cash-accounts', authorize(['owner', 'manager']), requireTenant, as
 // === CASH TRANSACTIONS ===
 
 // Get cash transactions
-router.get('/cash-transactions', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, accountId, type, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -234,7 +234,7 @@ router.get('/cash-transactions', authorize(['owner', 'manager', 'accountant']), 
 // === CASH FLOW SUMMARY ===
 
 // Get cash flow overview
-router.get('/cash-flow/summary', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { startDate, endDate } = req.query
 
@@ -323,7 +323,7 @@ router.get('/cash-flow/summary', authorize(['owner', 'manager', 'accountant']), 
 // === EXPENSE CATEGORIES ===
 
 // Get expense categories
-router.get('/expense-categories', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/expense-categories', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const categories = [
       { name: 'rent', displayName: 'Rent', icon: '🏢' },

@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authorize, requireTenant } from '../accessControl.js'
+import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -10,7 +10,7 @@ const prisma = new PrismaClient()
 // === SUPPLIERS ===
 
 // Get all suppliers for tenant
-router.get('/suppliers', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/suppliers', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, search } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -52,7 +52,7 @@ router.get('/suppliers', authorize(['owner', 'manager', 'accountant']), requireT
 })
 
 // Create new supplier
-router.post('/suppliers', authorize(['owner', 'manager']), requireTenant, async (req, res) => {
+router.post('/suppliers', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
     const { name, email, phone, address, notes } = req.body
 
@@ -87,7 +87,7 @@ router.post('/suppliers', authorize(['owner', 'manager']), requireTenant, async 
 })
 
 // Update supplier
-router.put('/suppliers/:id', authorize(['owner', 'manager']), requireTenant, async (req, res) => {
+router.put('/suppliers/:id', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
     const { name, email, phone, address, status, notes } = req.body
@@ -126,7 +126,7 @@ router.put('/suppliers/:id', authorize(['owner', 'manager']), requireTenant, asy
 // === SUPPLIER PURCHASES ===
 
 // Get all supplier purchases
-router.get('/purchases', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, supplierId, paymentStatus, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -178,7 +178,7 @@ router.get('/purchases', authorize(['owner', 'manager', 'accountant']), requireT
 })
 
 // Create new supplier purchase
-router.post('/purchases', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { 
       supplierId, 
@@ -261,7 +261,7 @@ router.post('/purchases', authorize(['owner', 'manager', 'accountant']), require
 // === SUPPLIER PAYMENTS ===
 
 // Get supplier payments
-router.get('/payments', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, supplierId, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -307,7 +307,7 @@ router.get('/payments', authorize(['owner', 'manager', 'accountant']), requireTe
 })
 
 // Record supplier payment
-router.post('/payments', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { supplierId, purchaseId, amount, paymentMethod, reference, notes } = req.body
 
@@ -371,7 +371,7 @@ router.post('/payments', authorize(['owner', 'manager', 'accountant']), requireT
 // === PAYABLES REPORTS ===
 
 // Get payables summary
-router.get('/payables/summary', authorize(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/payables/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const [totalPayables, overdueCount, agingReport] = await Promise.all([
       // Total amount owed
