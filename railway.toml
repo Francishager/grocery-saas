@@ -1,8 +1,9 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
+dockerfilePath = "backend/Dockerfile"
 
 [deploy]
-startCommand = "npx prisma db push --accept-data-loss && node server.js"
+startCommand = "npx prisma db push --accept-data-loss --skip-generate && node --trace-warnings server.js 2>&1; echo 'EXIT CODE:' $?"
 healthcheckPath = "/"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"

@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { addToGrist, fetchFromGrist } from "./gristUtils.js";
 
 // Dev SaaS admin credentials (change later)

@@ -1,17 +1,22 @@
 # Use Node.js 18 LTS for better compatibility
 FROM node:18-alpine AS base
 
-# Install dependencies only when needed
-FROM base AS deps
-RUN apk add --no-cache python3 make g++
-
-# Install dependencies
+# Build stage
 FROM base AS builder
 WORKDIR /app
+
+# Install build tools for native modules
+RUN apk add --no-cache python3 make g++ openssl
 
 # Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
+
+# Install dependencies
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Generate Prisma client
+RUN npx prisma generate
 
 # Copy source files
 COPY *.js ./
@@ -20,17 +25,11 @@ COPY middleware ./middleware
 COPY routes ./routes
 COPY src ./src
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-
-# Generate Prisma client
-RUN npx prisma generate
-
 # Production stage
 FROM base AS runner
 WORKDIR /app
 
-# Install OpenSSL for Prisma
+# Install OpenSSL for Prisma runtime
 RUN apk add --no-cache openssl
 
 # Create non-root user
@@ -52,9 +51,9 @@ USER app
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD node --eval "require('http').get('http://localhost:3000', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
+# Health check (uses CJS eval which works in all contexts)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+  CMD node --eval "require('http').get('http://localhost:3000/', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
 
 # Start the application
 CMD ["node", "server.js"]
