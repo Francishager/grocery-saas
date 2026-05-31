@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>
@@ -20,6 +20,10 @@ class ApiError extends Error {
 }
 
 function getAuthToken(): string | null {
+  const stored = localStorage.getItem('auth_tokens')
+  if (stored) {
+    try { return JSON.parse(stored).accessToken } catch { return null }
+  }
   return localStorage.getItem('token')
 }
 
@@ -67,6 +71,8 @@ async function request<T>(
   if (!response.ok) {
     if (response.status === 401) {
       localStorage.removeItem('token')
+      localStorage.removeItem('auth_tokens')
+      localStorage.removeItem('auth_user')
       localStorage.removeItem('user')
       window.location.href = '/login'
     }
@@ -90,129 +96,189 @@ export const api = {
 // Auth endpoints
 export const authApi = {
   login: (email: string, password: string) =>
-    api.post<{ message: string; token: string; user: User }>('/login', {
+    api.post<{ message: string; tokens: { accessToken: string }; user: User }>('/api/auth/login', {
       body: { email, password },
       skipAuth: true,
     }),
 
   register: (data: RegisterData) =>
-    api.post<{ message: string; user: User }>('/register', {
+    api.post<{ message: string; user: User }>('/api/auth/register', {
       body: data,
       skipAuth: true,
     }),
 
   requestReset: (email: string) =>
-    api.post<{ message: string }>('/auth/request-reset', {
+    api.post<{ message: string }>('/api/auth/request-reset', {
       body: { email },
       skipAuth: true,
     }),
 
   validateToken: () =>
-    api.get<{ valid: boolean; user: User }>('/validate-token'),
+    api.get<{ valid: boolean; user: User }>('/api/auth/me'),
 
   logout: () =>
-    api.post<{ message: string }>('/logout'),
+    api.post<{ message: string }>('/api/auth/logout'),
 }
 
 // Dashboard endpoints
 export const dashboardApi = {
   getKpis: () =>
-    api.get<DashboardKpis>('/dashboard/kpis'),
+    api.get<DashboardKpis>('/api/dashboard/kpis'),
 }
 
 // Inventory endpoints
 export const inventoryApi = {
   list: (q?: string) =>
-    api.get<InventoryItem[]>('/inventory', { params: { q } }),
+    api.get<InventoryItem[]>('/api/inventory', { params: { q } }),
 
   get: (id: string) =>
-    api.get<InventoryItem>(`/inventory/${id}`),
+    api.get<InventoryItem>(`/api/inventory/${id}`),
 
   create: (data: Partial<InventoryItem>) =>
-    api.post<InventoryItem>('/inventory', { body: data }),
+    api.post<InventoryItem>('/api/inventory', { body: data }),
 
   update: (id: string, data: Partial<InventoryItem>) =>
-    api.patch<InventoryItem>(`/inventory/${id}`, { body: data }),
+    api.patch<InventoryItem>(`/api/inventory/${id}`, { body: data }),
 
   delete: (id: string) =>
-    api.delete<{ message: string }>(`/inventory/${id}`),
+    api.delete<{ message: string }>(`/api/inventory/${id}`),
 }
 
 // Sales endpoints
 export const salesApi = {
   list: (params?: { start?: string; end?: string }) =>
-    api.get<Sale[]>('/sales', { params }),
+    api.get<Sale[]>('/api/sales', { params }),
 
   create: (data: Partial<Sale>) =>
-    api.post<Sale>('/sales', { body: data }),
+    api.post<Sale>('/api/sales', { body: data }),
 
   checkout: (cart: CartItem[], payment_mode: string) =>
-    api.post<{ message: string; count: number; total: number; sales: Sale[] }>('/sales/checkout', {
-      body: { cart, payment_mode },
+    api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
+      body: { cart, paymentMethod: payment_mode },
     }),
 }
 
 // Purchases endpoints
 export const purchasesApi = {
   list: (params?: { start?: string; end?: string }) =>
-    api.get<Purchase[]>('/purchases', { params }),
+    api.get<Purchase[]>('/api/purchases', { params }),
 
   create: (data: Partial<Purchase>) =>
-    api.post<Purchase>('/purchases', { body: data }),
+    api.post<Purchase>('/api/purchases', { body: data }),
 
   checkout: (items: PurchaseItem[], vendor_name: string, invoice_no: string, date?: string) =>
-    api.post<{ message: string; count: number; total_cost: number; purchases: Purchase[] }>('/purchases/checkout', {
-      body: { items, vendor_name, invoice_no, date },
+    api.post<{ message: string; count: number; total: number; purchase: any }>('/api/purchases/checkout', {
+      body: { items, supplier: vendor_name, refNo: invoice_no, notes: date },
     }),
 }
 
 // Reports endpoints
 export const reportsApi = {
   getProducts: () =>
-    api.get<TopProduct[]>('/reports/products'),
+    api.get<TopProduct[]>('/api/reports/sales'),
 
   getStaff: () =>
-    api.get<StaffLeaderboard[]>('/reports/staff'),
+    api.get<StaffLeaderboard[]>('/api/reports/sales'),
 
   getDaily: () =>
-    api.get<DailyReport[]>('/reports/daily'),
+    api.get<DailyReport[]>('/api/reports/sales'),
 
   getMonthly: () =>
-    api.get<MonthlyReport[]>('/reports/monthly'),
+    api.get<MonthlyReport[]>('/api/reports/sales'),
 }
 
 // Admin endpoints
 export const adminApi = {
   getMetrics: () =>
-    api.get<AdminMetrics>('/admin/metrics'),
+    api.get<AdminMetrics>('/api/admin/metrics'),
 
   getBusinesses: () =>
-    api.get<Business[]>('/admin/businesses'),
+    api.get<Business[]>('/api/admin/businesses'),
 
   createBusiness: (data: Partial<Business>) =>
-    api.post<Business>('/admin/businesses', { body: data }),
+    api.post<Business>('/api/admin/businesses', { body: data }),
 
   createOwner: (data: CreateOwnerData) =>
-    api.post<{ message: string; email: string; business_id: string }>('/admin/owners', { body: data }),
+    api.post<{ message: string; email: string; business_id: string }>('/api/admin/owners', { body: data }),
 
   getSubscriptions: () =>
-    api.get<Subscription[]>('/admin/subscriptions'),
+    api.get<Subscription[]>('/api/admin/subscriptions'),
 
   createSubscription: (data: Partial<Subscription>) =>
-    api.post<Subscription>('/admin/subscriptions', { body: data }),
+    api.post<Subscription>('/api/admin/subscriptions', { body: data }),
 
   getInvoices: () =>
-    api.get<Invoice[]>('/admin/invoices'),
+    api.get<Invoice[]>('/api/admin/invoices'),
 
   schemaCheck: () =>
-    api.get<{ ok: boolean; tables: SchemaTable[]; report: string }>('/admin/schema-check'),
+    api.get<{ ok: boolean; tables: SchemaTable[]; report: string }>('/api/admin/schema-check'),
+
+  getOwners: (params?: { search?: string }) =>
+    api.get<any[]>('/api/admin/owners', { params }),
+
+  resetOwnerPassword: (id: string, password: string) =>
+    api.post<{ message: string }>(`/api/admin/owners/${id}/reset-password`, { body: { password } }),
+
+  updateSubscription: (id: string, data: { planId?: string; status?: string }) =>
+    api.patch<any>(`/api/admin/subscriptions/${id}`, { body: data }),
+}
+
+// Platform endpoints
+export const platformApi = {
+  getStats: () =>
+    api.get<any>('/api/platform/stats'),
+
+  getPlans: () =>
+    api.get<any[]>('/api/platform/plans'),
+
+  createPlan: (data: any) =>
+    api.post<any>('/api/platform/plans', { body: data }),
+
+  updatePlan: (id: string, data: any) =>
+    api.put<any>(`/api/platform/plans/${id}`, { body: data }),
+
+  deletePlan: (id: string) =>
+    api.delete<{ message: string }>(`/api/platform/plans/${id}`),
+
+  getFeatures: () =>
+    api.get<any[]>('/api/platform/features'),
+
+  createFeature: (data: any) =>
+    api.post<any>('/api/platform/features', { body: data }),
+
+  deleteFeature: (id: string) =>
+    api.delete<{ message: string }>(`/api/platform/features/${id}`),
+
+  getPlanFeatures: (planId: string) =>
+    api.get<any[]>(`/api/platform/plans/${planId}/features`),
+
+  togglePlanFeature: (planId: string, featureId: string, enabled: boolean) =>
+    api.post<any>(`/api/platform/plans/${planId}/features/${featureId}`, { body: { enabled } }),
+}
+
+// Tenant endpoints
+export const tenantsApi = {
+  list: (params?: { status?: string; search?: string }) =>
+    api.get<any>('/api/tenants', { params }),
+
+  get: (id: string) =>
+    api.get<any>(`/api/tenants/${id}`),
+
+  activate: (id: string) =>
+    api.post<any>(`/api/tenants/${id}/activate`),
+
+  suspend: (id: string) =>
+    api.post<any>(`/api/tenants/${id}/suspend`),
+
+  updatePlan: (id: string, planId: string) =>
+    api.put<any>(`/api/tenants/${id}/plan`, { body: { planId } }),
 }
 
 // Types
 export interface User {
   id: string | number
   email: string
-  role: 'SaaS Admin' | 'Owner' | 'Manager' | 'Accountant' | 'Attendant'
+  role: 'saas_admin' | 'owner' | 'manager' | 'accountant' | 'attendant'
   fname: string
   lname: string
   mname?: string

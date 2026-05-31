@@ -78,10 +78,12 @@ model User {
   role      UserRole  @default(attendant)
   tenantId  String?
   tenant    Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  isActive  Boolean   @default(true)
-  lastLogin DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  isActive   Boolean   @default(true)
+  lastLogin  DateTime?
+  otpCode    String?
+  otpExpires DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   // Legacy relations (keep for compatibility)
   sales       Sale[]

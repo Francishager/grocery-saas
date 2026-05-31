@@ -56,25 +56,25 @@ export function hasRole(user: User | null, roles: string[]): boolean {
 }
 
 export function isSaaSAdmin(user: User | null): boolean {
-  return user?.role === 'SaaS Admin'
+  return user?.role === 'saas_admin'
 }
 
 export function isOwner(user: User | null): boolean {
-  return user?.role === 'Owner'
+  return user?.role === 'owner'
 }
 
 export function canViewReports(user: User | null): boolean {
-  return hasRole(user, ['SaaS Admin', 'Owner', 'Accountant'])
+  return hasRole(user, ['saas_admin', 'owner', 'accountant'])
 }
 
 export function canManageSales(user: User | null): boolean {
-  return hasRole(user, ['SaaS Admin', 'Owner', 'Manager', 'Attendant'])
+  return hasRole(user, ['saas_admin', 'owner', 'manager', 'attendant'])
 }
 
 export function canManageInventory(user: User | null): boolean {
-  return hasRole(user, ['SaaS Admin', 'Owner', 'Manager', 'Accountant'])
+  return hasRole(user, ['saas_admin', 'owner', 'manager', 'accountant'])
 }
 
 export function canManagePurchases(user: User | null): boolean {
-  return hasRole(user, ['SaaS Admin', 'Owner', 'Manager', 'Accountant'])
+  return hasRole(user, ['saas_admin', 'owner', 'manager', 'accountant'])
 }

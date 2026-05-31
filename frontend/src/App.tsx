@@ -16,7 +16,14 @@ import InventoryPage from '@/pages/InventoryPage'
 import PurchasesPage from '@/pages/PurchasesPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AdminPage from '@/pages/admin/AdminPage'
-import SaaSAdminDashboard from '@/pages/admin/SaaSAdminDashboard'
+import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
+import BusinessesPage from '@/pages/SaaSAdmin/BusinessesPage'
+import ProvisionPage from '@/pages/SaaSAdmin/ProvisionPage'
+import PlansPage from '@/pages/SaaSAdmin/PlansPage'
+import FeaturesPage from '@/pages/SaaSAdmin/FeaturesPage'
+import OwnersPage from '@/pages/SaaSAdmin/OwnersPage'
+import SubscriptionsPage from '@/pages/SaaSAdmin/SubscriptionsPage'
+import InvitationsList from '@/pages/SaaSAdmin/InvitationsList'
 
 // Public Route Component (redirects if already logged in)
 function PublicRoute({ children, redirectTo = '/dashboard' }: { children: React.ReactNode, redirectTo?: string }) {
@@ -66,8 +73,13 @@ function App() {
         }>
           <Route index element={<Navigate to="/saas/dashboard" replace />} />
           <Route path="dashboard" element={<SaaSAdminDashboard />} />
-          <Route path="tenants" element={<SaaSAdminDashboard />} />
-          <Route path="invitations" element={<SaaSAdminDashboard />} />
+          <Route path="businesses" element={<BusinessesPage />} />
+          <Route path="provision" element={<ProvisionPage />} />
+          <Route path="plans" element={<PlansPage />} />
+          <Route path="features" element={<FeaturesPage />} />
+          <Route path="invitations" element={<InvitationsList />} />
+          <Route path="owners" element={<OwnersPage />} />
+          <Route path="subscriptions" element={<SubscriptionsPage />} />
         </Route>
 
         {/* Business Routes (Tenant Level) - SaaS Admin BLOCKED */}

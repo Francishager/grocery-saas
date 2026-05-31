@@ -138,7 +138,7 @@ class FeatureAccessService {
   // Check if user can access feature
   canAccessFeature(featureName: string, userRole?: string): boolean {
     // SaaS Admin can access everything
-    if (userRole === 'saas_admin') return true
+    if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
 
     // Check if feature is enabled
     if (!this.isFeatureEnabled(featureName)) return false
