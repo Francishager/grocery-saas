@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || ''
+const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-backend.up.railway.app'
 
 interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>
@@ -469,3 +469,4 @@ export interface AdminMetrics {
   churnRate: number
   uptimeHours: number
 }
+
