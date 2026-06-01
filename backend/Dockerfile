@@ -9,8 +9,8 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++ openssl
 
 # Copy package files
-COPY backend/package*.json ./
-COPY backend/prisma ./prisma/
+COPY package*.json ./
+COPY prisma ./prisma/
 
 # Install dependencies
 RUN npm ci --omit=dev && npm cache clean --force
@@ -19,11 +19,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 RUN npx prisma generate
 
 # Copy source files
-COPY backend/*.js ./
-COPY backend/*.ts ./
-COPY backend/middleware ./middleware
-COPY backend/routes ./routes
-COPY backend/src ./src
+COPY *.js ./
+COPY *.ts ./
+COPY middleware ./middleware
+COPY routes ./routes
+COPY src ./src
 
 # Production stage
 FROM base AS runner
