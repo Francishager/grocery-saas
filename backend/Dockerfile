@@ -24,6 +24,7 @@ COPY *.ts ./
 COPY middleware ./middleware
 COPY routes ./routes
 COPY src ./src
+COPY start.sh ./
 
 # Production stage
 FROM base AS runner
