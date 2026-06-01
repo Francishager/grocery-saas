@@ -1,3 +1,4 @@
+import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { Settings, ToggleLeft, ToggleRight, Loader2, RefreshCw, Save, X, Plus, Trash2 } from 'lucide-react'
 
@@ -13,7 +14,7 @@ interface PlanFeature {
 
 interface Plan { id: string; name: string }
 
-function getAuthHeaders(): Record<string, string> {
+function {}: Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' }
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
@@ -34,8 +35,8 @@ export const FeaturesPage: React.FC = () => {
     setLoading(true)
     try {
       const [fRes, pRes] = await Promise.all([
-        fetch('/api/platform/features', { headers: getAuthHeaders() }),
-        fetch('/api/platform/plans', { headers: getAuthHeaders() }),
+        apiFetch('/api/platform/features', {}),
+        apiFetch('/api/platform/plans', {}),
       ])
       if (fRes.ok) setFeatures(await fRes.json())
       if (pRes.ok) { const p = await pRes.json(); setPlans(p); if (p.length && !selectedPlan) setSelectedPlan(p[0].id) }
@@ -46,7 +47,7 @@ export const FeaturesPage: React.FC = () => {
   const fetchPlanFeatures = async (planId: string) => {
     if (!planId) return
     try {
-      const res = await fetch(`/api/platform/plans/${planId}/features`, { headers: getAuthHeaders() })
+      const res = await fetch(`/api/platform/plans/${planId}/features`, {})
       if (res.ok) setPlanFeatures(await res.json())
     } catch {}
   }
@@ -57,7 +58,7 @@ export const FeaturesPage: React.FC = () => {
   const handleCreateFeature = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true)
     try {
-      const res = await fetch('/api/platform/features', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(form) })
+      const res = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify(form) })
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed') }
       setShowForm(false); setForm({ name: '', slug: '', category: 'core', description: '', isActive: true }); fetchData()
     } catch (err) { alert(err instanceof Error ? err.message : 'Failed') }
@@ -67,7 +68,7 @@ export const FeaturesPage: React.FC = () => {
   const handleTogglePlanFeature = async (featureId: string, enabled: boolean) => {
     try {
       const res = await fetch(`/api/platform/plans/${selectedPlan}/features/${featureId}`, {
-        method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ enabled }),
+        method: 'POST', body: JSON.stringify({ enabled }),
       })
       if (res.ok) fetchPlanFeatures(selectedPlan)
     } catch {}
@@ -76,7 +77,7 @@ export const FeaturesPage: React.FC = () => {
   const handleDeleteFeature = async (id: string) => {
     if (!confirm('Delete this feature?')) return
     try {
-      const res = await fetch(`/api/platform/features/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
+      const res = await fetch(`/api/platform/features/${id}`, { method: 'DELETE' })
       if (res.ok) fetchData()
     } catch {}
   }
@@ -112,7 +113,7 @@ export const FeaturesPage: React.FC = () => {
                     <Settings className="w-5 h-5 text-gray-400" />
                     <div>
                       <p className="font-medium text-sm">{f.name}</p>
-                      <p className="text-xs text-gray-500">{f.slug} • {categoryBadge(f.category)}</p>
+                      <p className="text-xs text-gray-500">{f.slug} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ {categoryBadge(f.category)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

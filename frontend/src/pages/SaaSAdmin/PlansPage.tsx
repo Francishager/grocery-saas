@@ -1,3 +1,4 @@
+import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { CreditCard, Plus, Edit, Trash2, Loader2, RefreshCw, Save, X } from 'lucide-react'
 
@@ -6,14 +7,7 @@ interface Plan {
   maxUsers: number; maxProducts: number; maxBranches: number; maxCustomers: number; maxSuppliers: number
   isDefault: boolean; isActive: boolean
   _count?: { tenants: number }
-}
 
-function getAuthHeaders(): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  const t = localStorage.getItem('auth_tokens')
-  if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
-  return h
-}
 
 const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', maxUsers: 5, maxProducts: 100, maxBranches: 1, maxCustomers: 50, maxSuppliers: 20, isDefault: false, isActive: true }
 
@@ -27,7 +21,7 @@ export const PlansPage: React.FC = () => {
 
   const fetchPlans = async () => {
     setLoading(true)
-    try { const r = await fetch('/api/platform/plans', { headers: getAuthHeaders() }); if (r.ok) setPlans(await r.json()) } catch {}
+    try { const r = await apiFetch('/api/platform/plans', {}); if (r.ok) setPlans(await r.json()) } catch {}
     setLoading(false)
   }
 
@@ -45,7 +39,7 @@ export const PlansPage: React.FC = () => {
     try {
       const url = editingId ? `/api/platform/plans/${editingId}` : '/api/platform/plans'
       const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch(url, { method, headers: getAuthHeaders(), body: JSON.stringify(form) })
+      const res = await fetch(url, { method, body: JSON.stringify(form) })
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed') }
       setShowForm(false); fetchPlans()
     } catch (err) { alert(err instanceof Error ? err.message : 'Failed') }
@@ -55,7 +49,7 @@ export const PlansPage: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this plan? Tenants on this plan will need reassignment.')) return
     try {
-      const res = await fetch(`/api/platform/plans/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
+      const res = await fetch(`/api/platform/plans/${id}`, { method: 'DELETE' })
       if (res.ok) fetchPlans(); else alert('Failed to delete')
     } catch { alert('Request failed') }
   }
@@ -137,6 +131,5 @@ export const PlansPage: React.FC = () => {
       )}
     </div>
   )
-}
 
 export default PlansPage

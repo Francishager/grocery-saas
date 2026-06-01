@@ -1,3 +1,4 @@
+import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { Users, Search, Mail, Key, Loader2, RefreshCw, X } from 'lucide-react'
 
@@ -6,7 +7,7 @@ interface Owner {
   tenant?: { id: string; name: string; status: string } | null
 }
 
-function getAuthHeaders(): Record<string, string> {
+function {}: Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' }
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
@@ -25,7 +26,7 @@ export const OwnersPage: React.FC = () => {
     try {
       const params = new URLSearchParams()
       if (search) params.append('search', search)
-      const res = await fetch(`/api/admin/owners?${params}`, { headers: getAuthHeaders() })
+      const res = await fetch(`/api/admin/owners?${params}`, {})
       if (res.ok) { const d = await res.json(); setOwners(d.owners || d) }
     } catch {}
     setLoading(false)
@@ -38,7 +39,7 @@ export const OwnersPage: React.FC = () => {
     if (!newPass || newPass.length < 6) { alert('Password must be at least 6 characters'); return }
     setResetting(id)
     try {
-      const res = await fetch(`/api/admin/owners/${id}/reset-password`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ password: newPass }) })
+      const res = await fetch(`/api/admin/owners/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password: newPass }) })
       if (res.ok) alert('Password reset successfully'); else alert('Failed to reset password')
     } catch { alert('Request failed') }
     setResetting(null)

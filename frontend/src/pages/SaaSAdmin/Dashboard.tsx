@@ -1,3 +1,4 @@
+import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { Building, Users, DollarSign, TrendingUp, Mail, AlertCircle, Loader2, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
@@ -13,7 +14,7 @@ interface PlatformStats {
   expiringSubscriptions: number
 }
 
-function getAuthHeaders(): Record<string, string> {
+function {}: Record<string, string> {
   const h: Record<string, string> = {}
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
@@ -29,7 +30,7 @@ export const SaaSAdminDashboard: React.FC = () => {
   const fetchStats = async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/platform/stats', { headers: getAuthHeaders() })
+      const res = await apiapiFetch('/api/platform/stats', {})
       if (res.ok) setStats(await res.json())
     } catch {}
     setLoading(false)
@@ -84,7 +85,7 @@ export const SaaSAdminDashboard: React.FC = () => {
             <div><p className="text-sm text-gray-500">Pending Invitations</p><p className="text-2xl font-bold mt-1">{stats?.pendingInvitations || 0}</p></div>
             <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center"><Mail className="w-6 h-6 text-yellow-600" /></div>
           </div>
-          <a href="/saas/invitations" className="mt-4 text-sm text-blue-600 hover:underline">View all invitations →</a>
+          <a href="/saas/invitations" className="mt-4 text-sm text-blue-600 hover:underline">View all invitations ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢</a>
         </div>
       </div>
 

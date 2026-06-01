@@ -1,9 +1,10 @@
+import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { Building2, User, Mail, Phone, CreditCard, Loader2, CheckCircle } from 'lucide-react'
 
 interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string }
 
-function getAuthHeaders(): Record<string, string> {
+function {}: Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' }
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
@@ -21,7 +22,7 @@ export const ProvisionPage: React.FC = () => {
   })
 
   useEffect(() => {
-    fetch('/api/platform/plans', { headers: getAuthHeaders() })
+    apiFetch('/api/platform/plans', {})
       .then(r => r.ok ? r.json() : [])
       .then(setPlans)
       .catch(() => {})
@@ -37,16 +38,16 @@ export const ProvisionPage: React.FC = () => {
     setLoading(true); setError(null); setSuccess(false)
     try {
       // 1. Create business
-      const bizRes = await fetch('/api/admin/businesses', {
-        method: 'POST', headers: getAuthHeaders(),
+      const bizRes = await apiFetch('/api/admin/businesses', {
+        method: 'POST',
         body: JSON.stringify({ name: form.businessName, slug: form.businessSlug, email: form.businessEmail, phone: form.businessPhone, planId: form.planId || undefined }),
       })
       if (!bizRes.ok) { const d = await bizRes.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed to create business') }
       const biz = await bizRes.json()
 
       // 2. Create owner
-      const ownRes = await fetch('/api/admin/owners', {
-        method: 'POST', headers: getAuthHeaders(),
+      const ownRes = await apiFetch('/api/admin/owners', {
+        method: 'POST',
         body: JSON.stringify({ name: form.ownerName, email: form.ownerEmail, password: form.ownerPassword, tenantId: biz.id, role: 'owner' }),
       })
       if (!ownRes.ok) { const d = await ownRes.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed to create owner') }
@@ -87,7 +88,7 @@ export const ProvisionPage: React.FC = () => {
           <div><label className="block text-sm font-medium mb-1">Subscription Plan</label>
             <select value={form.planId} onChange={e => handleChange('planId', e.target.value)} className="w-full px-3 py-2 border rounded-lg">
               <option value="">Select a plan</option>
-              {plans.map(p => <option key={p.id} value={p.id}>{p.name} — {p.price} {p.currency}/{p.billingCycle}</option>)}
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {p.price} {p.currency}/{p.billingCycle}</option>)}
             </select>
           </div>
         </div>
