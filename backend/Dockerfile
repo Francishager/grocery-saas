@@ -9,8 +9,8 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++ openssl
 
 # Copy package files
-COPY package*.json ./
-COPY prisma ./prisma/
+COPY backend/package*.json ./
+COPY backend/prisma ./prisma/
 
 # Install dependencies
 RUN npm ci --omit=dev && npm cache clean --force
@@ -19,11 +19,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 RUN npx prisma generate
 
 # Copy source files
-COPY *.js ./
-COPY *.ts ./
-COPY middleware ./middleware
-COPY routes ./routes
-COPY src ./src
+COPY backend/*.js ./
+COPY backend/*.ts ./
+COPY backend/middleware ./middleware
+COPY backend/routes ./routes
+COPY backend/src ./src
 
 # Production stage
 FROM base AS runner
@@ -53,7 +53,7 @@ EXPOSE 3000
 
 # Health check (uses CJS eval which works in all contexts)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD node --eval "require('http').get('http://localhost:3000/', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
+  CMD wget -qO- http://localhost:3000/ || exit 1
 
 # Start the application
 CMD ["node", "src/app.js"]
