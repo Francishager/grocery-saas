@@ -44,8 +44,10 @@ COPY --from=builder --chown=app:app /app/*.ts ./
 COPY --from=builder --chown=app:app /app/middleware ./middleware
 COPY --from=builder --chown=app:app /app/routes ./routes
 COPY --from=builder --chown=app:app /app/src ./src
+COPY --from=builder --chown=app:app /app/start.sh ./start.sh
 
-# Switch to non-root user
+# Make entrypoint executable and switch to non-root user
+RUN chmod +x start.sh
 USER app
 
 # Expose port
@@ -56,4 +58,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
   CMD wget -qO- http://localhost:3000/ || exit 1
 
 # Start the application
-CMD ["node", "src/app.js"]
+CMD ["./start.sh"]
