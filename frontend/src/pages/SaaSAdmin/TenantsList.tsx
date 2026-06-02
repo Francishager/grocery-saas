@@ -1,3 +1,4 @@
+import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { 
   Building, Search, Filter, MoreVertical, 
@@ -34,65 +35,25 @@ export interface TenantsListProps {
 class TenantService {
   private apiEndpoint = '/api/tenants'
 
-  async getAll(filters?: {
-    status?: string
-    search?: string
-    page?: number
-    limit?: number
-  }): Promise<{ tenants: Tenant[]; total: number }> {
+  async getAll(filters?: { status?: string; search?: string; page?: number; limit?: number }): Promise<{ tenants: Tenant[]; total: number }> {
     const params = new URLSearchParams()
     if (filters?.status) params.append('status', filters.status)
     if (filters?.search) params.append('search', filters.search)
     if (filters?.page) params.append('page', String(filters.page))
     if (filters?.limit) params.append('limit', String(filters.limit))
-
-    const tokens = localStorage.getItem('auth_tokens')
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-    if (tokens) {
-      const { accessToken } = JSON.parse(tokens)
-      headers['Authorization'] = `Bearer ${accessToken}`
-    }
-
-    const response = await fetch(`${this.apiEndpoint}?${params.toString()}`, { headers })
+    const response = await apiFetch(`${this.apiEndpoint}?${params.toString()}`)
     if (!response.ok) throw new Error('Failed to fetch tenants')
     return response.json()
   }
 
   async suspend(id: string, reason?: string): Promise<Tenant> {
-    const tokens = localStorage.getItem('auth_tokens')
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-    if (tokens) {
-      const { accessToken } = JSON.parse(tokens)
-      headers['Authorization'] = `Bearer ${accessToken}`
-    }
-
-    const response = await fetch(`${this.apiEndpoint}/${id}/suspend`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ reason }),
-    })
+    const response = await apiFetch(`${this.apiEndpoint}/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) })
     if (!response.ok) throw new Error('Failed to suspend tenant')
     return response.json()
   }
 
   async activate(id: string): Promise<Tenant> {
-    const tokens = localStorage.getItem('auth_tokens')
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-    if (tokens) {
-      const { accessToken } = JSON.parse(tokens)
-      headers['Authorization'] = `Bearer ${accessToken}`
-    }
-
-    const response = await fetch(`${this.apiEndpoint}/${id}/activate`, {
-      method: 'POST',
-      headers,
-    })
+    const response = await apiFetch(`${this.apiEndpoint}/${id}/activate`, { method: 'POST' })
     if (!response.ok) throw new Error('Failed to activate tenant')
     return response.json()
   }

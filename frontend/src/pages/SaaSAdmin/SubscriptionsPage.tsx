@@ -1,4 +1,4 @@
-import { apiFetch } from '../../lib/api'
+﻿import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft } from 'lucide-react'
 
@@ -10,8 +10,7 @@ interface Subscription {
 
 interface Plan { id: string; name: string; price: number; currency: string }
 
-function {}: Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
   return h
@@ -43,7 +42,7 @@ export const SubscriptionsPage: React.FC = () => {
   const handleChangePlan = async (subId: string, planId: string) => {
     setChanging(subId)
     try {
-      const res = await fetch(`/api/admin/subscriptions/${subId}`, { method: 'PUT', body: JSON.stringify({ planId }) })
+      const res = await apiFetch(`/api/admin/subscriptions/${subId}`, { method: 'PUT', body: JSON.stringify({ planId }) })
       if (res.ok) { fetchData(); setSelected(null) } else alert('Failed to change plan')
     } catch { alert('Request failed') }
     setChanging(null)
@@ -107,7 +106,7 @@ export const SubscriptionsPage: React.FC = () => {
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">Change Plan ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {selected.tenant?.name}</h2><button onClick={() => setSelected(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
+            <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">Change Plan - {selected.tenant?.name}</h2><button onClick={() => setSelected(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
             <div className="space-y-3 text-sm mb-4">
               <div className="flex justify-between"><span className="text-gray-500">Current Plan</span><span className="font-medium">{selected.plan?.name}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(selected.status)}</div>

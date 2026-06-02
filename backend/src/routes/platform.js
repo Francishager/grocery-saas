@@ -52,6 +52,42 @@ router.put("/plans/:id", authenticateToken, requirePlatformAdmin, async (req, re
   }
 });
 
+
+// Delete plan
+router.delete("/plans/:id", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    await prisma.planFeature.deleteMany({ where: { planId: req.params.id } });
+    await prisma.plan.delete({ where: { id: req.params.id } });
+    res.json({ message: "Plan deleted" });
+  } catch (err) {
+    console.error("Delete plan error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Get plan features
+router.get("/plans/:planId/features", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const pfs = await prisma.planFeature.findMany({ where: { planId: req.params.planId }, include: { feature: true } });
+    res.json(pfs);
+  } catch (err) {
+    console.error("Get plan features error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Delete feature
+router.delete("/features/:id", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    await prisma.planFeature.deleteMany({ where: { featureId: req.params.id } });
+    await prisma.tenantFeature.deleteMany({ where: { featureId: req.params.id } });
+    await prisma.feature.delete({ where: { id: req.params.id } });
+    res.json({ message: "Feature deleted" });
+  } catch (err) {
+    console.error("Delete feature error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 // List features
 router.get("/features", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
@@ -78,7 +114,7 @@ router.post("/plan-features", authenticateToken, requirePlatformAdmin, async (re
   try {
     const { planId, featureId, enabled = true } = req.body;
     if (!planId || !featureId) return res.status(400).json({ error: "planId and featureId required" });
-    const pf = await prisma.planFeature.create({ data: { planId, featureId, enabled } });
+    const pf = await prisma.planFeature.upsert({ where: { planId_featureId: { planId, featureId } }, update: { enabled }, create: { planId, featureId, enabled } });
     res.status(201).json({ message: "Feature assigned to plan", planFeature: pf });
   } catch (err) {
     console.error("Assign feature error:", err);

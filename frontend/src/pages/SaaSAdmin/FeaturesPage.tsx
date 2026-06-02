@@ -3,23 +3,16 @@ import React, { useState, useEffect } from 'react'
 import { Settings, ToggleLeft, ToggleRight, Loader2, RefreshCw, Save, X, Plus, Trash2 } from 'lucide-react'
 
 interface Feature {
-  id: string; name: string; slug: string; category: string; description: string; isActive: boolean
+  id: string; name: string; displayName: string; slug: string; category: string; description: string; isActive: boolean
+  _count?: { planFeatures: number; tenantFeatures: number }
 }
 
 interface PlanFeature {
   featureId: string; planId: string; enabled: boolean
   feature: { id: string; name: string; slug: string }
-  plan: { id: string; name: string }
 }
 
 interface Plan { id: string; name: string }
-
-function {}: Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  const t = localStorage.getItem('auth_tokens')
-  if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
-  return h
-}
 
 export const FeaturesPage: React.FC = () => {
   const [features, setFeatures] = useState<Feature[]>([])
@@ -28,15 +21,15 @@ export const FeaturesPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', slug: '', category: 'core', description: '', isActive: true })
+  const [form, setForm] = useState({ name: '', displayName: '', category: 'core', description: '', isActive: true })
   const [selectedPlan, setSelectedPlan] = useState<string>('')
 
   const fetchData = async () => {
     setLoading(true)
     try {
       const [fRes, pRes] = await Promise.all([
-        apiFetch('/api/platform/features', {}),
-        apiFetch('/api/platform/plans', {}),
+        apiFetch('/api/platform/features'),
+        apiFetch('/api/platform/plans'),
       ])
       if (fRes.ok) setFeatures(await fRes.json())
       if (pRes.ok) { const p = await pRes.json(); setPlans(p); if (p.length && !selectedPlan) setSelectedPlan(p[0].id) }
@@ -47,7 +40,7 @@ export const FeaturesPage: React.FC = () => {
   const fetchPlanFeatures = async (planId: string) => {
     if (!planId) return
     try {
-      const res = await fetch(`/api/platform/plans/${planId}/features`, {})
+      const res = await apiFetch(`/api/platform/plans/${planId}/features`)
       if (res.ok) setPlanFeatures(await res.json())
     } catch {}
   }
@@ -58,18 +51,17 @@ export const FeaturesPage: React.FC = () => {
   const handleCreateFeature = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true)
     try {
-      const res = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify(form) })
+      const payload = { ...form, slug: form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') }
+      const res = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify(payload) })
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed') }
-      setShowForm(false); setForm({ name: '', slug: '', category: 'core', description: '', isActive: true }); fetchData()
+      setShowForm(false); setForm({ name: '', displayName: '', category: 'core', description: '', isActive: true }); fetchData()
     } catch (err) { alert(err instanceof Error ? err.message : 'Failed') }
     setSaving(false)
   }
 
   const handleTogglePlanFeature = async (featureId: string, enabled: boolean) => {
     try {
-      const res = await fetch(`/api/platform/plans/${selectedPlan}/features/${featureId}`, {
-        method: 'POST', body: JSON.stringify({ enabled }),
-      })
+      const res = await apiFetch(`/api/platform/plan-features`, { method: 'POST', body: JSON.stringify({ planId: selectedPlan, featureId, enabled }) })
       if (res.ok) fetchPlanFeatures(selectedPlan)
     } catch {}
   }
@@ -77,7 +69,7 @@ export const FeaturesPage: React.FC = () => {
   const handleDeleteFeature = async (id: string) => {
     if (!confirm('Delete this feature?')) return
     try {
-      const res = await fetch(`/api/platform/features/${id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/platform/features/${id}`, { method: 'DELETE' })
       if (res.ok) fetchData()
     } catch {}
   }
@@ -101,7 +93,6 @@ export const FeaturesPage: React.FC = () => {
         <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Feature Registry */}
           <div className="bg-white rounded-lg border">
             <div className="p-4 border-b"><h2 className="font-semibold">Feature Registry</h2></div>
             <div className="divide-y">
@@ -112,8 +103,8 @@ export const FeaturesPage: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <Settings className="w-5 h-5 text-gray-400" />
                     <div>
-                      <p className="font-medium text-sm">{f.name}</p>
-                      <p className="text-xs text-gray-500">{f.slug} ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ {categoryBadge(f.category)}</p>
+                      <p className="font-medium text-sm">{f.displayName || f.name}</p>
+                      <div className="flex items-center gap-2 text-xs text-gray-500">{f.slug} &middot; {categoryBadge(f.category)}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -125,7 +116,6 @@ export const FeaturesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Plan Feature Assignment */}
           <div className="bg-white rounded-lg border">
             <div className="p-4 border-b flex items-center justify-between">
               <h2 className="font-semibold">Plan Feature Assignment</h2>
@@ -140,7 +130,7 @@ export const FeaturesPage: React.FC = () => {
                 return (
                   <div key={f.id} className="flex items-center justify-between p-4">
                     <div>
-                      <p className="font-medium text-sm">{f.name}</p>
+                      <p className="font-medium text-sm">{f.displayName || f.name}</p>
                       <p className="text-xs text-gray-500">{f.slug}</p>
                     </div>
                     <button onClick={() => handleTogglePlanFeature(f.id, !enabled)} className="flex items-center gap-2">
@@ -160,8 +150,8 @@ export const FeaturesPage: React.FC = () => {
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">New Feature</h2><button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
             <form onSubmit={handleCreateFeature} className="space-y-4">
-              <div><label className="block text-sm font-medium mb-1">Name *</label><input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium mb-1">Slug *</label><input required value={form.slug} onChange={e => setForm(p => ({ ...p, slug: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g. pos, inventory, reports" /></div>
+              <div><label className="block text-sm font-medium mb-1">Name *</label><input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g. pos, inventory, reports" /></div>
+              <div><label className="block text-sm font-medium mb-1">Display Name</label><input value={form.displayName} onChange={e => setForm(p => ({ ...p, displayName: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g. Point of Sale" /></div>
               <div><label className="block text-sm font-medium mb-1">Category</label><select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} className="w-full px-3 py-2 border rounded-lg"><option value="core">Core</option><option value="advanced">Advanced</option><option value="integration">Integration</option></select></div>
               <div><label className="block text-sm font-medium mb-1">Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" rows={2} /></div>
               <label className="flex items-center gap-2"><input type="checkbox" checked={form.isActive} onChange={e => setForm(p => ({ ...p, isActive: e.target.checked }))} /> Active</label>

@@ -9,8 +9,7 @@ interface Tenant {
   plan?: { name: string; price: number; currency: string; billingCycle: string }
 }
 
-function {}: Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
   return h
@@ -30,7 +29,7 @@ export const BusinessesPage: React.FC = () => {
       const params = new URLSearchParams()
       if (statusFilter !== 'all') params.append('status', statusFilter)
       if (search) params.append('search', search)
-      const res = await fetch(`/api/tenants?${params}`, {})
+      const res = await apiFetch(`/api/tenants?${params}`, {})
       if (res.ok) { const d = await res.json(); setTenants(d.tenants || d) }
     } catch {}
     setLoading(false)
@@ -42,7 +41,7 @@ export const BusinessesPage: React.FC = () => {
     if (!confirm(`Are you sure you want to ${action} this tenant?`)) return
     setActionLoading(id)
     try {
-      const res = await fetch(`/api/tenants/${id}/${action}`, { method: 'POST' })
+      const res = await apiFetch(`/api/tenants/${id}/${action}`, { method: 'POST' })
       if (res.ok) fetchTenants()
       else alert(`Failed to ${action} tenant`)
     } catch { alert('Request failed') }

@@ -4,12 +4,6 @@ import { Building2, User, Mail, Phone, CreditCard, Loader2, CheckCircle } from '
 
 interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string }
 
-function {}: Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  const t = localStorage.getItem('auth_tokens')
-  if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
-  return h
-}
 
 export const ProvisionPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -88,7 +82,7 @@ export const ProvisionPage: React.FC = () => {
           <div><label className="block text-sm font-medium mb-1">Subscription Plan</label>
             <select value={form.planId} onChange={e => handleChange('planId', e.target.value)} className="w-full px-3 py-2 border rounded-lg">
               <option value="">Select a plan</option>
-              {plans.map(p => <option key={p.id} value={p.id}>{p.name} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {p.price} {p.currency}/{p.billingCycle}</option>)}
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name} - {p.price} {p.currency}/{p.billingCycle}</option>)}
             </select>
           </div>
         </div>

@@ -7,8 +7,7 @@ interface Owner {
   tenant?: { id: string; name: string; status: string } | null
 }
 
-function {}: Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+
   const t = localStorage.getItem('auth_tokens')
   if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
   return h
@@ -26,7 +25,7 @@ export const OwnersPage: React.FC = () => {
     try {
       const params = new URLSearchParams()
       if (search) params.append('search', search)
-      const res = await fetch(`/api/admin/owners?${params}`, {})
+      const res = await apiFetch(`/api/admin/owners?${params}`, {})
       if (res.ok) { const d = await res.json(); setOwners(d.owners || d) }
     } catch {}
     setLoading(false)
@@ -39,7 +38,7 @@ export const OwnersPage: React.FC = () => {
     if (!newPass || newPass.length < 6) { alert('Password must be at least 6 characters'); return }
     setResetting(id)
     try {
-      const res = await fetch(`/api/admin/owners/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password: newPass }) })
+      const res = await apiFetch(`/api/admin/owners/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password: newPass }) })
       if (res.ok) alert('Password reset successfully'); else alert('Failed to reset password')
     } catch { alert('Request failed') }
     setResetting(null)

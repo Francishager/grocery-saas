@@ -4,12 +4,11 @@ import { CreditCard, Plus, Edit, Trash2, Loader2, RefreshCw, Save, X } from 'luc
 
 interface Plan {
   id: string; name: string; slug: string; price: number; currency: string; billingCycle: string
-  maxUsers: number; maxProducts: number; maxBranches: number; maxCustomers: number; maxSuppliers: number
-  isDefault: boolean; isActive: boolean
-  _count?: { tenants: number }
+  features: string[]; maxUsers: number; maxProducts: number
+  isDefault: boolean; _count?: { tenants: number }
+}
 
-
-const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', maxUsers: 5, maxProducts: 100, maxBranches: 1, maxCustomers: 50, maxSuppliers: 20, isDefault: false, isActive: true }
+const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: 'Up to 5 users, Basic reports', maxUsers: 5, maxProducts: 100, isDefault: false }
 
 export const PlansPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -21,7 +20,7 @@ export const PlansPage: React.FC = () => {
 
   const fetchPlans = async () => {
     setLoading(true)
-    try { const r = await apiFetch('/api/platform/plans', {}); if (r.ok) setPlans(await r.json()) } catch {}
+    try { const r = await apiFetch('/api/platform/plans'); if (r.ok) setPlans(await r.json()) } catch {}
     setLoading(false)
   }
 
@@ -30,16 +29,17 @@ export const PlansPage: React.FC = () => {
   const openCreate = () => { setEditingId(null); setForm(emptyForm); setShowForm(true) }
   const openEdit = (p: Plan) => {
     setEditingId(p.id)
-    setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, maxUsers: p.maxUsers, maxProducts: p.maxProducts, maxBranches: p.maxBranches, maxCustomers: p.maxCustomers, maxSuppliers: p.maxSuppliers, isDefault: p.isDefault, isActive: p.isActive })
+    setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, features: Array.isArray(p.features) ? p.features.join(', ') : '', maxUsers: p.maxUsers, maxProducts: p.maxProducts, isDefault: p.isDefault })
     setShowForm(true)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true)
     try {
+      const payload = { ...form, features: form.features.split(',').map((f: string) => f.trim()).filter(Boolean) }
       const url = editingId ? `/api/platform/plans/${editingId}` : '/api/platform/plans'
       const method = editingId ? 'PUT' : 'POST'
-      const res = await fetch(url, { method, body: JSON.stringify(form) })
+      const res = await apiFetch(url, { method, body: JSON.stringify(payload) })
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed') }
       setShowForm(false); fetchPlans()
     } catch (err) { alert(err instanceof Error ? err.message : 'Failed') }
@@ -49,7 +49,7 @@ export const PlansPage: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this plan? Tenants on this plan will need reassignment.')) return
     try {
-      const res = await fetch(`/api/platform/plans/${id}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/platform/plans/${id}`, { method: 'DELETE' })
       if (res.ok) fetchPlans(); else alert('Failed to delete')
     } catch { alert('Request failed') }
   }
@@ -85,13 +85,13 @@ export const PlansPage: React.FC = () => {
               <div className="flex flex-wrap gap-2">
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxUsers} users</span>
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxProducts} products</span>
-                <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxBranches} branches</span>
-                <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxCustomers} customers</span>
-                <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxSuppliers} suppliers</span>
               </div>
+              {Array.isArray(p.features) && p.features.length > 0 && (
+                <div className="flex flex-wrap gap-1">{p.features.map((f, i) => <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{f}</span>)}</div>
+              )}
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500">{p._count?.tenants || 0} tenants</span>
-                <span className={`px-2 py-1 rounded text-xs ${p.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{p.isActive ? 'Active' : 'Inactive'}</span>
+                <span className={`px-2 py-1 rounded text-xs ${p.isDefault ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{p.isDefault ? 'Default' : 'Custom'}</span>
               </div>
             </div>
           ))}
@@ -106,18 +106,15 @@ export const PlansPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium mb-1">Name *</label><input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Slug *</label><input required value={form.slug} onChange={e => setForm(p => ({ ...p, slug: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-                <div><label className="block text-sm font-medium mb-1">Price *</label><input required type="number" value={form.price} onChange={e => setForm(p => ({ ...p, price: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+                <div><label className="block text-sm font-medium mb-1">Price *</label><input required type="number" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Currency</label><select value={form.currency} onChange={e => setForm(p => ({ ...p, currency: e.target.value }))} className="w-full px-3 py-2 border rounded-lg"><option value="UGX">UGX</option><option value="USD">USD</option><option value="KES">KES</option></select></div>
                 <div><label className="block text-sm font-medium mb-1">Billing Cycle</label><select value={form.billingCycle} onChange={e => setForm(p => ({ ...p, billingCycle: e.target.value }))} className="w-full px-3 py-2 border rounded-lg"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
                 <div><label className="block text-sm font-medium mb-1">Max Users</label><input type="number" value={form.maxUsers} onChange={e => setForm(p => ({ ...p, maxUsers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Max Products</label><input type="number" value={form.maxProducts} onChange={e => setForm(p => ({ ...p, maxProducts: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-                <div><label className="block text-sm font-medium mb-1">Max Branches</label><input type="number" value={form.maxBranches} onChange={e => setForm(p => ({ ...p, maxBranches: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-                <div><label className="block text-sm font-medium mb-1">Max Customers</label><input type="number" value={form.maxCustomers} onChange={e => setForm(p => ({ ...p, maxCustomers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-                <div><label className="block text-sm font-medium mb-1">Max Suppliers</label><input type="number" value={form.maxSuppliers} onChange={e => setForm(p => ({ ...p, maxSuppliers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+                <div className="col-span-2"><label className="block text-sm font-medium mb-1">Features (comma-separated)</label><input value={form.features} onChange={e => setForm(p => ({ ...p, features: e.target.value }))} placeholder="e.g. Inventory, Sales, Reports" className="w-full px-3 py-2 border rounded-lg" /></div>
               </div>
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2"><input type="checkbox" checked={form.isDefault} onChange={e => setForm(p => ({ ...p, isDefault: e.target.checked }))} /> Default plan</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={form.isActive} onChange={e => setForm(p => ({ ...p, isActive: e.target.checked }))} /> Active</label>
               </div>
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
@@ -131,5 +128,6 @@ export const PlansPage: React.FC = () => {
       )}
     </div>
   )
+}
 
 export default PlansPage
