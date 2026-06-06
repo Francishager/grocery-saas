@@ -7,12 +7,6 @@ interface Owner {
   tenant?: { id: string; name: string; status: string } | null
 }
 
-
-  const t = localStorage.getItem('auth_tokens')
-  if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
-  return h
-}
-
 export const OwnersPage: React.FC = () => {
   const [owners, setOwners] = useState<Owner[]>([])
   const [loading, setLoading] = useState(true)

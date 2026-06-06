@@ -9,12 +9,6 @@ interface Tenant {
   plan?: { name: string; price: number; currency: string; billingCycle: string }
 }
 
-
-  const t = localStorage.getItem('auth_tokens')
-  if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
-  return h
-}
-
 export const BusinessesPage: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
