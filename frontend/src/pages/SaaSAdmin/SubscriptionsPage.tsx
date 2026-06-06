@@ -10,12 +10,6 @@ interface Subscription {
 
 interface Plan { id: string; name: string; price: number; currency: string }
 
-
-  const t = localStorage.getItem('auth_tokens')
-  if (t) { try { h['Authorization'] = `Bearer ${JSON.parse(t).accessToken}` } catch {} }
-  return h
-}
-
 export const SubscriptionsPage: React.FC = () => {
   const [subs, setSubs] = useState<Subscription[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
