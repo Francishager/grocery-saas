@@ -14,9 +14,6 @@ interface PlatformStats {
   expiringSubscriptions: number
 }
 
-
-}
-
 export const SaaSAdminDashboard: React.FC = () => {
   const [stats, setStats] = useState<PlatformStats | null>(null)
   const [loading, setLoading] = useState(true)

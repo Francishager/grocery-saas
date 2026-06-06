@@ -21,6 +21,14 @@ import expensesRouter from "../routes/expenses.js";
 import platformNewRouter from "../routes/platform-new.js";
 
 dotenv.config();
+const resolvedDatabaseUrl =
+  process.env.DATABASE_URL ||
+  process.env.DATABASE_PUBLIC_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  process.env.POSTGRES_URL;
+if (resolvedDatabaseUrl && !process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = resolvedDatabaseUrl;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;

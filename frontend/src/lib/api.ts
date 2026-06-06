@@ -88,16 +88,17 @@ async function request<T>(
 // Drop-in fetch replacement  prepends API_URL and adds auth
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = getAuthToken()
-  const headers: Record<string, string> = { ...(init?.headers as Record<string,string> || {}) }
-  if (token) headers['Authorization'] = Bearer 
+  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) || {}) }
+  if (token) headers['Authorization'] = `Bearer ${token}`
   if (init?.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
-  const url = path.startsWith('http') ? path : ${API_URL}
+  const url = path.startsWith('http') ? path : `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
   return fetch(url, { ...init, headers })
 }
 
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>('GET', path, options),
   post: <T>(path: string, options?: RequestOptions) => request<T>('POST', path, options),
+  put: <T>(path: string, options?: RequestOptions) => request<T>('PUT', path, options),
   patch: <T>(path: string, options?: RequestOptions) => request<T>('PATCH', path, options),
   delete: <T>(path: string, options?: RequestOptions) => request<T>('DELETE', path, options),
 }
