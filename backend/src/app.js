@@ -59,11 +59,16 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_ORIG
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Always allow production frontend as fallback
+const productionFrontend = "https://grocery-saas.grocerysaas.workers.dev";
+
 app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (allowedOrigins.includes(origin) || origin.includes("localhost")) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      if (origin.includes("localhost")) return cb(null, true);
+      if (origin === productionFrontend) return cb(null, true);
       if (!allowedOrigins.length) return cb(null, true);
       cb(new Error("CORS: Origin not allowed"), false);
     },
