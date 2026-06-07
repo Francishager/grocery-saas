@@ -101,11 +101,20 @@ router.get("/features", authenticateToken, requirePlatformAdmin, async (req, res
 // Create feature
 router.post("/features", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const feature = await prisma.feature.create({ data: req.body });
+    const { name, displayName, description, category, isActive } = req.body;
+    if (!name || !displayName) {
+      return res.status(400).json({ error: "name and displayName are required" });
+    }
+    const feature = await prisma.feature.create({
+      data: { name, displayName, description: description || null, category: category || "core", isActive: isActive !== false }
+    });
     res.status(201).json({ message: "Feature created", feature });
   } catch (err) {
     console.error("Create feature error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    if (err.code === "P2002") {
+      return res.status(409).json({ error: "Feature name already exists" });
+    }
+    res.status(500).json({ error: "Internal server error", detail: err.message });
   }
 });
 
