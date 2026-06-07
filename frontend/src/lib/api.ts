@@ -69,7 +69,7 @@ async function request<T>(
   const data = isJson ? await response.json().catch(() => ({})) : await response.text()
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 || (response.status === 403 && data?.message === 'Invalid token')) {
       localStorage.removeItem('token')
       localStorage.removeItem('auth_tokens')
       localStorage.removeItem('auth_user')
@@ -92,7 +92,19 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (init?.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
   const url = path.startsWith('http') ? path : `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
-  return fetch(url, { ...init, headers })
+  return fetch(url, { ...init, headers }).then(async (res) => {
+    if (res.status === 401 || res.status === 403) {
+      const data = await res.clone().json().catch(() => ({}))
+      if (data?.message === 'Invalid token' || data?.message === 'Token expired') {
+        localStorage.removeItem('token')
+        localStorage.removeItem('auth_tokens')
+        localStorage.removeItem('auth_user')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
+      }
+    }
+    return res
+  })
 }
 
 export const api = {
