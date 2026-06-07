@@ -5,7 +5,7 @@ import prisma from "../db.js";
 import { authenticateToken, requireRole } from "../../middleware/auth.js";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Login
 router.post("/login", async (req, res) => {
