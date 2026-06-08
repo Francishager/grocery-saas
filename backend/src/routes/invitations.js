@@ -73,6 +73,7 @@ router.post("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
       data: { email, name, phone, token, otpCode, expiresAt, tenantId, planId, message, createdById: req.user.id, status: "pending" },
     });
 
+    let emailSent = false;
     try {
       const frontUrl = process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
       const acceptUrl = `${frontUrl}/accept-invitation/${token}`;
@@ -82,11 +83,12 @@ router.post("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
          <p><b>Your verification code (OTP):</b> ${otpCode}</p>
          <p><a href="${acceptUrl}">Accept Invitation</a></p>
          <p>This invitation expires in 7 days.</p>`);
+      emailSent = true;
     } catch (e) {
-      console.warn("Invitation email send failed:", e?.message);
+      console.error("Invitation email send failed:", e?.message);
     }
 
-    res.status(201).json({ message: "Invitation created", invitation });
+    res.status(201).json({ message: "Invitation created", invitation, otpCode: emailSent ? undefined : otpCode, emailSent });
   } catch (err) {
     console.error("Create invitation error:", err);
     res.status(500).json({ error: "Internal server error" });

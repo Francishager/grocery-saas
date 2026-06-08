@@ -27,6 +27,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [otpCode, setOtpCode] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen && !propPlans?.length) {
@@ -52,9 +53,12 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
     setError(null)
 
     try {
-      const invitation = await InviteService.create(formData)
+      const result = await InviteService.create(formData)
+      if (result.otpCode) {
+        setOtpCode(result.otpCode)
+      }
       setSuccess(true)
-      onSuccess?.(invitation)
+      onSuccess?.(result)
       
       // Reset form after success
       setTimeout(() => {
@@ -66,6 +70,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
           message: '',
         })
         setSuccess(false)
+        setOtpCode(null)
         onClose()
       }, 2000)
     } catch (err) {
@@ -104,6 +109,12 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
               <p className="text-gray-500 mt-2">
                 An email has been sent to {formData.email}
               </p>
+              {otpCode && (
+                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                  <p className="text-sm font-medium text-yellow-800">Email delivery unavailable — share this OTP manually:</p>
+                  <p className="text-2xl font-bold text-yellow-900 mt-1 tracking-widest">{otpCode}</p>
+                </div>
+              )}
             </div>
           ) : (
             <>
