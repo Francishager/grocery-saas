@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 
 const resendApiKey = process.env.RESEND_API_KEY;
-const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || "noreply@grocery-saas.com";
+const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || "noreply@watchafriview.com";
 
 const smtpHost = process.env.SMTP_HOST;
 const smtpPort = Number(process.env.SMTP_PORT || 587);
