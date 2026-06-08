@@ -164,8 +164,9 @@ export const InstitutionProvider: React.FC<InstitutionProviderProps> = ({
 
   const hasFeature = useCallback((feature: string): boolean => {
     if (!institution) return false
-    return institution.features.includes(feature) || 
-           institution.subscription?.features.includes(feature) || false
+    const features = institution.features || []
+    const subFeatures = institution.subscription?.features || []
+    return features.includes(feature) || subFeatures.includes(feature)
   }, [institution])
 
   const isSubscriptionActive = useCallback((): boolean => {
