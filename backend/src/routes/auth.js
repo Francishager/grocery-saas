@@ -19,6 +19,15 @@ router.post("/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ message: "Invalid credentials" });
 
+    // Force password reset if otpCode is present (first login after admin invite)
+    if (user.otpCode && user.otpExpires && new Date(user.otpExpires) > new Date()) {
+      return res.json({
+        forceReset: true,
+        email: user.email,
+        message: "Please reset your password using the OTP sent to your email",
+      });
+    }
+
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" },
       JWT_SECRET,

@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { X, Mail, User, Phone, Building, Send, Loader2 } from 'lucide-react'
 import InviteService, { InvitationCreateInput } from '@/services/InviteService'
+import { apiFetch } from '@/lib/api'
 
 export interface InviteBusinessOwnerModalProps {
   isOpen: boolean
@@ -13,22 +14,32 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
   isOpen,
   onClose,
   onSuccess,
-  plans = [
-    { id: 'starter', name: 'Starter' },
-    { id: 'professional', name: 'Professional' },
-    { id: 'enterprise', name: 'Enterprise' },
-  ],
+  plans: propPlans,
 }) => {
+  const [plans, setPlans] = useState(propPlans || [])
   const [formData, setFormData] = useState<InvitationCreateInput>({
     email: '',
     name: '',
     phone: '',
-    planId: 'professional',
+    planId: '',
     message: '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
+  useEffect(() => {
+    if (isOpen && !propPlans?.length) {
+      apiFetch('/api/platform/plans')
+        .then(r => r.json())
+        .then(data => {
+          const list = Array.isArray(data) ? data : data.plans || []
+          setPlans(list.map((p: any) => ({ id: p.id, name: p.name })))
+          if (list.length && !formData.planId) setFormData(prev => ({ ...prev, planId: list[0].id }))
+        })
+        .catch(() => {})
+    }
+  }, [isOpen, propPlans])
 
   const handleChange = (field: keyof InvitationCreateInput, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
@@ -51,7 +62,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
           email: '',
           name: '',
           phone: '',
-          planId: 'professional',
+          planId: plans[0]?.id || '',
           message: '',
         })
         setSuccess(false)

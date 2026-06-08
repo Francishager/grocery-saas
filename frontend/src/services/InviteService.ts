@@ -16,6 +16,7 @@ export interface Invitation {
   planId?: string
   planName?: string
   message?: string
+  otpCode?: string
 }
 
 export interface InvitationCreateInput {
@@ -102,7 +103,24 @@ class InviteService {
       throw new Error('Failed to fetch invitations')
     }
 
-    return response.json()
+    const data = await response.json()
+    const invitations: Invitation[] = (data.invitations || []).map((inv: any) => ({
+      id: inv.id,
+      email: inv.email,
+      name: inv.name,
+      phone: inv.phone,
+      status: inv.status,
+      invitedBy: inv.createdBy ? `${inv.createdBy.fname || ''} ${inv.createdBy.lname || ''}`.trim() : inv.createdById,
+      invitedAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      acceptedAt: inv.acceptedAt,
+      tenantId: inv.tenantId,
+      tenantName: inv.tenant?.name,
+      planId: inv.planId,
+      message: inv.message,
+    }))
+
+    return { invitations, total: data.total || invitations.length, stats: data.stats || { total: 0, pending: 0, accepted: 0, expired: 0, cancelled: 0 } }
   }
 
   /**
@@ -165,16 +183,17 @@ class InviteService {
    * Accept invitation and create account
    */
   async accept(token: string, data: {
+    otp: string
     password: string
     name: string
     phone?: string
     businessName: string
     businessType?: string
   }): Promise<{ user: any; tokens: any; tenant: any }> {
-    const response = await fetch(`${this.apiEndpoint}/accept/${token}`, {
+    const response = await fetch(`${this.apiEndpoint}/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ token, ...data }),
     })
 
     if (!response.ok) {

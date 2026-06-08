@@ -114,6 +114,7 @@ model Invitation {
   name        String?
   phone       String?
   token       String           @unique
+  otpCode     String?          // OTP for verification during acceptance
   status      InvitationStatus @default(pending)
   planId      String?
   message     String?
