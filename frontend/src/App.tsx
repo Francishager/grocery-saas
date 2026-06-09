@@ -10,6 +10,7 @@ import SaaSAdminLoginPage from '@/pages/auth/SaaSAdminLoginPage'
 import RegisterPage from '@/pages/auth/RegisterPage'
 import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage'
 import AcceptInvitation from '@/pages/auth/AcceptInvitation'
+import UnauthorizedPage from '@/pages/auth/UnauthorizedPage'
 import DashboardPage from '@/pages/DashboardPage'
 import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
@@ -63,6 +64,7 @@ function App() {
             <ForgotPasswordPage />
           </PublicRoute>
         } />
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
         <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />
 
         {/* SaaS Admin Routes (Platform Level) */}

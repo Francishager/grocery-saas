@@ -38,7 +38,14 @@ router.post("/login", async (req, res) => {
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
 
     const isPlatformUser = user.role === "saas_admin";
-    const permissions = isPlatformUser ? ["*"] : ["dashboard", "sales", "inventory", "purchases", "customers", "reports", "expenses", "settings"];
+    const permissions = isPlatformUser
+      ? ["*"]
+      : ["view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales", "refund_sales",
+         "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
+         "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock",
+         "view_reports", "export_reports",
+         "view_users", "manage_users", "assign_roles",
+         "view_settings", "manage_settings", "view_own_billing"];
 
     res.json({
       user: { id: user.id, email: user.email, name: `${user.fname || ""} ${user.lname || ""}`.trim(), role: user.role, tenantId: user.tenantId, isPlatformUser, permissions },
@@ -87,7 +94,14 @@ router.get("/me", authenticateToken, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     const { password: _, ...safe } = user;
     const isPlatformUser = user.role === "saas_admin";
-    const permissions = isPlatformUser ? ["*"] : ["dashboard", "sales", "inventory", "purchases", "customers", "reports", "expenses", "settings"];
+    const permissions = isPlatformUser
+      ? ["*"]
+      : ["view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales", "refund_sales",
+         "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
+         "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock",
+         "view_reports", "export_reports",
+         "view_users", "manage_users", "assign_roles",
+         "view_settings", "manage_settings", "view_own_billing"];
     res.json({ user: { ...safe, isPlatformUser, permissions } });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
