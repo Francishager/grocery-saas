@@ -321,11 +321,13 @@ export interface RegisterData {
 }
 
 export interface DashboardKpis {
-  total_sales: number
-  total_profit: number
-  total_discount: number
-  total_tax: number
-  low_stock: InventoryItem[]
+  revenue: number
+  revenueChange: number
+  salesCount: number
+  purchases: number
+  productCount: number
+  lowStockCount: number
+  customerCount: number
 }
 
 export interface InventoryItem {

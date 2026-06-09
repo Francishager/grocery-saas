@@ -45,6 +45,8 @@ export default function DashboardPage() {
     )
   }
 
+  const k = kpis || {}
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,41 +60,46 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
+            <CardTitle className="text-sm font-medium">Revenue</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(kpis.total_sales)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(k.revenue || 0)}</div>
+            {k.revenueChange != null && (
+              <p className={`text-xs ${k.revenueChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {k.revenueChange >= 0 ? <TrendingUp className="inline h-3 w-3" /> : <TrendingDown className="inline h-3 w-3" />} {Math.abs(k.revenueChange)}% vs last month
+          </p>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-600" />
+            <CardTitle className="text-sm font-medium">Sales</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{formatCurrency(kpis.total_profit)}</div>
+            <div className="text-2xl font-bold">{k.salesCount ?? 0}</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Discount</CardTitle>
-            <TrendingDown className="h-4 w-4 text-orange-600" />
+            <CardTitle className="text-sm font-medium">Purchases</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{formatCurrency(kpis.total_discount)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(k.purchases || 0)}</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Tax</CardTitle>
+            <CardTitle className="text-sm font-medium">Customers</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(kpis.total_tax)}</div>
+            <div className="text-2xl font-bold">{k.customerCount ?? 0}</div>
           </CardContent>
         </Card>
       </div>
@@ -105,37 +112,14 @@ export default function DashboardPage() {
             <CardTitle>Low Stock Alert</CardTitle>
           </div>
           <CardDescription>
-            Items that need restocking soon
+            {k.lowStockCount ?? 0} items need restocking
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {kpis.low_stock.length === 0 ? (
+          {(k.lowStockCount ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">All items are well stocked</p>
           ) : (
-            <div className="space-y-3">
-              {kpis.low_stock.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-lg border p-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <Package className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium">{item.product_name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        SKU: {item.product_id}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-orange-600">{item.quantity} left</p>
-                    <p className="text-sm text-muted-foreground">
-                      Alert at {item.low_stock_alert}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <p className="text-sm text-muted-foreground">{k.lowStockCount} products are running low</p>
           )}
         </CardContent>
       </Card>
