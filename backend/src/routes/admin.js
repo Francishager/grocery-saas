@@ -159,12 +159,26 @@ router.post("/subscription/edit", authenticateToken, requirePlatformAdmin, async
   }
 });
 
-// List subscriptions (plans)
+// List subscriptions
 router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const plans = await prisma.plan.findMany({ include: { tenants: true } });
-    res.json(plans);
+    const tenants = await prisma.tenant.findMany({
+      include: { plan: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const subscriptions = tenants.map(t => ({
+      id: t.id,
+      status: t.status || "active",
+      startDate: t.createdAt,
+      endDate: null,
+      tenant: { id: t.id, name: t.name, status: t.status },
+      plan: t.plan ? { id: t.plan.id, name: t.plan.name, price: t.plan.price, currency: t.plan.currency || "UGX", billingCycle: t.plan.billingCycle || "monthly" } : null,
+    }));
+
+    res.json({ subscriptions });
   } catch (err) {
+    console.error("List subscriptions error:", err);
     res.status(500).json({ error: "Failed to load subscriptions" });
   }
 });

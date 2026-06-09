@@ -81,10 +81,10 @@ export const SubscriptionsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {subs.filter(s => !search || s.tenant?.name?.toLowerCase().includes(search.toLowerCase())).map(s => (
+              {subs.filter(s => !search || (s.tenant?.name || '').toLowerCase().includes(search.toLowerCase())).map(s => (
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3"><div className="text-sm font-medium">{s.tenant?.name || '-'}</div><span className={`text-xs px-2 py-0.5 rounded ${s.tenant?.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{s.tenant?.status || '-'}</span></td>
-                  <td className="px-4 py-3"><div className="text-sm font-medium">{s.plan?.name || '-'}</div><div className="text-xs text-gray-500">{fmt(s.plan?.price || 0, s.plan?.currency || 'UGX')}/{s.plan?.billingCycle || '-'}</div></td>
+                  <td className="px-4 py-3"><div className="text-sm font-medium">{s.plan?.name || 'No Plan'}</div><div className="text-xs text-gray-500">{fmt(s.plan?.price || 0, s.plan?.currency || 'UGX')}/{s.plan?.billingCycle || '-'}</div></td>
                   <td className="px-4 py-3">{statusBadge(s.status)}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.startDate)}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.endDate)}</td>
