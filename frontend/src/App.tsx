@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { Layout } from '@/components/layout/Layout'
+import { SaaSAdminLayout } from '@/components/layout/SaaSAdminLayout'
+import { TenantLayout } from '@/components/layout/TenantLayout'
 import { RouteGuard } from '@/guard/RouteGuard'
 
 // Pages
@@ -70,7 +71,7 @@ function App() {
         {/* SaaS Admin Routes (Platform Level) */}
         <Route path="/saas" element={
           <RouteGuard role="saas_admin" platformOnly>
-            <Layout />
+            <SaaSAdminLayout />
           </RouteGuard>
         }>
           <Route index element={<Navigate to="/saas/dashboard" replace />} />
@@ -87,7 +88,7 @@ function App() {
         {/* Business Routes (Tenant Level) - SaaS Admin BLOCKED */}
         <Route path="/" element={
           <RouteGuard accessesBusinessData>
-            <Layout />
+            <TenantLayout />
           </RouteGuard>
         }>
           <Route index element={<Navigate to="/dashboard" replace />} />

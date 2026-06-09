@@ -36,7 +36,7 @@ export interface TitleProviderProps {
 export const TitleProvider: React.FC<TitleProviderProps> = ({
   children,
   initialTitle = '',
-  appName = 'Grocery SaaS',
+  appName = 'jibuSales',
   separator = ' | ',
   updateDocumentTitle = true,
   onTitleChange,

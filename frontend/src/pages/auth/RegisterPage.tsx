@@ -76,7 +76,7 @@ export default function RegisterPage() {
           </div>
           <CardTitle className="text-2xl">Create an account</CardTitle>
           <CardDescription>
-            Register your business on Grocery SaaS
+            Register your business on jibuSales
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -125,7 +125,7 @@ export default function RegisterPage() {
               <Input
                 id="business_name"
                 name="business_name"
-                placeholder="My Grocery Shop"
+                placeholder="My Business"
                 value={formData.business_name}
                 onChange={handleChange}
                 required

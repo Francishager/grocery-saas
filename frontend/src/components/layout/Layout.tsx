@@ -65,7 +65,7 @@ export function Layout() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
                 <Package className="h-5 w-5 text-primary-foreground" />
               </div>
-              <span className="text-lg font-bold">Grocery SaaS</span>
+              <span className="text-lg font-bold">jibuSales</span>
             </div>
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />

@@ -1,36 +1,52 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { Settings, ToggleLeft, ToggleRight, Loader2, RefreshCw, Save, X, Plus, Trash2 } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3 } from 'lucide-react'
 
-interface Feature {
-  id: string; name: string; displayName: string; slug: string; category: string; description: string; isActive: boolean
-  _count?: { planFeatures: number; tenantFeatures: number }
-}
-
-interface PlanFeature {
-  featureId: string; planId: string; enabled: boolean
-  feature: { id: string; name: string; slug: string }
-}
-
+interface Feature { id: string; name: string; displayName: string; slug: string; category: string; description: string; isActive: boolean }
+interface PlanFeature { featureId: string; planId: string; enabled: boolean; feature: { id: string; name: string; slug: string } }
 interface Plan { id: string; name: string }
+
+const MODULES = [
+  { id: 'financial', name: 'Financial Management', icon: DollarSign, color: 'text-green-600 bg-green-100', features: [
+    { name: 'bookkeeping', displayName: 'Bookkeeping' }, { name: 'income_tracking', displayName: 'Income Tracking' },
+    { name: 'expense_management', displayName: 'Expense Management' }, { name: 'payables_management', displayName: 'Payables Management' },
+    { name: 'receivables_management', displayName: 'Receivables Management' }, { name: 'cash_flow_monitoring', displayName: 'Cash Flow Monitoring' },
+    { name: 'profitability_analysis', displayName: 'Profitability Analysis' },
+  ]},
+  { id: 'inventory', name: 'Inventory Management', icon: Package, color: 'text-orange-600 bg-orange-100', features: [
+    { name: 'product_tracking', displayName: 'Product Tracking' }, { name: 'stock_movement', displayName: 'Stock Movement Monitoring' },
+    { name: 'low_stock_alerts', displayName: 'Low-Stock Alerts' }, { name: 'purchase_management', displayName: 'Purchase Management' },
+    { name: 'supplier_management', displayName: 'Supplier Management' }, { name: 'inventory_valuation', displayName: 'Inventory Valuation' },
+  ]},
+  { id: 'sales', name: 'Sales Management', icon: ShoppingCart, color: 'text-blue-600 bg-blue-100', features: [
+    { name: 'pos_sales', displayName: 'POS Sales Processing' }, { name: 'invoice_generation', displayName: 'Invoice Generation' },
+    { name: 'customer_transactions', displayName: 'Customer Transactions' }, { name: 'sales_tracking', displayName: 'Sales Tracking' },
+    { name: 'payment_management', displayName: 'Payment Management' },
+  ]},
+  { id: 'operations', name: 'Business Operations', icon: Briefcase, color: 'text-purple-600 bg-purple-100', features: [
+    { name: 'staff_management', displayName: 'Staff Management' }, { name: 'role_access_control', displayName: 'Role-Based Access Control' },
+    { name: 'activity_logs', displayName: 'Activity Logs' }, { name: 'branch_management', displayName: 'Branch Management' },
+    { name: 'workflow_organization', displayName: 'Workflow Organization' },
+  ]},
+  { id: 'reporting', name: 'Reporting & Insights', icon: BarChart3, color: 'text-cyan-600 bg-cyan-100', features: [
+    { name: 'financial_reports', displayName: 'Financial Reports' }, { name: 'sales_reports', displayName: 'Sales Reports' },
+    { name: 'inventory_reports', displayName: 'Inventory Reports' }, { name: 'performance_dashboards', displayName: 'Business Performance Dashboards' },
+    { name: 'decision_analytics', displayName: 'Decision-Support Analytics' },
+  ]},
+]
 
 export const FeaturesPage: React.FC = () => {
   const [features, setFeatures] = useState<Feature[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
   const [planFeatures, setPlanFeatures] = useState<PlanFeature[]>([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', displayName: '', category: 'core', description: '', isActive: true })
   const [selectedPlan, setSelectedPlan] = useState<string>('')
 
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [fRes, pRes] = await Promise.all([
-        apiFetch('/api/platform/features'),
-        apiFetch('/api/platform/plans'),
-      ])
+      const [fRes, pRes] = await Promise.all([apiFetch('/api/platform/features'), apiFetch('/api/platform/plans')])
       if (fRes.ok) setFeatures(await fRes.json())
       if (pRes.ok) { const p = await pRes.json(); setPlans(p); if (p.length && !selectedPlan) setSelectedPlan(p[0].id) }
     } catch {}
@@ -39,128 +55,109 @@ export const FeaturesPage: React.FC = () => {
 
   const fetchPlanFeatures = async (planId: string) => {
     if (!planId) return
-    try {
-      const res = await apiFetch(`/api/platform/plans/${planId}/features`)
-      if (res.ok) setPlanFeatures(await res.json())
-    } catch {}
+    try { const res = await apiFetch(`/api/platform/plans/${planId}/features`); if (res.ok) setPlanFeatures(await res.json()) } catch {}
   }
 
   useEffect(() => { fetchData() }, [])
   useEffect(() => { if (selectedPlan) fetchPlanFeatures(selectedPlan) }, [selectedPlan])
 
-  const handleCreateFeature = async (e: React.FormEvent) => {
-    e.preventDefault(); setSaving(true)
-    try {
-      const payload = { ...form, slug: form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') }
-      const res = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify(payload) })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed') }
-      setShowForm(false); setForm({ name: '', displayName: '', category: 'core', description: '', isActive: true }); fetchData()
-    } catch (err) { alert(err instanceof Error ? err.message : 'Failed') }
+  const isFeatureEnabled = (featureName: string) => planFeatures.some(pf => pf.feature?.name === featureName && pf.enabled)
+
+  const handleToggle = async (featureName: string, enabled: boolean) => {
+    const feat = features.find(f => f.name === featureName)
+    if (!feat || !selectedPlan) return
+    setSaving(true)
+    try { const res = await apiFetch('/api/platform/plan-features', { method: 'POST', body: JSON.stringify({ planId: selectedPlan, featureId: feat.id, enabled }) }); if (res.ok) fetchPlanFeatures(selectedPlan) } catch {}
     setSaving(false)
   }
 
-  const handleTogglePlanFeature = async (featureId: string, enabled: boolean) => {
-    try {
-      const res = await apiFetch(`/api/platform/plan-features`, { method: 'POST', body: JSON.stringify({ planId: selectedPlan, featureId, enabled }) })
-      if (res.ok) fetchPlanFeatures(selectedPlan)
-    } catch {}
+  const handleSeedFeatures = async () => {
+    if (!confirm('Create all jibuSales module features?')) return
+    setSaving(true)
+    for (const mod of MODULES) {
+      for (const f of mod.features) {
+        if (!features.find(ef => ef.name === f.name)) {
+          await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: f.name, displayName: f.displayName, category: mod.id, description: f.displayName, isActive: true, slug: f.name }) })
+        }
+      }
+    }
+    await fetchData(); setSaving(false)
   }
 
   const handleDeleteFeature = async (id: string) => {
     if (!confirm('Delete this feature?')) return
-    try {
-      const res = await apiFetch(`/api/platform/features/${id}`, { method: 'DELETE' })
-      if (res.ok) fetchData()
-    } catch {}
-  }
-
-  const categoryBadge = (c: string) => {
-    const cls: Record<string, string> = { core: 'bg-blue-100 text-blue-800', advanced: 'bg-purple-100 text-purple-800', integration: 'bg-green-100 text-green-800' }
-    return <span className={`px-2 py-1 rounded text-xs font-medium ${cls[c] || 'bg-gray-100 text-gray-800'}`}>{c}</span>
+    try { const res = await apiFetch(`/api/platform/features/${id}`, { method: 'DELETE' }); if (res.ok) fetchData() } catch {}
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold">Features</h1><p className="text-gray-500">Manage platform features and plan assignments</p></div>
+        <div><h1 className="text-2xl font-bold text-white">Features</h1><p className="text-slate-400">Manage jibuSales modules and plan assignments</p></div>
         <div className="flex gap-2">
-          <button onClick={fetchData} className="px-3 py-2 border rounded-lg hover:bg-gray-50"><RefreshCw size={18} /></button>
-          <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"><Plus size={18} /> New Feature</button>
+          <button onClick={fetchData} className="px-3 py-2 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-800"><RefreshCw size={18} /></button>
+          <button onClick={handleSeedFeatures} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus size={18} />} Seed All Modules
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-slate-300">Assign features for plan:</label>
+          <select value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg text-sm">
+            {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
         </div>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-lg border">
-            <div className="p-4 border-b"><h2 className="font-semibold">Feature Registry</h2></div>
-            <div className="divide-y">
-              {features.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">No features defined</div>
-              ) : features.map(f => (
-                <div key={f.id} className="flex items-center justify-between p-4">
-                  <div className="flex items-center gap-3">
-                    <Settings className="w-5 h-5 text-gray-400" />
-                    <div>
-                      <p className="font-medium text-sm">{f.displayName || f.name}</p>
-                      <div className="flex items-center gap-2 text-xs text-gray-500">{f.slug} &middot; {categoryBadge(f.category)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs ${f.isActive ? 'text-green-600' : 'text-gray-400'}`}>{f.isActive ? 'Active' : 'Inactive'}</span>
-                    <button onClick={() => handleDeleteFeature(f.id)} className="p-1 hover:bg-red-50 text-red-600 rounded"><Trash2 size={14} /></button>
-                  </div>
+        <div className="space-y-4">
+          {MODULES.map(mod => {
+            const ModIcon = mod.icon
+            return (
+              <div key={mod.id} className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+                <div className="p-4 border-b border-slate-800 flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${mod.color}`}><ModIcon className="w-5 h-5" /></div>
+                  <div><h2 className="font-semibold text-white">{mod.name}</h2><p className="text-xs text-slate-400">{mod.features.length} features</p></div>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h2 className="font-semibold">Plan Feature Assignment</h2>
-              <select value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)} className="px-3 py-1 border rounded-lg text-sm">
-                {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div className="divide-y">
-              {features.map(f => {
-                const pf = planFeatures.find(p => p.featureId === f.id)
-                const enabled = pf?.enabled ?? false
-                return (
-                  <div key={f.id} className="flex items-center justify-between p-4">
-                    <div>
-                      <p className="font-medium text-sm">{f.displayName || f.name}</p>
-                      <p className="text-xs text-gray-500">{f.slug}</p>
-                    </div>
-                    <button onClick={() => handleTogglePlanFeature(f.id, !enabled)} className="flex items-center gap-2">
-                      {enabled ? <ToggleRight className="w-6 h-6 text-green-600" /> : <ToggleLeft className="w-6 h-6 text-gray-400" />}
-                      <span className={`text-xs ${enabled ? 'text-green-600' : 'text-gray-400'}`}>{enabled ? 'On' : 'Off'}</span>
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">New Feature</h2><button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
-            <form onSubmit={handleCreateFeature} className="space-y-4">
-              <div><label className="block text-sm font-medium mb-1">Name *</label><input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g. pos, inventory, reports" /></div>
-              <div><label className="block text-sm font-medium mb-1">Display Name</label><input value={form.displayName} onChange={e => setForm(p => ({ ...p, displayName: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g. Point of Sale" /></div>
-              <div><label className="block text-sm font-medium mb-1">Category</label><select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} className="w-full px-3 py-2 border rounded-lg"><option value="core">Core</option><option value="advanced">Advanced</option><option value="integration">Integration</option></select></div>
-              <div><label className="block text-sm font-medium mb-1">Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" rows={2} /></div>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.isActive} onChange={e => setForm(p => ({ ...p, isActive: e.target.checked }))} /> Active</label>
-              <div className="flex gap-3">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={saving} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save size={16} />} Create</button>
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {mod.features.map(mf => {
+                    const existing = features.find(f => f.name === mf.name)
+                    const enabled = isFeatureEnabled(mf.name)
+                    return (
+                      <div key={mf.name} className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
+                        <span className="text-sm text-slate-200">{mf.displayName}</span>
+                        <button onClick={() => handleToggle(mf.name, !enabled)} disabled={saving || !existing} className="flex items-center gap-1">
+                          {enabled ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </form>
-          </div>
+            )
+          })}
+
+          {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).length > 0 && (
+            <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+              <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other Features</h2></div>
+              <div className="divide-y divide-slate-800">
+                {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).map(f => (
+                  <div key={f.id} className="flex items-center justify-between p-4">
+                    <div><p className="font-medium text-sm text-slate-200">{f.displayName || f.name}</p><p className="text-xs text-slate-400">{f.category}</p></div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleToggle(f.name, !isFeatureEnabled(f.name))} disabled={saving}>
+                        {isFeatureEnabled(f.name) ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
+                      </button>
+                      <button onClick={() => handleDeleteFeature(f.id)} className="p-1 hover:bg-red-900 text-red-400 rounded"><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

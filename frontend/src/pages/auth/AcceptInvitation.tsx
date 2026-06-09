@@ -164,7 +164,7 @@ const AcceptInvitation: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
-          <h1 className="mt-4 text-xl font-semibold text-gray-900">Welcome to Grocery SaaS!</h1>
+          <h1 className="mt-4 text-xl font-semibold text-gray-900">Welcome to jibuSales!</h1>
           <p className="mt-2 text-gray-600">
             Your account has been created successfully. Redirecting to your dashboard...
           </p>
@@ -185,7 +185,7 @@ const AcceptInvitation: React.FC = () => {
             Accept Your Invitation
           </h1>
           <p className="mt-2 text-gray-600">
-            You've been invited to join Grocery SaaS as a business owner
+            You've been invited to join jibuSales as a business owner
           </p>
         </div>
 
@@ -363,7 +363,7 @@ const AcceptInvitation: React.FC = () => {
                     className={`w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
                       formErrors.businessName ? 'border-red-300' : 'border-gray-300'
                     }`}
-                    placeholder="My Grocery Store"
+                    placeholder="My Business"
                   />
                 </div>
                 {formErrors.businessName && (
