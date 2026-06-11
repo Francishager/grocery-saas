@@ -234,7 +234,7 @@ export default function SaaSAdminDashboard() {
       trial: 'outline'
     }
     return (
-      <Badge variant={variants[status as keyof typeof variants]}>
+      <Badge variant={(variants[status as keyof typeof variants] as 'default' | 'destructive' | 'outline' | 'secondary')}>
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </Badge>
     )

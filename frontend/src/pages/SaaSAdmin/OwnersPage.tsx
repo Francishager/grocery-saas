@@ -20,7 +20,7 @@ export const OwnersPage: React.FC = () => {
       const params = new URLSearchParams()
       if (search) params.append('search', search)
       const res = await apiFetch(`/api/admin/owners?${params}`, {})
-      if (res.ok) { const d = await res.json(); setOwners(d.owners || d) }
+      if (res.ok) { const d = await res.json(); setOwners(Array.isArray(d?.owners) ? d.owners : Array.isArray(d) ? d : []) }
     } catch {}
     setLoading(false)
   }

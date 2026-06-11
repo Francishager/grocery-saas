@@ -16,12 +16,12 @@ export interface GuestGuardProps {
 
 export const GuestGuard: React.FC<GuestGuardProps> = ({
   children,
-  redirectTo = '/dashboard',
+  redirectTo = '/tenant/dashboard',
   showLoading = true,
   loadingComponent,
 }) => {
   const location = useLocation()
-  const { isLoading, isAuthenticated } = useAuth()
+  const { loading: isLoading, isAuthenticated } = useAuth()
 
   // Show loading state
   if (isLoading) {

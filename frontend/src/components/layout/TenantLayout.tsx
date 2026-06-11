@@ -6,12 +6,12 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
 
 const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/sales', label: 'Sales', icon: ShoppingCart },
-  { to: '/inventory', label: 'Inventory', icon: Package },
-  { to: '/purchases', label: 'Purchases', icon: FileText },
-  { to: '/reports', label: 'Reports', icon: TrendingUp },
-  { to: '/admin', label: 'Staff', icon: Users },
+  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart },
+  { to: '/tenant/inventory', label: 'Inventory', icon: Package },
+  { to: '/tenant/purchases', label: 'Purchases', icon: FileText },
+  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp },
+  { to: '/tenant/admin', label: 'Staff', icon: Users },
 ]
 
 export function TenantLayout() {

@@ -23,6 +23,14 @@ export interface AuthTokens {
   tokenType: string
 }
 
+export interface LoginResult {
+  user?: User
+  tokens?: AuthTokens
+  forceReset?: boolean
+  email?: string
+  message?: string
+}
+
 export interface JWTAuthContextValue {
   /** Current user */
   user: User | null
@@ -35,7 +43,7 @@ export interface JWTAuthContextValue {
   /** Error state */
   error: string | null
   /** Login */
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<LoginResult>
   /** Logout */
   logout: () => Promise<void>
   /** Register */
@@ -153,12 +161,19 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       }
 
       const data = await response.json()
+
+      // Handle force-reset response from backend
+      if (data.forceReset) {
+        return data
+      }
+
       const { user: userData, tokens: tokenData } = data
 
       setUser(userData)
       setTokens(tokenData)
       persistAuth(userData, tokenData)
       onLogin?.(userData, tokenData)
+      return { user: userData, tokens: tokenData }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
       throw err
@@ -274,8 +289,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     if (!user) return false
     // Platform users (SaaS Admin) cannot access business data
     if (isPlatformUser()) return false
-    // Business users must have a tenant ID
-    return !!user.tenantId || !!user.institutionId
+    // Business users: must have a tenant ID or a business role
+    return !!user.tenantId || !!user.institutionId || ['owner', 'manager', 'accountant', 'attendant'].includes(user.role)
   }, [user, isPlatformUser])
 
   const clearError = useCallback(() => {

@@ -24,7 +24,7 @@ export const BusinessesPage: React.FC = () => {
       if (statusFilter !== 'all') params.append('status', statusFilter)
       if (search) params.append('search', search)
       const res = await apiFetch(`/api/tenants?${params}`, {})
-      if (res.ok) { const d = await res.json(); setTenants(d.tenants || d) }
+      if (res.ok) { const d = await res.json(); setTenants(Array.isArray(d?.tenants) ? d.tenants : Array.isArray(d) ? d : []) }
     } catch {}
     setLoading(false)
   }

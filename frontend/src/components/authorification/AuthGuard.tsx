@@ -30,7 +30,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
   unauthorizedComponent,
 }) => {
   const location = useLocation()
-  const { user, isLoading, isAuthenticated, hasRole, hasPermission } = useAuth()
+  const { user, loading: isLoading, isAuthenticated, hasRole, hasPermission } = useAuth()
 
   // Show loading state
   if (isLoading) {

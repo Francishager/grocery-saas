@@ -9,10 +9,8 @@ export default function UnauthorizedPage() {
   const goBack = () => {
     if (isPlatformUser()) {
       navigate('/saas/dashboard')
-    } else if (user?.tenantId) {
-      navigate('/dashboard')
     } else {
-      navigate('/login')
+      navigate('/tenant/dashboard')
     }
   }
 

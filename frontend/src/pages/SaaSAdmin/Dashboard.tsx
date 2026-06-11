@@ -3,15 +3,19 @@ import React, { useState, useEffect } from 'react'
 import { Building, Users, DollarSign, TrendingUp, Mail, AlertCircle, Loader2, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 interface PlatformStats {
-  totalTenants: number
+  tenants: number
   activeTenants: number
-  suspendedTenants: number
-  trialTenants: number
-  totalUsers: number
-  monthlyRevenue: number
-  revenueChange: number
-  pendingInvitations: number
-  expiringSubscriptions: number
+  users: number
+  plans: number
+  features: number
+  totalTenants?: number
+  totalUsers?: number
+  trialTenants?: number
+  suspendedTenants?: number
+  monthlyRevenue?: number
+  revenueChange?: number
+  pendingInvitations?: number
+  expiringSubscriptions?: number
 }
 
 export const SaaSAdminDashboard: React.FC = () => {
@@ -40,19 +44,17 @@ export const SaaSAdminDashboard: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white rounded-lg border p-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-sm text-gray-500">Total Tenants</p><p className="text-2xl font-bold mt-1">{stats?.totalTenants || 0}</p></div>
+            <div><p className="text-sm text-gray-500">Total Tenants</p><p className="text-2xl font-bold mt-1">{stats?.tenants || stats?.totalTenants || 0}</p></div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center"><Building className="w-6 h-6 text-blue-600" /></div>
           </div>
           <div className="mt-4 flex items-center gap-4 text-sm">
             <span className="text-green-600">{stats?.activeTenants} active</span>
-            <span className="text-yellow-600">{stats?.trialTenants} trial</span>
-            <span className="text-red-600">{stats?.suspendedTenants} suspended</span>
           </div>
         </div>
 
         <div className="bg-white rounded-lg border p-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-sm text-gray-500">Total Users</p><p className="text-2xl font-bold mt-1">{stats?.totalUsers || 0}</p></div>
+            <div><p className="text-sm text-gray-500">Total Users</p><p className="text-2xl font-bold mt-1">{stats?.users || stats?.totalUsers || 0}</p></div>
             <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center"><Users className="w-6 h-6 text-purple-600" /></div>
           </div>
           <p className="mt-4 text-sm text-gray-500">Across all tenants</p>

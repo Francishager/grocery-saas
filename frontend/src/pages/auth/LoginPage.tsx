@@ -20,7 +20,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [currentSlide, setCurrentSlide] = useState(0)
-  const { login, isPlatformUser, canAccessBusinessData } = useJWTAuth()
+  const { login } = useJWTAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -37,10 +37,16 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      await login(email, password)
-      
-      // Check if user is SaaS Admin - they should use different login
-      if (isPlatformUser()) {
+      const result = await login(email, password)
+
+      // Handle force-reset from backend
+      if (result.forceReset) {
+        toast({ title: 'Password Reset Required', description: result.message || 'Please reset your password' })
+        return
+      }
+
+      // Route based on the actual login response (not stale React state)
+      if (result.user?.isPlatformUser || result.user?.role === 'saas_admin') {
         toast({
           variant: 'destructive',
           title: 'Wrong Login Page',
@@ -49,22 +55,12 @@ export default function LoginPage() {
         return
       }
 
-      // Check if user can access business data
-      if (!canAccessBusinessData()) {
-        toast({
-          variant: 'destructive',
-          title: 'Access Denied',
-          description: 'Your account does not have business access.',
-        })
-        return
-      }
-      
       toast({
         title: 'Welcome back!',
         description: 'Logged in successfully',
       })
 
-      navigate('/dashboard')
+      navigate('/tenant/dashboard')
     } catch (error: any) {
       toast({
         variant: 'destructive',

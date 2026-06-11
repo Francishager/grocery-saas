@@ -12,7 +12,7 @@ export default function SaaSAdminLoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const { login, isPlatformUser } = useJWTAuth()
+  const { login } = useJWTAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -21,10 +21,10 @@ export default function SaaSAdminLoginPage() {
     setLoading(true)
 
     try {
-      await login(email, password)
-      
-      // Check if user is platform admin
-      if (!isPlatformUser()) {
+      const result = await login(email, password)
+
+      // Route based on the actual login response (not stale React state)
+      if (result.user?.role !== 'saas_admin' && !result.user?.isPlatformUser) {
         toast({
           variant: 'destructive',
           title: 'Access Denied',
@@ -32,7 +32,7 @@ export default function SaaSAdminLoginPage() {
         })
         return
       }
-      
+
       toast({
         title: 'Welcome, SaaS Admin',
         description: 'Logged in successfully',

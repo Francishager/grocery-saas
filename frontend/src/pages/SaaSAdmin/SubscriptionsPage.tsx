@@ -25,7 +25,7 @@ export const SubscriptionsPage: React.FC = () => {
         apiFetch('/api/admin/subscriptions', {}),
         apiFetch('/api/platform/plans', {}),
       ])
-      if (sRes.ok) { const d = await sRes.json(); setSubs(d.subscriptions || d) }
+      if (sRes.ok) { const d = await sRes.json(); setSubs(Array.isArray(d?.subscriptions) ? d.subscriptions : Array.isArray(d) ? d : []) }
       if (pRes.ok) setPlans(await pRes.json())
     } catch {}
     setLoading(false)

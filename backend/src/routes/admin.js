@@ -59,6 +59,55 @@ router.post("/businesses", authenticateToken, requirePlatformAdmin, async (req, 
   }
 });
 
+// List owners
+router.get("/owners", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { search } = req.query;
+    const where = { role: "owner" };
+    if (search) {
+      where.OR = [
+        { fname: { contains: search, mode: "insensitive" } },
+        { lname: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+      ];
+    }
+    const users = await prisma.user.findMany({
+      where,
+      include: { tenant: { select: { id: true, name: true, status: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const owners = users.map(u => ({
+      id: u.id,
+      name: `${u.fname || ""} ${u.lname || ""}`.trim() || u.email,
+      email: u.email,
+      role: u.role,
+      isActive: true,
+      lastLogin: null,
+      createdAt: u.createdAt,
+      tenant: u.tenant,
+    }));
+    res.json({ owners });
+  } catch (err) {
+    console.error("List owners error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Reset owner password
+router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+    if (!password || password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    const hashed = await bcrypt.hash(password, 12);
+    await prisma.user.update({ where: { id }, data: { password: hashed } });
+    res.json({ message: "Password reset successfully" });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Create owner
 router.post("/owners", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
