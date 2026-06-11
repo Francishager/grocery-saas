@@ -1,11 +1,21 @@
-import { useEffect, useState } from 'react'
-import { ShoppingCart, Plus, Search, Trash2 } from 'lucide-react'
+ import { useEffect, useState } from 'react'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw } from 'lucide-react'
 import { inventoryApi, salesApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+
+interface RecentSale {
+  id: string
+  receiptNo: string
+  total: number
+  paymentMethod: string
+  createdAt: string
+  items: { productId: string; quantity: number; price: number; total: number }[]
+  user?: { fname: string; lname: string }
+}
 
 export default function SalesPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
@@ -14,10 +24,13 @@ export default function SalesPage() {
   const [paymentMode, setPaymentMode] = useState('cash')
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [recentSales, setRecentSales] = useState<RecentSale[]>([])
+  const [salesLoading, setSalesLoading] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
     loadInventory()
+    loadRecentSales()
   }, [])
 
   const loadInventory = async () => {
@@ -93,6 +106,7 @@ export default function SalesPage() {
         description: `${cart.length} items sold for ${formatCurrency(cartTotal)}`,
       })
       setCart([])
+      loadRecentSales()
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -101,6 +115,18 @@ export default function SalesPage() {
       })
     } finally {
       setProcessing(false)
+    }
+  }
+
+  const loadRecentSales = async () => {
+    setSalesLoading(true)
+    try {
+      const data = await salesApi.list()
+      setRecentSales(Array.isArray(data) ? data : [])
+    } catch {
+      // silently fail — sales history is secondary
+    } finally {
+      setSalesLoading(false)
     }
   }
 
@@ -264,6 +290,65 @@ export default function SalesPage() {
           </Card>
         </div>
       </div>
+
+      {/* Recent Sales */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Receipt className="h-5 w-5" />
+              <CardTitle>Recent Sales</CardTitle>
+            </div>
+            <Button variant="ghost" size="icon" onClick={loadRecentSales}>
+              <RefreshCw className={`h-4 w-4 ${salesLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {salesLoading ? (
+            <div className="flex items-center justify-center h-20">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+            </div>
+          ) : recentSales.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6">No sales recorded yet</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="pb-3 font-medium">Receipt</th>
+                    <th className="pb-3 font-medium">Items</th>
+                    <th className="pb-3 font-medium">Payment</th>
+                    <th className="pb-3 font-medium">Staff</th>
+                    <th className="pb-3 font-medium text-right">Total</th>
+                    <th className="pb-3 font-medium text-right">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentSales.slice(0, 20).map((sale) => (
+                    <tr key={sale.id} className="border-b last:border-0">
+                      <td className="py-3 font-mono text-sm">{sale.receiptNo}</td>
+                      <td className="py-3 text-sm">{sale.items?.length ?? 0} items</td>
+                      <td className="py-3">
+                        <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          {(sale.paymentMethod || 'cash').replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="py-3 text-sm">
+                        {sale.user ? `${sale.user.fname || ''} ${sale.user.lname || ''}`.trim() || '—' : '—'}
+                      </td>
+                      <td className="py-3 text-right font-medium">{formatCurrency(sale.total)}</td>
+                      <td className="py-3 text-right text-sm text-muted-foreground">
+                        {new Date(sale.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

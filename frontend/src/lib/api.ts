@@ -150,40 +150,92 @@ export const dashboardApi = {
 
 // Inventory endpoints
 export const inventoryApi = {
-  list: (q?: string) =>
-    api.get<InventoryItem[]>('/api/inventory', { params: { q } }),
+  list: async (q?: string) => {
+    const data = await api.get<any>('/api/inventory', { params: { search: q } })
+    const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
+    return products.map(mapProductToInventory)
+  },
 
-  get: (id: string) =>
-    api.get<InventoryItem>(`/api/inventory/${id}`),
+  get: async (id: string) => {
+    const data = await api.get<any>(`/api/inventory/${id}`)
+    return mapProductToInventory(data)
+  },
 
   create: (data: Partial<InventoryItem>) =>
-    api.post<InventoryItem>('/api/inventory', { body: data }),
+    api.post<InventoryItem>('/api/inventory', { body: {
+      name: data.product_name,
+      price: data.unit_price,
+      cost: data.cost_price,
+      quantity: data.quantity,
+      minStock: data.low_stock_alert,
+      sku: data.product_id,
+    } }),
 
   update: (id: string, data: Partial<InventoryItem>) =>
-    api.patch<InventoryItem>(`/api/inventory/${id}`, { body: data }),
+    api.put<InventoryItem>(`/api/inventory/${id}`, { body: {
+      name: data.product_name,
+      price: data.unit_price,
+      cost: data.cost_price,
+      quantity: data.quantity,
+      minStock: data.low_stock_alert,
+      sku: data.product_id,
+    } }),
 
   delete: (id: string) =>
     api.delete<{ message: string }>(`/api/inventory/${id}`),
 }
 
+// Map backend Product model to frontend InventoryItem
+function mapProductToInventory(p: any): InventoryItem {
+  return {
+    id: p.id,
+    business_id: p.tenantId,
+    product_id: p.id,
+    product_name: p.name,
+    quantity: p.quantity ?? 0,
+    unit_price: p.price ?? 0,
+    cost_price: p.cost ?? 0,
+    low_stock_alert: p.minStock ?? 10,
+    updated_at: p.updatedAt || p.createdAt,
+  }
+}
+
 // Sales endpoints
 export const salesApi = {
-  list: (params?: { start?: string; end?: string }) =>
-    api.get<Sale[]>('/api/sales', { params }),
+  list: async (params?: { start?: string; end?: string }) => {
+    const mappedParams: Record<string, string | number | boolean | undefined> = {}
+    if (params?.start) mappedParams.from = params.start
+    if (params?.end) mappedParams.to = params.end
+    const data = await api.get<any>('/api/sales', { params: mappedParams })
+    return Array.isArray(data?.sales) ? data.sales : Array.isArray(data) ? data : []
+  },
 
   create: (data: Partial<Sale>) =>
     api.post<Sale>('/api/sales', { body: data }),
 
   checkout: (cart: CartItem[], payment_mode: string) =>
     api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
-      body: { cart, paymentMethod: payment_mode },
+      body: {
+        cart: cart.map(c => ({
+          productId: c.product_id || c.id,
+          qty: c.qty,
+          price: c.selling_price,
+          discount: c.discount || 0,
+        })),
+        paymentMethod: payment_mode,
+      },
     }),
 }
 
 // Purchases endpoints
 export const purchasesApi = {
-  list: (params?: { start?: string; end?: string }) =>
-    api.get<Purchase[]>('/api/purchases', { params }),
+  list: async (params?: { start?: string; end?: string }) => {
+    const mappedParams: Record<string, string | number | boolean | undefined> = {}
+    if (params?.start) mappedParams.from = params.start
+    if (params?.end) mappedParams.to = params.end
+    const data = await api.get<any>('/api/purchases', { params: mappedParams })
+    return Array.isArray(data?.purchases) ? data.purchases : Array.isArray(data) ? data : []
+  },
 
   create: (data: Partial<Purchase>) =>
     api.post<Purchase>('/api/purchases', { body: data }),
