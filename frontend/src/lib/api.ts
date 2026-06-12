@@ -248,17 +248,74 @@ export const purchasesApi = {
 
 // Reports endpoints
 export const reportsApi = {
-  getProducts: () =>
-    api.get<TopProduct[]>('/api/reports/sales'),
+  getProducts: async () => {
+    const data = await api.get<any>('/api/reports/sales')
+    const sales = Array.isArray(data?.sales) ? data.sales : Array.isArray(data) ? data : []
+    // Aggregate top products from sale items
+    const productMap: Record<string, { product: string; quantity: number; revenue: number; profit: number }> = {}
+    for (const sale of sales) {
+      for (const item of sale.items || []) {
+        const name = item.product?.name || item.productId || 'Unknown'
+        if (!productMap[name]) productMap[name] = { product: name, quantity: 0, revenue: 0, profit: 0 }
+        productMap[name].quantity += item.quantity || 0
+        productMap[name].revenue += item.total || 0
+        productMap[name].profit += (item.total || 0) - ((item.product?.cost || 0) * (item.quantity || 0))
+      }
+    }
+    return Object.values(productMap).sort((a, b) => b.profit - a.profit)
+  },
 
-  getStaff: () =>
-    api.get<StaffLeaderboard[]>('/api/reports/sales'),
+  getStaff: async () => {
+    const data = await api.get<any>('/api/reports/sales')
+    const sales = Array.isArray(data?.sales) ? data.sales : Array.isArray(data) ? data : []
+    // Aggregate staff performance from sales
+    const staffMap: Record<string, { staff: string; sales_count: number; total_revenue: number; profit: number }> = {}
+    for (const sale of sales) {
+      const name = sale.user ? `${sale.user.fname || ''} ${sale.user.lname || ''}`.trim() || 'Unknown' : 'Unknown'
+      if (!staffMap[name]) staffMap[name] = { staff: name, sales_count: 0, total_revenue: 0, profit: 0 }
+      staffMap[name].sales_count += 1
+      staffMap[name].total_revenue += sale.total || 0
+      const itemProfit = (sale.items || []).reduce((s: number, i: any) => s + ((i.total || 0) - ((i.product?.cost || 0) * (i.quantity || 0))), 0)
+      staffMap[name].profit += itemProfit
+    }
+    return Object.values(staffMap).sort((a, b) => b.profit - a.profit)
+  },
 
-  getDaily: () =>
-    api.get<DailyReport[]>('/api/reports/sales'),
+  getDaily: async () => {
+    const data = await api.get<any>('/api/reports/sales')
+    const sales = Array.isArray(data?.sales) ? data.sales : Array.isArray(data) ? data : []
+    // Group by day
+    const dayMap: Record<string, { date: string; gross: number; discount: number; tax: number; cost: number; profit: number }> = {}
+    for (const sale of sales) {
+      const day = new Date(sale.createdAt).toISOString().slice(0, 10)
+      if (!dayMap[day]) dayMap[day] = { date: day, gross: 0, discount: 0, tax: 0, cost: 0, profit: 0 }
+      dayMap[day].gross += sale.total || 0
+      dayMap[day].discount += sale.discount || 0
+      dayMap[day].tax += sale.tax || 0
+      const cost = (sale.items || []).reduce((s: number, i: any) => s + ((i.product?.cost || 0) * (i.quantity || 0)), 0)
+      dayMap[day].cost += cost
+      dayMap[day].profit += (sale.total || 0) - cost - (sale.discount || 0)
+    }
+    return Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date))
+  },
 
-  getMonthly: () =>
-    api.get<MonthlyReport[]>('/api/reports/sales'),
+  getMonthly: async () => {
+    const data = await api.get<any>('/api/reports/sales')
+    const sales = Array.isArray(data?.sales) ? data.sales : Array.isArray(data) ? data : []
+    // Group by month
+    const monthMap: Record<string, { month: string; gross: number; discount: number; tax: number; cost: number; profit: number }> = {}
+    for (const sale of sales) {
+      const m = new Date(sale.createdAt).toISOString().slice(0, 7)
+      if (!monthMap[m]) monthMap[m] = { month: m, gross: 0, discount: 0, tax: 0, cost: 0, profit: 0 }
+      monthMap[m].gross += sale.total || 0
+      monthMap[m].discount += sale.discount || 0
+      monthMap[m].tax += sale.tax || 0
+      const cost = (sale.items || []).reduce((s: number, i: any) => s + ((i.product?.cost || 0) * (i.quantity || 0)), 0)
+      monthMap[m].cost += cost
+      monthMap[m].profit += (sale.total || 0) - cost - (sale.discount || 0)
+    }
+    return Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month))
+  },
 }
 
 // Admin endpoints
