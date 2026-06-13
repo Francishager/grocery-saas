@@ -9,7 +9,7 @@ router.post("/", authenticateToken, requireRole(["owner", "manager", "accountant
   try {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.id;
-    const { supplier, refNo, items = [], notes } = req.body;
+    const { supplier, refNo, items = [], notes, paymentMethod } = req.body;
 
     if (!items.length) return res.status(400).json({ error: "Items required" });
 
@@ -21,6 +21,7 @@ router.post("/", authenticateToken, requireRole(["owner", "manager", "accountant
         userId,
         supplier,
         refNo: refNo || `PUR-${Date.now()}`,
+        paymentMethod: paymentMethod || "cash",
         total,
         notes,
         items: { create: items.map((i) => ({ productId: i.productId, quantity: Number(i.quantity || 1), cost: Number(i.cost || 0), total: Number(i.cost || 0) * Number(i.quantity || 1) })) },
@@ -40,7 +41,7 @@ router.post("/checkout", authenticateToken, requireRole(["owner", "manager", "ac
   try {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.id;
-    const { cart = [], supplier, notes } = req.body;
+    const { cart = [], supplier, notes, paymentMethod } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
 
     const total = cart.reduce((sum, c) => sum + Number(c.cost || 0) * Number(c.quantity || 1), 0);
@@ -50,6 +51,7 @@ router.post("/checkout", authenticateToken, requireRole(["owner", "manager", "ac
         userId,
         supplier,
         refNo: `PUR-${Date.now()}`,
+        paymentMethod: paymentMethod || "cash",
         total,
         notes,
         items: { create: cart.map((c) => ({ productId: c.productId, quantity: Number(c.quantity || 1), cost: Number(c.cost || 0), total: Number(c.cost || 0) * Number(c.quantity || 1) })) },

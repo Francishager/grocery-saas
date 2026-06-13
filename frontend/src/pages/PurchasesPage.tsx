@@ -14,6 +14,7 @@ export default function PurchasesPage() {
   const [cart, setCart] = useState<PurchaseItem[]>([])
   const [vendorName, setVendorName] = useState('')
   const [invoiceNo, setInvoiceNo] = useState('')
+  const [paymentMode, setPaymentMode] = useState('cash')
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
   const { toast } = useToast()
@@ -90,7 +91,7 @@ export default function PurchasesPage() {
 
     setProcessing(true)
     try {
-      await purchasesApi.checkout(cart, vendorName, invoiceNo)
+      await purchasesApi.checkout(cart, vendorName, invoiceNo, undefined, paymentMode)
       toast({
         title: 'Purchase recorded!',
         description: `${cart.length} items purchased for ${formatCurrency(cartTotal)}`,
@@ -239,6 +240,20 @@ export default function PurchasesPage() {
                         onChange={(e) => setInvoiceNo(e.target.value)}
                         placeholder="Enter invoice number"
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="paymentMode">Payment Method</Label>
+                      <select
+                        id="paymentMode"
+                        value={paymentMode}
+                        onChange={(e) => setPaymentMode(e.target.value)}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="credit">Credit</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="mobile_money">Mobile Money</option>
+                      </select>
                     </div>
 
                     <div className="flex justify-between py-2">

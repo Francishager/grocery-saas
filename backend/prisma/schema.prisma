@@ -253,9 +253,10 @@ model Purchase {
   tenantId  String
   userId    String
   user      User           @relation(fields: [userId], references: [id])
-  supplier  String?
-  total     Float
-  notes     String?
+  supplier      String?
+  paymentMethod String?         @default("cash")
+  total         Float
+  notes         String?
   items     PurchaseItem[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt

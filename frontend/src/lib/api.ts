@@ -170,6 +170,7 @@ export const inventoryApi = {
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
+      categoryId: data.categoryId || null,
     } }),
 
   update: (id: string, data: any) =>
@@ -181,6 +182,7 @@ export const inventoryApi = {
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
+      categoryId: data.categoryId || null,
     } }),
 
   delete: (id: string) =>
@@ -244,10 +246,17 @@ export const purchasesApi = {
   create: (data: Partial<Purchase>) =>
     api.post<Purchase>('/api/purchases', { body: data }),
 
-  checkout: (items: PurchaseItem[], vendor_name: string, invoice_no: string, date?: string) =>
+  checkout: (items: PurchaseItem[], vendor_name: string, invoice_no: string, date?: string, paymentMethod?: string) =>
     api.post<{ message: string; count: number; total: number; purchase: any }>('/api/purchases/checkout', {
-      body: { items, supplier: vendor_name, refNo: invoice_no, notes: date },
+      body: { items, supplier: vendor_name, refNo: invoice_no, notes: date, paymentMethod: paymentMethod || 'cash' },
     }),
+}
+
+// Categories endpoint
+export const categoriesApi = {
+  list: () => api.get<Array<{ id: string; name: string; slug: string }>>('/api/inventory/categories'),
+  create: (data: { name: string; slug: string }) =>
+    api.post('/api/inventory/categories', { body: data }),
 }
 
 // Reports endpoints
