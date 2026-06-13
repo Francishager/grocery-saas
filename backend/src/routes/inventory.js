@@ -74,6 +74,25 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
+// Categories
+router.get("/categories", authenticateToken, async (req, res) => {
+  try {
+    const categories = await prisma.category.findMany({ where: { tenantId: req.user?.tenantId }, orderBy: { name: "asc" } });
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/categories", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+  try {
+    const category = await prisma.category.create({ data: { ...req.body, tenantId: req.user?.tenantId } });
+    res.status(201).json({ message: "Category created", category });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Get single product
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
@@ -113,25 +132,6 @@ router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res
   try {
     await prisma.product.update({ where: { id: req.params.id }, data: { isActive: false } });
     res.json({ message: "Product deactivated" });
-  } catch (err) {
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Categories
-router.get("/categories", authenticateToken, async (req, res) => {
-  try {
-    const categories = await prisma.category.findMany({ where: { tenantId: req.user?.tenantId }, orderBy: { name: "asc" } });
-    res.json(categories);
-  } catch (err) {
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.post("/categories", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
-  try {
-    const category = await prisma.category.create({ data: { ...req.body, tenantId: req.user?.tenantId } });
-    res.status(201).json({ message: "Category created", category });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
