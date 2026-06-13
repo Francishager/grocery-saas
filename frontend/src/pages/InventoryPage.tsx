@@ -21,6 +21,8 @@ export default function InventoryPage() {
     unit_price: 0,
     cost_price: 0,
     low_stock_alert: 5,
+    barcode: '',
+    sku: '',
   })
   const { toast } = useToast()
 
@@ -97,6 +99,8 @@ export default function InventoryPage() {
       unit_price: item.unit_price,
       cost_price: item.cost_price,
       low_stock_alert: item.low_stock_alert,
+      barcode: (item as any).barcode || '',
+      sku: (item as any).sku || '',
     })
     setShowForm(true)
   }
@@ -109,6 +113,8 @@ export default function InventoryPage() {
       unit_price: 0,
       cost_price: 0,
       low_stock_alert: 5,
+      barcode: '',
+      sku: '',
     })
   }
 
@@ -160,6 +166,17 @@ export default function InventoryPage() {
                     setFormData((prev) => ({ ...prev, product_id: e.target.value }))
                   }
                   required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="barcode">Barcode</Label>
+                <Input
+                  id="barcode"
+                  value={formData.barcode}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, barcode: e.target.value }))
+                  }
+                  placeholder="Scan or enter barcode"
                 />
               </div>
               <div className="space-y-2">

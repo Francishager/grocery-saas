@@ -161,24 +161,26 @@ export const inventoryApi = {
     return mapProductToInventory(data)
   },
 
-  create: (data: Partial<InventoryItem>) =>
+  create: (data: any) =>
     api.post<InventoryItem>('/api/inventory', { body: {
       name: data.product_name,
       price: data.unit_price,
       cost: data.cost_price,
       quantity: data.quantity,
       minStock: data.low_stock_alert,
-      sku: data.product_id,
+      sku: data.product_id || data.sku,
+      barcode: data.barcode || null,
     } }),
 
-  update: (id: string, data: Partial<InventoryItem>) =>
+  update: (id: string, data: any) =>
     api.put<InventoryItem>(`/api/inventory/${id}`, { body: {
       name: data.product_name,
       price: data.unit_price,
       cost: data.cost_price,
       quantity: data.quantity,
       minStock: data.low_stock_alert,
-      sku: data.product_id,
+      sku: data.product_id || data.sku,
+      barcode: data.barcode || null,
     } }),
 
   delete: (id: string) =>
@@ -196,6 +198,8 @@ function mapProductToInventory(p: any): InventoryItem {
     unit_price: p.price ?? 0,
     cost_price: p.cost ?? 0,
     low_stock_alert: p.minStock ?? 10,
+    barcode: p.barcode || '',
+    sku: p.sku || '',
     updated_at: p.updatedAt || p.createdAt,
   }
 }
@@ -405,6 +409,32 @@ export const tenantsApi = {
     api.put<any>(`/api/tenants/${id}/plan`, { body: { planId } }),
 }
 
+// Receipt endpoints
+export const receiptsApi = {
+  getPdf: (saleId: string) => {
+    const token = getAuthToken()
+    return `${API_URL}/api/receipts/${saleId}/pdf${token ? `?token=${token}` : ''}`
+  },
+
+  getEscPos: (saleId: string) =>
+    api.get<{ commands: string[]; receiptNo: string }>(`/api/receipts/${saleId}/escpos`),
+}
+
+// Audit endpoints
+export const auditApi = {
+  list: (params?: { model?: string; action?: string; userId?: string; from?: string; to?: string; page?: number; limit?: number }) =>
+    api.get<AuditLogList>('/api/audit', { params }),
+
+  summary: () =>
+    api.get<AuditSummary>('/api/audit/summary'),
+}
+
+// Barcode lookup
+export const barcodeApi = {
+  lookup: (barcode: string) =>
+    api.get<{ products: InventoryItem[]; total: number }>('/api/inventory', { params: { barcode } }),
+}
+
 // Types
 export interface User {
   id: string | number
@@ -448,6 +478,8 @@ export interface InventoryItem {
   unit_price: number
   cost_price: number
   low_stock_alert: number
+  barcode?: string
+  sku?: string
   updated_at: string
 }
 
@@ -601,5 +633,32 @@ export interface AdminMetrics {
   recent: Array<{ name: string; tier: string; created_at: string | null }>
   churnRate: number
   uptimeHours: number
+}
+
+export interface AuditLogEntry {
+  id: string
+  tenantId: string
+  userId: string
+  userEmail: string
+  action: string
+  model: string
+  recordId: string | null
+  changes: { before?: Record<string, any>; after?: Record<string, any>; data?: Record<string, any> } | null
+  ip: string | null
+  createdAt: string
+}
+
+export interface AuditLogList {
+  logs: AuditLogEntry[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface AuditSummary {
+  byModel: Record<string, number>
+  byAction: Record<string, number>
+  byDay: Record<string, number>
+  total: number
 }
 

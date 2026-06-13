@@ -14,11 +14,15 @@ import invitationRoutes from "./routes/invitations.js";
 import tenantRoutes from "./routes/tenants.js";
 import platformRoutes from "./routes/platform.js";
 import crudRoutes from "./routes/crud.js";
+import auditRoutes from "./routes/audit.js";
+import receiptRoutes from "./routes/receipts.js";
 
 import receivablesRouter from "../routes/receivables.js";
 import payablesRouter from "../routes/payables.js";
 import expensesRouter from "../routes/expenses.js";
 import platformNewRouter from "../routes/platform-new.js";
+
+import { auditMiddleware } from "./utils/audit.js";
 
 dotenv.config();
 const resolvedDatabaseUrl =
@@ -77,6 +81,9 @@ app.use(
 );
 app.use(express.json());
 
+// Audit logging middleware (captures all mutating requests)
+app.use("/api", auditMiddleware());
+
 // Security headers
 app.use((req, res, next) => {
   res.set("X-Frame-Options", "DENY");
@@ -107,6 +114,8 @@ app.use("/api/invitations", invitationRoutes);
 app.use("/api/tenants", tenantRoutes);
 app.use("/api/platform", platformRoutes);
 app.use("/api/admin/crud", crudRoutes);
+app.use("/api/audit", auditRoutes);
+app.use("/api/receipts", receiptRoutes);
 
 // Legacy feature routes
 app.use("/api/receivables", receivablesRouter);

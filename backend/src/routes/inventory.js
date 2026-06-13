@@ -8,9 +8,54 @@ const router = Router();
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const tenantId = req.user?.tenantId;
-    const { search, category, page = 1, limit = 100, lowStock } = req.query;
+    const { search, category, page = 1, limit = 100, lowStock, barcode } = req.query;
     const where = { tenantId, isActive: true };
-    if (search) where.name = { contains: search, mode: "insensitive" };
+
+    // Barcode exact lookup (highest priority)
+    if (barcode) {
+      const product = await prisma.product.findFirst({
+        where: { tenantId, barcode, isActive: true },
+        include: { category: true },
+      });
+      return res.json({ products: product ? [product] : [], total: product ? 1 : 0, page: 1, limit: 1 });
+    }
+
+    // Full-text fuzzy search using PostgreSQL trigram + ILIKE
+    if (search) {
+      const products = await prisma.$queryRaw`
+        SELECT p.*, c.name as "categoryName",
+          similarity(p.name, ${search}) AS sim_score
+        FROM products p
+        LEFT JOIN categories c ON p."categoryId" = c.id
+        WHERE p."tenantId" = ${tenantId}
+          AND p."isActive" = true
+          AND (
+            p.name ILIKE '%' || ${search} || '%'
+            OR p.sku ILIKE '%' || ${search} || '%'
+            OR p.barcode ILIKE '%' || ${search} || '%'
+            OR p.description ILIKE '%' || ${search} || '%'
+            OR similarity(p.name, ${search}) > 0.1
+          )
+        ORDER BY sim_score DESC, p.name ASC
+        LIMIT ${Number(limit)}
+        OFFSET ${(Number(page) - 1) * Number(limit)}
+      `;
+      const countResult = await prisma.$queryRaw`
+        SELECT COUNT(*)::int as total FROM products p
+        WHERE p."tenantId" = ${tenantId}
+          AND p."isActive" = true
+          AND (
+            p.name ILIKE '%' || ${search} || '%'
+            OR p.sku ILIKE '%' || ${search} || '%'
+            OR p.barcode ILIKE '%' || ${search} || '%'
+            OR p.description ILIKE '%' || ${search} || '%'
+            OR similarity(p.name, ${search}) > 0.1
+          )
+      `;
+      const total = countResult[0]?.total || 0;
+      return res.json({ products, total, page: Number(page), limit: Number(limit) });
+    }
+
     if (category) where.categoryId = category;
     if (lowStock === "true") where.quantity = { lte: prisma.product.fields.minStock };
 

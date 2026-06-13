@@ -1,11 +1,13 @@
  import { useEffect, useState } from 'react'
-import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw } from 'lucide-react'
-import { inventoryApi, salesApi, type InventoryItem, type CartItem } from '@/lib/api'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode } from 'lucide-react'
+import { inventoryApi, salesApi, barcodeApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import BarcodeScanner from '@/components/BarcodeScanner'
+import ReceiptViewer from '@/components/ReceiptViewer'
 
 interface RecentSale {
   id: string
@@ -26,6 +28,7 @@ export default function SalesPage() {
   const [processing, setProcessing] = useState(false)
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [salesLoading, setSalesLoading] = useState(false)
+  const [showScanner, setShowScanner] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -165,7 +168,36 @@ export default function SalesPage() {
                 <Button type="submit" variant="secondary">
                   Search
                 </Button>
+                <Button
+                  type="button"
+                  variant={showScanner ? 'default' : 'outline'}
+                  onClick={() => setShowScanner(!showScanner)}
+                >
+                  <ScanBarcode className="h-4 w-4" />
+                </Button>
               </form>
+
+              {showScanner && (
+                <div className="mt-3">
+                  <BarcodeScanner
+                    onScan={async (code) => {
+                      try {
+                        const result = await barcodeApi.lookup(code)
+                        const products = Array.isArray(result?.products) ? result.products : []
+                        if (products.length > 0) {
+                          addToCart(products[0])
+                          toast({ title: `Added: ${products[0].product_name}` })
+                        } else {
+                          toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${code}` })
+                        }
+                      } catch {
+                        toast({ variant: 'destructive', title: 'Barcode lookup failed' })
+                      }
+                    }}
+                    onClose={() => setShowScanner(false)}
+                  />
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {loading ? (
@@ -308,43 +340,29 @@ export default function SalesPage() {
           {salesLoading ? (
             <div className="flex items-center justify-center h-20">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-            </div>
+           </div>
           ) : recentSales.length === 0 ? (
             <p className="text-center text-muted-foreground py-6">No sales recorded yet</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="pb-3 font-medium">Receipt</th>
-                    <th className="pb-3 font-medium">Items</th>
-                    <th className="pb-3 font-medium">Payment</th>
-                    <th className="pb-3 font-medium">Staff</th>
-                    <th className="pb-3 font-medium text-right">Total</th>
-                    <th className="pb-3 font-medium text-right">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentSales.slice(0, 20).map((sale) => (
-                    <tr key={sale.id} className="border-b last:border-0">
-                      <td className="py-3 font-mono text-sm">{sale.receiptNo}</td>
-                      <td className="py-3 text-sm">{sale.items?.length ?? 0} items</td>
-                      <td className="py-3">
-                        <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                          {(sale.paymentMethod || 'cash').replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="py-3 text-sm">
-                        {sale.user ? `${sale.user.fname || ''} ${sale.user.lname || ''}`.trim() || '—' : '—'}
-                      </td>
-                      <td className="py-3 text-right font-medium">{formatCurrency(sale.total)}</td>
-                      <td className="py-3 text-right text-sm text-muted-foreground">
-                        {new Date(sale.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+              {recentSales.slice(0, 20).map((sale) => {
+                const payLabel = (sale.paymentMethod || "cash").split("_").join(" ")
+                const staff = sale.user ? [sale.user.fname, sale.user.lname].filter(Boolean).join(" ") || "—" : "—"
+                const dateStr = new Date(sale.createdAt).toLocaleString("en-US", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"})
+                return (
+                  <div key={sale.id} className="flex items-center justify-between rounded-lg border p-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-mono text-sm font-medium">{sale.receiptNo}</p>
+                      <p className="text-xs text-muted-foreground">{sale.items ? sale.items.length : 0} items &middot; {payLabel} &middot; {staff}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium">{formatCurrency(sale.total)}</span>
+                      <span className="text-xs text-muted-foreground">{dateStr}</span>
+                      <ReceiptViewer saleId={String(sale.id)} receiptNo={sale.receiptNo} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </CardContent>

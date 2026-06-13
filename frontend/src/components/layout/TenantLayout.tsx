@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, FileText, TrendingUp, LogOut, Menu, X, Users } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, FileText, TrendingUp, LogOut, Menu, X, Users, ClipboardList } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/tenant/inventory', label: 'Inventory', icon: Package },
   { to: '/tenant/purchases', label: 'Purchases', icon: FileText },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp },
+  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList },
   { to: '/tenant/admin', label: 'Staff', icon: Users },
 ]
 

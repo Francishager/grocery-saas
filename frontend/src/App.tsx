@@ -19,6 +19,7 @@ import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
 import PurchasesPage from '@/pages/PurchasesPage'
 import ReportsPage from '@/pages/ReportsPage'
+import AuditLogPage from '@/pages/AuditLogPage'
 import AdminPage from '@/pages/admin/AdminPage'
  
 // SaaS Admin Pages
@@ -106,6 +107,7 @@ function App() {
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="purchases" element={<PurchasesPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="audit" element={<AuditLogPage />} />
           <Route path="admin" element={<AdminPage />} />
         </Route>
 

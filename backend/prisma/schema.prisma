@@ -165,7 +165,26 @@ model Product {
   supplierPurchaseItems SupplierPurchaseItem[]
 
   @@unique([tenantId, sku])
+  @@unique([tenantId, barcode])
   @@map("products")
+}
+
+// Audit Log — tracks all data mutations
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String
+  userEmail  String
+  action     String   // create, update, delete, login, checkout, etc.
+  model      String   // Product, Sale, Purchase, User, etc.
+  recordId   String?  // ID of the affected record
+  changes    Json?    // { before: {...}, after: {...} } or { data: {...} }
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, model])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
 }
 
 // Categories
