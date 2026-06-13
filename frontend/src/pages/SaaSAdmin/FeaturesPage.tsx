@@ -42,6 +42,7 @@ export const FeaturesPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<string>('')
+  const [error, setError] = useState('')
 
   const fetchData = async () => {
     setLoading(true)
@@ -63,11 +64,27 @@ export const FeaturesPage: React.FC = () => {
 
   const isFeatureEnabled = (featureName: string) => planFeatures.some(pf => pf.feature?.name === featureName && pf.enabled)
 
-  const handleToggle = async (featureName: string, enabled: boolean) => {
-    const feat = features.find(f => f.name === featureName)
-    if (!feat || !selectedPlan) return
-    setSaving(true)
-    try { const res = await apiFetch('/api/platform/plan-features', { method: 'POST', body: JSON.stringify({ planId: selectedPlan, featureId: feat.id, enabled }) }); if (res.ok) fetchPlanFeatures(selectedPlan) } catch {}
+  const handleToggle = async (mf: { name: string; displayName: string }, category: string, enabled: boolean) => {
+    if (!selectedPlan) { setError('Select a plan first'); return }
+    setSaving(true); setError('')
+    try {
+      // Auto-create the underlying system feature if it doesn't exist yet,
+      // so toggling always works even before "Seed All Modules" is run.
+      let feat = features.find(f => f.name === mf.name)
+      if (!feat) {
+        const cRes = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: mf.name, displayName: mf.displayName, category, description: mf.displayName, isActive: true }) })
+        if (!cRes.ok) { const e = await cRes.json().catch(() => ({})); throw new Error(e.error || 'Failed to create feature') }
+        const created = await cRes.json()
+        feat = created.feature
+        if (feat) setFeatures(prev => [...prev, feat as Feature])
+      }
+      if (!feat) throw new Error('Feature unavailable')
+      const res = await apiFetch('/api/platform/plan-features', { method: 'POST', body: JSON.stringify({ planId: selectedPlan, featureId: feat.id, enabled }) })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed to update toggle') }
+      await fetchPlanFeatures(selectedPlan)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    }
     setSaving(false)
   }
 
@@ -101,6 +118,13 @@ export const FeaturesPage: React.FC = () => {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-red-900/40 border border-red-700 text-red-200 rounded-lg px-4 py-2 text-sm flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError('')} className="text-red-300 hover:text-white">×</button>
+        </div>
+      )}
+
       <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
         <div className="flex items-center gap-4">
           <label className="text-sm font-medium text-slate-300">Assign features for plan:</label>
@@ -124,12 +148,11 @@ export const FeaturesPage: React.FC = () => {
                 </div>
                 <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                   {mod.features.map(mf => {
-                    const existing = features.find(f => f.name === mf.name)
                     const enabled = isFeatureEnabled(mf.name)
                     return (
                       <div key={mf.name} className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
                         <span className="text-sm text-slate-200">{mf.displayName}</span>
-                        <button onClick={() => handleToggle(mf.name, !enabled)} disabled={saving || !existing} className="flex items-center gap-1">
+                        <button onClick={() => handleToggle(mf, mod.id, !enabled)} disabled={saving} className="flex items-center gap-1">
                           {enabled ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
                         </button>
                       </div>
@@ -148,7 +171,7 @@ export const FeaturesPage: React.FC = () => {
                   <div key={f.id} className="flex items-center justify-between p-4">
                     <div><p className="font-medium text-sm text-slate-200">{f.displayName || f.name}</p><p className="text-xs text-slate-400">{f.category}</p></div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => handleToggle(f.name, !isFeatureEnabled(f.name))} disabled={saving}>
+                      <button onClick={() => handleToggle({ name: f.name, displayName: f.displayName || f.name }, f.category, !isFeatureEnabled(f.name))} disabled={saving}>
                         {isFeatureEnabled(f.name) ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
                       </button>
                       <button onClick={() => handleDeleteFeature(f.id)} className="p-1 hover:bg-red-900 text-red-400 rounded"><Trash2 size={14} /></button>
