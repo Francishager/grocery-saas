@@ -9,7 +9,7 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const tenantId = req.user?.tenantId;
     const { search, category, page = 1, limit = 100, lowStock, barcode } = req.query;
-    const where = { tenantId, isActive: true };
+    const where = { tenantId, isActive: { not: false } };
 
     // Barcode exact lookup (highest priority)
     if (barcode) {
