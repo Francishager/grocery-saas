@@ -14,7 +14,7 @@ router.get("/", authenticateToken, async (req, res) => {
     // Barcode exact lookup (highest priority)
     if (barcode) {
       const product = await prisma.product.findFirst({
-        where: { tenantId, barcode, isActive: true },
+        where: { tenantId, barcode, isActive: { not: false } },
         include: { category: true },
       });
       return res.json({ products: product ? [product] : [], total: product ? 1 : 0, page: 1, limit: 1 });
@@ -57,10 +57,10 @@ router.get("/", authenticateToken, async (req, res) => {
     }
 
     if (category) where.categoryId = category;
-    if (lowStock === "true") where.quantity = { lte: prisma.product.fields.minStock };
+    if (lowStock === "true") where.quantity = { lte: prisma.product.fields.minStock.default };
 
     const products = await prisma.product.findMany({
-      where,
+      where: { ...where, isActive: { not: false } },
       include: { category: true },
       orderBy: { name: "asc" },
       skip: (Number(page) - 1) * Number(limit),
