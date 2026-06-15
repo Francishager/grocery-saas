@@ -7,7 +7,9 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Seeding database...')
 
-  // Create default plans
+  // =====================================================
+  // CREATE PLANS
+  // =====================================================
   const plans = await Promise.all([
     prisma.plan.upsert({
       where: { slug: 'starter' },
@@ -58,15 +60,17 @@ async function main() {
 
   console.log(`✅ Created ${plans.length} plans`)
 
-  // Create SaaS Admin user
-  const hashedPassword = await bcrypt.hash('Admin123!', 10)
-  
+  // =====================================================
+  // SaaS ADMIN
+  // =====================================================
+  const adminPassword = await bcrypt.hash('Admin123!', 10)
+
   const saasAdmin = await prisma.user.upsert({
     where: { email: 'admin@grocerysaas.com' },
     update: {},
     create: {
       email: 'admin@grocerysaas.com',
-      password: hashedPassword,
+      password: adminPassword,
       fname: 'Platform',
       lname: 'Admin',
       role: UserRole.saas_admin,
@@ -75,6 +79,96 @@ async function main() {
   })
 
   console.log(`✅ Created SaaS Admin: ${saasAdmin.email}`)
+
+  // =====================================================
+  // TENANT (FIXED - ONLY ONCE)
+  // =====================================================
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: 'kyengo-mart' },
+    update: {},
+    create: {
+      name: 'Kyengo Mart',
+      slug: 'kyengo-mart',
+      email: 'kyengo@tenant.local',
+      plan: {
+        connect: { id: plans[1].id }
+      },
+    },
+  })
+
+  console.log(`✅ Created Tenant: ${tenant.name}`)
+
+  // =====================================================
+  // OWNER USER
+  // =====================================================
+  const ownerPassword = await bcrypt.hash('Owner@2024!', 10)
+
+  const owner = await prisma.user.upsert({
+    where: { email: 'jibusales00@gmail.com' },
+    update: {},
+    create: {
+      email: 'jibusales00@gmail.com',
+      password: ownerPassword,
+      fname: 'Moses',
+      lname: 'Nsubuga',
+      role: UserRole.owner,
+      tenantId: tenant.id,
+      isActive: true,
+    },
+  })
+
+  console.log(`✅ Created Owner: ${owner.email}`)
+
+  // =====================================================
+  // LINK TENANT OWNER
+  // =====================================================
+  await prisma.tenant.update({
+    where: { id: tenant.id },
+    data: {
+      ownerId: owner.id,
+    },
+  })
+
+  // =====================================================
+  // MAIN BRANCH
+  // =====================================================
+  const branch = await prisma.branch.upsert({
+    where: {
+      tenantId_name: {
+        tenantId: tenant.id,
+        name: 'Namulanda (Main)',
+      },
+    },
+    update: {},
+    create: {
+      name: 'Namulanda (Main)',
+      tenantId: tenant.id,
+      address: 'Namulanda',
+      isActive: true,
+    },
+  })
+
+  console.log(`✅ Created Branch: ${branch.name}`)
+
+  // =====================================================
+  // LINK OWNER TO BRANCH
+  // =====================================================
+  await prisma.userBranch.upsert({
+    where: {
+      userId_branchId: {
+        userId: owner.id,
+        branchId: branch.id,
+      },
+    },
+    update: {},
+    create: {
+      userId: owner.id,
+      branchId: branch.id,
+      isPrimary: true,
+    },
+  })
+
+  console.log(`✅ Linked Owner to Branch`)
 
   console.log('🎉 Seeding completed!')
 }

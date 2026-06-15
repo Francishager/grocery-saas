@@ -7,6 +7,13 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface FormData {
   product_id: string
@@ -206,12 +213,31 @@ export default function InventoryPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="categoryId">Category</Label>
-                <Input
-                  id="categoryId"
+
+                <Select
                   value={formData.categoryId}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, categoryId: e.target.value }))}
-                  placeholder="Enter category name"
-                />
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      categoryId: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Category" />
+                  </SelectTrigger>
+
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem
+                        key={category.id}
+                        value={category.id}
+                      >
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="product_name">Product Name</Label>

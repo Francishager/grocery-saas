@@ -12,22 +12,28 @@ datasource db {
 
 // Tenant/Business - each business is a tenant in the SaaS
 model Tenant {
-  id          String       @id @default(cuid())
-  name        String
-  slug        String       @unique
-  email       String       @unique
-  phone       String?
-  address     String?
-  logo        String?
-  status      TenantStatus @default(active)
-  planId      String?
-  plan        Plan?        @relation(fields: [planId], references: [id])
+  id      String       @id @default(cuid())
+  name    String
+  slug    String       @unique
+  email   String       @unique
+  phone   String?
+  address String?
+  logo    String?
+  status  TenantStatus @default(active)
+
+  // ADD THESE
+  ownerId String?
+  owner   User?   @relation("TenantOwner", fields: [ownerId], references: [id])
+
+  planId String?
+  plan   Plan?   @relation(fields: [planId], references: [id])
+
   users       User[]
   invitations Invitation[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
 
-  // New relations
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   customers        Customer[]
   suppliers        Supplier[]
   usageLimit       UsageLimit?       @relation(fields: [usageLimitId], references: [id])
@@ -68,16 +74,21 @@ model Plan {
 
 // Users - can be SaaS Admin or tenant users
 model User {
-  id         String    @id @default(cuid())
-  email      String    @unique
-  password   String
-  fname      String?
-  lname      String?
-  phone      String?
-  avatar     String?
-  role       UserRole  @default(attendant)
-  tenantId   String?
-  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String   @id @default(cuid())
+  email    String   @unique
+  password String
+  fname    String?
+  lname    String?
+  phone    String?
+  avatar   String?
+  role     UserRole @default(attendant)
+
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // ADD THIS
+  ownedTenants Tenant[] @relation("TenantOwner")
+
   isActive   Boolean   @default(true)
   lastLogin  DateTime?
   otpCode    String?
