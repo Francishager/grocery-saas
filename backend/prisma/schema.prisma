@@ -10,6 +10,41 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Branch {
+  id       String  @id @default(cuid())
+  name     String
+  address  String?
+  isActive Boolean @default(true)
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  users UserBranch[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@map("branches")
+}
+
+model UserBranch {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, branchId])
+  @@map("user_branches")
+}
+
 // Tenant/Business - each business is a tenant in the SaaS
 model Tenant {
   id      String       @id @default(cuid())
@@ -21,27 +56,54 @@ model Tenant {
   logo    String?
   status  TenantStatus @default(active)
 
-  // ADD THESE
-  ownerId String?
-  owner   User?   @relation("TenantOwner", fields: [ownerId], references: [id])
-
+  // =====================
+  // PLAN RELATION
+  // =====================
   planId String?
   plan   Plan?   @relation(fields: [planId], references: [id])
 
-  users       User[]
+  // =====================
+  // OWNERSHIP (1-1)
+  // =====================
+  ownerId String? @unique
+  owner   User?   @relation("TenantOwner", fields: [ownerId], references: [id])
+
+  // =====================
+  // USERS (1-MANY)
+  // =====================
+  users User[] @relation("TenantUsers")
+
+  // =====================
+  // BRANCHES
+  // =====================
+  branches Branch[]
+
+  // =====================
+  // INVITATIONS
+  // =====================
   invitations Invitation[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  // =====================
+  // BUSINESS DATA
+  // =====================
   customers        Customer[]
   suppliers        Supplier[]
-  usageLimit       UsageLimit?       @relation(fields: [usageLimitId], references: [id])
   features         TenantFeature[]
   cashAccounts     CashAccount[]
   expenses         Expense[]
   cashTransactions CashTransaction[]
-  usageLimitId     String?
+
+  // =====================
+  // USAGE LIMIT
+  // =====================
+  usageLimitId String?
+  usageLimit   UsageLimit? @relation(fields: [usageLimitId], references: [id])
+
+  // =====================
+  // TIMESTAMPS
+  // =====================
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("tenants")
 }
@@ -83,29 +145,44 @@ model User {
   avatar   String?
   role     UserRole @default(attendant)
 
+  // =========================
+  // TENANT (many users per tenant)
+  // =========================
   tenantId String?
-  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant? @relation("TenantUsers", fields: [tenantId], references: [id], onDelete: Cascade)
 
-  // ADD THIS
-  ownedTenants Tenant[] @relation("TenantOwner")
+  // =========================
+  // TENANT OWNERSHIP (1 user owns 1 tenant)
+  // =========================
+  ownedTenant Tenant? @relation("TenantOwner")
 
   isActive   Boolean   @default(true)
   lastLogin  DateTime?
   otpCode    String?
   otpExpires DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
 
-  // Legacy relations (keep for compatibility)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // =========================
+  // LEGACY RELATIONS
+  // =========================
   sales       Sale[]
   purchases   Purchase[]
   invitations Invitation[] @relation("CreatedBy")
 
-  // New relations
+  // =========================
+  // NEW RELATIONS
+  // =========================
   saleRecords       SaleRecord[]
   supplierPurchases SupplierPurchase[]
   expenses          Expense[]
   cashTransactions  CashTransaction[]
+
+  // =========================
+  // BRANCH ASSIGNMENTS
+  // =========================
+  branches UserBranch[]
 
   @@map("users")
 }

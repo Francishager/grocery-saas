@@ -60,6 +60,7 @@ async function main() {
 
   console.log(`✅ Created ${plans.length} plans`)
 
+
   // =====================================================
   // SaaS ADMIN
   // =====================================================
@@ -97,6 +98,83 @@ async function main() {
   })
 
   console.log(`✅ Created Tenant: ${tenant.name}`)
+
+  // =====================================================
+  // DEFAULT CATEGORIES
+  // =====================================================
+
+  const categories = [
+    { name: "Groceries", slug: "groceries" },
+    { name: "Beverages", slug: "beverages" },
+    { name: "Dairy Products", slug: "dairy-products" },
+    { name: "Bakery", slug: "bakery" },
+    { name: "Snacks", slug: "snacks" },
+    { name: "Confectionery", slug: "confectionery" },
+    { name: "Fruits", slug: "fruits" },
+    { name: "Vegetables", slug: "vegetables" },
+    { name: "Meat & Poultry", slug: "meat-poultry" },
+    { name: "Frozen Foods", slug: "frozen-foods" },
+    { name: "Electronics", slug: "electronics" },
+    { name: "Mobile Phones", slug: "mobile-phones" },
+    { name: "Phone Accessories", slug: "phone-accessories" },
+    { name: "Computers", slug: "computers" },
+    { name: "Printers", slug: "printers" },
+    { name: "Stationery", slug: "stationery" },
+    { name: "Books", slug: "books" },
+    { name: "Office Supplies", slug: "office-supplies" },
+    { name: "Hardware", slug: "hardware" },
+    { name: "Building Materials", slug: "building-materials" },
+    { name: "Paints", slug: "paints" },
+    { name: "Plumbing", slug: "plumbing" },
+    { name: "Electrical", slug: "electrical" },
+    { name: "Cosmetics", slug: "cosmetics" },
+    { name: "Beauty Products", slug: "beauty-products" },
+    { name: "Personal Care", slug: "personal-care" },
+    { name: "Salon Supplies", slug: "salon-supplies" },
+    { name: "Pharmaceuticals", slug: "pharmaceuticals" },
+    { name: "Medical Supplies", slug: "medical-supplies" },
+    { name: "Baby Products", slug: "baby-products" },
+    { name: "Clothing", slug: "clothing" },
+    { name: "Shoes", slug: "shoes" },
+    { name: "Bags", slug: "bags" },
+    { name: "Fashion Accessories", slug: "fashion-accessories" },
+    { name: "Jewelry", slug: "jewelry" },
+    { name: "Home Appliances", slug: "home-appliances" },
+    { name: "Kitchenware", slug: "kitchenware" },
+    { name: "Furniture", slug: "furniture" },
+    { name: "Bedding", slug: "bedding" },
+    { name: "Cleaning Supplies", slug: "cleaning-supplies" },
+    { name: "Laundry Products", slug: "laundry-products" },
+    { name: "Pet Supplies", slug: "pet-supplies" },
+    { name: "Agricultural Inputs", slug: "agricultural-inputs" },
+    { name: "Seeds", slug: "seeds" },
+    { name: "Animal Feeds", slug: "animal-feeds" },
+    { name: "Restaurant Supplies", slug: "restaurant-supplies" },
+    { name: "Liquor & Wines", slug: "liquor-wines" },
+    { name: "Water", slug: "water" },
+    { name: "Industrial Supplies", slug: "industrial-supplies" },
+    { name: "Spare Parts", slug: "spare-parts" },
+    { name: "Other", slug: "other" },
+  ];
+
+  for (const category of categories) {
+    await prisma.category.upsert({
+      where: {
+        tenantId_slug: {
+          tenantId: tenant.id,
+          slug: category.slug,
+        },
+      },
+      update: {},
+      create: {
+        name: category.name,
+        slug: category.slug,
+        tenantId: tenant.id,
+      },
+    });
+  }
+
+  console.log(`✅ Created ${categories.length} categories`);
 
   // =====================================================
   // OWNER USER
