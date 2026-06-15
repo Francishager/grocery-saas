@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
 import { 
   Users, 
   Building2, 
@@ -24,6 +25,7 @@ import {
   Trash2,
   Calendar,
   DollarSign,
+  Shield,
   ArrowUpRight,
   ArrowDownRight
 } from 'lucide-react'
@@ -85,23 +87,31 @@ export default function ReceivablesPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const creditEnabled = isFeatureEnabled('credit')
 
   useEffect(() => {
-    if (isFeatureEnabled('credit')) {
-      loadCustomers()
-      loadReceivablesSummary()
+    if (!creditEnabled) {
+      setLoading(false)
+      return
     }
-  }, [isFeatureEnabled('credit')])
+
+    if (activeTab === 'customers') {
+      loadCustomers()
+    }
+    if (activeTab === 'sales') loadSales()
+    if (activeTab === 'payments') loadPayments()
+    loadReceivablesSummary()
+  }, [creditEnabled, activeTab, searchTerm, statusFilter])
 
   const loadCustomers = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      setLoading(true)
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
         ...(statusFilter !== 'all' && { status: statusFilter })
       })
       
-      const response = await fetch(`${API_URL}/api/receivables/customers?${params}`)
+      const response = await apiFetch(`/api/receivables/customers?${params}`)
       if (response.ok) {
         const data = await response.json()
         setCustomers(data.customers)
@@ -119,8 +129,7 @@ export default function ReceivablesPage() {
 
   const loadSales = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/receivables/sales`)
+      const response = await apiFetch('/api/receivables/sales')
       if (response.ok) {
         const data = await response.json()
         setSales(data.sales)
@@ -136,8 +145,7 @@ export default function ReceivablesPage() {
 
   const loadPayments = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/receivables/payments`)
+      const response = await apiFetch('/api/receivables/payments')
       if (response.ok) {
         const data = await response.json()
         setPayments(data.payments)
@@ -153,8 +161,7 @@ export default function ReceivablesPage() {
 
   const loadReceivablesSummary = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/receivables/receivables/summary`)
+      const response = await apiFetch('/api/receivables/receivables/summary')
       if (response.ok) {
         const data = await response.json()
         setSummary(data)
@@ -168,13 +175,8 @@ export default function ReceivablesPage() {
     if (!selectedCustomer || !paymentAmount) return
 
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/receivables/payments`, {
+      const response = await apiFetch('/api/receivables/payments', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
         body: JSON.stringify({
           customerId: selectedCustomer.id,
           amount: parseFloat(paymentAmount),
@@ -222,6 +224,20 @@ export default function ReceivablesPage() {
     if (score >= 80) return 'text-green-600'
     if (score >= 60) return 'text-yellow-600'
     return 'text-red-600'
+  }
+
+  const getPaymentStatusBadge = (status: string) => {
+    const variants = {
+      paid: 'default',
+      partial: 'secondary',
+      unpaid: 'destructive',
+      overdue: 'destructive'
+    }
+    return (
+      <Badge variant={variants[status as keyof typeof variants] as any}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    )
   }
 
   if (!canAccessFeature('credit')) {
@@ -426,6 +442,95 @@ export default function ReceivablesPage() {
                         View Details
                       </Button>
                     </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'sales' && (
+        <div className="grid gap-4">
+          {sales.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">No credit sales found.</CardContent>
+            </Card>
+          ) : (
+            sales.map((sale) => (
+              <Card key={sale.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <FileText className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{sale.receiptNo}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {sale.customer?.name || 'Walk-in customer'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(sale.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {getPaymentStatusBadge(sale.paymentStatus)}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Total</p>
+                      <p className="font-semibold">{Number(sale.total || 0).toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Paid</p>
+                      <p className="font-semibold">{Number(sale.amountPaid || 0).toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Balance</p>
+                      <p className="font-semibold text-red-600">{Number(sale.balance || 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'payments' && (
+        <div className="grid gap-4">
+          {payments.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">No customer payments found.</CardContent>
+            </Card>
+          ) : (
+            payments.map((payment) => (
+              <Card key={payment.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Wallet className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{Number(payment.amount || 0).toFixed(2)}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          From {payment.customer?.name || 'Customer'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(payment.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline">{payment.paymentMethod}</Badge>
+                  </div>
+
+                  {payment.sale?.receiptNo && (
+                    <p className="mt-4 text-sm text-muted-foreground">Sale: {payment.sale.receiptNo}</p>
                   )}
                 </CardContent>
               </Card>

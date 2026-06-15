@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
 
 interface Expense {
   id: string
@@ -79,17 +80,12 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
     setLoading(true)
     
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
       const url = initialData?.id 
-        ? `${API_URL}/api/expenses/expenses/${initialData.id}`
-        : `${API_URL}/api/expenses/expenses`
+        ? `/api/expenses/expenses/${initialData.id}`
+        : '/api/expenses/expenses'
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: initialData?.id ? 'PUT' : 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
         body: JSON.stringify({
           ...formData,
           amount: parseFloat(formData.amount),

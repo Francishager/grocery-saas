@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { apiFetch } from '@/lib/api'
 
 export interface Feature {
   name: string
@@ -24,6 +25,37 @@ export interface UsageLimits {
   maxBranches: number
   maxCustomers: number
   maxSuppliers: number
+}
+
+const FEATURE_ALIASES: Record<string, string[]> = {
+  pos_sales: ['pos', 'sales'],
+  sales_tracking: ['sales'],
+  invoice_generation: ['sales'],
+  customer_transactions: ['sales', 'customers', 'credit'],
+  payment_management: ['sales'],
+  product_tracking: ['inventory'],
+  stock_movement: ['inventory'],
+  low_stock_alerts: ['inventory'],
+  purchase_management: ['inventory', 'purchases'],
+  supplier_management: ['suppliers', 'payables'],
+  inventory_valuation: ['inventory'],
+  bookkeeping: ['reports'],
+  income_tracking: ['reports'],
+  expense_management: ['expenses'],
+  payables_management: ['payables', 'suppliers'],
+  receivables_management: ['credit', 'customers', 'receivables'],
+  cash_flow_monitoring: ['expenses', 'reports'],
+  profitability_analysis: ['reports'],
+  staff_management: ['staff'],
+  role_access_control: ['staff'],
+  activity_logs: ['audit'],
+  branch_management: ['staff'],
+  workflow_organization: ['staff'],
+  financial_reports: ['reports'],
+  sales_reports: ['reports'],
+  inventory_reports: ['reports'],
+  performance_dashboards: ['reports'],
+  decision_analytics: ['reports'],
 }
 
 class FeatureAccessService {
@@ -67,15 +99,14 @@ class FeatureAccessService {
     this.notifyListeners()
 
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/platform/tenant/${tenantId}/features`)
+      const response = await apiFetch('/api/admin/me/features')
       
       if (!response.ok) {
         throw new Error('Failed to load features')
       }
 
       const data = await response.json()
-      this.features = data.features || {}
+      this.features = this.normalizeFeatures(data.features || {})
       
       // Load usage limits
       await this.loadUsageLimits(tenantId)
@@ -87,6 +118,29 @@ class FeatureAccessService {
       this.loading = false
       this.notifyListeners()
     }
+  }
+
+  private normalizeFeatures(rawFeatures: string[] | FeatureAccess): FeatureAccess {
+    const normalized: FeatureAccess = {}
+
+    const setFeature = (name: string, enabled: boolean = true, source: 'plan' | 'override' | 'default' = 'plan') => {
+      if (!name) return
+      normalized[name] = { enabled, source }
+      ;(FEATURE_ALIASES[name] || []).forEach((alias) => {
+        if (!normalized[alias] || enabled) normalized[alias] = { enabled, source }
+      })
+    }
+
+    if (Array.isArray(rawFeatures)) {
+      rawFeatures.forEach((name) => setFeature(name, true, 'plan'))
+      return normalized
+    }
+
+    Object.entries(rawFeatures).forEach(([name, access]) => {
+      setFeature(name, access.enabled, access.source)
+    })
+
+    return normalized
   }
 
   // Load usage limits
@@ -146,11 +200,15 @@ class FeatureAccessService {
     // Role-based restrictions
     const featureRoleRestrictions: Record<string, string[]> = {
       credit: ['owner', 'manager', 'accountant'],
+      payables: ['owner', 'manager', 'accountant'],
+      receivables: ['owner', 'manager', 'accountant'],
       suppliers: ['owner', 'manager', 'accountant'],
       expenses: ['owner', 'manager', 'accountant'],
       cash_flow: ['owner', 'manager', 'accountant'],
       advanced_reports: ['owner', 'accountant'],
       multi_branch: ['owner'],
+      staff: ['owner', 'manager'],
+      audit: ['owner', 'manager', 'accountant'],
       sms: ['owner'],
       whatsapp: ['owner'],
       offline_mode: ['owner', 'manager', 'accountant', 'attendant']
@@ -186,6 +244,11 @@ class FeatureAccessService {
   // Get usage limit
   getUsageLimit(type: keyof UsageLimits): number {
     return this.usageLimits?.[type] || 0
+  }
+
+  // Get normalized feature access map
+  getFeatureAccess(): FeatureAccess {
+    return this.features
   }
 
   // Get all usage limits
@@ -233,8 +296,8 @@ export function useFeatureAccess() {
   useEffect(() => {
     // Subscribe to feature service changes
     const unsubscribe = featureAccessService.subscribe(() => {
-      setFeatures({ ...featureAccessService.features })
-      setUsageLimits(featureAccessService.usageLimits)
+      setFeatures({ ...featureAccessService.getFeatureAccess() })
+      setUsageLimits(featureAccessService.getUsageLimits())
       setLoading(featureAccessService.isLoading())
       setError(featureAccessService.getError())
     })

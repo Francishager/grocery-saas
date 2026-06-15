@@ -12,6 +12,35 @@ interface Feature {
   id: string; name: string; displayName?: string; category?: string; isActive?: boolean
 }
 
+const FEATURE_MODULES = [
+  { id: 'financial', name: 'Financial Management', features: [
+    { name: 'bookkeeping', displayName: 'Bookkeeping' }, { name: 'income_tracking', displayName: 'Income Tracking' },
+    { name: 'expense_management', displayName: 'Expense Management' }, { name: 'payables_management', displayName: 'Payables Management' },
+    { name: 'receivables_management', displayName: 'Receivables Management' }, { name: 'cash_flow_monitoring', displayName: 'Cash Flow Monitoring' },
+    { name: 'profitability_analysis', displayName: 'Profitability Analysis' },
+  ]},
+  { id: 'inventory', name: 'Inventory Management', features: [
+    { name: 'product_tracking', displayName: 'Product Tracking' }, { name: 'stock_movement', displayName: 'Stock Movement Monitoring' },
+    { name: 'low_stock_alerts', displayName: 'Low-Stock Alerts' }, { name: 'purchase_management', displayName: 'Purchase Management' },
+    { name: 'supplier_management', displayName: 'Supplier Management' }, { name: 'inventory_valuation', displayName: 'Inventory Valuation' },
+  ]},
+  { id: 'sales', name: 'Sales Management', features: [
+    { name: 'pos_sales', displayName: 'POS Sales Processing' }, { name: 'invoice_generation', displayName: 'Invoice Generation' },
+    { name: 'customer_transactions', displayName: 'Customer Transactions' }, { name: 'sales_tracking', displayName: 'Sales Tracking' },
+    { name: 'payment_management', displayName: 'Payment Management' },
+  ]},
+  { id: 'operations', name: 'Business Operations', features: [
+    { name: 'staff_management', displayName: 'Staff Management' }, { name: 'role_access_control', displayName: 'Role-Based Access Control' },
+    { name: 'activity_logs', displayName: 'Activity Logs' }, { name: 'branch_management', displayName: 'Branch Management' },
+    { name: 'workflow_organization', displayName: 'Workflow Organization' },
+  ]},
+  { id: 'reporting', name: 'Reporting & Insights', features: [
+    { name: 'financial_reports', displayName: 'Financial Reports' }, { name: 'sales_reports', displayName: 'Sales Reports' },
+    { name: 'inventory_reports', displayName: 'Inventory Reports' }, { name: 'performance_dashboards', displayName: 'Business Performance Dashboards' },
+    { name: 'decision_analytics', displayName: 'Decision-Support Analytics' },
+  ]},
+]
+
 const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, isDefault: false }
 
 export const PlansPage: React.FC = () => {
@@ -74,9 +103,20 @@ export const PlansPage: React.FC = () => {
   }
 
   const fmt = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
+  const catalogFeatures: Feature[] = FEATURE_MODULES.flatMap(mod => mod.features.map(feature => ({
+    id: feature.name,
+    name: feature.name,
+    displayName: feature.displayName,
+    category: mod.id,
+    isActive: true,
+  })))
+  const featureOptions = [
+    ...catalogFeatures,
+    ...features.filter(feature => !catalogFeatures.some(catalogFeature => catalogFeature.name === feature.name)),
+  ]
   const selectedFeatureNames = form.features.split(',').map((f: string) => f.trim()).filter(Boolean)
-  const featureLabel = (name: string) => features.find(f => f.name === name)?.displayName || name
-  const featureGroups = features.reduce<Record<string, Feature[]>>((groups, feature) => {
+  const featureLabel = (name: string) => featureOptions.find(f => f.name === name)?.displayName || name
+  const featureGroups = featureOptions.reduce<Record<string, Feature[]>>((groups, feature) => {
     const category = feature.category || 'other'
     groups[category] = groups[category] || []
     groups[category].push(feature)
@@ -149,29 +189,26 @@ export const PlansPage: React.FC = () => {
                 <div className="col-span-2">
                   <label className="block text-sm font-medium mb-1">Features</label>
                   <div className="max-h-60 space-y-3 overflow-y-auto rounded-lg border p-3">
-                    {featuresLoading ? (
-                      <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
-                    ) : features.length === 0 ? (
-                      <p className="text-sm text-gray-500">No platform features found yet.</p>
-                    ) : (
-                      Object.entries(featureGroups).map(([category, group]) => (
-                        <div key={category} className="space-y-2">
-                          <p className="text-xs font-semibold uppercase text-gray-500">{category.replace(/_/g, ' ')}</p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {group.map(feature => (
-                              <label key={feature.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFeatureNames.includes(feature.name)}
-                                  onChange={e => toggleFeature(feature.name, e.target.checked)}
-                                />
-                                <span>{feature.displayName || feature.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      ))
+                    {featuresLoading && (
+                      <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin text-blue-600" /> Loading custom features...</div>
                     )}
+                    {Object.entries(featureGroups).map(([category, group]) => (
+                      <div key={category} className="space-y-2">
+                        <p className="text-xs font-semibold uppercase text-gray-500">{category.replace(/_/g, ' ')}</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {group.map(feature => (
+                            <label key={feature.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedFeatureNames.includes(feature.name)}
+                                onChange={e => toggleFeature(feature.name, e.target.checked)}
+                              />
+                              <span>{feature.displayName || feature.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

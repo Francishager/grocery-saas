@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
 import { 
   Wallet, 
   TrendingUp, 
@@ -81,18 +82,23 @@ export default function ExpensesPage() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
+  const expensesEnabled = isFeatureEnabled('expenses')
 
   useEffect(() => {
-    if (isFeatureEnabled('expenses')) {
-      loadExpenses()
-      loadCashAccounts()
-      loadCashFlowSummary()
+    if (!expensesEnabled) {
+      setLoading(false)
+      return
     }
-  }, [isFeatureEnabled('expenses')])
+
+    if (activeTab === 'expenses') loadExpenses()
+    if (activeTab === 'accounts') loadCashAccounts()
+    if (activeTab === 'transactions') loadTransactions()
+    loadCashFlowSummary()
+  }, [expensesEnabled, activeTab, searchTerm, categoryFilter, startDate, endDate])
 
   const loadExpenses = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      setLoading(true)
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
         ...(categoryFilter && { category: categoryFilter }),
@@ -102,7 +108,7 @@ export default function ExpensesPage() {
         })
       })
       
-      const response = await fetch(`${API_URL}/api/expenses/expenses?${params}`)
+      const response = await apiFetch(`/api/expenses/expenses?${params}`)
       if (response.ok) {
         const data = await response.json()
         setExpenses(data.expenses)
@@ -120,8 +126,7 @@ export default function ExpensesPage() {
 
   const loadCashAccounts = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/expenses/cash-accounts`)
+      const response = await apiFetch('/api/expenses/cash-accounts')
       if (response.ok) {
         const data = await response.json()
         setCashAccounts(data)
@@ -133,7 +138,6 @@ export default function ExpensesPage() {
 
   const loadTransactions = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
         ...(startDate && endDate && { 
@@ -142,7 +146,7 @@ export default function ExpensesPage() {
         })
       })
       
-      const response = await fetch(`${API_URL}/api/expenses/cash-transactions?${params}`)
+      const response = await apiFetch(`/api/expenses/cash-transactions?${params}`)
       if (response.ok) {
         const data = await response.json()
         setTransactions(data.transactions)
@@ -154,7 +158,6 @@ export default function ExpensesPage() {
 
   const loadCashFlowSummary = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
       const params = new URLSearchParams({
         ...(startDate && endDate && { 
           startDate,
@@ -162,7 +165,7 @@ export default function ExpensesPage() {
         })
       })
       
-      const response = await fetch(`${API_URL}/api/expenses/cash-flow/summary?${params}`)
+      const response = await apiFetch(`/api/expenses/cash-flow/summary?${params}`)
       if (response.ok) {
         const data = await response.json()
         setSummary(data)

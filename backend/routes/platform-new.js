@@ -36,15 +36,7 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       include: {
-        plan: {
-          include: {
-            planFeatures: {
-              include: {
-                feature: true
-              }
-            }
-          }
-        },
+        plan: true,
         features: {
           include: {
             feature: true
@@ -57,39 +49,35 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
       return res.status(404).json({ error: 'Tenant not found' })
     }
 
-    // Get all features
-    const allFeatures = await prisma.feature.findMany({
-      where: { isActive: true }
-    })
+    const [allFeatures, planFeatures] = await Promise.all([
+      prisma.feature.findMany({ where: { isActive: true } }),
+      tenant.planId
+        ? prisma.planFeature.findMany({
+            where: { planId: tenant.planId, enabled: true },
+            include: { feature: true }
+          })
+        : Promise.resolve([])
+    ])
 
     // Build feature access map
     const featureAccess = {}
-    
+
     for (const feature of allFeatures) {
-      // Check tenant override first
-      const tenantFeature = tenant.features.find(tf => tf.featureId === feature.id)
-      
-      if (tenantFeature) {
-        // Use tenant override
-        featureAccess[feature.name] = {
-          enabled: tenantFeature.enabled,
-          source: 'override'
-        }
-      } else if (tenant.plan) {
-        // Check plan features
-        const planFeature = tenant.plan.planFeatures.find(pf => pf.featureId === feature.id)
-        featureAccess[feature.name] = {
-          enabled: planFeature ? planFeature.enabled : false,
-          source: 'plan'
-        }
-      } else {
-        // No plan, default to disabled
-        featureAccess[feature.name] = {
-          enabled: false,
-          source: 'default'
-        }
-      }
+      featureAccess[feature.name] = { enabled: false, source: 'default' }
     }
+
+    const jsonFeatures = Array.isArray(tenant.plan?.features) ? tenant.plan.features : []
+    jsonFeatures.filter(Boolean).forEach((name) => {
+      featureAccess[name] = { enabled: true, source: 'plan' }
+    })
+
+    planFeatures.forEach((pf) => {
+      if (pf.feature?.name) featureAccess[pf.feature.name] = { enabled: true, source: 'plan' }
+    })
+
+    tenant.features.forEach((tf) => {
+      if (tf.feature?.name) featureAccess[tf.feature.name] = { enabled: tf.enabled, source: 'override' }
+    })
 
     res.json({
       tenantId,

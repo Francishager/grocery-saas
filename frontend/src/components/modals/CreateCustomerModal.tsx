@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
 
 interface Customer {
   id: string
@@ -67,17 +68,12 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
     setLoading(true)
     
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
       const url = initialData?.id 
-        ? `${API_URL}/api/receivables/customers/${initialData.id}`
-        : `${API_URL}/api/receivables/customers`
+        ? `/api/receivables/customers/${initialData.id}`
+        : '/api/receivables/customers'
       
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: initialData?.id ? 'PUT' : 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
         body: JSON.stringify(formData)
       })
 

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
 import { 
   Building2, 
   FileText, 
@@ -102,23 +103,31 @@ export default function PayablesPage() {
   const [selectedPurchase, setSelectedPurchase] = useState<SupplierPurchase | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const suppliersEnabled = isFeatureEnabled('suppliers')
 
   useEffect(() => {
-    if (isFeatureEnabled('suppliers')) {
-      loadSuppliers()
-      loadPayablesSummary()
+    if (!suppliersEnabled) {
+      setLoading(false)
+      return
     }
-  }, [isFeatureEnabled('suppliers')])
+
+    if (activeTab === 'suppliers') {
+      loadSuppliers()
+    }
+    if (activeTab === 'purchases') loadPurchases()
+    if (activeTab === 'payments') loadPayments()
+    loadPayablesSummary()
+  }, [suppliersEnabled, activeTab, searchTerm, statusFilter])
 
   const loadSuppliers = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      setLoading(true)
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
         ...(statusFilter !== 'all' && { status: statusFilter })
       })
       
-      const response = await fetch(`${API_URL}/api/payables/suppliers?${params}`)
+      const response = await apiFetch(`/api/payables/suppliers?${params}`)
       if (response.ok) {
         const data = await response.json()
         setSuppliers(data.suppliers)
@@ -136,8 +145,7 @@ export default function PayablesPage() {
 
   const loadPurchases = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/payables/purchases`)
+      const response = await apiFetch('/api/payables/purchases')
       if (response.ok) {
         const data = await response.json()
         setPurchases(data.purchases)
@@ -153,8 +161,7 @@ export default function PayablesPage() {
 
   const loadPayments = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/payables/payments`)
+      const response = await apiFetch('/api/payables/payments')
       if (response.ok) {
         const data = await response.json()
         setPayments(data.payments)
@@ -170,8 +177,7 @@ export default function PayablesPage() {
 
   const loadPayablesSummary = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/payables/payables/summary`)
+      const response = await apiFetch('/api/payables/payables/summary')
       if (response.ok) {
         const data = await response.json()
         setSummary(data)
@@ -185,13 +191,8 @@ export default function PayablesPage() {
     if (!selectedPurchase || !paymentAmount) return
 
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/payables/payments`, {
+      const response = await apiFetch('/api/payables/payments', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
         body: JSON.stringify({
           supplierId: selectedPurchase.supplier.id,
           purchaseId: selectedPurchase.id,

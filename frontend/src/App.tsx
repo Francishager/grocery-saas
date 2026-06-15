@@ -21,6 +21,9 @@ import PurchasesPage from '@/pages/PurchasesPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import AdminPage from '@/pages/admin/AdminPage'
+import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
+import PayablesPage from '@/pages/receivables/PayablesPage'
+import ExpensesPage from '@/pages/expenses/ExpensesPage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -106,6 +109,9 @@ function App() {
           <Route path="sales" element={<SalesPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="purchases" element={<PurchasesPage />} />
+          <Route path="receivables" element={<ReceivablesPage />} />
+          <Route path="payables" element={<PayablesPage />} />
+          <Route path="expenses" element={<ExpensesPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="admin" element={<AdminPage />} />

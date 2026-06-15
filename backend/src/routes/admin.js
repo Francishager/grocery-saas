@@ -376,8 +376,35 @@ router.get("/me/features", authenticateToken, async (req, res) => {
     const tenantId = req.user?.tenantId;
     let planCodes = [];
     if (tenantId) {
-      const tenantFeatures = await prisma.tenantFeature.findMany({ where: { tenantId, enabled: true }, include: { feature: true } });
-      planCodes = tenantFeatures.map((tf) => tf.feature.name);
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { plan: true },
+      });
+
+      const jsonFeatures = Array.isArray(tenant?.plan?.features) ? tenant.plan.features : [];
+      const planFeatureRows = tenant?.planId
+        ? await prisma.planFeature.findMany({
+            where: { planId: tenant.planId, enabled: true },
+            include: { feature: true },
+          })
+        : [];
+      const tenantOverrides = await prisma.tenantFeature.findMany({
+        where: { tenantId },
+        include: { feature: true },
+      });
+
+      const effective = new Set([
+        ...jsonFeatures.filter(Boolean),
+        ...planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean),
+      ]);
+
+      tenantOverrides.forEach((tf) => {
+        if (!tf.feature?.name) return;
+        if (tf.enabled) effective.add(tf.feature.name);
+        else effective.delete(tf.feature.name);
+      });
+
+      planCodes = Array.from(effective);
     }
 
     const effective = planCodes.length ? planCodes : roleBaseline;

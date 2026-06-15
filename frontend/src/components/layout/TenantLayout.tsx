@@ -1,25 +1,35 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, FileText, TrendingUp, LogOut, Menu, X, Users, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, FileText, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart },
-  { to: '/tenant/inventory', label: 'Inventory', icon: Package },
-  { to: '/tenant/purchases', label: 'Purchases', icon: FileText },
-  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp },
-  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList },
-  { to: '/tenant/admin', label: 'Staff', icon: Users, disabled: true },
+  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', roles: ['owner', 'manager', 'attendant'] },
+  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/purchases', label: 'Purchases', icon: FileText, feature: 'purchases', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/admin', label: 'Staff', icon: Users, feature: 'staff', roles: ['owner', 'manager'] },
 ]
 
 export function TenantLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { user, logout } = useJWTAuth()
+  const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const handleLogout = () => { logout(); navigate('/login') }
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.roles && user?.role && !item.roles.includes(user.role)) return false
+    if (!item.feature) return true
+    return canAccessFeature(item.feature)
+  })
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -37,23 +47,13 @@ export function TenantLayout() {
             <Button variant="ghost" size="icon" className="text-slate-200 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></Button>
           </div>
           <nav className="flex-1 space-y-1 p-4">
-            {navItems.map((item) =>
-              item.disabled ? (
-                <div
-                  key={item.to}
-                  aria-disabled="true"
-                  title="Staff management is disabled"
-                  className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 opacity-60"
-                >
-                  <item.icon className="h-5 w-5" />{item.label}
-                </div>
-              ) : (
-                <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
-                  className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
-                  <item.icon className="h-5 w-5" />{item.label}
-                </NavLink>
-              )
-            )}
+            {visibleNavItems.map((item) => (
+              <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                <item.icon className="h-5 w-5" />{item.label}
+              </NavLink>
+            ))}
+            {loading && <div className="px-3 py-2 text-xs text-slate-500">Loading plan features...</div>}
           </nav>
           <div className="border-t border-[hsl(var(--sidebar-border))] p-4">
             <div className="mb-3 flex items-center gap-3">
