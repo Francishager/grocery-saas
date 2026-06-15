@@ -7,87 +7,89 @@
 
 @layer base {
   :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
+    --background: 218 27% 95%;
+    --foreground: 222 47% 11%;
 
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
 
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: oklch(0.55 0.22 250);
-    --primary-foreground: oklch(0.98 0 0);
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: oklch(0.96 0.03 250);
-    --secondary-foreground: oklch(0.25 0.05 250);
+    --secondary: 210 40% 92%;
+    --secondary-foreground: 222 47% 16%;
 
-    --muted: oklch(0.96 0.01 250);
-    --muted-foreground: oklch(0.45 0.02 250);
+    --muted: 214 32% 91%;
+    --muted-foreground: 215 20% 38%;
 
-    --accent: oklch(0.95 0.04 250);
-    --accent-foreground: oklch(0.25 0.05 250);
+    --accent: 190 70% 92%;
+    --accent-foreground: 222 47% 14%;
 
-    --destructive: oklch(0.62 0.25 27);
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: oklch(0.9 0.01 250);
-    --input: oklch(0.9 0.01 250);
-    --ring: oklch(0.55 0.22 250);
+    --border: 214 28% 84%;
+    --input: 214 28% 84%;
+    --ring: 217 91% 60%;
 
     --radius: 0.625rem;
 
-    --sidebar: oklch(0.98 0.01 250);
-    --sidebar-foreground: oklch(0.2 0.02 250);
+    --sidebar: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
 
-    --sidebar-primary: oklch(0.55 0.22 250);
-    --sidebar-primary-foreground: oklch(0.98 0 0);
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
 
-    --sidebar-accent: oklch(0.93 0.03 250);
-    --sidebar-accent-foreground: oklch(0.2 0.02 250);
+    --sidebar-accent: 215 32% 18%;
+    --sidebar-accent-foreground: 210 40% 98%;
 
-    --sidebar-border: oklch(0.9 0.01 250);
-    --sidebar-ring: oklch(0.55 0.22 250);
+    --sidebar-border: 215 28% 17%;
+    --sidebar-ring: 217 91% 60%;
   }
 
   .dark {
-    --background: oklch(0.15 0.02 250);
-    --foreground: oklch(0.98 0 0);
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
 
-    --card: oklch(0.2 0.02 250);
-    --card-foreground: oklch(0.98 0 0);
+    --card: 222 40% 12%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: oklch(0.2 0.02 250);
-    --popover-foreground: oklch(0.98 0 0);
+    --popover: 222 40% 12%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary: oklch(0.65 0.22 250);
-    --primary-foreground: oklch(0.98 0 0);
+    --primary: 217 91% 65%;
+    --primary-foreground: 222 47% 8%;
 
-    --secondary: oklch(0.25 0.03 250);
-    --secondary-foreground: oklch(0.98 0 0);
+    --secondary: 217 32% 17%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: oklch(0.25 0.03 250);
-    --muted-foreground: oklch(0.75 0.02 250);
+    --muted: 217 32% 17%;
+    --muted-foreground: 215 20% 72%;
 
-    --accent: oklch(0.3 0.03 250);
-    --accent-foreground: oklch(0.98 0 0);
+    --accent: 190 45% 22%;
+    --accent-foreground: 210 40% 98%;
 
-    --destructive: oklch(0.65 0.22 27);
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: oklch(0.3 0.02 250);
-    --input: oklch(0.3 0.02 250);
-    --ring: oklch(0.65 0.22 250);
+    --border: 217 32% 22%;
+    --input: 217 32% 22%;
+    --ring: 217 91% 65%;
 
-    --sidebar: oklch(0.18 0.02 250);
-    --sidebar-foreground: oklch(0.98 0 0);
+    --sidebar: 222 47% 9%;
+    --sidebar-foreground: 210 40% 98%;
 
-    --sidebar-primary: oklch(0.65 0.22 250);
-    --sidebar-primary-foreground: oklch(0.98 0 0);
+    --sidebar-primary: 217 91% 65%;
+    --sidebar-primary-foreground: 222 47% 8%;
 
-    --sidebar-accent: oklch(0.25 0.03 250);
-    --sidebar-accent-foreground: oklch(0.98 0 0);
+    --sidebar-accent: 217 32% 17%;
+    --sidebar-accent-foreground: 210 40% 98%;
 
-    --sidebar-border: oklch(0.3 0.02 250);
-    --sidebar-ring: oklch(0.65 0.22 250);
+    --sidebar-border: 217 32% 20%;
+    --sidebar-ring: 217 91% 65%;
   }
 
   .theme {

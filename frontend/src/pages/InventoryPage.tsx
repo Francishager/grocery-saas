@@ -1,36 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Edit, Trash2 } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2 } from 'lucide-react'
 import { inventoryApi, categoriesApi, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Command,
   CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from "@/components/ui/command"
-
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/Popover"
-
-import { Button } from "@/components/ui/button"
-import { Check, ChevronsUpDown } from "lucide-react"
-import { cn } from "@/lib/utils";
 
 interface FormData {
   product_id: string
@@ -57,7 +46,7 @@ const initialFormData: FormData = {
 }
 
 export default function InventoryPage() {
-  const [open, setOpen] = useState(true)
+  const [categoryOpen, setCategoryOpen] = useState(false)
   const [items, setItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -150,14 +139,16 @@ export default function InventoryPage() {
       low_stock_alert: item.low_stock_alert || 5,
       barcode: (item as any).barcode || '',
       sku: (item as any).sku || '',
-      categoryId: (item as any).categoryId || '',
+      categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
     })
+    setCategoryOpen(false)
     setShowForm(true)
   }
 
   const openNewForm = () => {
     setEditingItem(null)
     setFormData(initialFormData)
+    setCategoryOpen(false)
     setShowForm(true)
   }
 
@@ -165,7 +156,12 @@ export default function InventoryPage() {
     setShowForm(false)
     setEditingItem(null)
     setFormData(initialFormData)
+    setCategoryOpen(false)
   }
+
+  const selectedCategory = categories.find(
+    (category) => String(category.id) === formData.categoryId
+  )
 
   return (
     <div className="space-y-6 p-6">
@@ -232,52 +228,58 @@ export default function InventoryPage() {
               <div className="space-y-2">
                 <Label>Category</Label>
 
-                <Popover open={open} onOpenChange={setOpen}>
+                <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
                       role="combobox"
-                      aria-expanded={open}
+                      aria-expanded={categoryOpen}
                       className="w-full justify-between"
                     >
-                      {formData.categoryId
-                        ? categories.find((c) => c.id === formData.categoryId)?.name
-                        : "Select category"}
+                      <span className={cn("truncate", !selectedCategory && "text-muted-foreground")}>
+                        {selectedCategory?.name || "Select category"}
+                      </span>
                       <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
                     </Button>
                   </PopoverTrigger>
 
-                  <PopoverContent className="w-full p-0">
+                  <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-0">
                     <Command>
                       <CommandInput placeholder="Search category..." />
 
-                      <CommandEmpty>No category found.</CommandEmpty>
+                      <CommandList className="max-h-60 overflow-y-auto">
+                        <CommandEmpty>No category found.</CommandEmpty>
 
-                      <CommandGroup className="max-h-60 overflow-auto">
-                        {categories.map((category) => (
-                          <CommandItem
-                            key={category.id}
-                            value={category.name}
-                            onSelect={() => {
-                              setFormData((prev) => ({
-                                ...prev,
-                                categoryId: category.id,
-                              }))
-                              setOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                formData.categoryId === category.id
-                                  ? "opacity-100"
-                                  : "opacity-0"
-                              )}
-                            />
-                            {category.name}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
+                        <CommandGroup>
+                          {categories.map((category) => {
+                            const categoryId = String(category.id)
+
+                            return (
+                              <CommandItem
+                                key={categoryId}
+                                value={category.name}
+                                onSelect={() => {
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    categoryId,
+                                  }))
+                                  setCategoryOpen(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    formData.categoryId === categoryId
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate">{category.name}</span>
+                              </CommandItem>
+                            )
+                          })}
+                        </CommandGroup>
+                      </CommandList>
                     </Command>
                   </PopoverContent>
                 </Popover>

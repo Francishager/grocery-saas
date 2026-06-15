@@ -202,6 +202,7 @@ function mapProductToInventory(p: any): InventoryItem {
     low_stock_alert: p.minStock ?? 10,
     barcode: p.barcode || '',
     sku: p.sku || '',
+    categoryId: p.categoryId ? String(p.categoryId) : p.category?.id ? String(p.category.id) : '',
     updated_at: p.updatedAt || p.createdAt,
   }
 }
@@ -489,6 +490,7 @@ export interface InventoryItem {
   low_stock_alert: number
   barcode?: string
   sku?: string
+  categoryId?: string
   updated_at: string
 }
 
@@ -670,4 +672,3 @@ export interface AuditSummary {
   byDay: Record<string, number>
   total: number
 }
-
