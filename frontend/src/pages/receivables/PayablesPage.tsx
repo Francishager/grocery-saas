@@ -5,9 +5,12 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { formatCurrency } from '@/lib/utils'
+import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { 
   Building2, 
   FileText, 
@@ -87,11 +90,35 @@ interface SupplierPayment {
   }
 }
 
+interface PurchaseDraftItem {
+  productId: string
+  quantity: string
+  cost: string
+}
+
+const createEmptyPurchaseItem = (): PurchaseDraftItem => ({
+  productId: '',
+  quantity: '1',
+  cost: '',
+})
+
+const parseAmount = (value: string | number | undefined) => {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : 0
+}
+
+const readResponseError = async (response: Response, fallback: string) => {
+  const data = await response.json().catch(() => ({}))
+  return data?.error || data?.message || fallback
+}
+
 export default function PayablesPage() {
   const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
   const { toast } = useToast()
   
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [supplierOptions, setSupplierOptions] = useState<Supplier[]>([])
+  const [products, setProducts] = useState<InventoryItem[]>([])
   const [purchases, setPurchases] = useState<SupplierPurchase[]>([])
   const [payments, setPayments] = useState<SupplierPayment[]>([])
   const [loading, setLoading] = useState(true)
@@ -99,10 +126,20 @@ export default function PayablesPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [activeTab, setActiveTab] = useState<'suppliers' | 'purchases' | 'payments'>('suppliers')
   const [summary, setSummary] = useState<any>(null)
+  const [showSupplierModal, setShowSupplierModal] = useState(false)
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false)
+  const [savingPurchase, setSavingPurchase] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPurchase, setSelectedPurchase] = useState<SupplierPurchase | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [purchaseForm, setPurchaseForm] = useState({
+    supplierId: '',
+    refNo: '',
+    amountPaid: '0',
+    notes: '',
+  })
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseDraftItem[]>([createEmptyPurchaseItem()])
   const suppliersEnabled = isFeatureEnabled('suppliers')
 
   useEffect(() => {
@@ -119,27 +156,32 @@ export default function PayablesPage() {
     loadPayablesSummary()
   }, [suppliersEnabled, activeTab, searchTerm, statusFilter])
 
-  const loadSuppliers = async () => {
+  const loadSuppliers = async (
+    showPageLoading = true,
+    overrides?: { search?: string; status?: string }
+  ) => {
     try {
-      setLoading(true)
+      if (showPageLoading) setLoading(true)
       const params = new URLSearchParams({
-        ...(searchTerm && { search: searchTerm }),
-        ...(statusFilter !== 'all' && { status: statusFilter })
+        ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
+        ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
       })
       
       const response = await apiFetch(`/api/payables/suppliers?${params}`)
       if (response.ok) {
         const data = await response.json()
         setSuppliers(data.suppliers)
+      } else {
+        throw new Error(await readResponseError(response, 'Failed to load suppliers'))
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to load suppliers',
+        description: error instanceof Error ? error.message : 'Failed to load suppliers',
         variant: 'destructive'
       })
     } finally {
-      setLoading(false)
+      if (showPageLoading) setLoading(false)
     }
   }
 
@@ -187,6 +229,125 @@ export default function PayablesPage() {
     }
   }
 
+  const loadProducts = async () => {
+    try {
+      const data = await inventoryApi.list()
+      setProducts(data)
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load products',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const loadSupplierOptions = async () => {
+    try {
+      const response = await apiFetch('/api/payables/suppliers?status=active&limit=100')
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to load supplier options'))
+      }
+      const data = await response.json()
+      setSupplierOptions(data.suppliers || [])
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to load supplier options',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const openPurchaseModal = () => {
+    setShowPurchaseModal(true)
+    loadSupplierOptions()
+    if (products.length === 0) loadProducts()
+  }
+
+  const updatePurchaseItem = (index: number, patch: Partial<PurchaseDraftItem>) => {
+    setPurchaseItems((prev) =>
+      prev.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)
+    )
+  }
+
+  const handlePurchaseProductChange = (index: number, productId: string) => {
+    const product = products.find((item) => String(item.id) === productId)
+    updatePurchaseItem(index, {
+      productId,
+      cost: product ? String(product.cost_price) : '',
+    })
+  }
+
+  const purchaseTotal = purchaseItems.reduce((sum, item) => {
+    return sum + parseAmount(item.cost) * Math.max(1, parseInt(item.quantity, 10) || 1)
+  }, 0)
+
+  const createPurchase = async (event: React.FormEvent) => {
+    event.preventDefault()
+
+    const items = purchaseItems
+      .filter((item) => item.productId)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
+        cost: parseAmount(item.cost),
+      }))
+
+    if (!purchaseForm.supplierId || items.length === 0) {
+      toast({
+        title: 'Missing purchase details',
+        description: 'Select a supplier and at least one product.',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    setSavingPurchase(true)
+    try {
+      const response = await apiFetch('/api/payables/purchases', {
+        method: 'POST',
+        body: JSON.stringify({
+          supplierId: purchaseForm.supplierId,
+          refNo: purchaseForm.refNo || undefined,
+          items,
+          total: purchaseTotal,
+          amountPaid: Math.min(parseAmount(purchaseForm.amountPaid), purchaseTotal),
+          notes: purchaseForm.notes || undefined,
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to create purchase'))
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Purchase recorded successfully'
+      })
+      setShowPurchaseModal(false)
+      setPurchaseForm({
+        supplierId: '',
+        refNo: '',
+        amountPaid: '0',
+        notes: '',
+      })
+      setPurchaseItems([createEmptyPurchaseItem()])
+      loadPurchases()
+      if (activeTab === 'suppliers') loadSuppliers()
+      loadSupplierOptions()
+      loadPayablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create purchase',
+        variant: 'destructive'
+      })
+    } finally {
+      setSavingPurchase(false)
+    }
+  }
+
   const recordPayment = async () => {
     if (!selectedPurchase || !paymentAmount) return
 
@@ -202,23 +363,27 @@ export default function PayablesPage() {
         })
       })
 
-      if (response.ok) {
-        toast({
-          title: 'Success',
-          description: 'Payment recorded successfully'
-        })
-        setShowPaymentModal(false)
-        setSelectedPurchase(null)
-        setPaymentAmount('')
-        setPaymentMethod('cash')
-        loadPurchases()
-        loadPayments()
-        loadPayablesSummary()
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to record payment'))
       }
+
+      toast({
+        title: 'Success',
+        description: 'Payment recorded successfully'
+      })
+      setShowPaymentModal(false)
+      setSelectedPurchase(null)
+      setPaymentAmount('')
+      setPaymentMethod('cash')
+      loadPurchases()
+      if (activeTab === 'suppliers') loadSuppliers()
+      loadSupplierOptions()
+      loadPayments()
+      loadPayablesSummary()
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to record payment',
+        description: error instanceof Error ? error.message : 'Failed to record payment',
         variant: 'destructive'
       })
     }
@@ -283,10 +448,16 @@ export default function PayablesPage() {
           <h1 className="text-2xl font-bold">Payables Management</h1>
           <p className="text-muted-foreground">Manage suppliers and outstanding payments</p>
         </div>
-        <Button onClick={() => window.location.href = '/admin/platform'}>
-          <Settings className="h-4 w-4 mr-2" />
-          Manage Plans
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowSupplierModal(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Supplier
+          </Button>
+          <Button onClick={openPurchaseModal}>
+            <FileText className="h-4 w-4 mr-2" />
+            New Purchase
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -477,6 +648,7 @@ export default function PayablesPage() {
                         size="sm"
                         onClick={() => {
                           setSelectedPurchase(purchase)
+                          setPaymentAmount(String(purchase.balance))
                           setShowPaymentModal(true)
                         }}
                       >
@@ -539,6 +711,158 @@ export default function PayablesPage() {
               </Card>
             ))
           )}
+        </div>
+      )}
+
+      <CreateSupplierModal
+        isOpen={showSupplierModal}
+        onClose={() => setShowSupplierModal(false)}
+        onSuccess={(supplier) => {
+          setSuppliers((prev) => [supplier, ...prev.filter((item) => item.id !== supplier.id)])
+          setSupplierOptions((prev) => [supplier, ...prev.filter((item) => item.id !== supplier.id)])
+          if (activeTab === 'suppliers') loadSuppliers()
+          loadPayablesSummary()
+        }}
+      />
+
+      {/* Purchase Modal */}
+      {showPurchaseModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">New Supplier Purchase</h3>
+            <form onSubmit={createPurchase} className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Supplier</Label>
+                  <Select
+                    value={purchaseForm.supplierId}
+                    onValueChange={(value) => setPurchaseForm((prev) => ({ ...prev, supplierId: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select supplier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(supplierOptions.length ? supplierOptions : suppliers).map((supplier) => (
+                        <SelectItem key={supplier.id} value={supplier.id}>
+                          {supplier.name} {supplier.phone ? `(${supplier.phone})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="purchaseRef">Reference / Invoice No.</Label>
+                  <Input
+                    id="purchaseRef"
+                    value={purchaseForm.refNo}
+                    onChange={(event) => setPurchaseForm((prev) => ({ ...prev, refNo: event.target.value }))}
+                    placeholder="Auto-generated if blank"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Items</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPurchaseItems((prev) => [...prev, createEmptyPurchaseItem()])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Item
+                  </Button>
+                </div>
+
+                {purchaseItems.map((item, index) => (
+                  <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_100px_140px_40px]">
+                    <Select value={item.productId} onValueChange={(value) => handlePurchaseProductChange(index, value)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Product" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.map((product) => (
+                          <SelectItem key={product.id} value={String(product.id)}>
+                            {product.product_name} {product.product_id ? `(${product.product_id})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(event) => updatePurchaseItem(index, { quantity: event.target.value })}
+                      placeholder="Qty"
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.cost}
+                      onChange={(event) => updatePurchaseItem(index, { cost: event.target.value })}
+                      placeholder="Unit cost"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={purchaseItems.length === 1}
+                      onClick={() => setPurchaseItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="purchasePaid">Amount Paid</Label>
+                  <Input
+                    id="purchasePaid"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    max={purchaseTotal}
+                    value={purchaseForm.amountPaid}
+                    onChange={(event) => setPurchaseForm((prev) => ({ ...prev, amountPaid: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="purchaseNotes">Notes</Label>
+                  <Textarea
+                    id="purchaseNotes"
+                    value={purchaseForm.notes}
+                    onChange={(event) => setPurchaseForm((prev) => ({ ...prev, notes: event.target.value }))}
+                    rows={2}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-md border p-4 text-sm">
+                <div className="flex justify-between">
+                  <span>Total Cost</span>
+                  <span className="font-semibold">{formatCurrency(purchaseTotal)}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Balance after payment</span>
+                  <span>{formatCurrency(Math.max(0, purchaseTotal - parseAmount(purchaseForm.amountPaid)))}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShowPurchaseModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={savingPurchase}>
+                  {savingPurchase ? 'Saving...' : 'Record Purchase'}
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

@@ -194,7 +194,7 @@ function mapProductToInventory(p: any): InventoryItem {
   return {
     id: p.id,
     business_id: p.tenantId,
-    product_id: p.id,
+    product_id: p.sku || '',
     product_name: p.name,
     quantity: p.quantity ?? 0,
     unit_price: p.price ?? 0,
@@ -224,7 +224,7 @@ export const salesApi = {
     api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
       body: {
         cart: cart.map(c => ({
-          productId: c.product_id || c.id,
+          productId: c.id,
           qty: c.qty,
           price: c.selling_price,
           discount: c.discount || 0,
@@ -249,7 +249,17 @@ export const purchasesApi = {
 
   checkout: (items: PurchaseItem[], vendor_name: string, invoice_no: string, date?: string, paymentMethod?: string) =>
     api.post<{ message: string; count: number; total: number; purchase: any }>('/api/purchases/checkout', {
-      body: { items, supplier: vendor_name, refNo: invoice_no, notes: date, paymentMethod: paymentMethod || 'cash' },
+      body: {
+        cart: items.map((item) => ({
+          productId: item.id,
+          quantity: item.qty,
+          cost: item.unit_cost,
+        })),
+        supplier: vendor_name,
+        refNo: invoice_no,
+        notes: date,
+        paymentMethod: paymentMethod || 'cash',
+      },
     }),
 }
 

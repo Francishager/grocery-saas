@@ -41,7 +41,7 @@ router.post("/checkout", authenticateToken, requireRole(["owner", "manager", "ac
   try {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.id;
-    const { cart = [], supplier, notes, paymentMethod } = req.body;
+    const { cart = [], supplier, refNo, notes, paymentMethod } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
 
     const total = cart.reduce((sum, c) => sum + Number(c.cost || 0) * Number(c.quantity || 1), 0);
@@ -50,7 +50,7 @@ router.post("/checkout", authenticateToken, requireRole(["owner", "manager", "ac
         tenantId,
         userId,
         supplier,
-        refNo: `PUR-${Date.now()}`,
+        refNo: refNo || `PUR-${Date.now()}`,
         paymentMethod: paymentMethod || "cash",
         total,
         notes,

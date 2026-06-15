@@ -5,9 +5,12 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { formatCurrency } from '@/lib/utils'
+import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import { 
   Users, 
   Building2, 
@@ -70,12 +73,38 @@ interface Expense {
   }
 }
 
+interface SaleDraftItem {
+  productId: string
+  quantity: string
+  price: string
+  discount: string
+}
+
+const createEmptySaleItem = (): SaleDraftItem => ({
+  productId: '',
+  quantity: '1',
+  price: '',
+  discount: '0',
+})
+
+const parseAmount = (value: string | number | undefined) => {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : 0
+}
+
+const readResponseError = async (response: Response, fallback: string) => {
+  const data = await response.json().catch(() => ({}))
+  return data?.error || data?.message || fallback
+}
+
 export default function ReceivablesPage() {
   const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
   const { toast } = useToast()
   
   const [customers, setCustomers] = useState<Customer[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [customerOptions, setCustomerOptions] = useState<Customer[]>([])
+  const [products, setProducts] = useState<InventoryItem[]>([])
   const [sales, setSales] = useState<any[]>([])
   const [payments, setPayments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,10 +112,23 @@ export default function ReceivablesPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'sales' | 'payments'>('customers')
   const [summary, setSummary] = useState<any>(null)
+  const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [showSaleModal, setShowSaleModal] = useState(false)
+  const [savingSale, setSavingSale] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [saleForm, setSaleForm] = useState({
+    customerId: '',
+    paymentMethod: 'credit',
+    amountPaid: '0',
+    tax: '0',
+    discount: '0',
+    notes: '',
+  })
+  const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
   const creditEnabled = isFeatureEnabled('credit')
 
   useEffect(() => {
@@ -103,27 +145,32 @@ export default function ReceivablesPage() {
     loadReceivablesSummary()
   }, [creditEnabled, activeTab, searchTerm, statusFilter])
 
-  const loadCustomers = async () => {
+  const loadCustomers = async (
+    showPageLoading = true,
+    overrides?: { search?: string; status?: string }
+  ) => {
     try {
-      setLoading(true)
+      if (showPageLoading) setLoading(true)
       const params = new URLSearchParams({
-        ...(searchTerm && { search: searchTerm }),
-        ...(statusFilter !== 'all' && { status: statusFilter })
+        ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
+        ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
       })
       
       const response = await apiFetch(`/api/receivables/customers?${params}`)
       if (response.ok) {
         const data = await response.json()
         setCustomers(data.customers)
+      } else {
+        throw new Error(await readResponseError(response, 'Failed to load customers'))
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to load customers',
+        description: error instanceof Error ? error.message : 'Failed to load customers',
         variant: 'destructive'
       })
     } finally {
-      setLoading(false)
+      if (showPageLoading) setLoading(false)
     }
   }
 
@@ -171,37 +218,174 @@ export default function ReceivablesPage() {
     }
   }
 
+  const loadProducts = async () => {
+    try {
+      const data = await inventoryApi.list()
+      setProducts(data)
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load products',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const loadCustomerOptions = async () => {
+    try {
+      const response = await apiFetch('/api/receivables/customers?status=active&limit=100')
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to load customer options'))
+      }
+      const data = await response.json()
+      setCustomerOptions(data.customers || [])
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to load customer options',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const openSaleModal = () => {
+    setShowSaleModal(true)
+    loadCustomerOptions()
+    if (products.length === 0) loadProducts()
+  }
+
+  const updateSaleItem = (index: number, patch: Partial<SaleDraftItem>) => {
+    setSaleItems((prev) =>
+      prev.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)
+    )
+  }
+
+  const handleSaleProductChange = (index: number, productId: string) => {
+    const product = products.find((item) => String(item.id) === productId)
+    updateSaleItem(index, {
+      productId,
+      price: product ? String(product.unit_price) : '',
+    })
+  }
+
+  const saleSubtotal = saleItems.reduce((sum, item) => {
+    return sum + parseAmount(item.price) * Math.max(1, parseInt(item.quantity, 10) || 1)
+  }, 0)
+  const saleItemDiscount = saleItems.reduce((sum, item) => sum + parseAmount(item.discount), 0)
+  const saleTotal = Math.max(
+    0,
+    saleSubtotal + parseAmount(saleForm.tax) - parseAmount(saleForm.discount) - saleItemDiscount
+  )
+
+  const createSale = async (event: React.FormEvent) => {
+    event.preventDefault()
+
+    const items = saleItems
+      .filter((item) => item.productId)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
+        price: parseAmount(item.price),
+        discount: parseAmount(item.discount),
+      }))
+
+    if (!saleForm.customerId || items.length === 0) {
+      toast({
+        title: 'Missing sale details',
+        description: 'Select a customer and at least one product.',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    setSavingSale(true)
+    try {
+      const response = await apiFetch('/api/receivables/sales', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerId: saleForm.customerId,
+          items,
+          paymentMethod: saleForm.paymentMethod,
+          subtotal: saleSubtotal,
+          tax: parseAmount(saleForm.tax),
+          discount: parseAmount(saleForm.discount),
+          total: saleTotal,
+          amountPaid: Math.min(parseAmount(saleForm.amountPaid), saleTotal),
+          notes: saleForm.notes || undefined,
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to create sale'))
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Sale recorded successfully'
+      })
+      setShowSaleModal(false)
+      setSaleForm({
+        customerId: '',
+        paymentMethod: 'credit',
+        amountPaid: '0',
+        tax: '0',
+        discount: '0',
+        notes: '',
+      })
+      setSaleItems([createEmptySaleItem()])
+      loadSales()
+      if (activeTab === 'customers') loadCustomers()
+      loadCustomerOptions()
+      loadReceivablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create sale',
+        variant: 'destructive'
+      })
+    } finally {
+      setSavingSale(false)
+    }
+  }
+
   const recordPayment = async () => {
-    if (!selectedCustomer || !paymentAmount) return
+    const targetCustomer = selectedSale?.customer || selectedCustomer
+    if (!targetCustomer || !paymentAmount) return
 
     try {
       const response = await apiFetch('/api/receivables/payments', {
         method: 'POST',
         body: JSON.stringify({
-          customerId: selectedCustomer.id,
+          customerId: targetCustomer.id,
+          saleId: selectedSale?.id,
           amount: parseFloat(paymentAmount),
           paymentMethod,
           notes: `Payment recorded via dashboard`
         })
       })
 
-      if (response.ok) {
-        toast({
-          title: 'Success',
-          description: 'Payment recorded successfully'
-        })
-        setShowPaymentModal(false)
-        setSelectedCustomer(null)
-        setPaymentAmount('')
-        setPaymentMethod('cash')
-        loadCustomers()
-        loadPayments()
-        loadReceivablesSummary()
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to record payment'))
       }
+
+      toast({
+        title: 'Success',
+        description: 'Payment recorded successfully'
+      })
+      setShowPaymentModal(false)
+      setSelectedCustomer(null)
+      setSelectedSale(null)
+      setPaymentAmount('')
+      setPaymentMethod('cash')
+      if (activeTab === 'customers') loadCustomers()
+      loadCustomerOptions()
+      loadSales()
+      loadPayments()
+      loadReceivablesSummary()
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to record payment',
+        description: error instanceof Error ? error.message : 'Failed to record payment',
         variant: 'destructive'
       })
     }
@@ -275,10 +459,16 @@ export default function ReceivablesPage() {
           <h1 className="text-2xl font-bold">Receivables Management</h1>
           <p className="text-muted-foreground">Manage customer credit and outstanding payments</p>
         </div>
-        <Button onClick={() => setActiveTab('customers')} disabled={!isFeatureEnabled('customers')}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Customer
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowCustomerModal(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Customer
+          </Button>
+          <Button onClick={openSaleModal}>
+            <FileText className="h-4 w-4 mr-2" />
+            New Sale
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -431,6 +621,7 @@ export default function ReceivablesPage() {
                         size="sm"
                         onClick={() => {
                           setSelectedCustomer(customer)
+                          setSelectedSale(null)
                           setShowPaymentModal(true)
                         }}
                       >
@@ -494,6 +685,23 @@ export default function ReceivablesPage() {
                       <p className="font-semibold text-red-600">{Number(sale.balance || 0).toFixed(2)}</p>
                     </div>
                   </div>
+
+                  {Number(sale.balance || 0) > 0 && sale.customer && (
+                    <div className="mt-4">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setSelectedCustomer(sale.customer)
+                          setSelectedSale(sale)
+                          setPaymentAmount(String(sale.balance))
+                          setShowPaymentModal(true)
+                        }}
+                      >
+                        <DollarSign className="h-4 w-4 mr-1" />
+                        Record Payment
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))
@@ -539,6 +747,202 @@ export default function ReceivablesPage() {
         </div>
       )}
 
+      <CreateCustomerModal
+        isOpen={showCustomerModal}
+        onClose={() => setShowCustomerModal(false)}
+        onSuccess={(customer) => {
+          setCustomers((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
+          setCustomerOptions((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
+          if (activeTab === 'customers') loadCustomers()
+          loadReceivablesSummary()
+        }}
+      />
+
+      {/* Sale Modal */}
+      {showSaleModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">New Customer Sale</h3>
+            <form onSubmit={createSale} className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Customer</Label>
+                  <Select
+                    value={saleForm.customerId}
+                    onValueChange={(value) => setSaleForm((prev) => ({ ...prev, customerId: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select customer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(customerOptions.length ? customerOptions : customers).map((customer) => (
+                        <SelectItem key={customer.id} value={customer.id}>
+                          {customer.name} {customer.phone ? `(${customer.phone})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Payment Method</Label>
+                  <Select
+                    value={saleForm.paymentMethod}
+                    onValueChange={(value) => setSaleForm((prev) => ({ ...prev, paymentMethod: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select payment method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="credit">Credit</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="card">Card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Items</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSaleItems((prev) => [...prev, createEmptySaleItem()])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Item
+                  </Button>
+                </div>
+
+                {saleItems.map((item, index) => (
+                  <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]">
+                    <Select value={item.productId} onValueChange={(value) => handleSaleProductChange(index, value)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Product" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.map((product) => (
+                          <SelectItem key={product.id} value={String(product.id)}>
+                            {product.product_name} {product.product_id ? `(${product.product_id})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(event) => updateSaleItem(index, { quantity: event.target.value })}
+                      placeholder="Qty"
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.price}
+                      onChange={(event) => updateSaleItem(index, { price: event.target.value })}
+                      placeholder="Price"
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.discount}
+                      onChange={(event) => updateSaleItem(index, { discount: event.target.value })}
+                      placeholder="Discount"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={saleItems.length === 1}
+                      onClick={() => setSaleItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <Label htmlFor="saleTax">Tax</Label>
+                  <Input
+                    id="saleTax"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={saleForm.tax}
+                    onChange={(event) => setSaleForm((prev) => ({ ...prev, tax: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="saleDiscount">Order Discount</Label>
+                  <Input
+                    id="saleDiscount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={saleForm.discount}
+                    onChange={(event) => setSaleForm((prev) => ({ ...prev, discount: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="salePaid">Amount Paid</Label>
+                  <Input
+                    id="salePaid"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    max={saleTotal}
+                    value={saleForm.amountPaid}
+                    onChange={(event) => setSaleForm((prev) => ({ ...prev, amountPaid: event.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="saleNotes">Notes</Label>
+                <Textarea
+                  id="saleNotes"
+                  value={saleForm.notes}
+                  onChange={(event) => setSaleForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  rows={3}
+                />
+              </div>
+
+              <div className="rounded-md border p-4 text-sm">
+                <div className="flex justify-between">
+                  <span>Subtotal</span>
+                  <span>{formatCurrency(saleSubtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Total Due</span>
+                  <span className="font-semibold">{formatCurrency(saleTotal)}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Balance after payment</span>
+                  <span>{formatCurrency(Math.max(0, saleTotal - parseAmount(saleForm.amountPaid)))}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShowSaleModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={savingSale}>
+                  {savingSale ? 'Saving...' : 'Record Sale'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Payment Modal */}
       {showPaymentModal && selectedCustomer && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -548,7 +952,12 @@ export default function ReceivablesPage() {
               <div>
                 <Label>Customer</Label>
                 <p className="font-medium">{selectedCustomer.name}</p>
-                <p className="text-sm text-muted-foreground">Balance: {selectedCustomer.balance.toFixed(2)}</p>
+                {selectedSale?.receiptNo && (
+                  <p className="text-sm text-muted-foreground">Sale: {selectedSale.receiptNo}</p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Balance: {Number(selectedSale?.balance ?? selectedCustomer.balance).toFixed(2)}
+                </p>
               </div>
               
               <div>
@@ -560,7 +969,7 @@ export default function ReceivablesPage() {
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
-                  max={selectedCustomer.balance}
+                  max={Number(selectedSale?.balance ?? selectedCustomer.balance)}
                 />
               </div>
               
@@ -581,7 +990,13 @@ export default function ReceivablesPage() {
             </div>
             
             <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setShowPaymentModal(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowPaymentModal(false)
+                  setSelectedSale(null)
+                }}
+              >
                 Cancel
               </Button>
               <Button onClick={recordPayment} disabled={!paymentAmount || parseFloat(paymentAmount) <= 0}>

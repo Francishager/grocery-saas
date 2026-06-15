@@ -7,16 +7,28 @@ import { authenticateToken, requireRole, requireTenant } from '../middleware/aut
 const router = express.Router()
 const prisma = new PrismaClient()
 
+const toMoney = (value, fallback = 0) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+const paymentStatusFor = (total, amountPaid) => {
+  if (amountPaid >= total) return 'paid'
+  if (amountPaid > 0) return 'partial'
+  return 'unpaid'
+}
+
 // === SUPPLIERS ===
 
 // Get all suppliers for tenant
 router.get('/suppliers', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
-    const { page = 1, limit = 50, search } = req.query
+    const { page = 1, limit = 50, search, status } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
     const where = {
       tenantId: req.tenant.id,
+      ...(status && status !== 'all' && { status }),
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -55,22 +67,27 @@ router.get('/suppliers', authenticateToken, requireRole(['owner', 'manager', 'ac
 router.post('/suppliers', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
     const { name, email, phone, address, notes } = req.body
+    if (!name?.trim()) {
+      return res.status(400).json({ error: 'Supplier name is required' })
+    }
 
     // Check if supplier already exists
-    const existingSupplier = await prisma.supplier.findFirst({
-      where: {
-        tenantId: req.tenant.id,
-        phone
-      }
-    })
+    if (phone?.trim()) {
+      const existingSupplier = await prisma.supplier.findFirst({
+        where: {
+          tenantId: req.tenant.id,
+          phone
+        }
+      })
 
-    if (existingSupplier) {
-      return res.status(400).json({ error: 'Supplier with this phone number already exists' })
+      if (existingSupplier) {
+        return res.status(400).json({ error: 'Supplier with this phone number already exists' })
+      }
     }
 
     const supplier = await prisma.supplier.create({
       data: {
-        name,
+        name: name.trim(),
         email,
         phone,
         address,
@@ -190,16 +207,47 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
       notes 
     } = req.body
 
+    if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one purchase item is required' })
+
+    const supplier = await prisma.supplier.findFirst({
+      where: { id: supplierId, tenantId: req.tenant.id }
+    })
+
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' })
+    if (supplier.status !== 'active') return res.status(400).json({ error: 'Supplier is not active' })
+
+    const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, tenantId: req.tenant.id, isActive: { not: false } }
+    })
+    const productsById = new Map(products.map((product) => [product.id, product]))
+    if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
+
+    const purchaseItems = items.map((item) => {
+      const product = productsById.get(item.productId)
+      const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1)
+      const cost = toMoney(item.cost, product?.cost || 0)
+
+      return {
+        productId: item.productId,
+        quantity,
+        cost,
+        total: cost * quantity
+      }
+    })
+
+    const computedTotal = total !== undefined ? toMoney(total) : purchaseItems.reduce((sum, item) => sum + item.total, 0)
+    const paid = Math.min(toMoney(amountPaid), computedTotal)
+    const balance = Math.max(0, computedTotal - paid)
+    const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
+
     // Generate reference number if not provided
     const purchaseRefNo = refNo || `PUR-${Date.now()}`
 
     // Update supplier balance
-    const supplier = await prisma.supplier.findUnique({
-      where: { id: supplierId }
-    })
-
-    if (supplier) {
-      const newBalance = supplier.balance + (total - amountPaid)
+    if (balance > 0) {
+      const newBalance = supplier.balance + balance
       await prisma.supplier.update({
         where: { id: supplierId },
         data: { balance: newBalance }
@@ -212,12 +260,12 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
         tenantId: req.tenant.id,
         supplierId,
         userId: req.user.id,
-        total,
-        amountPaid,
-        balance: total - amountPaid,
-        paymentStatus,
+        total: computedTotal,
+        amountPaid: paid,
+        balance,
+        paymentStatus: finalPaymentStatus,
         notes,
-        dueDate: paymentStatus === 'unpaid' ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined // 30 days
+        dueDate: balance > 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined // 30 days
       },
       include: {
         supplier: true,
@@ -226,29 +274,27 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
     })
 
     // Create purchase items
-    if (items && items.length > 0) {
-      await prisma.supplierPurchaseItem.createMany({
-        data: items.map(item => ({
-          purchaseId: purchase.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          cost: item.cost,
-          total: item.total
-        }))
-      })
+    await prisma.supplierPurchaseItem.createMany({
+      data: purchaseItems.map(item => ({
+        purchaseId: purchase.id,
+        productId: item.productId,
+        quantity: item.quantity,
+        cost: item.cost,
+        total: item.total
+      }))
+    })
 
-      // Update product quantities and costs
-      for (const item of items) {
-        await prisma.product.update({
-          where: { id: item.productId },
-          data: {
-            quantity: {
-              increment: item.quantity
-            },
-            cost: item.cost
-          }
-        })
-      }
+    // Update product quantities and costs
+    for (const item of purchaseItems) {
+      await prisma.product.update({
+        where: { id: item.productId },
+        data: {
+          quantity: {
+            increment: item.quantity
+          },
+          cost: item.cost
+        }
+      })
     }
 
     res.status(201).json(purchase)
@@ -310,14 +356,28 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
 router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { supplierId, purchaseId, amount, paymentMethod, reference, notes } = req.body
+    const paidAmount = toMoney(amount)
+    if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
+    if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
 
     // Get supplier
-    const supplier = await prisma.supplier.findUnique({
-      where: { id: supplierId }
+    const supplier = await prisma.supplier.findFirst({
+      where: { id: supplierId, tenantId: req.tenant.id }
     })
 
     if (!supplier) {
       return res.status(404).json({ error: 'Supplier not found' })
+    }
+
+    let purchase = null
+    if (purchaseId) {
+      purchase = await prisma.supplierPurchase.findFirst({
+        where: { id: purchaseId, supplierId, tenantId: req.tenant.id }
+      })
+      if (!purchase) return res.status(404).json({ error: 'Purchase not found for this supplier' })
+      if (paidAmount > purchase.balance) return res.status(400).json({ error: 'Payment exceeds purchase balance' })
+    } else if (paidAmount > supplier.balance) {
+      return res.status(400).json({ error: 'Payment exceeds supplier balance' })
     }
 
     // Create payment
@@ -326,7 +386,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
         tenantId: req.tenant.id,
         supplierId,
         purchaseId,
-        amount,
+        amount: paidAmount,
         paymentMethod,
         reference,
         notes
@@ -334,31 +394,25 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     })
 
     // Update supplier balance
-    const newBalance = supplier.balance - amount
+    const newBalance = Math.max(0, supplier.balance - paidAmount)
     await prisma.supplier.update({
       where: { id: supplierId },
       data: { balance: newBalance }
     })
 
     // Update purchase payment status if fully paid
-    if (purchaseId) {
-      const purchase = await prisma.supplierPurchase.findUnique({
-        where: { id: purchaseId }
+    if (purchase) {
+      const newAmountPaid = Math.min(purchase.total, purchase.amountPaid + paidAmount)
+      const newPurchaseBalance = Math.max(0, purchase.balance - paidAmount)
+
+      await prisma.supplierPurchase.update({
+        where: { id: purchaseId },
+        data: {
+          amountPaid: newAmountPaid,
+          balance: newPurchaseBalance,
+          paymentStatus: newPurchaseBalance <= 0 ? 'paid' : 'partial'
+        }
       })
-
-      if (purchase) {
-        const newAmountPaid = purchase.amountPaid + amount
-        const newBalance = purchase.balance - amount
-
-        await prisma.supplierPurchase.update({
-          where: { id: purchaseId },
-          data: {
-            amountPaid: newAmountPaid,
-            balance: newBalance,
-            paymentStatus: newBalance <= 0 ? 'paid' : 'partial'
-          }
-        })
-      }
     }
 
     res.status(201).json(payment)

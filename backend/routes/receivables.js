@@ -7,16 +7,28 @@ import { authenticateToken, requireRole, requireTenant } from '../middleware/aut
 const router = express.Router()
 const prisma = new PrismaClient()
 
+const toMoney = (value, fallback = 0) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+const paymentStatusFor = (total, amountPaid) => {
+  if (amountPaid >= total) return 'paid'
+  if (amountPaid > 0) return 'partial'
+  return 'unpaid'
+}
+
 // === CUSTOMERS ===
 
 // Get all customers for tenant
 router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
-    const { page = 1, limit = 50, search } = req.query
+    const { page = 1, limit = 50, search, status } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
     const where = {
       tenantId: req.tenant.id,
+      ...(status && status !== 'all' && { status }),
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -55,26 +67,31 @@ router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'ac
 router.post('/customers', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
     const { name, email, phone, address, creditLimit = 0, notes } = req.body
+    if (!name?.trim()) {
+      return res.status(400).json({ error: 'Customer name is required' })
+    }
 
     // Check if customer already exists
-    const existingCustomer = await prisma.customer.findFirst({
-      where: {
-        tenantId: req.tenant.id,
-        phone
-      }
-    })
+    if (phone?.trim()) {
+      const existingCustomer = await prisma.customer.findFirst({
+        where: {
+          tenantId: req.tenant.id,
+          phone
+        }
+      })
 
-    if (existingCustomer) {
-      return res.status(400).json({ error: 'Customer with this phone number already exists' })
+      if (existingCustomer) {
+        return res.status(400).json({ error: 'Customer with this phone number already exists' })
+      }
     }
 
     const customer = await prisma.customer.create({
       data: {
-        name,
+        name: name.trim(),
         email,
         phone,
         address,
-        creditLimit,
+        creditLimit: toMoney(creditLimit),
         notes,
         tenantId: req.tenant.id
       }
@@ -196,26 +213,65 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
       notes 
     } = req.body
 
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one sale item is required' })
+
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, tenantId: req.tenant.id }
+    })
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    if (customer.status !== 'active') return res.status(400).json({ error: 'Customer is not active' })
+
+    const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, tenantId: req.tenant.id, isActive: { not: false } }
+    })
+    const productsById = new Map(products.map((product) => [product.id, product]))
+    if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
+
+    const saleItems = items.map((item) => {
+      const product = productsById.get(item.productId)
+      const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1)
+      const price = toMoney(item.price, product?.price || 0)
+      const itemDiscount = toMoney(item.discount)
+      const lineTotal = Math.max(0, price * quantity - itemDiscount)
+
+      if (product.quantity < quantity) {
+        throw Object.assign(new Error(`${product.name} has only ${product.quantity} in stock`), { statusCode: 400 })
+      }
+
+      return {
+        productId: item.productId,
+        quantity,
+        price,
+        discount: itemDiscount,
+        total: lineTotal
+      }
+    })
+
+    const computedSubtotal = saleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const computedDiscount = saleItems.reduce((sum, item) => sum + item.discount, 0) + toMoney(discount)
+    const computedTax = toMoney(tax)
+    const computedTotal = total !== undefined ? toMoney(total) : Math.max(0, computedSubtotal + computedTax - computedDiscount)
+    const paid = Math.min(toMoney(amountPaid), computedTotal)
+    const balance = Math.max(0, computedTotal - paid)
+    const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
+
     // Generate receipt number
     const receiptNo = `SALE-${Date.now()}`
 
     // Update customer balance if credit sale
-    if (customerId && paymentStatus === 'unpaid') {
-      const customer = await prisma.customer.findUnique({
-        where: { id: customerId }
-      })
-
-      if (customer && customer.creditLimit > 0) {
-        const newBalance = customer.balance + (total - amountPaid)
-        if (newBalance > customer.creditLimit) {
-          return res.status(400).json({ error: 'Credit limit exceeded' })
-        }
-
-        await prisma.customer.update({
-          where: { id: customerId },
-          data: { balance: newBalance }
-        })
+    if (balance > 0) {
+      const newBalance = customer.balance + balance
+      if (customer.creditLimit > 0 && newBalance > customer.creditLimit) {
+        return res.status(400).json({ error: 'Credit limit exceeded' })
       }
+
+      await prisma.customer.update({
+        where: { id: customerId },
+        data: { balance: newBalance }
+      })
     }
 
     const sale = await prisma.saleRecord.create({
@@ -224,16 +280,16 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
         tenantId: req.tenant.id,
         userId: req.user.id,
         customerId,
-        subtotal,
-        tax,
-        discount,
-        total,
-        amountPaid,
-        balance: total - amountPaid,
+        subtotal: subtotal !== undefined ? toMoney(subtotal) : computedSubtotal,
+        tax: computedTax,
+        discount: computedDiscount,
+        total: computedTotal,
+        amountPaid: paid,
+        balance,
         paymentMethod,
-        paymentStatus,
+        paymentStatus: finalPaymentStatus,
         notes,
-        dueDate: paymentStatus === 'unpaid' ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined // 30 days
+        dueDate: balance > 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined // 30 days
       },
       include: {
         customer: true,
@@ -242,35 +298,33 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
     })
 
     // Create sale items
-    if (items && items.length > 0) {
-      await prisma.saleRecordItem.createMany({
-        data: items.map(item => ({
-          saleId: sale.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          price: item.price,
-          discount: item.discount || 0,
-          total: item.total
-        }))
-      })
+    await prisma.saleRecordItem.createMany({
+      data: saleItems.map(item => ({
+        saleId: sale.id,
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price,
+        discount: item.discount,
+        total: item.total
+      }))
+    })
 
-      // Update product quantities
-      for (const item of items) {
-        await prisma.product.update({
-          where: { id: item.productId },
-          data: {
-            quantity: {
-              decrement: item.quantity
-            }
+    // Update product quantities
+    for (const item of saleItems) {
+      await prisma.product.update({
+        where: { id: item.productId },
+        data: {
+          quantity: {
+            decrement: item.quantity
           }
-        })
-      }
+        }
+      })
     }
 
     res.status(201).json(sale)
   } catch (error) {
     console.error('Create sale error:', error)
-    res.status(500).json({ error: 'Failed to create sale' })
+    res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed to create sale' })
   }
 })
 
@@ -326,14 +380,28 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
 router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { customerId, saleId, amount, paymentMethod, reference, notes } = req.body
+    const paidAmount = toMoney(amount)
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
 
     // Get customer
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId }
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, tenantId: req.tenant.id }
     })
 
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    let sale = null
+    if (saleId) {
+      sale = await prisma.saleRecord.findFirst({
+        where: { id: saleId, customerId, tenantId: req.tenant.id }
+      })
+      if (!sale) return res.status(404).json({ error: 'Sale not found for this customer' })
+      if (paidAmount > sale.balance) return res.status(400).json({ error: 'Payment exceeds sale balance' })
+    } else if (paidAmount > customer.balance) {
+      return res.status(400).json({ error: 'Payment exceeds customer balance' })
     }
 
     // Create payment
@@ -342,7 +410,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
         tenantId: req.tenant.id,
         customerId,
         saleId,
-        amount,
+        amount: paidAmount,
         paymentMethod,
         reference,
         notes
@@ -350,31 +418,25 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     })
 
     // Update customer balance
-    const newBalance = customer.balance - amount
+    const newBalance = Math.max(0, customer.balance - paidAmount)
     await prisma.customer.update({
       where: { id: customerId },
       data: { balance: newBalance }
     })
 
     // Update sale payment status if fully paid
-    if (saleId) {
-      const sale = await prisma.saleRecord.findUnique({
-        where: { id: saleId }
+    if (sale) {
+      const newAmountPaid = Math.min(sale.total, sale.amountPaid + paidAmount)
+      const newSaleBalance = Math.max(0, sale.balance - paidAmount)
+
+      await prisma.saleRecord.update({
+        where: { id: saleId },
+        data: {
+          amountPaid: newAmountPaid,
+          balance: newSaleBalance,
+          paymentStatus: newSaleBalance <= 0 ? 'paid' : 'partial'
+        }
       })
-
-      if (sale) {
-        const newAmountPaid = sale.amountPaid + amount
-        const newBalance = sale.balance - amount
-
-        await prisma.saleRecord.update({
-          where: { id: saleId },
-          data: {
-            amountPaid: newAmountPaid,
-            balance: newBalance,
-            paymentStatus: newBalance <= 0 ? 'paid' : 'partial'
-          }
-        })
-      }
     }
 
     res.status(201).json(payment)
