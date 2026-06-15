@@ -26,7 +26,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"
+} from "@/components/ui/Popover"
 
 import { Button } from "@/components/ui/button"
 import { Check, ChevronsUpDown } from "lucide-react"
