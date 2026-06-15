@@ -19,6 +19,35 @@ function generateTempPassword(len = 12) {
   return out;
 }
 
+function splitName(name = "") {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  return {
+    fname: parts[0] || "",
+    lname: parts.slice(1).join(" "),
+  };
+}
+
+function businessDetail(message, label) {
+  const match = String(message || "").match(new RegExp(`^${label}:\\s*(.+)$`, "im"));
+  return match?.[1]?.trim() || "";
+}
+
+function invitationPublicFields(inv, plan = null) {
+  return {
+    valid: true,
+    email: inv.email,
+    name: inv.name,
+    phone: inv.phone,
+    tenantId: inv.tenantId,
+    planId: inv.planId,
+    planName: plan?.name || null,
+    businessName: businessDetail(inv.message, "Business name"),
+    businessLocation: businessDetail(inv.message, "Business location"),
+    businessPhone: businessDetail(inv.message, "Business phone"),
+    message: inv.message,
+  };
+}
+
 function createTokens(user) {
   const accessToken = jwt.sign(
     { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" },
@@ -44,6 +73,11 @@ router.get("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
       take: Number(limit),
     });
     const total = await prisma.invitation.count({ where });
+    const planIds = [...new Set(invitations.map((inv) => inv.planId).filter(Boolean))];
+    const plans = planIds.length
+      ? await prisma.plan.findMany({ where: { id: { in: planIds } }, select: { id: true, name: true } })
+      : [];
+    const planNames = new Map(plans.map((plan) => [plan.id, plan.name]));
 
     const [pending, accepted, expired, cancelled] = await Promise.all([
       prisma.invitation.count({ where: { status: "pending" } }),
@@ -52,7 +86,11 @@ router.get("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
       prisma.invitation.count({ where: { status: "cancelled" } }),
     ]);
 
-    res.json({ invitations, total, stats: { pending, accepted, expired, cancelled, total: pending + accepted + expired + cancelled } });
+    res.json({
+      invitations: invitations.map((inv) => ({ ...inv, planName: inv.planId ? planNames.get(inv.planId) || null : null })),
+      total,
+      stats: { pending, accepted, expired, cancelled, total: pending + accepted + expired + cancelled },
+    });
   } catch (err) {
     console.error("List invitations error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -62,33 +100,50 @@ router.get("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
 // Create invitation
 router.post("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { email, name, phone, tenantId, planId, message } = req.body;
+    const { email, name, phone, tenantId, planId, message, businessName, businessLocation, businessPhone } = req.body;
     if (!email) return res.status(400).json({ error: "Email required" });
 
     const token = crypto.randomBytes(32).toString("hex");
     const otpCode = generateOTP();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    const businessDetails = [
+      businessName && `Business name: ${businessName}`,
+      businessLocation && `Business location: ${businessLocation}`,
+      businessPhone && `Business phone: ${businessPhone}`,
+    ].filter(Boolean);
+    const invitationMessage = [message, ...businessDetails].filter(Boolean).join("\n\n");
 
     const invitation = await prisma.invitation.create({
-      data: { email, name, phone, token, otpCode, expiresAt, tenantId, planId, message, createdById: req.user.id, status: "pending" },
+      data: { email, name, phone, token, otpCode, expiresAt, tenantId, planId, message: invitationMessage || null, createdById: req.user.id, status: "pending" },
     });
 
     let emailSent = false;
+    let emailError = null;
+    const plan = planId ? await prisma.plan.findUnique({ where: { id: planId } }) : null;
+    const displayBusinessName = businessName || businessDetail(invitationMessage, "Business name");
     try {
       const frontUrl = process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
       const acceptUrl = `${frontUrl}/accept-invitation/${token}`;
       await sendMail(email, "You're invited to join",
         `<p>Hello ${name || ""},</p>
-         <p>You've been invited to join the platform.</p>
+         <p>You've been invited to join jibuSales${displayBusinessName ? ` for <b>${displayBusinessName}</b>` : ""}.</p>
+         ${plan ? `<p><b>Plan:</b> ${plan.name}</p>` : ""}
          <p><b>Your verification code (OTP):</b> ${otpCode}</p>
          <p><a href="${acceptUrl}">Accept Invitation</a></p>
          <p>This invitation expires in 7 days.</p>`);
       emailSent = true;
     } catch (e) {
-      console.error("Invitation email send failed:", e?.message);
+      emailError = e?.message || "Email failed";
+      console.error("Invitation email send failed:", emailError);
     }
 
-    res.status(201).json({ message: "Invitation created", invitation, otpCode: emailSent ? undefined : otpCode, emailSent });
+    res.status(201).json({
+      message: emailSent ? "Invitation created and email sent" : "Invitation created, but email failed",
+      invitation,
+      otpCode: emailSent ? undefined : otpCode,
+      emailSent,
+      emailError,
+    });
   } catch (err) {
     console.error("Create invitation error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -117,18 +172,28 @@ router.post("/:id/resend", authenticateToken, requirePlatformAdmin, async (req, 
     const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.invitation.update({ where: { id: inv.id }, data: { token: newToken, otpCode: newOtp, expiresAt: newExpiry, status: "pending" } });
 
+    let emailSent = false;
+    let emailError = null;
     try {
       const frontUrl = process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
+      const businessName = businessDetail(inv.message, "Business name");
       await sendMail(inv.email, "Invitation resent",
         `<p>Hello ${inv.name || ""},</p>
-         <p>Your invitation has been resent.</p>
+         <p>Your invitation${businessName ? ` for <b>${businessName}</b>` : ""} has been resent.</p>
          <p><b>Your new verification code (OTP):</b> ${newOtp}</p>
          <p><a href="${frontUrl}/accept-invitation/${newToken}">Accept Invitation</a></p>`);
+      emailSent = true;
     } catch (e) {
-      console.warn("Resend email failed:", e?.message);
+      emailError = e?.message || "Email failed";
+      console.warn("Resend email failed:", emailError);
     }
 
-    res.json({ message: "Invitation resent" });
+    res.json({
+      message: emailSent ? "Invitation resent and email sent" : "Invitation resent, but email failed",
+      emailSent,
+      emailError,
+      otpCode: emailSent ? undefined : newOtp,
+    });
   } catch (err) {
     console.error("Resend invitation error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -138,7 +203,7 @@ router.post("/:id/resend", authenticateToken, requirePlatformAdmin, async (req, 
 // Accept invitation (public - token based)
 router.post("/accept", async (req, res) => {
   try {
-    const { token, otp, password, fname, lname, phone, businessName } = req.body;
+    const { token, otp, password, name, fname, lname, phone, businessName } = req.body;
     if (!token || !otp || !password) return res.status(400).json({ error: "token, otp and password required" });
 
     const inv = await prisma.invitation.findUnique({ where: { token } });
@@ -150,27 +215,30 @@ router.post("/accept", async (req, res) => {
     const existingUser = await prisma.user.findUnique({ where: { email: inv.email } });
     if (existingUser) return res.status(409).json({ error: "User already exists" });
 
+    const finalBusinessName = businessName || businessDetail(inv.message, "Business name");
     let tenantId = inv.tenantId;
-    if (!tenantId && businessName) {
-      const slug = businessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    if (!tenantId && finalBusinessName) {
+      const slug = finalBusinessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
       const tenant = await prisma.tenant.create({
-        data: { name: businessName, slug, email: inv.email, phone: phone || inv.phone, status: "active", planId: inv.planId },
+        data: { name: finalBusinessName, slug, email: inv.email, phone: phone || inv.phone || businessDetail(inv.message, "Business phone"), address: businessDetail(inv.message, "Business location") || undefined, status: "active", planId: inv.planId },
       });
       tenantId = tenant.id;
     }
 
     const hashed = await (await import("bcryptjs")).default.hash(password, 12);
+    const parsedName = splitName(name);
     const user = await prisma.user.create({
       data: {
         email: inv.email,
         password: hashed,
-        fname: fname || inv.name || inv.email.split("@")[0],
-        lname,
+        fname: fname || parsedName.fname || inv.name || inv.email.split("@")[0],
+        lname: lname || parsedName.lname || "",
         phone: phone || inv.phone,
         tenantId,
         role: "owner",
       },
     });
+    if (tenantId) await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
 
     await prisma.invitation.update({ where: { id: inv.id }, data: { status: "accepted", acceptedAt: new Date(), tenantId } });
 
@@ -196,7 +264,8 @@ router.get("/token/:token", async (req, res) => {
     if (!inv) return res.status(404).json({ error: "Invalid token" });
     if (inv.status !== "pending") return res.status(400).json({ error: "Invitation already used", status: inv.status });
     if (new Date(inv.expiresAt) < new Date()) return res.status(400).json({ error: "Invitation expired" });
-    res.json({ valid: true, email: inv.email, name: inv.name, tenantId: inv.tenantId, planId: inv.planId });
+    const plan = inv.planId ? await prisma.plan.findUnique({ where: { id: inv.planId } }) : null;
+    res.json(invitationPublicFields(inv, plan));
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -209,7 +278,8 @@ router.get("/validate/:token", async (req, res) => {
     if (!inv) return res.status(404).json({ error: "Invalid token" });
     if (inv.status !== "pending") return res.status(400).json({ error: "Invitation already used", status: inv.status });
     if (new Date(inv.expiresAt) < new Date()) return res.status(400).json({ error: "Invitation expired" });
-    res.json({ valid: true, email: inv.email, name: inv.name, tenantId: inv.tenantId, planId: inv.planId });
+    const plan = inv.planId ? await prisma.plan.findUnique({ where: { id: inv.planId } }) : null;
+    res.json(invitationPublicFields(inv, plan));
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }

@@ -1,22 +1,33 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus } from 'lucide-react'
+import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft } from 'lucide-react'
 import InviteBusinessOwnerModal from './InviteBusinessOwnerModal'
 
 interface Tenant {
-  id: string; name: string; slug: string; status: string; planId: string
+  id: string; name: string; slug: string; status: string; planId?: string | null
   ownerName: string; ownerEmail: string; createdAt: string
   _count?: { users: number; customers: number; suppliers: number }
-  plan?: { name: string; price: number; currency: string; billingCycle: string }
+  plan?: { id: string; name: string; price: number; currency: string; billingCycle: string } | null
+}
+
+interface Plan {
+  id: string
+  name: string
+  price: number
+  currency: string
+  billingCycle: string
 }
 
 export const BusinessesPage: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>([])
+  const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [selected, setSelected] = useState<Tenant | null>(null)
+  const [planTenant, setPlanTenant] = useState<Tenant | null>(null)
+  const [planChanging, setPlanChanging] = useState<string | null>(null)
   const [showCreateBusiness, setShowCreateBusiness] = useState(false)
 
   const fetchTenants = async () => {
@@ -33,6 +44,13 @@ export const BusinessesPage: React.FC = () => {
 
   useEffect(() => { fetchTenants() }, [statusFilter])
 
+  useEffect(() => {
+    apiFetch('/api/platform/plans', {})
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setPlans(Array.isArray(data) ? data : data.plans || []))
+      .catch(() => {})
+  }, [])
+
   const handleAction = async (id: string, action: 'activate' | 'suspend') => {
     if (!confirm(`Are you sure you want to ${action} this tenant?`)) return
     setActionLoading(id)
@@ -44,12 +62,33 @@ export const BusinessesPage: React.FC = () => {
     setActionLoading(null)
   }
 
+  const handleChangePlan = async (tenant: Tenant, planId: string) => {
+    setPlanChanging(planId)
+    try {
+      const res = await apiFetch(`/api/tenants/${tenant.id}/plan`, {
+        method: 'PUT',
+        body: JSON.stringify({ planId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || data.message || 'Failed to change plan')
+
+      await fetchTenants()
+      setPlanTenant(null)
+      if (selected?.id === tenant.id) setSelected(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to change plan')
+    } finally {
+      setPlanChanging(null)
+    }
+  }
+
   const statusBadge = (s: string) => {
     const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', suspended: 'bg-red-100 text-red-800', trial: 'bg-blue-100 text-blue-800', expired: 'bg-gray-100 text-gray-800' }
     return <span className={`px-2 py-1 rounded-full text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-800'}`}>{s.charAt(0).toUpperCase() + s.slice(1)}</span>
   }
 
   const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  const fmtMoney = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
 
   return (
     <div className="space-y-6">
@@ -107,6 +146,7 @@ export const BusinessesPage: React.FC = () => {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setSelected(t)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="View"><Eye size={16} /></button>
+                      <button onClick={() => setPlanTenant(t)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
                       <button onClick={() => handleAction(t.id, t.status === 'suspended' ? 'activate' : 'suspend')} disabled={actionLoading === t.id} className={`p-1 rounded ${t.status === 'suspended' ? 'text-green-600 hover:bg-green-50' : 'text-red-600 hover:bg-red-50'}`} title={t.status === 'suspended' ? 'Activate' : 'Suspend'}>
                         {actionLoading === t.id ? <Loader2 size={16} className="animate-spin" /> : t.status === 'suspended' ? <CheckCircle size={16} /> : <Ban size={16} />}
                       </button>
@@ -134,11 +174,49 @@ export const BusinessesPage: React.FC = () => {
               <div className="flex justify-between"><span className="text-gray-500">Created</span><span>{fmtDate(selected.createdAt)}</span></div>
             </div>
             <div className="mt-4 flex gap-2">
+              <button onClick={() => setPlanTenant(selected)} className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                Change Plan
+              </button>
               <button onClick={() => handleAction(selected.id, selected.status === 'suspended' ? 'activate' : 'suspend')} className={`flex-1 px-4 py-2 rounded-lg text-white ${selected.status === 'suspended' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
                 {selected.status === 'suspended' ? 'Activate' : 'Suspend'}
               </button>
               <button onClick={() => setSelected(null)} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50">Close</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {planTenant && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Change Plan - {planTenant.name}</h2>
+              <button onClick={() => setPlanTenant(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+            </div>
+            <div className="mb-4 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Current Plan</span>
+                <span className="font-medium">{planTenant.plan?.name || '-'}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {plans.length === 0 ? (
+                <p className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">No plans are available yet.</p>
+              ) : (
+                plans.map((plan) => (
+                  <button
+                    key={plan.id}
+                    onClick={() => handleChangePlan(planTenant, plan.id)}
+                    disabled={planChanging === plan.id}
+                    className={`w-full flex items-center justify-between rounded-lg border p-3 text-left hover:bg-blue-50 ${plan.id === planTenant.planId || plan.id === planTenant.plan?.id ? 'border-blue-500 bg-blue-50' : ''}`}
+                  >
+                    <span className="text-sm font-medium">{plan.name}</span>
+                    <span className="text-sm text-gray-500">{fmtMoney(plan.price, plan.currency)}/{plan.billingCycle}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            <button onClick={() => setPlanTenant(null)} className="mt-4 w-full px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
           </div>
         </div>
       )}

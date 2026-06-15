@@ -15,8 +15,14 @@ export interface Invitation {
   tenantName?: string
   planId?: string
   planName?: string
+  businessName?: string
+  businessLocation?: string
+  businessPhone?: string
   message?: string
   otpCode?: string
+  emailSent?: boolean
+  emailError?: string | null
+  deliveryMessage?: string
 }
 
 export interface InvitationCreateInput {
@@ -60,10 +66,25 @@ class InviteService {
 
     if (!response.ok) {
       const error = await response.json()
-      throw new Error(error.message || 'Failed to create invitation')
+      throw new Error(error.error || error.message || 'Failed to create invitation')
     }
 
-    return response.json()
+    const result = await response.json()
+    if (result.invitation) {
+      const inv = result.invitation
+      return {
+        ...inv,
+        invitedBy: inv.createdById || '',
+        invitedAt: inv.createdAt,
+        expiresAt: inv.expiresAt,
+        otpCode: result.otpCode,
+        emailSent: result.emailSent,
+        emailError: result.emailError || null,
+        deliveryMessage: result.message,
+      }
+    }
+
+    return result
   }
 
   /**
@@ -77,25 +98,22 @@ class InviteService {
 
     if (!response.ok) {
       const error = await response.json()
-      throw new Error(error.message || 'Failed to create invitations')
+      throw new Error(error.error || error.message || 'Failed to create invitations')
     }
 
     return response.json()
   }
 
   private toBackendPayload(data: InvitationCreateInput): InvitationCreateInput {
-    const businessDetails = [
-      data.businessName && `Business name: ${data.businessName}`,
-      data.businessLocation && `Business location: ${data.businessLocation}`,
-      data.businessPhone && `Business phone: ${data.businessPhone}`,
-    ].filter(Boolean)
-
     return {
       email: data.email,
       name: data.name,
       phone: data.phone,
-      planId: data.planId,
-      message: [data.message, ...businessDetails].filter(Boolean).join('\n\n'),
+      businessName: data.businessName,
+      businessLocation: data.businessLocation,
+      businessPhone: data.businessPhone,
+      planId: data.planId || undefined,
+      message: data.message,
     }
   }
 
@@ -137,6 +155,7 @@ class InviteService {
       tenantId: inv.tenantId,
       tenantName: inv.tenant?.name,
       planId: inv.planId,
+      planName: inv.planName,
       message: inv.message,
     }))
 
@@ -187,13 +206,14 @@ class InviteService {
   /**
    * Resend invitation email
    */
-  async resend(id: string): Promise<Invitation> {
+  async resend(id: string): Promise<{ message: string; emailSent?: boolean; emailError?: string | null; otpCode?: string }> {
     const response = await this.fetchWithAuth(`${this.apiEndpoint}/${id}/resend`, {
       method: 'POST',
     })
 
     if (!response.ok) {
-      throw new Error('Failed to resend invitation')
+      const error = await response.json().catch(() => ({}))
+      throw new Error(error.error || error.message || 'Failed to resend invitation')
     }
 
     return response.json()
@@ -207,7 +227,8 @@ class InviteService {
     password: string
     name: string
     phone?: string
-    businessName: string
+    businessName?: string
+    businessLocation?: string
     businessType?: string
   }): Promise<{ user: any; tokens: any; tenant: any }> {
     const response = await fetch(`${this.apiEndpoint}/accept`, {
@@ -218,7 +239,7 @@ class InviteService {
 
     if (!response.ok) {
       const error = await response.json()
-      throw new Error(error.message || 'Failed to accept invitation')
+      throw new Error(error.error || error.message || 'Failed to accept invitation')
     }
 
     return response.json()

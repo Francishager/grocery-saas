@@ -19,6 +19,64 @@ function generateTempPassword(len = 12) {
   return out;
 }
 
+function splitName(name = "") {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  return {
+    fname: parts[0] || "",
+    lname: parts.slice(1).join(" "),
+  };
+}
+
+function frontendOrigin() {
+  return process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
+}
+
+function subscriptionPayload(tenant) {
+  return {
+    id: tenant.id,
+    status: tenant.status || "active",
+    startDate: tenant.createdAt,
+    endDate: null,
+    tenant: { id: tenant.id, name: tenant.name, status: tenant.status },
+    plan: tenant.plan ? { id: tenant.plan.id, name: tenant.plan.name, price: tenant.plan.price, currency: tenant.plan.currency || "UGX", billingCycle: tenant.plan.billingCycle || "monthly" } : null,
+  };
+}
+
+async function updateSubscription(req, res) {
+  try {
+    const { planId, status } = req.body;
+    if (!planId && !status) return res.status(400).json({ error: "planId or status required" });
+
+    if (planId) {
+      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+    }
+
+    if (status && !["active", "suspended", "cancelled", "trial"].includes(status)) {
+      return res.status(400).json({ error: "Invalid subscription status" });
+    }
+
+    const data = {};
+    if (planId) data.planId = planId;
+    if (status) data.status = status;
+
+    const tenant = await prisma.tenant.update({
+      where: { id: req.params.id },
+      data,
+      include: { plan: true },
+    });
+
+    res.json({
+      message: "Subscription updated",
+      subscription: subscriptionPayload(tenant),
+    });
+  } catch (err) {
+    if (err?.code === "P2025") return res.status(404).json({ error: "Subscription not found" });
+    console.error("Update subscription error:", err);
+    res.status(500).json({ error: "Failed to update subscription" });
+  }
+}
+
 // Helper: email content
 function getEmailContent(locale, { ownerFname, businessName, businessId, tempPassword, otp, loginUrl }) {
   const subject = `Your business account is ready - ${businessName}`;
@@ -47,12 +105,12 @@ router.get("/businesses", authenticateToken, requirePlatformAdmin, async (req, r
 // Create business
 router.post("/businesses", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { name, email, phone, address, planId } = req.body;
+    const { name, slug: requestedSlug, email, phone, address, planId } = req.body;
     if (!name) return res.status(400).json({ error: "Business name required" });
 
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const slug = (requestedSlug || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
     const tenant = await prisma.tenant.create({ data: { name, slug, email: email || `${slug}@placeholder.com`, phone, address, planId, status: "active" } });
-    res.status(201).json({ message: "Business created", tenant });
+    res.status(201).json({ message: "Business created", tenant, id: tenant.id, tenantId: tenant.id });
   } catch (err) {
     console.error("Create business error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -111,16 +169,61 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
 // Create owner
 router.post("/owners", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { email, password, fname, lname, phone, tenantId } = req.body;
-    if (!email || !password || !fname || !lname || !tenantId) {
-      return res.status(400).json({ error: "email, password, fname, lname, tenantId required" });
+    const { email, password, name, fname, lname, phone, tenantId, locale } = req.body;
+    if (!email || !tenantId) {
+      return res.status(400).json({ error: "email and tenantId required" });
     }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+
+    const existingOwner = await prisma.user.findFirst({ where: { tenantId, role: "owner" } });
+    if (existingOwner) return res.status(409).json({ error: "Business already has an owner" });
+
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return res.status(409).json({ error: "User already exists" });
 
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({ data: { email, password: hashed, fname, lname, phone, tenantId, role: "owner" } });
-    res.status(201).json({ message: "Owner created", userId: user.id, email, tenantId });
+    const parsedName = splitName(name);
+    const ownerFname = fname || parsedName.fname || email.split("@")[0];
+    const ownerLname = lname || parsedName.lname || "";
+    const tempPassword = password || generateTempPassword(12);
+    const otp = generateOTP();
+    const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const hashed = await bcrypt.hash(tempPassword, 12);
+    const user = await prisma.user.create({
+      data: { email, password: hashed, fname: ownerFname, lname: ownerLname, phone, tenantId, role: "owner", otpCode: otp, otpExpires },
+    });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
+
+    let emailSent = false;
+    let emailError = null;
+    try {
+      const { subject, html } = getEmailContent(locale, {
+        ownerFname,
+        businessName: tenant.name,
+        businessId: tenantId,
+        tempPassword,
+        otp,
+        loginUrl: `${frontendOrigin()}/login`,
+      });
+      await sendMail(email, subject, html);
+      emailSent = true;
+    } catch (e) {
+      emailError = e?.message || "Email failed";
+      console.warn("Create owner: email send failed:", emailError);
+    }
+
+    res.status(201).json({
+      message: emailSent ? "Owner created and email sent" : "Owner created, but email failed",
+      userId: user.id,
+      email,
+      tenantId,
+      emailSent,
+      emailError,
+      tempPassword: emailSent ? undefined : tempPassword,
+      otp: emailSent ? undefined : otp,
+    });
   } catch (err) {
     console.error("Create owner error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -216,14 +319,7 @@ router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req
       orderBy: { createdAt: "desc" },
     });
 
-    const subscriptions = tenants.map(t => ({
-      id: t.id,
-      status: t.status || "active",
-      startDate: t.createdAt,
-      endDate: null,
-      tenant: { id: t.id, name: t.name, status: t.status },
-      plan: t.plan ? { id: t.plan.id, name: t.plan.name, price: t.plan.price, currency: t.plan.currency || "UGX", billingCycle: t.plan.billingCycle || "monthly" } : null,
-    }));
+    const subscriptions = tenants.map(subscriptionPayload);
 
     res.json({ subscriptions });
   } catch (err) {
@@ -231,6 +327,8 @@ router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req
     res.status(500).json({ error: "Failed to load subscriptions" });
   }
 });
+router.put("/subscriptions/:id", authenticateToken, requirePlatformAdmin, updateSubscription);
+router.patch("/subscriptions/:id", authenticateToken, requirePlatformAdmin, updateSubscription);
 
 // My subscription
 router.get("/subscription", authenticateToken, requirePlatformAdmin, async (req, res) => {
@@ -283,15 +381,19 @@ router.post("/invite-owner", authenticateToken, requirePlatformAdmin, async (req
       data: { email, password: hashed, fname, lname, phone, tenantId, role: "owner", otpCode: otp, otpExpires },
     });
 
+    let emailError = null;
     try {
-      const frontUrl = process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
-      const { subject, html } = getEmailContent(locale, { ownerFname: fname, businessName: tenant.name, businessId: tenantId, tempPassword, otp, loginUrl: `${frontUrl}/` });
+      const { subject, html } = getEmailContent(locale, { ownerFname: fname, businessName: tenant.name, businessId: tenantId, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
       await sendMail(email, subject, html);
+      await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
+      return res.status(201).json({ message: "Owner invited and email sent", email, tenantId, emailSent: true });
     } catch (e) {
-      console.warn("invite-owner: email send failed:", e?.message);
+      emailError = e?.message || "Email failed";
+      console.warn("invite-owner: email send failed:", emailError);
     }
 
-    res.status(201).json({ message: "Owner invited", email, tenantId });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
+    res.status(201).json({ message: "Owner invited, but email failed", email, tenantId, emailSent: false, emailError, tempPassword, otp });
   } catch (err) {
     console.error("Invite owner error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -309,13 +411,23 @@ router.post("/reinvite-owner/:tenantId", authenticateToken, requirePlatformAdmin
     const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await prisma.user.update({ where: { id: owner.id }, data: { otpCode: otp, otpExpires } });
 
+    let emailSent = false;
+    let emailError = null;
     try {
       await sendMail(owner.email, "Password reset code (OTP)", `<p>Hello ${owner.fname || ""},</p><p>Your reset code: <b>${otp}</b></p><p>Expires in 24 hours.</p>`);
+      emailSent = true;
     } catch (e) {
-      console.warn("reinvite-owner: email send failed:", e?.message);
+      emailError = e?.message || "Email failed";
+      console.warn("reinvite-owner: email send failed:", emailError);
     }
 
-    res.json({ message: "Owner re-invited", email: owner.email });
+    res.json({
+      message: emailSent ? "Owner re-invited and email sent" : "Owner re-invited, but email failed",
+      email: owner.email,
+      emailSent,
+      emailError,
+      otp: emailSent ? undefined : otp,
+    });
   } catch (err) {
     console.error("Reinvite owner error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -327,35 +439,51 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
   try {
     const { business, owner } = req.body;
     if (!business?.name) return res.status(400).json({ error: "Business name required" });
-    if (!owner?.email || !owner?.fname || !owner?.lname) return res.status(400).json({ error: "owner.email, owner.fname, owner.lname required" });
+    if (!owner?.email) return res.status(400).json({ error: "owner.email required" });
 
     const existingUser = await prisma.user.findUnique({ where: { email: owner.email } });
     if (existingUser) return res.status(409).json({ error: "Owner email already exists" });
 
-    const slug = business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const slug = (business.slug || business.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const parsedName = splitName(owner.name);
+    const ownerFname = owner.fname || parsedName.fname || owner.email.split("@")[0];
+    const ownerLname = owner.lname || parsedName.lname || "";
 
     const tenant = await prisma.tenant.create({
-      data: { name: business.name, slug, email: owner.email, phone: owner.phone, status: "active", planId: business.planId },
+      data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, status: "active", planId: business.planId },
     });
 
-    const tempPassword = generateTempPassword(12);
+    const tempPassword = owner.password || generateTempPassword(12);
     const hashed = await bcrypt.hash(tempPassword, 12);
     const otp = generateOTP();
     const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const user = await prisma.user.create({
-      data: { email: owner.email, password: hashed, fname: owner.fname, lname: owner.lname, phone: owner.phone, tenantId: tenant.id, role: "owner", otpCode: otp, otpExpires },
+      data: { email: owner.email, password: hashed, fname: ownerFname, lname: ownerLname, phone: owner.phone, tenantId: tenant.id, role: "owner", otpCode: otp, otpExpires },
     });
+    await prisma.tenant.update({ where: { id: tenant.id }, data: { ownerId: user.id } });
 
+    let emailSent = false;
+    let emailError = null;
     try {
-      const frontUrl = process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
-      const { subject, html } = getEmailContent(owner.locale, { ownerFname: owner.fname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontUrl}/` });
+      const { subject, html } = getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
       await sendMail(owner.email, subject, html);
+      emailSent = true;
     } catch (e) {
-      console.warn("Provision tenant: email send failed:", e?.message);
+      emailError = e?.message || "Email failed";
+      console.warn("Provision tenant: email send failed:", emailError);
     }
 
-    res.status(201).json({ message: "Tenant provisioned", tenantId: tenant.id, slug: tenant.slug, ownerEmail: owner.email });
+    res.status(201).json({
+      message: emailSent ? "Tenant provisioned and owner email sent" : "Tenant provisioned, but owner email failed",
+      tenantId: tenant.id,
+      slug: tenant.slug,
+      ownerEmail: owner.email,
+      emailSent,
+      emailError,
+      tempPassword: emailSent ? undefined : tempPassword,
+      otp: emailSent ? undefined : otp,
+    });
   } catch (err) {
     console.error("Provision tenant error:", err);
     res.status(500).json({ error: "Internal server error" });

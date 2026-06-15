@@ -1,72 +1,141 @@
+import React, { useEffect, useState } from 'react'
+import { Building2, User, Loader2, CheckCircle, AlertTriangle } from 'lucide-react'
 import { apiFetch } from '../../lib/api'
-import React, { useState, useEffect } from 'react'
-import { Building2, User, Mail, Phone, CreditCard, Loader2, CheckCircle } from 'lucide-react'
 
-interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string }
+interface Plan {
+  id: string
+  name: string
+  price: number
+  currency: string
+  billingCycle: string
+}
 
+interface ProvisionResult {
+  message?: string
+  ownerEmail?: string
+  emailSent?: boolean
+  emailError?: string | null
+  tempPassword?: string
+  otp?: string
+}
+
+const emptyForm = {
+  businessName: '',
+  businessSlug: '',
+  businessEmail: '',
+  businessPhone: '',
+  planId: '',
+  ownerName: '',
+  ownerEmail: '',
+  ownerPassword: '',
+}
 
 export const ProvisionPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({
-    businessName: '', businessSlug: '', businessEmail: '', businessPhone: '', planId: '',
-    ownerName: '', ownerEmail: '', ownerPassword: '',
-  })
+  const [result, setResult] = useState<ProvisionResult | null>(null)
+  const [form, setForm] = useState(emptyForm)
 
   useEffect(() => {
     apiFetch('/api/platform/plans', {})
-      .then(r => r.ok ? r.json() : [])
-      .then(setPlans)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setPlans(Array.isArray(data) ? data : data.plans || []))
       .catch(() => {})
   }, [])
 
-  const handleChange = (field: string, value: string) => {
-    setForm(prev => ({ ...prev, [field]: value }))
+  const handleChange = (field: keyof typeof emptyForm, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }))
     setError(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true); setError(null); setSuccess(false)
+    setLoading(true)
+    setError(null)
+    setSuccess(false)
+    setResult(null)
+
     try {
-      // 1. Create business
-      const bizRes = await apiFetch('/api/admin/businesses', {
+      const res = await apiFetch('/api/admin/provision-tenant', {
         method: 'POST',
-        body: JSON.stringify({ name: form.businessName, slug: form.businessSlug, email: form.businessEmail, phone: form.businessPhone, planId: form.planId || undefined }),
+        body: JSON.stringify({
+          business: {
+            name: form.businessName,
+            slug: form.businessSlug,
+            email: form.businessEmail,
+            phone: form.businessPhone,
+            planId: form.planId || undefined,
+          },
+          owner: {
+            name: form.ownerName,
+            email: form.ownerEmail,
+            password: form.ownerPassword,
+          },
+        }),
       })
-      if (!bizRes.ok) { const d = await bizRes.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed to create business') }
-      const biz = await bizRes.json()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || data.message || 'Failed to provision business')
 
-      // 2. Create owner
-      const ownRes = await apiFetch('/api/admin/owners', {
-        method: 'POST',
-        body: JSON.stringify({ name: form.ownerName, email: form.ownerEmail, password: form.ownerPassword, tenantId: biz.id, role: 'owner' }),
-      })
-      if (!ownRes.ok) { const d = await ownRes.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed to create owner') }
-
+      setResult(data)
       setSuccess(true)
-      setForm({ businessName: '', businessSlug: '', businessEmail: '', businessPhone: '', planId: '', ownerName: '', ownerEmail: '', ownerPassword: '' })
+      setForm(emptyForm)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Provisioning failed')
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (success) return (
     <div className="flex items-center justify-center min-h-[400px]">
-      <div className="text-center">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle className="w-8 h-8 text-green-600" /></div>
+      <div className="max-w-md text-center">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="w-8 h-8 text-green-600" />
+        </div>
         <h2 className="text-xl font-semibold">Business Provisioned!</h2>
         <p className="text-gray-500 mt-2">The business and owner account have been created successfully.</p>
-        <button onClick={() => setSuccess(false)} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Provision Another</button>
+        {result?.emailSent === false ? (
+          <div className="mt-4 rounded-md border border-yellow-200 bg-yellow-50 p-4 text-left">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-5 w-5 text-yellow-700" />
+              <div>
+                <p className="font-medium text-yellow-900">Owner email was not delivered.</p>
+                <p className="mt-1 text-sm text-yellow-800">{result.emailError || result.message}</p>
+                {result.tempPassword && (
+                  <p className="mt-3 text-sm text-yellow-900"><span className="font-medium">Temporary password:</span> {result.tempPassword}</p>
+                )}
+                {result.otp && (
+                  <p className="mt-1 text-sm text-yellow-900"><span className="font-medium">OTP:</span> {result.otp}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-green-700">
+            Owner setup email sent to {result?.ownerEmail || 'the owner'}.
+          </p>
+        )}
+        <button
+          onClick={() => {
+            setSuccess(false)
+            setResult(null)
+          }}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          Provision Another
+        </button>
       </div>
     </div>
   )
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div><h1 className="text-2xl font-bold">Provision Business</h1><p className="text-gray-500">Create a new business tenant and owner in one step</p></div>
+      <div>
+        <h1 className="text-2xl font-bold">Provision Business</h1>
+        <p className="text-gray-500">Create a new business tenant and owner in one step</p>
+      </div>
 
       {error && <div className="p-3 bg-red-50 border border-red-200 rounded-md"><p className="text-sm text-red-600">{error}</p></div>}
 
@@ -74,15 +143,16 @@ export const ProvisionPage: React.FC = () => {
         <div className="bg-white rounded-lg border p-6 space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2"><Building2 className="w-5 h-5" /> Business Details</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium mb-1">Business Name *</label><input required value={form.businessName} onChange={e => handleChange('businessName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Fresh Mart" /></div>
-            <div><label className="block text-sm font-medium mb-1">Slug *</label><input required value={form.businessSlug} onChange={e => handleChange('businessSlug', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="fresh-mart" /></div>
-            <div><label className="block text-sm font-medium mb-1">Business Email *</label><input required type="email" value={form.businessEmail} onChange={e => handleChange('businessEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="info@freshmart.com" /></div>
-            <div><label className="block text-sm font-medium mb-1">Phone</label><input value={form.businessPhone} onChange={e => handleChange('businessPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" /></div>
+            <div><label className="block text-sm font-medium mb-1">Business Name *</label><input required value={form.businessName} onChange={(e) => handleChange('businessName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Fresh Mart" /></div>
+            <div><label className="block text-sm font-medium mb-1">Slug *</label><input required value={form.businessSlug} onChange={(e) => handleChange('businessSlug', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="fresh-mart" /></div>
+            <div><label className="block text-sm font-medium mb-1">Business Email *</label><input required type="email" value={form.businessEmail} onChange={(e) => handleChange('businessEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="info@freshmart.com" /></div>
+            <div><label className="block text-sm font-medium mb-1">Phone</label><input value={form.businessPhone} onChange={(e) => handleChange('businessPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" /></div>
           </div>
-          <div><label className="block text-sm font-medium mb-1">Subscription Plan</label>
-            <select value={form.planId} onChange={e => handleChange('planId', e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+          <div>
+            <label className="block text-sm font-medium mb-1">Subscription Plan</label>
+            <select value={form.planId} onChange={(e) => handleChange('planId', e.target.value)} className="w-full px-3 py-2 border rounded-lg">
               <option value="">Select a plan</option>
-              {plans.map(p => <option key={p.id} value={p.id}>{p.name} - {p.price} {p.currency}/{p.billingCycle}</option>)}
+              {plans.map((p) => <option key={p.id} value={p.id}>{p.name} - {p.price} {p.currency}/{p.billingCycle}</option>)}
             </select>
           </div>
         </div>
@@ -90,9 +160,9 @@ export const ProvisionPage: React.FC = () => {
         <div className="bg-white rounded-lg border p-6 space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2"><User className="w-5 h-5" /> Owner Account</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={e => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>
-            <div><label className="block text-sm font-medium mb-1">Owner Email *</label><input required type="email" value={form.ownerEmail} onChange={e => handleChange('ownerEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="john@freshmart.com" /></div>
-            <div><label className="block text-sm font-medium mb-1">Password *</label><input required type="password" minLength={6} value={form.ownerPassword} onChange={e => handleChange('ownerPassword', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Min 6 characters" /></div>
+            <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>
+            <div><label className="block text-sm font-medium mb-1">Owner Email *</label><input required type="email" value={form.ownerEmail} onChange={(e) => handleChange('ownerEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="john@freshmart.com" /></div>
+            <div><label className="block text-sm font-medium mb-1">Password *</label><input required type="password" minLength={6} value={form.ownerPassword} onChange={(e) => handleChange('ownerPassword', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Min 6 characters" /></div>
           </div>
         </div>
 

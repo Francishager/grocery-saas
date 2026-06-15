@@ -51,8 +51,12 @@ export const InvitationsList: React.FC = () => {
   const handleResend = async (id: string) => {
     setActionLoading(id)
     try {
-      await InviteService.resend(id)
-      alert('Invitation resent successfully')
+      const result = await InviteService.resend(id)
+      if (result.emailSent === false) {
+        alert(`Invitation updated, but email delivery failed.${result.otpCode ? ` Share this OTP manually: ${result.otpCode}` : ''}`)
+      } else {
+        alert(result.message || 'Invitation resent successfully')
+      }
       fetchInvitations()
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to resend invitation')

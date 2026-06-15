@@ -4,23 +4,56 @@ import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.j
 
 const router = Router();
 
+function withOwnerSummary(tenant) {
+  const owner = tenant.users?.find((user) => user.role === "owner") || tenant.owner || null;
+  const { owner: _owner, ...rest } = tenant;
+  return {
+    ...rest,
+    planName: tenant.plan?.name || null,
+    ownerName: owner ? `${owner.fname || ""} ${owner.lname || ""}`.trim() || owner.email : null,
+    ownerEmail: owner?.email || null,
+  };
+}
+
+function userSearch(search) {
+  return [
+    { fname: { contains: search, mode: "insensitive" } },
+    { lname: { contains: search, mode: "insensitive" } },
+    { email: { contains: search, mode: "insensitive" } },
+  ];
+}
+
 // List tenants
 router.get("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { status, search, page = 1, limit = 50 } = req.query;
     const where = {};
     if (status) where.status = status;
-    if (search) where.name = { contains: search, mode: "insensitive" };
+    if (search) {
+      const term = String(search);
+      where.OR = [
+        { name: { contains: term, mode: "insensitive" } },
+        { slug: { contains: term, mode: "insensitive" } },
+        { email: { contains: term, mode: "insensitive" } },
+        { owner: { is: { OR: userSearch(term) } } },
+        { users: { some: { role: "owner", OR: userSearch(term) } } },
+      ];
+    }
 
     const tenants = await prisma.tenant.findMany({
       where,
-      include: { plan: true, _count: { select: { users: true } } },
+      include: {
+        plan: true,
+        owner: { select: { id: true, email: true, fname: true, lname: true, role: true } },
+        users: { where: { role: "owner" }, select: { id: true, email: true, fname: true, lname: true, role: true }, take: 1 },
+        _count: { select: { users: true, customers: true, suppliers: true } },
+      },
       orderBy: { createdAt: "desc" },
       skip: (Number(page) - 1) * Number(limit),
       take: Number(limit),
     });
     const total = await prisma.tenant.count({ where });
-    res.json({ tenants, total, page: Number(page), limit: Number(limit) });
+    res.json({ tenants: tenants.map(withOwnerSummary), total, page: Number(page), limit: Number(limit) });
   } catch (err) {
     console.error("List tenants error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -32,10 +65,15 @@ router.get("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
   try {
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.params.id },
-      include: { plan: true, users: { select: { id: true, email: true, fname: true, lname: true, role: true, isActive: true } }, _count: { select: { customers: true, suppliers: true } } },
+      include: {
+        plan: true,
+        owner: { select: { id: true, email: true, fname: true, lname: true, role: true, isActive: true } },
+        users: { select: { id: true, email: true, fname: true, lname: true, role: true, isActive: true } },
+        _count: { select: { customers: true, suppliers: true, users: true } },
+      },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    res.json(tenant);
+    res.json(withOwnerSummary(tenant));
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -68,9 +106,14 @@ router.put("/:id/plan", authenticateToken, requirePlatformAdmin, async (req, res
   try {
     const { planId } = req.body;
     if (!planId) return res.status(400).json({ error: "planId required" });
-    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { planId } });
+
+    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { planId }, include: { plan: true } });
     res.json({ message: "Plan updated", tenant });
   } catch (err) {
+    if (err?.code === "P2025") return res.status(404).json({ error: "Tenant not found" });
     console.error("Update tenant plan error:", err);
     res.status(500).json({ error: "Internal server error" });
   }

@@ -10,7 +10,8 @@ const emailFrom =
 const smtpHost = process.env.SMTP_HOST;
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
-const smtpEnabled = Boolean(smtpHost && smtpUser && smtpPass);
+const smtpAuthPass = smtpHost === "smtp.gmail.com" ? String(smtpPass || "").replace(/\s+/g, "") : smtpPass;
+const smtpEnabled = Boolean(smtpHost && smtpUser && smtpAuthPass);
 
 let transporter = null;
 if (smtpEnabled) {
@@ -19,7 +20,7 @@ if (smtpEnabled) {
     host: smtpHost,
     port,
     secure: port === 465, // SSL for 465, STARTTLS for 587
-    auth: { user: smtpUser, pass: smtpPass },
+    auth: { user: smtpUser, pass: smtpAuthPass },
   });
   console.log(`✉ Mailer: using SMTP (${smtpHost}:${port}) as ${smtpUser}`);
 } else {

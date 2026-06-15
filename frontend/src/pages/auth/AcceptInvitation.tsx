@@ -46,6 +46,7 @@ const AcceptInvitation: React.FC = () => {
           ...prev,
           name: inv.name || '',
           phone: inv.phone || '',
+          businessName: inv.businessName || '',
         }))
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Invalid or expired invitation')
@@ -83,7 +84,7 @@ const AcceptInvitation: React.FC = () => {
       errors.confirmPassword = 'Passwords do not match'
     }
 
-    if (!formData.businessName.trim()) {
+    if (!formData.businessName.trim() && !invitation?.tenantId) {
       errors.businessName = 'Business name is required'
     }
 
@@ -105,7 +106,7 @@ const AcceptInvitation: React.FC = () => {
         password: formData.password,
         name: formData.name,
         phone: formData.phone || undefined,
-        businessName: formData.businessName,
+        businessName: formData.businessName || invitation?.businessName || undefined,
         businessType: formData.businessType || undefined,
       })
 
@@ -121,7 +122,7 @@ const AcceptInvitation: React.FC = () => {
 
       // Redirect to dashboard after 2 seconds
       setTimeout(() => {
-        navigate('/dashboard')
+        navigate('/tenant/dashboard')
       }, 2000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept invitation')
@@ -201,6 +202,11 @@ const AcceptInvitation: React.FC = () => {
                 {invitation.planName && (
                   <p className="text-sm text-blue-700">
                     Plan: {invitation.planName}
+                  </p>
+                )}
+                {invitation.businessName && (
+                  <p className="text-sm text-blue-700">
+                    Business: {invitation.businessName}
                   </p>
                 )}
               </div>
