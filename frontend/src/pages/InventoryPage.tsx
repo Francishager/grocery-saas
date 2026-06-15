@@ -113,22 +113,25 @@ export default function InventoryPage() {
       sku: (item as any).sku || '',
       categoryId: (item as any).categoryId || '',
     })
+    setShowForm(true)
+  }
 
   const resetForm = () => {
-      setFormData({
-        product_id: '',
-        product_name: '',
-        quantity: 0,
-        unit_price: 0,
-        cost_price: 0,
-        low_stock_alert: 5,
-        barcode: '',
-        sku: '',
-        categoryId: '',
-      })
+    setFormData({
+      product_id: '',
+      product_name: '',
+      quantity: 0,
+      unit_price: 0,
+      cost_price: 0,
+      low_stock_alert: 5,
+      barcode: '',
+      sku: '',
+      categoryId: '',
+    })
+  }
 
-      return (
-        <div className="space-y-6">
+  return (
+    <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Inventory</h1>
@@ -378,6 +381,4 @@ export default function InventoryPage() {
           </Card>
         </div>
       )
-    }
-  }
 }
