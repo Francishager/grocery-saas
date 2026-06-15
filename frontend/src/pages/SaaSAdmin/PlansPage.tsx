@@ -8,7 +8,11 @@ interface Plan {
   isDefault: boolean; _count?: { tenants: number }
 }
 
-const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: 'Up to 5 users, Basic reports', maxUsers: 5, maxProducts: 100, isDefault: false }
+interface Feature {
+  id: string; name: string; displayName?: string; category?: string; isActive?: boolean
+}
+
+const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, isDefault: false }
 
 export const PlansPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -17,6 +21,8 @@ export const PlansPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(emptyForm)
+  const [features, setFeatures] = useState<Feature[]>([])
+  const [featuresLoading, setFeaturesLoading] = useState(false)
 
   const fetchPlans = async () => {
     setLoading(true)
@@ -24,7 +30,20 @@ export const PlansPage: React.FC = () => {
     setLoading(false)
   }
 
-  useEffect(() => { fetchPlans() }, [])
+  const fetchFeatures = async () => {
+    setFeaturesLoading(true)
+    try {
+      const r = await apiFetch('/api/platform/features')
+      if (r.ok) {
+        const data = await r.json()
+        const list = Array.isArray(data) ? data : data.features || []
+        setFeatures(list)
+      }
+    } catch {}
+    setFeaturesLoading(false)
+  }
+
+  useEffect(() => { fetchPlans(); fetchFeatures() }, [])
 
   const openCreate = () => { setEditingId(null); setForm(emptyForm); setShowForm(true) }
   const openEdit = (p: Plan) => {
@@ -55,6 +74,22 @@ export const PlansPage: React.FC = () => {
   }
 
   const fmt = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
+  const selectedFeatureNames = form.features.split(',').map((f: string) => f.trim()).filter(Boolean)
+  const featureLabel = (name: string) => features.find(f => f.name === name)?.displayName || name
+  const featureGroups = features.reduce<Record<string, Feature[]>>((groups, feature) => {
+    const category = feature.category || 'other'
+    groups[category] = groups[category] || []
+    groups[category].push(feature)
+    return groups
+  }, {})
+  const toggleFeature = (name: string, checked: boolean) => {
+    setForm(p => {
+      const current = new Set(p.features.split(',').map((f: string) => f.trim()).filter(Boolean))
+      if (checked) current.add(name)
+      else current.delete(name)
+      return { ...p, features: Array.from(current).join(', ') }
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -87,7 +122,7 @@ export const PlansPage: React.FC = () => {
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxProducts} products</span>
               </div>
               {Array.isArray(p.features) && p.features.length > 0 && (
-                <div className="flex flex-wrap gap-1">{p.features.map((f, i) => <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{f}</span>)}</div>
+                <div className="flex flex-wrap gap-1">{p.features.map((f, i) => <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{featureLabel(f)}</span>)}</div>
               )}
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500">{p._count?.tenants || 0} tenants</span>
@@ -111,7 +146,34 @@ export const PlansPage: React.FC = () => {
                 <div><label className="block text-sm font-medium mb-1">Billing Cycle</label><select value={form.billingCycle} onChange={e => setForm(p => ({ ...p, billingCycle: e.target.value }))} className="w-full px-3 py-2 border rounded-lg"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
                 <div><label className="block text-sm font-medium mb-1">Max Users</label><input type="number" value={form.maxUsers} onChange={e => setForm(p => ({ ...p, maxUsers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Max Products</label><input type="number" value={form.maxProducts} onChange={e => setForm(p => ({ ...p, maxProducts: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
-                <div className="col-span-2"><label className="block text-sm font-medium mb-1">Features (comma-separated)</label><input value={form.features} onChange={e => setForm(p => ({ ...p, features: e.target.value }))} placeholder="e.g. Inventory, Sales, Reports" className="w-full px-3 py-2 border rounded-lg" /></div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">Features</label>
+                  <div className="max-h-60 space-y-3 overflow-y-auto rounded-lg border p-3">
+                    {featuresLoading ? (
+                      <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+                    ) : features.length === 0 ? (
+                      <p className="text-sm text-gray-500">No platform features found yet.</p>
+                    ) : (
+                      Object.entries(featureGroups).map(([category, group]) => (
+                        <div key={category} className="space-y-2">
+                          <p className="text-xs font-semibold uppercase text-gray-500">{category.replace(/_/g, ' ')}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {group.map(feature => (
+                              <label key={feature.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFeatureNames.includes(feature.name)}
+                                  onChange={e => toggleFeature(feature.name, e.target.checked)}
+                                />
+                                <span>{feature.displayName || feature.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2"><input type="checkbox" checked={form.isDefault} onChange={e => setForm(p => ({ ...p, isDefault: e.target.checked }))} /> Default plan</label>

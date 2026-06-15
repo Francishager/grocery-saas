@@ -1,10 +1,12 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3 } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; description: string; isActive: boolean }
 interface PlanFeature { featureId: string; planId: string; enabled: boolean; feature: { id: string; name: string; slug: string } }
 interface Plan { id: string; name: string }
+
+const emptyFeatureForm = { name: '', displayName: '', category: 'core', description: '', isActive: true }
 
 const MODULES = [
   { id: 'financial', name: 'Financial Management', icon: DollarSign, color: 'text-green-600 bg-green-100', features: [
@@ -43,6 +45,8 @@ export const FeaturesPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<string>('')
   const [error, setError] = useState('')
+  const [showFeatureForm, setShowFeatureForm] = useState(false)
+  const [featureForm, setFeatureForm] = useState(emptyFeatureForm)
 
   const fetchData = async () => {
     setLoading(true)
@@ -63,6 +67,7 @@ export const FeaturesPage: React.FC = () => {
   useEffect(() => { if (selectedPlan) fetchPlanFeatures(selectedPlan) }, [selectedPlan])
 
   const isFeatureEnabled = (featureName: string) => planFeatures.some(pf => pf.feature?.name === featureName && pf.enabled)
+  const toFeatureName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
   const handleToggle = async (mf: { name: string; displayName: string }, category: string, enabled: boolean) => {
     if (!selectedPlan) { setError('Select a plan first'); return }
@@ -101,6 +106,33 @@ export const FeaturesPage: React.FC = () => {
     await fetchData(); setSaving(false)
   }
 
+  const handleCreateFeature = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true); setError('')
+    try {
+      const displayName = featureForm.displayName.trim()
+      const name = toFeatureName(featureForm.name || displayName)
+      if (!name || !displayName) throw new Error('Feature name and display name are required')
+      const res = await apiFetch('/api/platform/features', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          displayName,
+          category: featureForm.category.trim() || 'core',
+          description: featureForm.description.trim() || displayName,
+          isActive: featureForm.isActive,
+        }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || e.message || 'Failed to create feature') }
+      setFeatureForm(emptyFeatureForm)
+      setShowFeatureForm(false)
+      await fetchData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    }
+    setSaving(false)
+  }
+
   const handleDeleteFeature = async (id: string) => {
     if (!confirm('Delete this feature?')) return
     try { const res = await apiFetch(`/api/platform/features/${id}`, { method: 'DELETE' }); if (res.ok) fetchData() } catch {}
@@ -112,6 +144,9 @@ export const FeaturesPage: React.FC = () => {
         <div><h1 className="text-2xl font-bold text-white">Features</h1><p className="text-slate-400">Manage jibuSales modules and plan assignments</p></div>
         <div className="flex gap-2">
           <button onClick={fetchData} className="px-3 py-2 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-800"><RefreshCw size={18} /></button>
+          <button onClick={() => setShowFeatureForm(true)} disabled={saving} className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 flex items-center gap-2 disabled:opacity-50">
+            <Plus size={18} /> New Feature
+          </button>
           <button onClick={handleSeedFeatures} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus size={18} />} Seed All Modules
           </button>
@@ -181,6 +216,45 @@ export const FeaturesPage: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showFeatureForm && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-lg border border-slate-800 max-w-lg w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">New Feature</h2>
+              <button onClick={() => setShowFeatureForm(false)} className="p-1 hover:bg-slate-800 rounded text-slate-300"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleCreateFeature} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-300">Display Name *</label>
+                <input required value={featureForm.displayName} onChange={e => setFeatureForm(p => ({ ...p, displayName: e.target.value }))} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg" placeholder="Customer Credit" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-300">Feature Key</label>
+                <input value={featureForm.name} onChange={e => setFeatureForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg" placeholder="customer_credit" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-300">Category</label>
+                <input value={featureForm.category} onChange={e => setFeatureForm(p => ({ ...p, category: e.target.value }))} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg" placeholder="core" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-300">Description</label>
+                <textarea value={featureForm.description} onChange={e => setFeatureForm(p => ({ ...p, description: e.target.value }))} rows={3} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg" />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input type="checkbox" checked={featureForm.isActive} onChange={e => setFeatureForm(p => ({ ...p, isActive: e.target.checked }))} />
+                Active
+              </label>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowFeatureForm(false)} className="flex-1 px-4 py-2 border border-slate-700 text-slate-200 rounded-lg hover:bg-slate-800">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save size={16} />} Create
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

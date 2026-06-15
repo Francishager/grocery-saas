@@ -23,6 +23,9 @@ export interface InvitationCreateInput {
   email: string
   name?: string
   phone?: string
+  businessName?: string
+  businessLocation?: string
+  businessPhone?: string
   planId?: string
   message?: string
 }
@@ -49,9 +52,10 @@ class InviteService {
    * Create a new invitation for business owner
    */
   async create(data: InvitationCreateInput): Promise<Invitation> {
+    const payload = this.toBackendPayload(data)
     const response = await this.fetchWithAuth(this.apiEndpoint, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     })
 
     if (!response.ok) {
@@ -68,7 +72,7 @@ class InviteService {
   async createBatch(invitations: InvitationCreateInput[]): Promise<Invitation[]> {
     const response = await this.fetchWithAuth(`${this.apiEndpoint}/batch`, {
       method: 'POST',
-      body: JSON.stringify({ invitations }),
+      body: JSON.stringify({ invitations: invitations.map((inv) => this.toBackendPayload(inv)) }),
     })
 
     if (!response.ok) {
@@ -77,6 +81,22 @@ class InviteService {
     }
 
     return response.json()
+  }
+
+  private toBackendPayload(data: InvitationCreateInput): InvitationCreateInput {
+    const businessDetails = [
+      data.businessName && `Business name: ${data.businessName}`,
+      data.businessLocation && `Business location: ${data.businessLocation}`,
+      data.businessPhone && `Business phone: ${data.businessPhone}`,
+    ].filter(Boolean)
+
+    return {
+      email: data.email,
+      name: data.name,
+      phone: data.phone,
+      planId: data.planId,
+      message: [data.message, ...businessDetails].filter(Boolean).join('\n\n'),
+    }
   }
 
   /**

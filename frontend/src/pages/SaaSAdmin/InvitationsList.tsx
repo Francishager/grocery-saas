@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { 
   Mail, Clock, CheckCircle, XCircle, RefreshCw, 
-  Plus, Search, Filter, MoreVertical, Loader2 
+  Search, Filter, Loader2
 } from 'lucide-react'
 import InviteService, { Invitation, InvitationStats } from '@/services/InviteService'
-import InviteBusinessOwnerModal from './InviteBusinessOwnerModal'
 
 export const InvitationsList: React.FC = () => {
   const [invitations, setInvitations] = useState<Invitation[]>([])
@@ -13,7 +12,6 @@ export const InvitationsList: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [showInviteModal, setShowInviteModal] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const fetchInvitations = async () => {
@@ -100,17 +98,7 @@ export const InvitationsList: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Business Owner Invitations</h1>
-          <p className="text-gray-500 mt-1">
-            Invite new business owners to join the platform
-          </p>
         </div>
-        <button
-          onClick={() => setShowInviteModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={20} />
-          Invite Business Owner
-        </button>
       </div>
 
       {/* Stats */}
@@ -252,13 +240,6 @@ export const InvitationsList: React.FC = () => {
           </table>
         )}
       </div>
-
-      {/* Invite Modal */}
-      <InviteBusinessOwnerModal
-        isOpen={showInviteModal}
-        onClose={() => setShowInviteModal(false)}
-        onSuccess={fetchInvitations}
-      />
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Mail, User, Phone, Building, Send, Loader2 } from 'lucide-react'
+import { X, Mail, User, Phone, Building, Send, Loader2, MapPin } from 'lucide-react'
 import InviteService, { InvitationCreateInput } from '@/services/InviteService'
 import { apiFetch } from '@/lib/api'
 
@@ -21,6 +21,9 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
     email: '',
     name: '',
     phone: '',
+    businessName: '',
+    businessLocation: '',
+    businessPhone: '',
     planId: '',
     message: '',
   })
@@ -66,6 +69,9 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
           email: '',
           name: '',
           phone: '',
+          businessName: '',
+          businessLocation: '',
+          businessPhone: '',
           planId: plans[0]?.id || '',
           message: '',
         })
@@ -83,12 +89,13 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4">
+      <div className="flex min-h-full items-center justify-center">
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg bg-white shadow-xl">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b">
+        <div className="flex items-center justify-between border-b p-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            Invite Business Owner
+            Create Business
           </h2>
           <button
             onClick={onClose}
@@ -99,7 +106,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
         </div>
 
         {/* Content */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 space-y-4 overflow-y-auto p-4">
           {success ? (
             <div className="text-center py-8">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -162,7 +169,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
               {/* Phone */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone Number
+                  Owner Phone Number
                 </label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -170,6 +177,58 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
                     type="tel"
                     value={formData.phone}
                     onChange={(e) => handleChange('phone', e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="+256 700 123 456"
+                  />
+                </div>
+              </div>
+
+              {/* Business Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Business Name *
+                </label>
+                <div className="relative">
+                  <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    required
+                    value={formData.businessName}
+                    onChange={(e) => handleChange('businessName', e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Business name"
+                  />
+                </div>
+              </div>
+
+              {/* Business Location */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Business Location
+                </label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={formData.businessLocation}
+                    onChange={(e) => handleChange('businessLocation', e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="City, district, or address"
+                  />
+                </div>
+              </div>
+
+              {/* Business Phone */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Business Phone Number
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="tel"
+                    value={formData.businessPhone}
+                    onChange={(e) => handleChange('businessPhone', e.target.value)}
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="+256 700 123 456"
                   />
@@ -222,7 +281,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || !formData.email}
+                  disabled={loading || !formData.email || !formData.businessName}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {loading ? (
@@ -241,6 +300,7 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
             </>
           )}
         </form>
+      </div>
       </div>
     </div>
   )
