@@ -68,16 +68,16 @@ model Plan {
 
 // Users - can be SaaS Admin or tenant users
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  password  String
-  fname     String?
-  lname     String?
-  phone     String?
-  avatar    String?
-  role      UserRole  @default(attendant)
-  tenantId  String?
-  tenant    Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id         String    @id @default(cuid())
+  email      String    @unique
+  password   String
+  fname      String?
+  lname      String?
+  phone      String?
+  avatar     String?
+  role       UserRole  @default(attendant)
+  tenantId   String?
+  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   isActive   Boolean   @default(true)
   lastLogin  DateTime?
   otpCode    String?
@@ -114,7 +114,7 @@ model Invitation {
   name        String?
   phone       String?
   token       String           @unique
-  otpCode     String?          // OTP for verification during acceptance
+  otpCode     String? // OTP for verification during acceptance
   status      InvitationStatus @default(pending)
   planId      String?
   message     String?
@@ -171,16 +171,16 @@ model Product {
 
 // Audit Log — tracks all data mutations
 model AuditLog {
-  id         String   @id @default(cuid())
-  tenantId   String
-  userId     String
-  userEmail  String
-  action     String   // create, update, delete, login, checkout, etc.
-  model      String   // Product, Sale, Purchase, User, etc.
-  recordId   String?  // ID of the affected record
-  changes    Json?    // { before: {...}, after: {...} } or { data: {...} }
-  ip         String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  userEmail String
+  action    String // create, update, delete, login, checkout, etc.
+  model     String // Product, Sale, Purchase, User, etc.
+  recordId  String? // ID of the affected record
+  changes   Json? // { before: {...}, after: {...} } or { data: {...} }
+  ip        String?
+  createdAt DateTime @default(now())
 
   @@index([tenantId, model])
   @@index([tenantId, createdAt])
@@ -248,18 +248,18 @@ model SaleItem {
 
 // Purchases
 model Purchase {
-  id        String         @id @default(cuid())
-  refNo     String?
-  tenantId  String
-  userId    String
-  user      User           @relation(fields: [userId], references: [id])
+  id            String         @id @default(cuid())
+  refNo         String?
+  tenantId      String
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
   supplier      String?
-  paymentMethod String?         @default("cash")
+  paymentMethod String?        @default("cash")
   total         Float
   notes         String?
-  items     PurchaseItem[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  items         PurchaseItem[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@map("purchases")
 }
