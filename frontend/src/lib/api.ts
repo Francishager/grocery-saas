@@ -255,7 +255,24 @@ export const purchasesApi = {
 
 // Categories endpoint
 export const categoriesApi = {
-  list: () => api.get<Array<{ id: string; name: string; slug: string }>>('/api/inventory/categories'),
+  list: async () => {
+    const data = await api.get<any>('/api/inventory/categories')
+    const categories = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.categories)
+        ? data.categories
+        : Array.isArray(data?.data)
+          ? data.data
+          : []
+
+    return categories
+      .filter((category: any) => category?.id && category?.name)
+      .map((category: any) => ({
+        ...category,
+        id: String(category.id),
+        name: String(category.name),
+      })) as Array<{ id: string; name: string; slug?: string }>
+  },
   create: (data: { name: string; slug: string }) =>
     api.post('/api/inventory/categories', { body: data }),
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2 } from 'lucide-react'
 import { inventoryApi, categoriesApi, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -7,19 +7,6 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/Popover"
 
 interface FormData {
   product_id: string
@@ -47,6 +34,7 @@ const initialFormData: FormData = {
 
 export default function InventoryPage() {
   const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categoryQuery, setCategoryQuery] = useState('')
   const [items, setItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -54,11 +42,27 @@ export default function InventoryPage() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
   const [formData, setFormData] = useState<FormData>(initialFormData)
+  const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
     loadCategories()
     loadInventory()
+  }, [])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        categoryPickerRef.current &&
+        !categoryPickerRef.current.contains(event.target as Node)
+      ) {
+        setCategoryOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
   const loadCategories = async () => {
@@ -67,6 +71,11 @@ export default function InventoryPage() {
       setCategories(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('Failed to load categories:', error)
+      toast({
+        variant: 'destructive',
+        title: 'Failed to load categories',
+        description: 'Please refresh the page and try again.',
+      })
     }
   }
 
@@ -142,6 +151,7 @@ export default function InventoryPage() {
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
     })
     setCategoryOpen(false)
+    setCategoryQuery('')
     setShowForm(true)
   }
 
@@ -149,6 +159,7 @@ export default function InventoryPage() {
     setEditingItem(null)
     setFormData(initialFormData)
     setCategoryOpen(false)
+    setCategoryQuery('')
     setShowForm(true)
   }
 
@@ -157,11 +168,22 @@ export default function InventoryPage() {
     setEditingItem(null)
     setFormData(initialFormData)
     setCategoryOpen(false)
+    setCategoryQuery('')
   }
 
   const selectedCategory = categories.find(
     (category) => String(category.id) === formData.categoryId
   )
+
+  const filteredCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLowerCase()
+
+    if (!query) return categories
+
+    return categories.filter((category) =>
+      category.name.toLowerCase().includes(query)
+    )
+  }, [categories, categoryQuery])
 
   return (
     <div className="space-y-6 p-6">
@@ -228,61 +250,78 @@ export default function InventoryPage() {
               <div className="space-y-2">
                 <Label>Category</Label>
 
-                <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={categoryOpen}
-                      className="w-full justify-between"
-                    >
-                      <span className={cn("truncate", !selectedCategory && "text-muted-foreground")}>
-                        {selectedCategory?.name || "Select category"}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
+                <div className="relative" ref={categoryPickerRef}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={categoryOpen}
+                    className="w-full justify-between"
+                    onClick={() => setCategoryOpen((current) => !current)}
+                  >
+                    <span className={cn("truncate", !selectedCategory && "text-muted-foreground")}>
+                      {selectedCategory?.name || "Select category"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                  </Button>
 
-                  <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-0">
-                    <Command>
-                      <CommandInput placeholder="Search category..." />
+                  {categoryOpen && (
+                    <div className="absolute left-0 right-0 z-50 mt-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg">
+                      <div className="relative mb-2">
+                        <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          autoFocus
+                          value={categoryQuery}
+                          onChange={(e) => setCategoryQuery(e.target.value)}
+                          placeholder="Search category..."
+                          className="pl-8"
+                        />
+                      </div>
 
-                      <CommandList className="max-h-60 overflow-y-auto">
-                        <CommandEmpty>No category found.</CommandEmpty>
-
-                        <CommandGroup>
-                          {categories.map((category) => {
+                      <div className="max-h-60 overflow-y-auto pr-1">
+                        {filteredCategories.length === 0 ? (
+                          <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                            {categories.length === 0
+                              ? 'No categories available'
+                              : 'No category found'}
+                          </div>
+                        ) : (
+                          filteredCategories.map((category) => {
                             const categoryId = String(category.id)
+                            const isSelected = formData.categoryId === categoryId
 
                             return (
-                              <CommandItem
+                              <button
                                 key={categoryId}
-                                value={category.name}
-                                onSelect={() => {
+                                type="button"
+                                className={cn(
+                                  "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
+                                  isSelected && "bg-muted font-medium"
+                                )}
+                                onClick={() => {
                                   setFormData((prev) => ({
                                     ...prev,
                                     categoryId,
                                   }))
+                                  setCategoryQuery('')
                                   setCategoryOpen(false)
                                 }}
                               >
                                 <Check
                                   className={cn(
-                                    "mr-2 h-4 w-4",
-                                    formData.categoryId === categoryId
-                                      ? "opacity-100"
-                                      : "opacity-0"
+                                    "h-4 w-4",
+                                    isSelected ? "opacity-100" : "opacity-0"
                                   )}
                                 />
                                 <span className="truncate">{category.name}</span>
-                              </CommandItem>
+                              </button>
                             )
-                          })}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="product_name">Product Name</Label>

@@ -12,7 +12,7 @@ const navItems = [
   { to: '/tenant/purchases', label: 'Purchases', icon: FileText },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList },
-  { to: '/tenant/admin', label: 'Staff', icon: Users },
+  { to: '/tenant/admin', label: 'Staff', icon: Users, disabled: true },
 ]
 
 export function TenantLayout() {
@@ -37,12 +37,23 @@ export function TenantLayout() {
             <Button variant="ghost" size="icon" className="text-slate-200 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></Button>
           </div>
           <nav className="flex-1 space-y-1 p-4">
-            {navItems.map((item) => (
-              <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
-                <item.icon className="h-5 w-5" />{item.label}
-              </NavLink>
-            ))}
+            {navItems.map((item) =>
+              item.disabled ? (
+                <div
+                  key={item.to}
+                  aria-disabled="true"
+                  title="Staff management is disabled"
+                  className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 opacity-60"
+                >
+                  <item.icon className="h-5 w-5" />{item.label}
+                </div>
+              ) : (
+                <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
+                  className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                  <item.icon className="h-5 w-5" />{item.label}
+                </NavLink>
+              )
+            )}
           </nav>
           <div className="border-t border-[hsl(var(--sidebar-border))] p-4">
             <div className="mb-3 flex items-center gap-3">
