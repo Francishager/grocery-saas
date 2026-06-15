@@ -13,7 +13,24 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+} from "@/components/ui/command"
+
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+
+import { Button } from "@/components/ui/button"
+import { Check, ChevronsUpDown } from "lucide-react"
+import { cn } from "@/lib/utils";
 
 interface FormData {
   product_id: string
@@ -40,6 +57,7 @@ const initialFormData: FormData = {
 }
 
 export default function InventoryPage() {
+  const [open, setOpen] = useState(false)
   const [items, setItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -212,32 +230,57 @@ export default function InventoryPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="categoryId">Category</Label>
+                <Label>Category</Label>
 
-                <Select
-                  value={formData.categoryId}
-                  onValueChange={(value) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      categoryId: value,
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Category" />
-                  </SelectTrigger>
+                <Popover open={open} onOpenChange={setOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={open}
+                      className="w-full justify-between"
+                    >
+                      {formData.categoryId
+                        ? categories.find((c) => c.id === formData.categoryId)?.name
+                        : "Select category"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
 
-                  <SelectContent>
-                    {categories.map((category) => (
-                      <SelectItem
-                        key={category.id}
-                        value={category.id}
-                      >
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <PopoverContent className="w-full p-0">
+                    <Command>
+                      <CommandInput placeholder="Search category..." />
+
+                      <CommandEmpty>No category found.</CommandEmpty>
+
+                      <CommandGroup className="max-h-60 overflow-auto">
+                        {categories.map((category) => (
+                          <CommandItem
+                            key={category.id}
+                            value={category.name}
+                            onSelect={() => {
+                              setFormData((prev) => ({
+                                ...prev,
+                                categoryId: category.id,
+                              }))
+                              setOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                formData.categoryId === category.id
+                                  ? "opacity-100"
+                                  : "opacity-0"
+                              )}
+                            />
+                            {category.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="product_name">Product Name</Label>
