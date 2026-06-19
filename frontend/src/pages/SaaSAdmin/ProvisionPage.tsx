@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Building2, User, Loader2, CheckCircle, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Building2, CheckCircle, Copy, Eye, EyeOff, Loader2, RefreshCw, Share2, User } from 'lucide-react'
 import { apiFetch } from '../../lib/api'
 
 interface Plan {
@@ -12,6 +12,8 @@ interface Plan {
 
 interface ProvisionResult {
   message?: string
+  tenantId?: string
+  slug?: string
   ownerEmail?: string
   emailSent?: boolean
   emailError?: string | null
@@ -19,7 +21,18 @@ interface ProvisionResult {
   otp?: string
 }
 
-const emptyForm = {
+function generatePassword(length = 14) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*'
+  const bytes = new Uint32Array(length)
+  window.crypto?.getRandomValues(bytes)
+  return Array.from(bytes, (value) => chars[value % chars.length]).join('')
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}
+
+const createEmptyForm = () => ({
   businessName: '',
   businessSlug: '',
   businessEmail: '',
@@ -27,8 +40,10 @@ const emptyForm = {
   planId: '',
   ownerName: '',
   ownerEmail: '',
-  ownerPassword: '',
-}
+  ownerPassword: generatePassword(),
+})
+
+type ProvisionForm = ReturnType<typeof createEmptyForm>
 
 export const ProvisionPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -36,7 +51,9 @@ export const ProvisionPage: React.FC = () => {
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ProvisionResult | null>(null)
-  const [form, setForm] = useState(emptyForm)
+  const [form, setForm] = useState<ProvisionForm>(() => createEmptyForm())
+  const [showPassword, setShowPassword] = useState(false)
+  const [copyMessage, setCopyMessage] = useState<string | null>(null)
 
   useEffect(() => {
     apiFetch('/api/platform/plans', {})
@@ -45,9 +62,57 @@ export const ProvisionPage: React.FC = () => {
       .catch(() => {})
   }, [])
 
-  const handleChange = (field: keyof typeof emptyForm, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }))
+  const handleChange = (field: keyof ProvisionForm, value: string) => {
+    setForm((prev) => {
+      const next = { ...prev, [field]: value }
+      if (field === 'businessName' && (!prev.businessSlug || prev.businessSlug === slugify(prev.businessName))) {
+        next.businessSlug = slugify(value)
+      }
+      return next
+    })
     setError(null)
+  }
+
+  const credentialsText = () => {
+    if (!result) return ''
+    return [
+      `Business: ${form.businessName || result.slug || 'Created business'}`,
+      result.tenantId ? `Business ID: ${result.tenantId}` : null,
+      result.slug ? `Slug: ${result.slug}` : null,
+      result.ownerEmail ? `Owner email: ${result.ownerEmail}` : null,
+      result.tempPassword ? `Temporary password: ${result.tempPassword}` : null,
+      result.otp ? `OTP: ${result.otp}` : null,
+      'Login: /login',
+    ].filter(Boolean).join('\n')
+  }
+
+  const copyCredentials = async () => {
+    const text = credentialsText()
+    if (!text) return
+
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopyMessage('Credentials copied')
+    } catch {
+      setCopyMessage('Copy failed')
+    }
+  }
+
+  const shareCredentials = async () => {
+    const text = credentialsText()
+    if (!text) return
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Business owner credentials', text })
+        setCopyMessage('Share sheet opened')
+        return
+      } catch {
+        return
+      }
+    }
+
+    await copyCredentials()
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -64,14 +129,14 @@ export const ProvisionPage: React.FC = () => {
           business: {
             name: form.businessName,
             slug: form.businessSlug,
-            email: form.businessEmail,
+            email: form.businessEmail || undefined,
             phone: form.businessPhone,
             planId: form.planId || undefined,
           },
           owner: {
             name: form.ownerName,
             email: form.ownerEmail,
-            password: form.ownerPassword,
+            password: form.ownerPassword || undefined,
           },
         }),
       })
@@ -80,7 +145,7 @@ export const ProvisionPage: React.FC = () => {
 
       setResult(data)
       setSuccess(true)
-      setForm(emptyForm)
+      setCopyMessage(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Provisioning failed')
     } finally {
@@ -96,6 +161,26 @@ export const ProvisionPage: React.FC = () => {
         </div>
         <h2 className="text-xl font-semibold">Business Provisioned!</h2>
         <p className="text-gray-500 mt-2">The business and owner account have been created successfully.</p>
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-left">
+          <p className="text-sm font-medium text-slate-900">Owner credentials</p>
+          <div className="mt-3 space-y-1 text-sm text-slate-700">
+            {result?.tenantId && <p><span className="font-medium">Business ID:</span> {result.tenantId}</p>}
+            {result?.ownerEmail && <p><span className="font-medium">Owner email:</span> {result.ownerEmail}</p>}
+            {result?.tempPassword && <p><span className="font-medium">Temporary password:</span> {result.tempPassword}</p>}
+            {result?.otp && <p><span className="font-medium">OTP:</span> {result.otp}</p>}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={copyCredentials} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-white">
+              <Copy className="h-4 w-4" />
+              Copy
+            </button>
+            <button type="button" onClick={shareCredentials} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-white">
+              <Share2 className="h-4 w-4" />
+              Share
+            </button>
+          </div>
+          {copyMessage && <p className="mt-2 text-xs text-slate-500">{copyMessage}</p>}
+        </div>
         {result?.emailSent === false ? (
           <div className="mt-4 rounded-md border border-yellow-200 bg-yellow-50 p-4 text-left">
             <div className="flex items-start gap-2">
@@ -103,12 +188,6 @@ export const ProvisionPage: React.FC = () => {
               <div>
                 <p className="font-medium text-yellow-900">Owner email was not delivered.</p>
                 <p className="mt-1 text-sm text-yellow-800">{result.emailError || result.message}</p>
-                {result.tempPassword && (
-                  <p className="mt-3 text-sm text-yellow-900"><span className="font-medium">Temporary password:</span> {result.tempPassword}</p>
-                )}
-                {result.otp && (
-                  <p className="mt-1 text-sm text-yellow-900"><span className="font-medium">OTP:</span> {result.otp}</p>
-                )}
               </div>
             </div>
           </div>
@@ -121,6 +200,8 @@ export const ProvisionPage: React.FC = () => {
           onClick={() => {
             setSuccess(false)
             setResult(null)
+            setForm(createEmptyForm())
+            setCopyMessage(null)
           }}
           className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
@@ -144,8 +225,8 @@ export const ProvisionPage: React.FC = () => {
           <h2 className="text-lg font-semibold flex items-center gap-2"><Building2 className="w-5 h-5" /> Business Details</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-sm font-medium mb-1">Business Name *</label><input required value={form.businessName} onChange={(e) => handleChange('businessName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Fresh Mart" /></div>
-            <div><label className="block text-sm font-medium mb-1">Slug *</label><input required value={form.businessSlug} onChange={(e) => handleChange('businessSlug', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="fresh-mart" /></div>
-            <div><label className="block text-sm font-medium mb-1">Business Email *</label><input required type="email" value={form.businessEmail} onChange={(e) => handleChange('businessEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="info@freshmart.com" /></div>
+            <div><label className="block text-sm font-medium mb-1">Slug</label><input value={form.businessSlug} onChange={(e) => handleChange('businessSlug', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="fresh-mart" /></div>
+            <div><label className="block text-sm font-medium mb-1">Business Email</label><input type="email" value={form.businessEmail} onChange={(e) => handleChange('businessEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="info@freshmart.com" /></div>
             <div><label className="block text-sm font-medium mb-1">Phone</label><input value={form.businessPhone} onChange={(e) => handleChange('businessPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" /></div>
           </div>
           <div>
@@ -162,7 +243,25 @@ export const ProvisionPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>
             <div><label className="block text-sm font-medium mb-1">Owner Email *</label><input required type="email" value={form.ownerEmail} onChange={(e) => handleChange('ownerEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="john@freshmart.com" /></div>
-            <div><label className="block text-sm font-medium mb-1">Password *</label><input required type="password" minLength={6} value={form.ownerPassword} onChange={(e) => handleChange('ownerPassword', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Min 6 characters" /></div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">Temporary Password</label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative flex-1">
+                  <input type={showPassword ? 'text' : 'password'} minLength={6} value={form.ownerPassword} onChange={(e) => handleChange('ownerPassword', e.target.value)} className="w-full rounded-lg border px-3 py-2 pr-10" placeholder="Auto-generated if empty" />
+                  <button type="button" onClick={() => setShowPassword((prev) => !prev)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100">
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <button type="button" onClick={() => handleChange('ownerPassword', generatePassword())} className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
+                  <RefreshCw className="h-4 w-4" />
+                  Generate
+                </button>
+                <button type="button" onClick={() => navigator.clipboard.writeText(form.ownerPassword)} className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
+                  <Copy className="h-4 w-4" />
+                  Copy
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

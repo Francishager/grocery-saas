@@ -221,8 +221,8 @@ router.post("/owners", authenticateToken, requirePlatformAdmin, async (req, res)
       tenantId,
       emailSent,
       emailError,
-      tempPassword: emailSent ? undefined : tempPassword,
-      otp: emailSent ? undefined : otp,
+      tempPassword,
+      otp,
     });
   } catch (err) {
     console.error("Create owner error:", err);
@@ -449,19 +449,24 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     const ownerFname = owner.fname || parsedName.fname || owner.email.split("@")[0];
     const ownerLname = owner.lname || parsedName.lname || "";
 
-    const tenant = await prisma.tenant.create({
-      data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, status: "active", planId: business.planId },
-    });
-
     const tempPassword = owner.password || generateTempPassword(12);
     const hashed = await bcrypt.hash(tempPassword, 12);
     const otp = generateOTP();
     const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    const user = await prisma.user.create({
-      data: { email: owner.email, password: hashed, fname: ownerFname, lname: ownerLname, phone: owner.phone, tenantId: tenant.id, role: "owner", otpCode: otp, otpExpires },
+    const { tenant } = await prisma.$transaction(async (tx) => {
+      const createdTenant = await tx.tenant.create({
+        data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, status: "active", planId: business.planId },
+      });
+
+      const user = await tx.user.create({
+        data: { email: owner.email, password: hashed, fname: ownerFname, lname: ownerLname, phone: owner.phone, tenantId: createdTenant.id, role: "owner", otpCode: otp, otpExpires },
+      });
+
+      await tx.tenant.update({ where: { id: createdTenant.id }, data: { ownerId: user.id } });
+
+      return { tenant: createdTenant, user };
     });
-    await prisma.tenant.update({ where: { id: tenant.id }, data: { ownerId: user.id } });
 
     let emailSent = false;
     let emailError = null;
@@ -481,10 +486,14 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       ownerEmail: owner.email,
       emailSent,
       emailError,
-      tempPassword: emailSent ? undefined : tempPassword,
-      otp: emailSent ? undefined : otp,
+      tempPassword,
+      otp,
     });
   } catch (err) {
+    if (err?.code === "P2002") {
+      const target = Array.isArray(err.meta?.target) ? err.meta.target.join(", ") : err.meta?.target;
+      return res.status(409).json({ error: `Duplicate value for ${target || "unique field"}` });
+    }
     console.error("Provision tenant error:", err);
     res.status(500).json({ error: "Internal server error" });
   }

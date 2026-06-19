@@ -23,6 +23,12 @@ export default function SaaSAdminLoginPage() {
     try {
       const result = await login(email, password)
 
+      if (result.forceReset) {
+        toast({ title: 'Password Reset Required', description: result.message || 'Please reset your password' })
+        navigate(`/forgot-password?email=${encodeURIComponent(result.email || email)}&mode=reset`)
+        return
+      }
+
       // Route based on the actual login response (not stale React state)
       if (result.user?.role !== 'saas_admin' && !result.user?.isPlatformUser) {
         toast({

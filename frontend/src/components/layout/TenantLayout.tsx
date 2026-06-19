@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, FileText, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, FileText, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', roles: ['owner', 'manager', 'accountant'] },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', roles: ['owner', 'manager', 'accountant'] },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', roles: ['owner', 'manager', 'accountant'] },
+  { to: '/tenant/branches', label: 'Branches', icon: GitBranch, roles: ['owner'] },
   { to: '/tenant/admin', label: 'Staff', icon: Users, feature: 'staff', roles: ['owner', 'manager'] },
 ]
 

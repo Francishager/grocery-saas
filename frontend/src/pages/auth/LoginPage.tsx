@@ -42,6 +42,7 @@ export default function LoginPage() {
       // Handle force-reset from backend
       if (result.forceReset) {
         toast({ title: 'Password Reset Required', description: result.message || 'Please reset your password' })
+        navigate(`/forgot-password?email=${encodeURIComponent(result.email || email)}&mode=reset`)
         return
       }
 

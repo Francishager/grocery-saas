@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import prisma from "../db.js";
 import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { sendMail } from "../../mailer.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -120,8 +121,28 @@ router.post("/request-reset", async (req, res) => {
     const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await prisma.user.update({ where: { id: user.id }, data: { otpCode: otp, otpExpires } });
 
-    res.json({ message: "OTP sent", otp }); // In production, email the OTP instead of returning it
+    let emailSent = false;
+    let emailError = null;
+    try {
+      await sendMail(
+        user.email,
+        "Password reset code",
+        `<p>Hello ${user.fname || ""},</p><p>Your password reset code is <b>${otp}</b>.</p><p>This code expires in 24 hours.</p>`
+      );
+      emailSent = true;
+    } catch (err) {
+      emailError = err?.message || "Email failed";
+      console.warn("Password reset email failed:", emailError);
+    }
+
+    res.json({
+      message: emailSent ? "Reset code sent" : "Reset code generated, but email failed",
+      emailSent,
+      emailError,
+      otp: emailSent ? undefined : otp,
+    });
   } catch (err) {
+    console.error("Request reset error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -131,6 +152,7 @@ router.post("/reset-password", async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     if (!email || !otp || !newPassword) return res.status(400).json({ error: "email, otp, newPassword required" });
+    if (String(newPassword).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -154,4 +176,3 @@ router.post("/logout", (req, res) => {
 });
 
 export default router;
-

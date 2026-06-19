@@ -130,8 +130,14 @@ export const authApi = {
     }),
 
   requestReset: (email: string) =>
-    api.post<{ message: string }>('/api/auth/request-reset', {
+    api.post<{ message: string; emailSent?: boolean; emailError?: string; otp?: string }>('/api/auth/request-reset', {
       body: { email },
+      skipAuth: true,
+    }),
+
+  resetPassword: (data: { email: string; otp: string; newPassword: string }) =>
+    api.post<{ message: string }>('/api/auth/reset-password', {
+      body: data,
       skipAuth: true,
     }),
 

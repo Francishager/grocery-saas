@@ -21,6 +21,7 @@ import PurchasesPage from '@/pages/PurchasesPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import AdminPage from '@/pages/admin/AdminPage'
+import BranchesPage from '@/pages/BranchesPage'
 import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
@@ -114,6 +115,7 @@ function App() {
           <Route path="expenses" element={<ExpensesPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="audit" element={<AuditLogPage />} />
+          <Route path="branches" element={<BranchesPage />} />
           <Route path="admin" element={<AdminPage />} />
         </Route>
 
