@@ -112,6 +112,13 @@ const readResponseError = async (response: Response, fallback: string) => {
   return data?.error || data?.message || fallback
 }
 
+const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex items-start justify-between gap-4 border-b py-2 last:border-b-0">
+    <span className="text-sm text-muted-foreground">{label}</span>
+    <span className="text-right text-sm font-medium break-words">{value || 'Not set'}</span>
+  </div>
+)
+
 export default function PayablesPage() {
   const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
   const { toast } = useToast()
@@ -131,6 +138,8 @@ export default function PayablesPage() {
   const [savingPurchase, setSavingPurchase] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPurchase, setSelectedPurchase] = useState<SupplierPurchase | null>(null)
+  const [selectedSupplierDetail, setSelectedSupplierDetail] = useState<Supplier | null>(null)
+  const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState<SupplierPurchase | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [purchaseForm, setPurchaseForm] = useState({
@@ -416,6 +425,16 @@ export default function PayablesPage() {
     )
   }
 
+  const closeDetails = () => {
+    setSelectedSupplierDetail(null)
+    setSelectedPurchaseDetail(null)
+  }
+
+  const formatUserName = (user?: SupplierPurchase['user']) => {
+    const name = `${user?.fname || ''} ${user?.lname || ''}`.trim()
+    return name || 'Unknown'
+  }
+
   if (!canAccessFeature('suppliers')) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -589,7 +608,7 @@ export default function PayablesPage() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => setSelectedSupplierDetail(supplier)}>
                         <Eye className="h-4 w-4 mr-1" />
                         View Details
                       </Button>
@@ -642,8 +661,8 @@ export default function PayablesPage() {
                     </div>
                   </div>
                   
-                  {purchase.balance > 0 && (
-                    <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex gap-2">
+                    {purchase.balance > 0 && (
                       <Button 
                         size="sm"
                         onClick={() => {
@@ -655,12 +674,12 @@ export default function PayablesPage() {
                         <Wallet className="h-4 w-4 mr-1" />
                         Record Payment
                       </Button>
-                      <Button size="sm" variant="outline">
-                        <FileText className="h-4 w-4 mr-1" />
-                        View Details
-                      </Button>
-                    </div>
-                  )}
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => setSelectedPurchaseDetail(purchase)}>
+                      <FileText className="h-4 w-4 mr-1" />
+                      View Details
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))
@@ -916,6 +935,82 @@ export default function PayablesPage() {
                 Record Payment
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(selectedSupplierDetail || selectedPurchaseDetail) && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {selectedSupplierDetail ? selectedSupplierDetail.name : selectedPurchaseDetail?.refNo}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {selectedSupplierDetail ? 'Supplier details' : 'Supplier purchase details'}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={closeDetails}>
+                Close
+              </Button>
+            </div>
+
+            {selectedSupplierDetail && (
+              <div className="space-y-4">
+                <div>
+                  <DetailRow label="Status" value={getStatusBadge(selectedSupplierDetail.status)} />
+                  <DetailRow label="Phone" value={selectedSupplierDetail.phone} />
+                  <DetailRow label="Email" value={selectedSupplierDetail.email} />
+                  <DetailRow label="Address" value={selectedSupplierDetail.address} />
+                  <DetailRow label="Outstanding Balance" value={formatCurrency(selectedSupplierDetail.balance)} />
+                  <DetailRow label="Notes" value={selectedSupplierDetail.notes} />
+                </div>
+              </div>
+            )}
+
+            {selectedPurchaseDetail && (
+              <div className="space-y-5">
+                <div>
+                  <DetailRow label="Supplier" value={selectedPurchaseDetail.supplier.name} />
+                  <DetailRow label="Status" value={getPaymentStatusBadge(selectedPurchaseDetail.paymentStatus)} />
+                  <DetailRow label="Total" value={formatCurrency(selectedPurchaseDetail.total)} />
+                  <DetailRow label="Amount Paid" value={formatCurrency(selectedPurchaseDetail.amountPaid)} />
+                  <DetailRow label="Balance" value={formatCurrency(selectedPurchaseDetail.balance)} />
+                  <DetailRow
+                    label="Due Date"
+                    value={selectedPurchaseDetail.dueDate ? new Date(selectedPurchaseDetail.dueDate).toLocaleDateString() : 'Not set'}
+                  />
+                  <DetailRow label="Recorded By" value={formatUserName(selectedPurchaseDetail.user)} />
+                  <DetailRow label="Created" value={new Date(selectedPurchaseDetail.createdAt).toLocaleString()} />
+                  <DetailRow label="Notes" value={selectedPurchaseDetail.notes} />
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold">Items</h4>
+                  <div className="space-y-2">
+                    {selectedPurchaseDetail.items?.length ? (
+                      selectedPurchaseDetail.items.map((item, index) => (
+                        <div key={`${item.product?.id || index}-${index}`} className="rounded-md border p-3 text-sm">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="font-medium">{item.product?.name || 'Product'}</p>
+                              <p className="text-xs text-muted-foreground">{item.product?.sku || 'No SKU'}</p>
+                            </div>
+                            <p className="font-semibold">{formatCurrency(Number(item.total || 0))}</p>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Qty {item.quantity} x {formatCurrency(Number(item.cost || 0))}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No items found for this purchase.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

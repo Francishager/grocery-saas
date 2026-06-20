@@ -29,6 +29,14 @@ const toMoney = (value, fallback = 0) => {
 const accountForPaymentMethod = (paymentMethod) =>
   CASH_ACCOUNTS_BY_PAYMENT_METHOD[paymentMethod] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
 
+const userSelect = { select: { id: true, fname: true, lname: true } }
+
+const withUser = (record) => {
+  if (!record) return record
+  const { User, ...rest } = record
+  return { ...rest, user: User || record.user || null }
+}
+
 async function ensureDefaultCashAccounts(tenantId, client = prisma) {
   await Promise.all(
     DEFAULT_CASH_ACCOUNTS.map((account) =>
@@ -96,7 +104,7 @@ router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'acc
         skip,
         take: Number(limit),
         include: {
-          user: { select: { id: true, fname: true, lname: true } }
+          User: userSelect
         },
         orderBy: { date: 'desc' }
       }),
@@ -104,7 +112,7 @@ router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'acc
     ])
 
     res.json({
-      expenses,
+      expenses: expenses.map(withUser),
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -152,7 +160,7 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
           date: date ? new Date(date) : new Date()
         },
         include: {
-          user: { select: { id: true, fname: true, lname: true } }
+          User: userSelect
         }
       })
 
@@ -182,7 +190,7 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
       return createdExpense
     })
 
-    res.status(201).json(expense)
+    res.status(201).json(withUser(expense))
   } catch (error) {
     console.error('Create expense error:', error)
     res.status(500).json({ error: 'Failed to create expense' })
@@ -309,7 +317,7 @@ router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manag
         take: Number(limit),
         include: {
           account: { select: { id: true, name: true, type: true } },
-          user: { select: { id: true, fname: true, lname: true } }
+          User: userSelect
         },
         orderBy: { createdAt: 'desc' }
       }),
@@ -317,7 +325,7 @@ router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manag
     ])
 
     res.json({
-      transactions,
+      transactions: transactions.map(withUser),
       pagination: {
         page: Number(page),
         limit: Number(limit),

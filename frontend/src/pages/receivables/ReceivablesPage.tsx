@@ -97,6 +97,13 @@ const readResponseError = async (response: Response, fallback: string) => {
   return data?.error || data?.message || fallback
 }
 
+const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex items-start justify-between gap-4 border-b py-2 last:border-b-0">
+    <span className="text-sm text-muted-foreground">{label}</span>
+    <span className="text-right text-sm font-medium break-words">{value || 'Not set'}</span>
+  </div>
+)
+
 export default function ReceivablesPage() {
   const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
   const { toast } = useToast()
@@ -118,6 +125,8 @@ export default function ReceivablesPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
+  const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<Customer | null>(null)
+  const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [saleForm, setSaleForm] = useState({
@@ -424,6 +433,16 @@ export default function ReceivablesPage() {
     )
   }
 
+  const closeDetails = () => {
+    setSelectedCustomerDetail(null)
+    setSelectedSaleDetail(null)
+  }
+
+  const formatUserName = (user?: { fname?: string; lname?: string }) => {
+    const name = `${user?.fname || ''} ${user?.lname || ''}`.trim()
+    return name || 'Unknown'
+  }
+
   if (!canAccessFeature('credit')) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -615,8 +634,8 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
                   
-                  {customer.balance > 0 && (
-                    <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex gap-2">
+                    {customer.balance > 0 && (
                       <Button 
                         size="sm"
                         onClick={() => {
@@ -628,12 +647,12 @@ export default function ReceivablesPage() {
                         <DollarSign className="h-4 w-4 mr-1" />
                         Record Payment
                       </Button>
-                      <Button size="sm" variant="outline">
-                        <Eye className="h-4 w-4 mr-1" />
-                        View Details
-                      </Button>
-                    </div>
-                  )}
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => setSelectedCustomerDetail(customer)}>
+                      <Eye className="h-4 w-4 mr-1" />
+                      View Details
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))
@@ -686,8 +705,8 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
 
-                  {Number(sale.balance || 0) > 0 && sale.customer && (
-                    <div className="mt-4">
+                  <div className="mt-4 flex gap-2">
+                    {Number(sale.balance || 0) > 0 && sale.customer && (
                       <Button
                         size="sm"
                         onClick={() => {
@@ -700,8 +719,12 @@ export default function ReceivablesPage() {
                         <DollarSign className="h-4 w-4 mr-1" />
                         Record Payment
                       </Button>
-                    </div>
-                  )}
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => setSelectedSaleDetail(sale)}>
+                      <Eye className="h-4 w-4 mr-1" />
+                      View Details
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))
@@ -1003,6 +1026,91 @@ export default function ReceivablesPage() {
                 Record Payment
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(selectedCustomerDetail || selectedSaleDetail) && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {selectedCustomerDetail ? selectedCustomerDetail.name : selectedSaleDetail?.receiptNo}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {selectedCustomerDetail ? 'Customer details' : 'Sale details'}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={closeDetails}>
+                Close
+              </Button>
+            </div>
+
+            {selectedCustomerDetail && (
+              <div>
+                <DetailRow label="Status" value={getStatusBadge(selectedCustomerDetail.status)} />
+                <DetailRow label="Phone" value={selectedCustomerDetail.phone} />
+                <DetailRow label="Email" value={selectedCustomerDetail.email} />
+                <DetailRow label="Address" value={selectedCustomerDetail.address} />
+                <DetailRow label="Credit Limit" value={formatCurrency(selectedCustomerDetail.creditLimit)} />
+                <DetailRow label="Balance" value={formatCurrency(selectedCustomerDetail.balance)} />
+                <DetailRow
+                  label="Available Credit"
+                  value={formatCurrency(selectedCustomerDetail.creditLimit - selectedCustomerDetail.balance)}
+                />
+                <DetailRow label="Trust Score" value={`${selectedCustomerDetail.trustScore}/100`} />
+                <DetailRow label="Notes" value={selectedCustomerDetail.notes} />
+              </div>
+            )}
+
+            {selectedSaleDetail && (
+              <div className="space-y-5">
+                <div>
+                  <DetailRow label="Customer" value={selectedSaleDetail.customer?.name || 'Walk-in customer'} />
+                  <DetailRow label="Status" value={getPaymentStatusBadge(selectedSaleDetail.paymentStatus)} />
+                  <DetailRow label="Payment Method" value={selectedSaleDetail.paymentMethod} />
+                  <DetailRow label="Subtotal" value={formatCurrency(Number(selectedSaleDetail.subtotal || 0))} />
+                  <DetailRow label="Tax" value={formatCurrency(Number(selectedSaleDetail.tax || 0))} />
+                  <DetailRow label="Discount" value={formatCurrency(Number(selectedSaleDetail.discount || 0))} />
+                  <DetailRow label="Total" value={formatCurrency(Number(selectedSaleDetail.total || 0))} />
+                  <DetailRow label="Amount Paid" value={formatCurrency(Number(selectedSaleDetail.amountPaid || 0))} />
+                  <DetailRow label="Balance" value={formatCurrency(Number(selectedSaleDetail.balance || 0))} />
+                  <DetailRow
+                    label="Due Date"
+                    value={selectedSaleDetail.dueDate ? new Date(selectedSaleDetail.dueDate).toLocaleDateString() : 'Not set'}
+                  />
+                  <DetailRow label="Recorded By" value={formatUserName(selectedSaleDetail.user || selectedSaleDetail.User)} />
+                  <DetailRow label="Created" value={new Date(selectedSaleDetail.createdAt).toLocaleString()} />
+                  <DetailRow label="Notes" value={selectedSaleDetail.notes} />
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold">Items</h4>
+                  <div className="space-y-2">
+                    {selectedSaleDetail.items?.length ? (
+                      selectedSaleDetail.items.map((item: any, index: number) => (
+                        <div key={`${item.product?.id || index}-${index}`} className="rounded-md border p-3 text-sm">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="font-medium">{item.product?.name || 'Product'}</p>
+                              <p className="text-xs text-muted-foreground">{item.product?.sku || 'No SKU'}</p>
+                            </div>
+                            <p className="font-semibold">{formatCurrency(Number(item.total || 0))}</p>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Qty {item.quantity} x {formatCurrency(Number(item.price || 0))}
+                            {Number(item.discount || 0) > 0 ? `, discount ${formatCurrency(Number(item.discount || 0))}` : ''}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No items found for this sale.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

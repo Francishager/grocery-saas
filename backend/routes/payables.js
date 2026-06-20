@@ -18,6 +18,14 @@ const paymentStatusFor = (total, amountPaid) => {
   return 'unpaid'
 }
 
+const userSelect = { select: { id: true, fname: true, lname: true } }
+
+const withUser = (record) => {
+  if (!record) return record
+  const { User, ...rest } = record
+  return { ...rest, user: User || record.user || null }
+}
+
 // === SUPPLIERS ===
 
 // Get all suppliers for tenant
@@ -167,7 +175,7 @@ router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'ac
         take: Number(limit),
         include: {
           supplier: true,
-          user: { select: { id: true, fname: true, lname: true } },
+          User: userSelect,
           items: {
             include: {
               product: { select: { id: true, name: true, sku: true } }
@@ -180,7 +188,7 @@ router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'ac
     ])
 
     res.json({
-      purchases,
+      purchases: purchases.map(withUser),
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -269,7 +277,7 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
       },
       include: {
         supplier: true,
-        user: { select: { id: true, fname: true, lname: true } }
+        User: userSelect
       }
     })
 
@@ -297,7 +305,7 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
       })
     }
 
-    res.status(201).json(purchase)
+    res.status(201).json(withUser(purchase))
   } catch (error) {
     console.error('Create purchase error:', error)
     res.status(500).json({ error: 'Failed to create purchase' })
@@ -446,26 +454,35 @@ router.get('/payables/summary', authenticateToken, requireRole(['owner', 'manage
       // Aging report
       prisma.$queryRaw`
         SELECT 
-          supplier_id,
+          supplier_purchases."supplierId" as supplier_id,
           suppliers.name as supplier_name,
           suppliers.phone,
-          SUM(balance) as total_owed,
-          COUNT(*) as overdue_purchases,
-          MAX(due_date) as latest_due
+          SUM(supplier_purchases.balance) as total_owed,
+          COUNT(*)::int as overdue_purchases,
+          MAX(supplier_purchases."dueDate") as latest_due
         FROM supplier_purchases
-        JOIN suppliers ON supplier_purchases.supplier_id = suppliers.id
-        WHERE supplier_purchases.tenant_id = ${req.tenant.id}
-          AND payment_status = 'unpaid'
-          AND balance > 0
-        GROUP BY supplier_id, suppliers.name, suppliers.phone
+        JOIN suppliers ON supplier_purchases."supplierId" = suppliers.id
+        WHERE supplier_purchases."tenantId" = ${req.tenant.id}
+          AND supplier_purchases."paymentStatus" = 'unpaid'
+          AND supplier_purchases.balance > 0
+        GROUP BY supplier_purchases."supplierId", suppliers.name, suppliers.phone
         ORDER BY total_owed DESC
       `
     ])
 
+    const agingReportRows = agingReport.map((row) => ({
+      supplier_id: row.supplier_id,
+      supplier_name: row.supplier_name,
+      phone: row.phone,
+      total_owed: Number(row.total_owed || 0),
+      overdue_purchases: Number(row.overdue_purchases || 0),
+      latest_due: row.latest_due
+    }))
+
     res.json({
       totalPayables: totalPayables._sum.balance || 0,
       overdueCount,
-      agingReport
+      agingReport: agingReportRows
     })
   } catch (error) {
     console.error('Payables summary error:', error)

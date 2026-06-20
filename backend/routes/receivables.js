@@ -18,6 +18,14 @@ const paymentStatusFor = (total, amountPaid) => {
   return 'unpaid'
 }
 
+const userSelect = { select: { id: true, fname: true, lname: true } }
+
+const withUser = (record) => {
+  if (!record) return record
+  const { User, ...rest } = record
+  return { ...rest, user: User || record.user || null }
+}
+
 // === CUSTOMERS ===
 
 // Get all customers for tenant
@@ -170,7 +178,7 @@ router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accoun
         take: Number(limit),
         include: {
           customer: true,
-          user: { select: { id: true, fname: true, lname: true } },
+          User: userSelect,
           items: {
             include: {
               product: { select: { id: true, name: true, sku: true } }
@@ -183,7 +191,7 @@ router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accoun
     ])
 
     res.json({
-      sales,
+      sales: sales.map(withUser),
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -293,7 +301,7 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
       },
       include: {
         customer: true,
-        user: { select: { id: true, fname: true, lname: true } }
+        User: userSelect
       }
     })
 
@@ -321,7 +329,7 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
       })
     }
 
-    res.status(201).json(sale)
+    res.status(201).json(withUser(sale))
   } catch (error) {
     console.error('Create sale error:', error)
     res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed to create sale' })
@@ -470,26 +478,35 @@ router.get('/receivables/summary', authenticateToken, requireRole(['owner', 'man
       // Aging report
       prisma.$queryRaw`
         SELECT 
-          customer_id,
+          sale_records."customerId" as customer_id,
           customers.name as customer_name,
           customers.phone,
-          SUM(balance) as total_owed,
-          COUNT(*) as overdue_invoices,
-          MAX(due_date) as latest_due
+          SUM(sale_records.balance) as total_owed,
+          COUNT(*)::int as overdue_invoices,
+          MAX(sale_records."dueDate") as latest_due
         FROM sale_records
-        JOIN customers ON sale_records.customer_id = customers.id
-        WHERE sale_records.tenant_id = ${req.tenant.id}
-          AND payment_status = 'unpaid'
-          AND balance > 0
-        GROUP BY customer_id, customers.name, customers.phone
+        JOIN customers ON sale_records."customerId" = customers.id
+        WHERE sale_records."tenantId" = ${req.tenant.id}
+          AND sale_records."paymentStatus" = 'unpaid'
+          AND sale_records.balance > 0
+        GROUP BY sale_records."customerId", customers.name, customers.phone
         ORDER BY total_owed DESC
       `
     ])
 
+    const agingReportRows = agingReport.map((row) => ({
+      customer_id: row.customer_id,
+      customer_name: row.customer_name,
+      phone: row.phone,
+      total_owed: Number(row.total_owed || 0),
+      overdue_invoices: Number(row.overdue_invoices || 0),
+      latest_due: row.latest_due
+    }))
+
     res.json({
       totalReceivables: totalReceivables._sum.balance || 0,
       overdueCount,
-      agingReport
+      agingReport: agingReportRows
     })
   } catch (error) {
     console.error('Receivables summary error:', error)
