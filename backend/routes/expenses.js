@@ -7,6 +7,70 @@ import { authenticateToken, requireRole, requireTenant } from '../middleware/aut
 const router = express.Router()
 const prisma = new PrismaClient()
 
+const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
+  cash: { name: 'Cash Box', type: 'cash' },
+  mobile_money: { name: 'Mobile Money', type: 'mobile_money' },
+  bank_transfer: { name: 'Bank Account', type: 'bank' },
+  card: { name: 'Card Payments', type: 'card' }
+}
+
+const DEFAULT_CASH_ACCOUNTS = [
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash,
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.mobile_money,
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.bank_transfer,
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.card
+]
+
+const toMoney = (value, fallback = 0) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+const accountForPaymentMethod = (paymentMethod) =>
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD[paymentMethod] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
+
+async function ensureDefaultCashAccounts(tenantId, client = prisma) {
+  await Promise.all(
+    DEFAULT_CASH_ACCOUNTS.map((account) =>
+      client.cashAccount.upsert({
+        where: {
+          tenantId_name: {
+            tenantId,
+            name: account.name
+          }
+        },
+        update: { type: account.type, isActive: true },
+        create: {
+          tenantId,
+          name: account.name,
+          type: account.type,
+          currency: 'UGX'
+        }
+      })
+    )
+  )
+}
+
+async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = prisma) {
+  const account = accountForPaymentMethod(paymentMethod)
+
+  return client.cashAccount.upsert({
+    where: {
+      tenantId_name: {
+        tenantId,
+        name: account.name
+      }
+    },
+    update: { type: account.type, isActive: true },
+    create: {
+      tenantId,
+      name: account.name,
+      type: account.type,
+      currency: 'UGX'
+    }
+  })
+}
+
 // === EXPENSES ===
 
 // Get all expenses for tenant
@@ -67,21 +131,55 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
       date 
     } = req.body
 
-    const expense = await prisma.expense.create({
-      data: {
-        tenantId: req.tenant.id,
-        category,
-        description,
-        amount,
-        paymentMethod,
-        reference,
-        notes,
-        userId: req.user.id,
-        date: date ? new Date(date) : new Date()
-      },
-      include: {
-        user: { select: { id: true, fname: true, lname: true } }
-      }
+    const amountValue = toMoney(amount)
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+
+    if (!category?.trim()) return res.status(400).json({ error: 'Expense category is required' })
+    if (!description?.trim()) return res.status(400).json({ error: 'Expense description is required' })
+    if (amountValue <= 0) return res.status(400).json({ error: 'Expense amount must be greater than zero' })
+
+    const expense = await prisma.$transaction(async (tx) => {
+      const createdExpense = await tx.expense.create({
+        data: {
+          tenantId: req.tenant.id,
+          category: category.trim(),
+          description: description.trim(),
+          amount: amountValue,
+          paymentMethod: resolvedPaymentMethod,
+          reference,
+          notes,
+          userId: req.user.id,
+          date: date ? new Date(date) : new Date()
+        },
+        include: {
+          user: { select: { id: true, fname: true, lname: true } }
+        }
+      })
+
+      const account = await cashAccountForPaymentMethod(req.tenant.id, resolvedPaymentMethod, tx)
+      const updatedAccount = await tx.cashAccount.update({
+        where: { id: account.id },
+        data: {
+          balance: {
+            decrement: amountValue
+          }
+        }
+      })
+
+      await tx.cashTransaction.create({
+        data: {
+          tenantId: req.tenant.id,
+          accountId: account.id,
+          type: 'expense',
+          amount: amountValue,
+          balanceAfter: updatedAccount.balance,
+          reference: reference || createdExpense.id,
+          description: createdExpense.description,
+          userId: req.user.id
+        }
+      })
+
+      return createdExpense
     })
 
     res.status(201).json(expense)
@@ -134,6 +232,8 @@ router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 
 // Get all cash accounts
 router.get('/cash-accounts', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    await ensureDefaultCashAccounts(req.tenant.id)
+
     const accounts = await prisma.cashAccount.findMany({
       where: {
         tenantId: req.tenant.id,
@@ -237,6 +337,7 @@ router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manag
 router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
     const { startDate, endDate } = req.query
+    await ensureDefaultCashAccounts(req.tenant.id)
 
     const dateFilter = startDate && endDate ? {
       createdAt: {

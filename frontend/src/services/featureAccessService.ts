@@ -28,6 +28,10 @@ export interface UsageLimits {
 }
 
 const FEATURE_ALIASES: Record<string, string[]> = {
+  credit: ['customers', 'receivables'],
+  receivables: ['credit', 'customers'],
+  suppliers: ['payables'],
+  payables: ['suppliers'],
   pos_sales: ['pos', 'sales'],
   sales_tracking: ['sales'],
   invoice_generation: ['sales'],

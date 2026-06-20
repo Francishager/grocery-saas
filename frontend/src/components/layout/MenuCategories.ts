@@ -43,7 +43,7 @@ export const dashboardMenuCategories: MenuCategory[] = [
   },
   {
     id: 'sales',
-    label: 'Sales & Purchases',
+    label: 'Sales',
     items: [
       {
         id: 'sales',
@@ -52,12 +52,6 @@ export const dashboardMenuCategories: MenuCategory[] = [
         icon: 'ShoppingCart',
         badge: 5,
         badgeColor: 'success',
-      },
-      {
-        id: 'purchases',
-        label: 'Purchases',
-        path: '/purchases',
-        icon: 'Package',
       },
       {
         id: 'pos',

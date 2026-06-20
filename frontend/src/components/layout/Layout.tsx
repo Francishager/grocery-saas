@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Package,
-  FileText,
   TrendingUp,
   Settings,
   LogOut,
@@ -24,7 +23,6 @@ const businessNavItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'manager', 'accountant', 'attendant'], feature: 'pos' },
   { to: '/sales', label: 'Sales', icon: ShoppingCart, roles: ['owner', 'manager', 'attendant'], feature: 'pos' },
   { to: '/inventory', label: 'Inventory', icon: Package, roles: ['owner', 'manager', 'accountant'], feature: 'inventory' },
-  { to: '/purchases', label: 'Purchases', icon: FileText, roles: ['owner', 'manager', 'accountant'], feature: 'inventory' },
   { to: '/reports', label: 'Reports', icon: TrendingUp, roles: ['owner', 'accountant'], feature: 'reports' },
 ]
 

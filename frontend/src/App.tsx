@@ -17,7 +17,6 @@ import UnauthorizedPage from '@/pages/auth/UnauthorizedPage'
 import DashboardPage from '@/pages/DashboardPage'
 import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
-import PurchasesPage from '@/pages/PurchasesPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import AdminPage from '@/pages/admin/AdminPage'
@@ -109,7 +108,7 @@ function App() {
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="sales" element={<SalesPage />} />
           <Route path="inventory" element={<InventoryPage />} />
-          <Route path="purchases" element={<PurchasesPage />} />
+          <Route path="purchases" element={<Navigate to="/tenant/payables" replace />} />
           <Route path="receivables" element={<ReceivablesPage />} />
           <Route path="payables" element={<PayablesPage />} />
           <Route path="expenses" element={<ExpensesPage />} />

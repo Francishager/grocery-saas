@@ -4,10 +4,54 @@ import { authenticateToken, requireRole } from "../../middleware/auth.js";
 
 const router = Router();
 
+const DEFAULT_CATEGORIES = [
+  { name: "Groceries", slug: "groceries" },
+  { name: "Beverages", slug: "beverages" },
+  { name: "Dairy Products", slug: "dairy-products" },
+  { name: "Bakery", slug: "bakery" },
+  { name: "Snacks", slug: "snacks" },
+  { name: "Fruits", slug: "fruits" },
+  { name: "Vegetables", slug: "vegetables" },
+  { name: "Meat & Poultry", slug: "meat-poultry" },
+  { name: "Frozen Foods", slug: "frozen-foods" },
+  { name: "Household Items", slug: "household-items" },
+  { name: "Personal Care", slug: "personal-care" },
+  { name: "Baby Products", slug: "baby-products" },
+  { name: "Cleaning Supplies", slug: "cleaning-supplies" },
+  { name: "Stationery", slug: "stationery" },
+  { name: "Hardware", slug: "hardware" },
+  { name: "Electronics", slug: "electronics" },
+  { name: "Other", slug: "other" },
+];
+
+const tenantIdFromUser = (user) => user?.tenantId || user?.tenant_id || user?.business_id;
+
+const slugify = (value = "") =>
+  String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+async function ensureTenantCategories(tenantId) {
+  if (!tenantId) return;
+
+  const count = await prisma.category.count({ where: { tenantId } });
+  if (count > 0) return;
+
+  await prisma.category.createMany({
+    data: DEFAULT_CATEGORIES.map((category) => ({
+      ...category,
+      tenantId,
+    })),
+    skipDuplicates: true,
+  });
+}
+
 // List products
 router.get("/", authenticateToken, async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const tenantId = tenantIdFromUser(req.user);
     const { search, category, page = 1, limit = 100, lowStock, barcode } = req.query;
     const where = { tenantId, isActive: { not: false } };
 
@@ -77,18 +121,32 @@ router.get("/", authenticateToken, async (req, res) => {
 // Categories
 router.get("/categories", authenticateToken, async (req, res) => {
   try {
-    const categories = await prisma.category.findMany({ where: { tenantId: req.user?.tenantId }, orderBy: { name: "asc" } });
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    await ensureTenantCategories(tenantId);
+    const categories = await prisma.category.findMany({ where: { tenantId }, orderBy: { name: "asc" } });
     res.json(categories);
   } catch (err) {
+    console.error("List categories error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 router.post("/categories", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
   try {
-    const category = await prisma.category.create({ data: { ...req.body, tenantId: req.user?.tenantId } });
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Category name is required" });
+
+    const slug = slugify(req.body?.slug || name);
+    const category = await prisma.category.create({ data: { name, slug, tenantId } });
     res.status(201).json({ message: "Category created", category });
   } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "Category already exists" });
+    console.error("Create category error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -107,7 +165,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 // Create product
 router.post("/", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const tenantId = tenantIdFromUser(req.user);
     const product = await prisma.product.create({ data: { ...req.body, tenantId } });
     res.status(201).json({ message: "Product created", product });
   } catch (err) {

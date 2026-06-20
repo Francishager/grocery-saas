@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch } from '@/lib/api'
+import CreateExpenseModal from '@/components/modals/CreateExpenseModal'
 import { 
   Wallet, 
   TrendingUp, 
@@ -82,6 +83,7 @@ export default function ExpensesPage() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
+  const [showExpenseModal, setShowExpenseModal] = useState(false)
   const expensesEnabled = isFeatureEnabled('expenses')
 
   useEffect(() => {
@@ -233,7 +235,7 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold">Expenses & Cash Flow</h1>
           <p className="text-muted-foreground">Track business expenses and manage cash accounts</p>
         </div>
-        <Button onClick={() => window.location.href = '/receivables/expenses/new'}>
+        <Button onClick={() => setShowExpenseModal(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Add Expense
         </Button>
@@ -447,6 +449,17 @@ export default function ExpensesPage() {
           ))}
         </div>
       )}
+
+      <CreateExpenseModal
+        isOpen={showExpenseModal}
+        onClose={() => setShowExpenseModal(false)}
+        onSuccess={() => {
+          loadExpenses()
+          loadCashAccounts()
+          loadTransactions()
+          loadCashFlowSummary()
+        }}
+      />
     </div>
   )
 }

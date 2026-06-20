@@ -96,6 +96,10 @@ export const requireTenant = (req, res, next) => {
       code: 'TENANT_REQUIRED',
     });
   }
+
+  const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+  req.tenant = { id: tenantId };
+  req.tenantId = tenantId;
   
   next();
 };
