@@ -1,15 +1,41 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import {
+  handleBranchError,
+  resolveBranchScope,
+  scopedWhere,
+  tenantIdFromUser,
+} from "../utils/branchAccess.js";
 
 const router = Router();
 
 const DEFAULT_CATEGORIES = [
+  { name: "Electrical Supplies", slug: "electrical-supplies" },
+  { name: "Electric Cables & Wires", slug: "electric-cables-wires" },
+  { name: "Switches & Sockets", slug: "switches-sockets" },
+  { name: "Circuit Breakers", slug: "circuit-breakers" },
+  { name: "Lighting & Bulbs", slug: "lighting-bulbs" },
+  { name: "Mobile Phones", slug: "mobile-phones" },
+  { name: "Mobile Accessories", slug: "mobile-accessories" },
+  { name: "Phone Chargers", slug: "phone-chargers" },
+  { name: "Power Banks", slug: "power-banks" },
+  { name: "Earphones & Headsets", slug: "earphones-headsets" },
+  { name: "Phone Cases", slug: "phone-cases" },
+  { name: "Screen Protectors", slug: "screen-protectors" },
+  { name: "Hardware Tools", slug: "hardware-tools" },
+  { name: "Nails & Screws", slug: "nails-screws" },
+  { name: "Plumbing Accessories", slug: "plumbing-accessories" },
+  { name: "Building Hardware", slug: "building-hardware" },
+  { name: "General Merchandise", slug: "general-merchandise" },
+  { name: "Wholesale Goods", slug: "wholesale-goods" },
+  { name: "Supermarket Essentials", slug: "supermarket-essentials" },
   { name: "Groceries", slug: "groceries" },
   { name: "Beverages", slug: "beverages" },
   { name: "Dairy Products", slug: "dairy-products" },
   { name: "Bakery", slug: "bakery" },
   { name: "Snacks", slug: "snacks" },
+  { name: "Confectionery", slug: "confectionery" },
   { name: "Fruits", slug: "fruits" },
   { name: "Vegetables", slug: "vegetables" },
   { name: "Meat & Poultry", slug: "meat-poultry" },
@@ -18,13 +44,44 @@ const DEFAULT_CATEGORIES = [
   { name: "Personal Care", slug: "personal-care" },
   { name: "Baby Products", slug: "baby-products" },
   { name: "Cleaning Supplies", slug: "cleaning-supplies" },
+  { name: "Laundry Products", slug: "laundry-products" },
   { name: "Stationery", slug: "stationery" },
+  { name: "Books", slug: "books" },
+  { name: "Office Supplies", slug: "office-supplies" },
   { name: "Hardware", slug: "hardware" },
+  { name: "Building Materials", slug: "building-materials" },
+  { name: "Paints", slug: "paints" },
+  { name: "Plumbing", slug: "plumbing" },
+  { name: "Electrical", slug: "electrical" },
   { name: "Electronics", slug: "electronics" },
+  { name: "Phone Accessories", slug: "phone-accessories" },
+  { name: "Computers", slug: "computers" },
+  { name: "Printers", slug: "printers" },
+  { name: "Cosmetics", slug: "cosmetics" },
+  { name: "Beauty Products", slug: "beauty-products" },
+  { name: "Salon Supplies", slug: "salon-supplies" },
+  { name: "Pharmaceuticals", slug: "pharmaceuticals" },
+  { name: "Medical Supplies", slug: "medical-supplies" },
+  { name: "Clothing", slug: "clothing" },
+  { name: "Shoes", slug: "shoes" },
+  { name: "Bags", slug: "bags" },
+  { name: "Fashion Accessories", slug: "fashion-accessories" },
+  { name: "Jewelry", slug: "jewelry" },
+  { name: "Home Appliances", slug: "home-appliances" },
+  { name: "Kitchenware", slug: "kitchenware" },
+  { name: "Furniture", slug: "furniture" },
+  { name: "Bedding", slug: "bedding" },
+  { name: "Pet Supplies", slug: "pet-supplies" },
+  { name: "Agricultural Inputs", slug: "agricultural-inputs" },
+  { name: "Seeds", slug: "seeds" },
+  { name: "Animal Feeds", slug: "animal-feeds" },
+  { name: "Restaurant Supplies", slug: "restaurant-supplies" },
+  { name: "Liquor & Wines", slug: "liquor-wines" },
+  { name: "Water", slug: "water" },
+  { name: "Industrial Supplies", slug: "industrial-supplies" },
+  { name: "Spare Parts", slug: "spare-parts" },
   { name: "Other", slug: "other" },
 ];
-
-const tenantIdFromUser = (user) => user?.tenantId || user?.tenant_id || user?.business_id;
 
 const slugify = (value = "") =>
   String(value)
@@ -51,61 +108,44 @@ async function ensureTenantCategories(tenantId) {
 // List products
 router.get("/", authenticateToken, async (req, res) => {
   try {
-    const tenantId = tenantIdFromUser(req.user);
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const tenantId = scope.tenantId;
     const { search, category, page = 1, limit = 100, lowStock, barcode } = req.query;
-    const where = { tenantId, isActive: { not: false } };
+    const where = scopedWhere(scope, { isActive: { not: false } });
 
     // Barcode exact lookup (highest priority)
     if (barcode) {
       const product = await prisma.product.findFirst({
-        where: { tenantId, barcode, isActive: { not: false } },
-        include: { category: true },
+        where: scopedWhere(scope, { barcode, isActive: { not: false } }),
+        include: { category: true, branch: true },
       });
       return res.json({ products: product ? [product] : [], total: product ? 1 : 0, page: 1, limit: 1 });
     }
 
-    // Full-text fuzzy search using PostgreSQL trigram + ILIKE
     if (search) {
-      const products = await prisma.$queryRaw`
-        SELECT p.*, c.name as "categoryName",
-          similarity(p.name, ${search}) AS sim_score
-        FROM products p
-        LEFT JOIN categories c ON p."categoryId" = c.id
-        WHERE p."tenantId" = ${tenantId}
-          AND p."isActive" = true
-          AND (
-            p.name ILIKE '%' || ${search} || '%'
-            OR p.sku ILIKE '%' || ${search} || '%'
-            OR p.barcode ILIKE '%' || ${search} || '%'
-            OR p.description ILIKE '%' || ${search} || '%'
-            OR similarity(p.name, ${search}) > 0.1
-          )
-        ORDER BY sim_score DESC, p.name ASC
-        LIMIT ${Number(limit)}
-        OFFSET ${(Number(page) - 1) * Number(limit)}
-      `;
-      const countResult = await prisma.$queryRaw`
-        SELECT COUNT(*)::int as total FROM products p
-        WHERE p."tenantId" = ${tenantId}
-          AND p."isActive" = true
-          AND (
-            p.name ILIKE '%' || ${search} || '%'
-            OR p.sku ILIKE '%' || ${search} || '%'
-            OR p.barcode ILIKE '%' || ${search} || '%'
-            OR p.description ILIKE '%' || ${search} || '%'
-            OR similarity(p.name, ${search}) > 0.1
-          )
-      `;
-      const total = countResult[0]?.total || 0;
+      where.OR = [
+        { name: { contains: String(search), mode: "insensitive" } },
+        { sku: { contains: String(search), mode: "insensitive" } },
+        { barcode: { contains: String(search), mode: "insensitive" } },
+        { description: { contains: String(search), mode: "insensitive" } },
+      ];
+      const products = await prisma.product.findMany({
+        where,
+        include: { category: true, branch: true },
+        orderBy: { name: "asc" },
+        skip: (Number(page) - 1) * Number(limit),
+        take: Number(limit),
+      });
+      const total = await prisma.product.count({ where });
       return res.json({ products, total, page: Number(page), limit: Number(limit) });
     }
 
     if (category) where.categoryId = category;
-    if (lowStock === "true") where.quantity = { lte: prisma.product.fields.minStock.default };
+    if (lowStock === "true") where.quantity = { lte: 10 };
 
     const products = await prisma.product.findMany({
       where: { ...where, isActive: { not: false } },
-      include: { category: true },
+      include: { category: true, branch: true },
       orderBy: { name: "asc" },
       skip: (Number(page) - 1) * Number(limit),
       take: Number(limit),
@@ -114,7 +154,7 @@ router.get("/", authenticateToken, async (req, res) => {
     res.json({ products, total, page: Number(page), limit: Number(limit) });
   } catch (err) {
     console.error("List inventory error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 
@@ -154,44 +194,103 @@ router.post("/categories", authenticateToken, requireRole(["owner", "manager"]),
 // Get single product
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
-    const product = await prisma.product.findUnique({ where: { id: req.params.id }, include: { category: true } });
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const product = await prisma.product.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      include: { category: true, branch: true },
+    });
     if (!product) return res.status(404).json({ error: "Product not found" });
     res.json(product);
   } catch (err) {
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 
 // Create product
 router.post("/", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
   try {
-    const tenantId = tenantIdFromUser(req.user);
-    const product = await prisma.product.create({ data: { ...req.body, tenantId } });
+    const scope = await resolveBranchScope(prisma, req, {
+      source: "body",
+      requireBranch: true,
+      allowOwnerAll: false,
+    });
+    const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, ...body } = req.body;
+
+    if (categoryId) {
+      const category = await prisma.category.findFirst({
+        where: { id: categoryId, tenantId: scope.tenantId },
+        select: { id: true },
+      });
+      if (!category) return res.status(400).json({ error: "Category not found" });
+    }
+
+    const product = await prisma.product.create({
+      data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
+      include: { category: true, branch: true },
+    });
     res.status(201).json({ message: "Product created", product });
   } catch (err) {
     console.error("Create product error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    if (err?.code === "P2002") return res.status(409).json({ error: "SKU or barcode already exists in this branch" });
+    handleBranchError(res, err);
   }
 });
 
 // Update product
 router.put("/:id", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
   try {
-    const product = await prisma.product.update({ where: { id: req.params.id }, data: req.body });
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const existing = await prisma.product.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+    });
+    if (!existing) return res.status(404).json({ error: "Product not found" });
+
+    const { tenantId: _tenantId, branchId, id: _id, categoryId, ...body } = req.body;
+    const data = { ...body };
+
+    if (categoryId !== undefined) {
+      if (categoryId) {
+        const category = await prisma.category.findFirst({
+          where: { id: categoryId, tenantId: existing.tenantId },
+          select: { id: true },
+        });
+        if (!category) return res.status(400).json({ error: "Category not found" });
+      }
+      data.categoryId = categoryId || null;
+    }
+
+    if (branchId !== undefined) {
+      const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {
+        source: "body",
+        requireBranch: true,
+        allowOwnerAll: false,
+      });
+      data.branchId = targetScope.branchId;
+    }
+
+    const product = await prisma.product.update({
+      where: { id: existing.id },
+      data,
+      include: { category: true, branch: true },
+    });
     res.json({ message: "Product updated", product });
   } catch (err) {
     console.error("Update product error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    if (err?.code === "P2002") return res.status(409).json({ error: "SKU or barcode already exists in this branch" });
+    handleBranchError(res, err);
   }
 });
 
 // Delete product
 router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res) => {
   try {
-    await prisma.product.update({ where: { id: req.params.id }, data: { isActive: false } });
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    await prisma.product.update({ where: { id: product.id }, data: { isActive: false } });
     res.json({ message: "Product deactivated" });
   } catch (err) {
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 

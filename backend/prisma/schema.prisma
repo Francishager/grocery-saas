@@ -20,6 +20,17 @@ model Branch {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   users UserBranch[]
+  products Product[]
+  sales Sale[]
+  purchases Purchase[]
+  customers Customer[]
+  saleRecords SaleRecord[]
+  customerPayments CustomerPayment[]
+  invoices Invoice[]
+  suppliers Supplier[]
+  supplierPurchases SupplierPurchase[]
+  supplierPayments SupplierPayment[]
+  expenses Expense[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -239,6 +250,8 @@ model Product {
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id])
   tenantId    String
+  branchId    String?
+  branch      Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   isActive    Boolean   @default(true)
   image       String?
   createdAt   DateTime  @default(now())
@@ -252,8 +265,9 @@ model Product {
   saleRecordItems       SaleRecordItem[]
   supplierPurchaseItems SupplierPurchaseItem[]
 
-  @@unique([tenantId, sku])
-  @@unique([tenantId, barcode])
+  @@unique([tenantId, branchId, sku])
+  @@unique([tenantId, branchId, barcode])
+  @@index([tenantId, branchId])
   @@map("products")
 }
 
@@ -294,6 +308,8 @@ model Sale {
   id            String     @id @default(cuid())
   receiptNo     String
   tenantId      String
+  branchId      String?
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
   userId        String
   user          User       @relation(fields: [userId], references: [id])
   total         Float
@@ -308,6 +324,7 @@ model Sale {
   updatedAt     DateTime   @updatedAt
 
   @@unique([tenantId, receiptNo])
+  @@index([tenantId, branchId])
   @@map("sales")
 }
 
@@ -339,6 +356,8 @@ model Purchase {
   id            String         @id @default(cuid())
   refNo         String?
   tenantId      String
+  branchId      String?
+  branch        Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   userId        String
   user          User           @relation(fields: [userId], references: [id])
   supplier      String?
@@ -349,6 +368,7 @@ model Purchase {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  @@index([tenantId, branchId])
   @@map("purchases")
 }
 
@@ -379,6 +399,8 @@ model Customer {
   phone       String?
   address     String?
   tenantId    String
+  branchId    String?
+  branch      Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   creditLimit Float          @default(0)
   balance     Float          @default(0) // Current outstanding balance
   status      CustomerStatus @default(active)
@@ -392,7 +414,8 @@ model Customer {
   invoices Invoice[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
-  @@unique([tenantId, phone])
+  @@unique([tenantId, branchId, phone])
+  @@index([tenantId, branchId])
   @@map("customers")
 }
 
@@ -407,6 +430,8 @@ model SaleRecord {
   id            String            @id @default(cuid())
   receiptNo     String
   tenantId      String
+  branchId      String?
+  branch        Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId    String?
   customer      Customer?         @relation(fields: [customerId], references: [id])
   userId        String
@@ -428,6 +453,7 @@ model SaleRecord {
   User          User              @relation(fields: [userId], references: [id])
 
   @@unique([tenantId, receiptNo])
+  @@index([tenantId, branchId])
   @@map("sale_records")
 }
 
@@ -465,6 +491,8 @@ model SaleRecordItem {
 model CustomerPayment {
   id            String      @id @default(cuid())
   tenantId      String
+  branchId      String?
+  branch        Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId    String
   customer      Customer    @relation(fields: [customerId], references: [id])
   saleId        String?
@@ -475,6 +503,7 @@ model CustomerPayment {
   notes         String?
   createdAt     DateTime    @default(now())
 
+  @@index([tenantId, branchId])
   @@map("customer_payments")
 }
 
@@ -483,6 +512,8 @@ model Invoice {
   id         String        @id @default(cuid())
   invoiceNo  String
   tenantId   String
+  branchId   String?
+  branch     Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId String
   customer   Customer      @relation(fields: [customerId], references: [id])
   saleId     String?
@@ -497,6 +528,7 @@ model Invoice {
   updatedAt  DateTime      @updatedAt
 
   @@unique([tenantId, invoiceNo])
+  @@index([tenantId, branchId])
   @@map("invoices")
 }
 
@@ -522,6 +554,8 @@ model Supplier {
   phone     String?
   address   String?
   tenantId  String
+  branchId  String?
+  branch    Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   balance   Float          @default(0) // Amount owed to supplier
   status    SupplierStatus @default(active)
   notes     String?
@@ -532,7 +566,8 @@ model Supplier {
   payments  SupplierPayment[]
   Tenant    Tenant             @relation(fields: [tenantId], references: [id])
 
-  @@unique([tenantId, phone])
+  @@unique([tenantId, branchId, phone])
+  @@index([tenantId, branchId])
   @@map("suppliers")
 }
 
@@ -547,6 +582,8 @@ model SupplierPurchase {
   id            String                 @id @default(cuid())
   refNo         String?
   tenantId      String
+  branchId      String?
+  branch        Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
   supplierId    String
   supplier      Supplier               @relation(fields: [supplierId], references: [id])
   userId        String
@@ -562,6 +599,7 @@ model SupplierPurchase {
   updatedAt     DateTime               @updatedAt
   User          User                   @relation(fields: [userId], references: [id])
 
+  @@index([tenantId, branchId])
   @@map("supplier_purchases")
 }
 
@@ -584,6 +622,8 @@ model SupplierPurchaseItem {
 model SupplierPayment {
   id            String            @id @default(cuid())
   tenantId      String
+  branchId      String?
+  branch        Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   supplierId    String
   supplier      Supplier          @relation(fields: [supplierId], references: [id])
   purchaseId    String?
@@ -594,6 +634,7 @@ model SupplierPayment {
   notes         String?
   createdAt     DateTime          @default(now())
 
+  @@index([tenantId, branchId])
   @@map("supplier_payments")
 }
 
@@ -604,6 +645,8 @@ model SupplierPayment {
 model Expense {
   id            String   @id @default(cuid())
   tenantId      String
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   category      String // rent, transport, salaries, utilities, etc.
   description   String
   amount        Float
@@ -617,6 +660,7 @@ model Expense {
   Tenant        Tenant   @relation(fields: [tenantId], references: [id])
   User          User     @relation(fields: [userId], references: [id])
 
+  @@index([tenantId, branchId])
   @@map("expenses")
 }
 

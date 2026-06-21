@@ -17,6 +17,7 @@ import crudRoutes from "./routes/crud.js";
 import auditRoutes from "./routes/audit.js";
 import receiptRoutes from "./routes/receipts.js";
 import branchRoutes from "./routes/branches.js";
+import staffRoutes from "./routes/staff.js";
 
 import receivablesRouter from "../routes/receivables.js";
 import payablesRouter from "../routes/payables.js";
@@ -118,6 +119,7 @@ app.use("/api/admin/crud", crudRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/receipts", receiptRoutes);
 app.use("/api/branches", branchRoutes);
+app.use("/api/staff", staffRoutes);
 
 // Legacy feature routes
 app.use("/api/receivables", receivablesRouter);

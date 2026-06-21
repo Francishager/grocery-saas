@@ -8,13 +8,80 @@ import { sendMail } from "../../mailer.js";
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
+function permissionsForUser(user) {
+  if (user.role === "saas_admin") return ["*"];
+
+  const common = ["view_dashboard"];
+  const byRole = {
+    owner: [
+      "view_sales", "create_sales", "edit_sales", "delete_sales", "refund_sales",
+      "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
+      "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock", "delete_inventory",
+      "view_reports", "export_reports",
+      "view_users", "manage_users", "assign_roles",
+      "view_branches", "manage_branches",
+      "view_settings", "manage_settings", "view_own_billing",
+    ],
+    manager: [
+      "view_sales", "create_sales", "edit_sales", "refund_sales",
+      "view_purchases", "create_purchases", "edit_purchases",
+      "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock",
+      "view_reports", "export_reports",
+      "view_users",
+      "view_branches",
+      "view_settings",
+    ],
+    accountant: [
+      "view_sales",
+      "view_purchases", "create_purchases", "edit_purchases",
+      "view_inventory",
+      "view_reports", "export_reports",
+      "view_branches",
+    ],
+    attendant: [
+      "view_sales", "create_sales",
+      "view_inventory",
+    ],
+  };
+
+  return [...common, ...(byRole[user.role] || byRole.attendant)];
+}
+
+function primaryBranchId(user) {
+  const primary = user.branches?.find((item) => item.isPrimary) || user.branches?.[0];
+  return primary?.branchId || null;
+}
+
+function userPayload(user) {
+  const isPlatformUser = user.role === "saas_admin";
+  const permissions = permissionsForUser(user);
+  return {
+    id: user.id,
+    email: user.email,
+    name: `${user.fname || ""} ${user.lname || ""}`.trim(),
+    fname: user.fname,
+    lname: user.lname,
+    role: user.role,
+    tenantId: user.tenantId,
+    branchId: primaryBranchId(user),
+    isPlatformUser,
+    permissions,
+  };
+}
+
 // Login
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: "Email and password required" });
 
-    const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: {
+        tenant: true,
+        branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
+    });
     if (!user || !user.isActive) return res.status(401).json({ message: "Invalid credentials" });
 
     const match = await bcrypt.compare(password, user.password);
@@ -38,18 +105,8 @@ router.post("/login", async (req, res) => {
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
 
-    const isPlatformUser = user.role === "saas_admin";
-    const permissions = isPlatformUser
-      ? ["*"]
-      : ["view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales", "refund_sales",
-         "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
-         "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock",
-         "view_reports", "export_reports",
-         "view_users", "manage_users", "assign_roles",
-         "view_settings", "manage_settings", "view_own_billing"];
-
     res.json({
-      user: { id: user.id, email: user.email, name: `${user.fname || ""} ${user.lname || ""}`.trim(), role: user.role, tenantId: user.tenantId, isPlatformUser, permissions },
+      user: userPayload(user),
       tokens: { accessToken, refreshToken, expiresIn: 86400, tokenType: "Bearer" },
     });
   } catch (err) {
@@ -91,19 +148,16 @@ router.post("/register", async (req, res) => {
 // Me
 router.get("/me", authenticateToken, async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id }, include: { tenant: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        tenant: true,
+        branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
+    });
     if (!user) return res.status(404).json({ error: "User not found" });
     const { password: _, ...safe } = user;
-    const isPlatformUser = user.role === "saas_admin";
-    const permissions = isPlatformUser
-      ? ["*"]
-      : ["view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales", "refund_sales",
-         "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
-         "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock",
-         "view_reports", "export_reports",
-         "view_users", "manage_users", "assign_roles",
-         "view_settings", "manage_settings", "view_own_billing"];
-    res.json({ user: { ...safe, isPlatformUser, permissions } });
+    res.json({ user: { ...safe, ...userPayload(user) } });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }

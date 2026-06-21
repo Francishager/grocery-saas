@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
+import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -31,11 +32,11 @@ const withUser = (record) => {
 // Get all customers for tenant
 router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, search, status } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(status && status !== 'all' && { status }),
       ...(search && {
         OR: [
@@ -44,7 +45,7 @@ router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'ac
           { email: { contains: search, mode: 'insensitive' } }
         ]
       })
-    }
+    })
 
     const [customers, total] = await Promise.all([
       prisma.customer.findMany({
@@ -67,13 +68,18 @@ router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'ac
     })
   } catch (error) {
     console.error('Get customers error:', error)
-    res.status(500).json({ error: 'Failed to fetch customers' })
+    handleBranchError(res, error, 'Failed to fetch customers')
   }
 })
 
 // Create new customer
 router.post('/customers', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { name, email, phone, address, creditLimit = 0, notes } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })
@@ -83,7 +89,8 @@ router.post('/customers', authenticateToken, requireRole(['owner', 'manager']), 
     if (phone?.trim()) {
       const existingCustomer = await prisma.customer.findFirst({
         where: {
-          tenantId: req.tenant.id,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
           phone
         }
       })
@@ -101,53 +108,63 @@ router.post('/customers', authenticateToken, requireRole(['owner', 'manager']), 
         address,
         creditLimit: toMoney(creditLimit),
         notes,
-        tenantId: req.tenant.id
+        tenantId: scope.tenantId,
+        branchId: scope.branchId
       }
     })
 
     res.status(201).json(customer)
   } catch (error) {
     console.error('Create customer error:', error)
-    res.status(500).json({ error: 'Failed to create customer' })
+    handleBranchError(res, error, 'Failed to create customer')
   }
 })
 
 // Update customer
 router.put('/customers/:id', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { name, email, phone, address, creditLimit, status, trustScore, notes } = req.body
+    const { name, email, phone, address, creditLimit, status, trustScore, notes, branchId } = req.body
 
     // Check if customer belongs to tenant
     const existingCustomer = await prisma.customer.findFirst({
-      where: {
-        id,
-        tenantId: req.tenant.id
-      }
+      where: scopedWhere(scope, { id })
     })
 
     if (!existingCustomer) {
       return res.status(404).json({ error: 'Customer not found' })
     }
 
+    const data = {
+      name,
+      email,
+      phone,
+      address,
+      creditLimit,
+      status,
+      trustScore,
+      notes
+    }
+
+    if (branchId !== undefined) {
+      const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {
+        source: 'body',
+        requireBranch: true,
+        allowOwnerAll: false
+      })
+      data.branchId = targetScope.branchId
+    }
+
     const customer = await prisma.customer.update({
       where: { id },
-      data: {
-        name,
-        email,
-        phone,
-        address,
-        creditLimit,
-        status,
-        trustScore,
-        notes
-      }
+      data
     })
 
     res.json(customer)
   } catch (error) {
     console.error('Update customer error:', error)
-    res.status(500).json({ error: 'Failed to update customer' })
+    handleBranchError(res, error, 'Failed to update customer')
   }
 })
 
@@ -156,11 +173,11 @@ router.put('/customers/:id', authenticateToken, requireRole(['owner', 'manager']
 // Get all sales records
 router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accountant', 'attendant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, customerId, paymentStatus, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(customerId && { customerId }),
       ...(paymentStatus && { paymentStatus }),
       ...(startDate && endDate && {
@@ -169,7 +186,7 @@ router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accoun
           lte: new Date(endDate)
         }
       })
-    }
+    })
 
     const [sales, total] = await Promise.all([
       prisma.saleRecord.findMany({
@@ -178,6 +195,7 @@ router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accoun
         take: Number(limit),
         include: {
           customer: true,
+          branch: true,
           User: userSelect,
           items: {
             include: {
@@ -201,13 +219,18 @@ router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accoun
     })
   } catch (error) {
     console.error('Get sales error:', error)
-    res.status(500).json({ error: 'Failed to fetch sales' })
+    handleBranchError(res, error, 'Failed to fetch sales')
   }
 })
 
 // Create new sale (credit or cash)
 router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accountant', 'attendant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { 
       customerId, 
       items, 
@@ -225,7 +248,7 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one sale item is required' })
 
     const customer = await prisma.customer.findFirst({
-      where: { id: customerId, tenantId: req.tenant.id }
+      where: scopedWhere(scope, { id: customerId })
     })
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
@@ -233,7 +256,7 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
 
     const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, tenantId: req.tenant.id, isActive: { not: false } }
+      where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } })
     })
     const productsById = new Map(products.map((product) => [product.id, product]))
     if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
@@ -285,7 +308,8 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
     const sale = await prisma.saleRecord.create({
       data: {
         receiptNo,
-        tenantId: req.tenant.id,
+        tenantId: scope.tenantId,
+        branchId: scope.branchId,
         userId: req.user.id,
         customerId,
         subtotal: subtotal !== undefined ? toMoney(subtotal) : computedSubtotal,
@@ -301,6 +325,7 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
       },
       include: {
         customer: true,
+        branch: true,
         User: userSelect
       }
     })
@@ -332,7 +357,8 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
     res.status(201).json(withUser(sale))
   } catch (error) {
     console.error('Create sale error:', error)
-    res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed to create sale' })
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to create sale')
   }
 })
 
@@ -341,11 +367,11 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
 // Get customer payments
 router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, customerId, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(customerId && { customerId }),
       ...(startDate && endDate && {
         createdAt: {
@@ -353,7 +379,7 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
           lte: new Date(endDate)
         }
       })
-    }
+    })
 
     const [payments, total] = await Promise.all([
       prisma.customerPayment.findMany({
@@ -380,13 +406,18 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
     })
   } catch (error) {
     console.error('Get payments error:', error)
-    res.status(500).json({ error: 'Failed to fetch payments' })
+    handleBranchError(res, error, 'Failed to fetch payments')
   }
 })
 
 // Record customer payment
 router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { customerId, saleId, amount, paymentMethod, reference, notes } = req.body
     const paidAmount = toMoney(amount)
     if (!customerId) return res.status(400).json({ error: 'Customer is required' })
@@ -394,7 +425,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
 
     // Get customer
     const customer = await prisma.customer.findFirst({
-      where: { id: customerId, tenantId: req.tenant.id }
+      where: scopedWhere(scope, { id: customerId })
     })
 
     if (!customer) {
@@ -404,7 +435,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     let sale = null
     if (saleId) {
       sale = await prisma.saleRecord.findFirst({
-        where: { id: saleId, customerId, tenantId: req.tenant.id }
+        where: scopedWhere(scope, { id: saleId, customerId })
       })
       if (!sale) return res.status(404).json({ error: 'Sale not found for this customer' })
       if (paidAmount > sale.balance) return res.status(400).json({ error: 'Payment exceeds sale balance' })
@@ -415,7 +446,8 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     // Create payment
     const payment = await prisma.customerPayment.create({
       data: {
-        tenantId: req.tenant.id,
+        tenantId: scope.tenantId,
+        branchId: scope.branchId,
         customerId,
         saleId,
         amount: paidAmount,
@@ -450,7 +482,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     res.status(201).json(payment)
   } catch (error) {
     console.error('Record payment error:', error)
-    res.status(500).json({ error: 'Failed to record payment' })
+    handleBranchError(res, error, 'Failed to record payment')
   }
 })
 
@@ -459,49 +491,57 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
 // Get receivables summary
 router.get('/receivables/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
-    const [totalReceivables, overdueCount, agingReport] = await Promise.all([
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const receivableWhere = scopedWhere(scope)
+    const saleWhere = scopedWhere(scope, {
+      paymentStatus: 'unpaid',
+      balance: { gt: 0 }
+    })
+
+    const [totalReceivables, overdueCount, agingSales] = await Promise.all([
       // Total amount owed
       prisma.customer.aggregate({
-        where: { tenantId: req.tenant.id },
+        where: receivableWhere,
         _sum: { balance: true }
       }),
       
       // Overdue customers count
       prisma.saleRecord.count({
-        where: {
-          tenantId: req.tenant.id,
+        where: scopedWhere(scope, {
           paymentStatus: 'unpaid',
           dueDate: { lt: new Date() }
-        }
+        })
       }),
 
       // Aging report
-      prisma.$queryRaw`
-        SELECT 
-          sale_records."customerId" as customer_id,
-          customers.name as customer_name,
-          customers.phone,
-          SUM(sale_records.balance) as total_owed,
-          COUNT(*)::int as overdue_invoices,
-          MAX(sale_records."dueDate") as latest_due
-        FROM sale_records
-        JOIN customers ON sale_records."customerId" = customers.id
-        WHERE sale_records."tenantId" = ${req.tenant.id}
-          AND sale_records."paymentStatus" = 'unpaid'
-          AND sale_records.balance > 0
-        GROUP BY sale_records."customerId", customers.name, customers.phone
-        ORDER BY total_owed DESC
-      `
+      prisma.saleRecord.findMany({
+        where: saleWhere,
+        include: { customer: { select: { id: true, name: true, phone: true } } },
+        orderBy: { balance: 'desc' }
+      })
     ])
 
-    const agingReportRows = agingReport.map((row) => ({
-      customer_id: row.customer_id,
-      customer_name: row.customer_name,
-      phone: row.phone,
-      total_owed: Number(row.total_owed || 0),
-      overdue_invoices: Number(row.overdue_invoices || 0),
-      latest_due: row.latest_due
-    }))
+    const agingByCustomer = new Map()
+    agingSales.forEach((sale) => {
+      if (!sale.customerId) return
+      const current = agingByCustomer.get(sale.customerId) || {
+        customer_id: sale.customerId,
+        customer_name: sale.customer?.name || 'Customer',
+        phone: sale.customer?.phone,
+        total_owed: 0,
+        overdue_invoices: 0,
+        latest_due: null
+      }
+      current.total_owed += Number(sale.balance || 0)
+      current.overdue_invoices += 1
+      if (!current.latest_due || (sale.dueDate && sale.dueDate > current.latest_due)) {
+        current.latest_due = sale.dueDate
+      }
+      agingByCustomer.set(sale.customerId, current)
+    })
+
+    const agingReportRows = Array.from(agingByCustomer.values())
+      .sort((a, b) => b.total_owed - a.total_owed)
 
     res.json({
       totalReceivables: totalReceivables._sum.balance || 0,
@@ -510,7 +550,7 @@ router.get('/receivables/summary', authenticateToken, requireRole(['owner', 'man
     })
   } catch (error) {
     console.error('Receivables summary error:', error)
-    res.status(500).json({ error: 'Failed to fetch receivables summary' })
+    handleBranchError(res, error, 'Failed to fetch receivables summary')
   }
 })
 

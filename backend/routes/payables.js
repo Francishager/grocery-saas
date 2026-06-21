@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
+import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -31,11 +32,11 @@ const withUser = (record) => {
 // Get all suppliers for tenant
 router.get('/suppliers', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, search, status } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(status && status !== 'all' && { status }),
       ...(search && {
         OR: [
@@ -44,7 +45,7 @@ router.get('/suppliers', authenticateToken, requireRole(['owner', 'manager', 'ac
           { email: { contains: search, mode: 'insensitive' } }
         ]
       })
-    }
+    })
 
     const [suppliers, total] = await Promise.all([
       prisma.supplier.findMany({
@@ -67,13 +68,18 @@ router.get('/suppliers', authenticateToken, requireRole(['owner', 'manager', 'ac
     })
   } catch (error) {
     console.error('Get suppliers error:', error)
-    res.status(500).json({ error: 'Failed to fetch suppliers' })
+    handleBranchError(res, error, 'Failed to fetch suppliers')
   }
 })
 
 // Create new supplier
 router.post('/suppliers', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { name, email, phone, address, notes } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Supplier name is required' })
@@ -83,7 +89,8 @@ router.post('/suppliers', authenticateToken, requireRole(['owner', 'manager']), 
     if (phone?.trim()) {
       const existingSupplier = await prisma.supplier.findFirst({
         where: {
-          tenantId: req.tenant.id,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
           phone
         }
       })
@@ -100,51 +107,54 @@ router.post('/suppliers', authenticateToken, requireRole(['owner', 'manager']), 
         phone,
         address,
         notes,
-        tenantId: req.tenant.id
+        tenantId: scope.tenantId,
+        branchId: scope.branchId
       }
     })
 
     res.status(201).json(supplier)
   } catch (error) {
     console.error('Create supplier error:', error)
-    res.status(500).json({ error: 'Failed to create supplier' })
+    handleBranchError(res, error, 'Failed to create supplier')
   }
 })
 
 // Update supplier
 router.put('/suppliers/:id', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { name, email, phone, address, status, notes } = req.body
+    const { name, email, phone, address, status, notes, branchId } = req.body
 
     // Check if supplier belongs to tenant
     const existingSupplier = await prisma.supplier.findFirst({
-      where: {
-        id,
-        tenantId: req.tenant.id
-      }
+      where: scopedWhere(scope, { id })
     })
 
     if (!existingSupplier) {
       return res.status(404).json({ error: 'Supplier not found' })
     }
 
+    const data = { name, email, phone, address, status, notes }
+
+    if (branchId !== undefined) {
+      const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {
+        source: 'body',
+        requireBranch: true,
+        allowOwnerAll: false
+      })
+      data.branchId = targetScope.branchId
+    }
+
     const supplier = await prisma.supplier.update({
       where: { id },
-      data: {
-        name,
-        email,
-        phone,
-        address,
-        status,
-        notes
-      }
+      data
     })
 
     res.json(supplier)
   } catch (error) {
     console.error('Update supplier error:', error)
-    res.status(500).json({ error: 'Failed to update supplier' })
+    handleBranchError(res, error, 'Failed to update supplier')
   }
 })
 
@@ -153,11 +163,11 @@ router.put('/suppliers/:id', authenticateToken, requireRole(['owner', 'manager']
 // Get all supplier purchases
 router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, supplierId, paymentStatus, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(supplierId && { supplierId }),
       ...(paymentStatus && { paymentStatus }),
       ...(startDate && endDate && {
@@ -166,7 +176,7 @@ router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'ac
           lte: new Date(endDate)
         }
       })
-    }
+    })
 
     const [purchases, total] = await Promise.all([
       prisma.supplierPurchase.findMany({
@@ -175,6 +185,7 @@ router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'ac
         take: Number(limit),
         include: {
           supplier: true,
+          branch: true,
           User: userSelect,
           items: {
             include: {
@@ -198,13 +209,18 @@ router.get('/purchases', authenticateToken, requireRole(['owner', 'manager', 'ac
     })
   } catch (error) {
     console.error('Get purchases error:', error)
-    res.status(500).json({ error: 'Failed to fetch purchases' })
+    handleBranchError(res, error, 'Failed to fetch purchases')
   }
 })
 
 // Create new supplier purchase
 router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { 
       supplierId, 
       items, 
@@ -219,7 +235,7 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one purchase item is required' })
 
     const supplier = await prisma.supplier.findFirst({
-      where: { id: supplierId, tenantId: req.tenant.id }
+      where: scopedWhere(scope, { id: supplierId })
     })
 
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' })
@@ -227,7 +243,7 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
 
     const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, tenantId: req.tenant.id, isActive: { not: false } }
+      where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } })
     })
     const productsById = new Map(products.map((product) => [product.id, product]))
     if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
@@ -265,7 +281,8 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
     const purchase = await prisma.supplierPurchase.create({
       data: {
         refNo: purchaseRefNo,
-        tenantId: req.tenant.id,
+        tenantId: scope.tenantId,
+        branchId: scope.branchId,
         supplierId,
         userId: req.user.id,
         total: computedTotal,
@@ -277,6 +294,7 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
       },
       include: {
         supplier: true,
+        branch: true,
         User: userSelect
       }
     })
@@ -308,7 +326,7 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
     res.status(201).json(withUser(purchase))
   } catch (error) {
     console.error('Create purchase error:', error)
-    res.status(500).json({ error: 'Failed to create purchase' })
+    handleBranchError(res, error, 'Failed to create purchase')
   }
 })
 
@@ -317,11 +335,11 @@ router.post('/purchases', authenticateToken, requireRole(['owner', 'manager', 'a
 // Get supplier payments
 router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, supplierId, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(supplierId && { supplierId }),
       ...(startDate && endDate && {
         createdAt: {
@@ -329,7 +347,7 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
           lte: new Date(endDate)
         }
       })
-    }
+    })
 
     const [payments, total] = await Promise.all([
       prisma.supplierPayment.findMany({
@@ -356,13 +374,18 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
     })
   } catch (error) {
     console.error('Get supplier payments error:', error)
-    res.status(500).json({ error: 'Failed to fetch supplier payments' })
+    handleBranchError(res, error, 'Failed to fetch supplier payments')
   }
 })
 
 // Record supplier payment
 router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { supplierId, purchaseId, amount, paymentMethod, reference, notes } = req.body
     const paidAmount = toMoney(amount)
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
@@ -370,7 +393,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
 
     // Get supplier
     const supplier = await prisma.supplier.findFirst({
-      where: { id: supplierId, tenantId: req.tenant.id }
+      where: scopedWhere(scope, { id: supplierId })
     })
 
     if (!supplier) {
@@ -380,7 +403,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     let purchase = null
     if (purchaseId) {
       purchase = await prisma.supplierPurchase.findFirst({
-        where: { id: purchaseId, supplierId, tenantId: req.tenant.id }
+        where: scopedWhere(scope, { id: purchaseId, supplierId })
       })
       if (!purchase) return res.status(404).json({ error: 'Purchase not found for this supplier' })
       if (paidAmount > purchase.balance) return res.status(400).json({ error: 'Payment exceeds purchase balance' })
@@ -391,7 +414,8 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     // Create payment
     const payment = await prisma.supplierPayment.create({
       data: {
-        tenantId: req.tenant.id,
+        tenantId: scope.tenantId,
+        branchId: scope.branchId,
         supplierId,
         purchaseId,
         amount: paidAmount,
@@ -426,7 +450,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
     res.status(201).json(payment)
   } catch (error) {
     console.error('Record supplier payment error:', error)
-    res.status(500).json({ error: 'Failed to record payment' })
+    handleBranchError(res, error, 'Failed to record payment')
   }
 })
 
@@ -435,49 +459,56 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
 // Get payables summary
 router.get('/payables/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
-    const [totalPayables, overdueCount, agingReport] = await Promise.all([
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const supplierWhere = scopedWhere(scope)
+    const purchaseWhere = scopedWhere(scope, {
+      paymentStatus: 'unpaid',
+      balance: { gt: 0 }
+    })
+
+    const [totalPayables, overdueCount, agingPurchases] = await Promise.all([
       // Total amount owed
       prisma.supplier.aggregate({
-        where: { tenantId: req.tenant.id },
+        where: supplierWhere,
         _sum: { balance: true }
       }),
       
       // Overdue purchases count
       prisma.supplierPurchase.count({
-        where: {
-          tenantId: req.tenant.id,
+        where: scopedWhere(scope, {
           paymentStatus: 'unpaid',
           dueDate: { lt: new Date() }
-        }
+        })
       }),
 
       // Aging report
-      prisma.$queryRaw`
-        SELECT 
-          supplier_purchases."supplierId" as supplier_id,
-          suppliers.name as supplier_name,
-          suppliers.phone,
-          SUM(supplier_purchases.balance) as total_owed,
-          COUNT(*)::int as overdue_purchases,
-          MAX(supplier_purchases."dueDate") as latest_due
-        FROM supplier_purchases
-        JOIN suppliers ON supplier_purchases."supplierId" = suppliers.id
-        WHERE supplier_purchases."tenantId" = ${req.tenant.id}
-          AND supplier_purchases."paymentStatus" = 'unpaid'
-          AND supplier_purchases.balance > 0
-        GROUP BY supplier_purchases."supplierId", suppliers.name, suppliers.phone
-        ORDER BY total_owed DESC
-      `
+      prisma.supplierPurchase.findMany({
+        where: purchaseWhere,
+        include: { supplier: { select: { id: true, name: true, phone: true } } },
+        orderBy: { balance: 'desc' }
+      })
     ])
 
-    const agingReportRows = agingReport.map((row) => ({
-      supplier_id: row.supplier_id,
-      supplier_name: row.supplier_name,
-      phone: row.phone,
-      total_owed: Number(row.total_owed || 0),
-      overdue_purchases: Number(row.overdue_purchases || 0),
-      latest_due: row.latest_due
-    }))
+    const agingBySupplier = new Map()
+    agingPurchases.forEach((purchase) => {
+      const current = agingBySupplier.get(purchase.supplierId) || {
+        supplier_id: purchase.supplierId,
+        supplier_name: purchase.supplier?.name || 'Supplier',
+        phone: purchase.supplier?.phone,
+        total_owed: 0,
+        overdue_purchases: 0,
+        latest_due: null
+      }
+      current.total_owed += Number(purchase.balance || 0)
+      current.overdue_purchases += 1
+      if (!current.latest_due || (purchase.dueDate && purchase.dueDate > current.latest_due)) {
+        current.latest_due = purchase.dueDate
+      }
+      agingBySupplier.set(purchase.supplierId, current)
+    })
+
+    const agingReportRows = Array.from(agingBySupplier.values())
+      .sort((a, b) => b.total_owed - a.total_owed)
 
     res.json({
       totalPayables: totalPayables._sum.balance || 0,
@@ -486,7 +517,7 @@ router.get('/payables/summary', authenticateToken, requireRole(['owner', 'manage
     })
   } catch (error) {
     console.error('Payables summary error:', error)
-    res.status(500).json({ error: 'Failed to fetch payables summary' })
+    handleBranchError(res, error, 'Failed to fetch payables summary')
   }
 })
 
