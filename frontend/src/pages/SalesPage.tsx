@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
-import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
+import { BluetoothThermalPrinter, ThermalPrinter, isBluetoothSupported, isSerialSupported } from '@/lib/thermalPrinter'
 
 interface RecentSale {
   id: string
@@ -100,12 +100,29 @@ export default function SalesPage() {
   )
 
   const autoPrintReceipt = async (saleId: string) => {
-    if (!isSerialSupported()) return
+    if (!isSerialSupported() && !isBluetoothSupported()) return
 
-    const printer = new ThermalPrinter()
+    let printer: BluetoothThermalPrinter | ThermalPrinter | null = null
     try {
-      const connected = await printer.connectToKnownPort()
-      if (!connected) return
+      if (isSerialSupported()) {
+        const serialPrinter = new ThermalPrinter()
+        if (await serialPrinter.connectToKnownPort()) {
+          printer = serialPrinter
+        } else {
+          await serialPrinter.disconnect()
+        }
+      }
+
+      if (!printer && isBluetoothSupported()) {
+        const bluetoothPrinter = new BluetoothThermalPrinter()
+        if (await bluetoothPrinter.connectToKnownDevice()) {
+          printer = bluetoothPrinter
+        } else {
+          await bluetoothPrinter.disconnect()
+        }
+      }
+
+      if (!printer) return
 
       const { commands } = await receiptsApi.getEscPos(saleId)
       await printer.printFromCommands(commands)
@@ -117,7 +134,7 @@ export default function SalesPage() {
         description: error?.message || 'Open the receipt and print manually.',
       })
     } finally {
-      await printer.disconnect()
+      await printer?.disconnect()
     }
   }
 

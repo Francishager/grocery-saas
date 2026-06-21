@@ -35,7 +35,7 @@ export function TenantLayout() {
     <div className="min-h-screen bg-background text-foreground">
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
       <aside className={cn(
-        'fixed left-0 top-0 z-50 h-full w-64 transform bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] shadow-xl transition-transform duration-200 ease-in-out lg:translate-x-0',
+        'fixed left-0 top-0 z-50 h-full w-80 max-w-[88vw] transform bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] shadow-xl transition-transform duration-200 ease-in-out lg:w-64 lg:max-w-none lg:translate-x-0',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="flex h-full flex-col">
@@ -46,24 +46,24 @@ export function TenantLayout() {
             </div>
             <Button variant="ghost" size="icon" className="text-slate-200 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></Button>
           </div>
-          <nav className="flex-1 space-y-1 p-4">
+          <nav className="flex-1 space-y-2 overflow-y-auto p-4 sm:p-5 lg:space-y-1 lg:p-4">
             {visibleNavItems.map((item) => (
               <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
-                <item.icon className="h-5 w-5" />{item.label}
+                className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />{item.label}
               </NavLink>
             ))}
             {loading && <div className="px-3 py-2 text-xs text-slate-500">Loading plan features...</div>}
           </nav>
           <div className="border-t border-[hsl(var(--sidebar-border))] p-4">
             <div className="mb-3 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 text-sky-100">{user?.name?.[0]?.toUpperCase() || 'U'}</div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/20 text-base text-sky-100 lg:h-10 lg:w-10 lg:text-sm">{user?.name?.[0]?.toUpperCase() || 'U'}</div>
               <div className="flex-1 overflow-hidden">
-                <p className="truncate text-sm font-medium text-white">{user?.name || 'User'}</p>
-                <p className="truncate text-xs text-slate-400">{user?.role || ''}</p>
+                <p className="truncate text-base font-medium text-white lg:text-sm">{user?.name || 'User'}</p>
+                <p className="truncate text-sm text-slate-400 lg:text-xs">{user?.role || ''}</p>
               </div>
             </div>
-            <Button variant="ghost" size="sm" className="w-full justify-start text-slate-300 hover:bg-white/10 hover:text-white" onClick={handleLogout}><LogOut className="mr-2 h-4 w-4" />Logout</Button>
+            <Button variant="ghost" size="sm" className="h-11 w-full justify-start text-base text-slate-300 hover:bg-white/10 hover:text-white lg:h-9 lg:text-sm" onClick={handleLogout}><LogOut className="mr-2 h-5 w-5 lg:h-4 lg:w-4" />Logout</Button>
           </div>
         </div>
       </aside>

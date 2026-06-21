@@ -1,5 +1,5 @@
 /**
- * ESC/POS Thermal Printer Integration via Web Serial API
+ * ESC/POS Thermal Printer Integration via Web Serial and Web Bluetooth APIs
  * 
  * Usage:
  *   const printer = new ThermalPrinter()
@@ -7,6 +7,29 @@
  *   await printer.print(saleData)  // Sends ESC/POS commands
  *   await printer.disconnect()
  */
+
+const BLUETOOTH_PRINTER_PROFILES = [
+  {
+    service: '000018f0-0000-1000-8000-00805f9b34fb',
+    characteristics: ['00002af1-0000-1000-8000-00805f9b34fb'],
+  },
+  {
+    service: '0000ffe0-0000-1000-8000-00805f9b34fb',
+    characteristics: ['0000ffe1-0000-1000-8000-00805f9b34fb'],
+  },
+  {
+    service: '0000ff00-0000-1000-8000-00805f9b34fb',
+    characteristics: ['0000ff02-0000-1000-8000-00805f9b34fb', '0000ff01-0000-1000-8000-00805f9b34fb'],
+  },
+  {
+    service: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    characteristics: ['6e400002-b5a3-f393-e0a9-e50e24dcca9e'],
+  },
+  {
+    service: '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+    characteristics: ['49535343-8841-43f4-a8d4-ecbe34729bb3'],
+  },
+]
 
 export class ThermalPrinter {
   private port: any | null = null
@@ -85,9 +108,7 @@ export class ThermalPrinter {
     if (!this.writer) throw new Error('Printer not connected')
 
     for (const hex of hexCommands) {
-      const bytes = new Uint8Array(
-        hex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
-      )
+      const bytes = hexToBytes(hex)
       await this.writer.write(bytes)
     }
   }
@@ -193,6 +214,93 @@ export class ThermalPrinter {
   }
 }
 
+export class BluetoothThermalPrinter {
+  private device: any | null = null
+  private characteristic: any | null = null
+
+  async connect(): Promise<boolean> {
+    const bluetooth = getBluetoothApi()
+    if (!bluetooth) {
+      throw new Error('Web Bluetooth API not supported in this browser. Use Chrome or Edge.')
+    }
+
+    this.device = await bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: BLUETOOTH_PRINTER_PROFILES.map((profile) => profile.service),
+    })
+    await this.openDevice(this.device)
+    return true
+  }
+
+  async connectToKnownDevice(): Promise<boolean> {
+    const bluetooth = getBluetoothApi()
+    if (!bluetooth?.getDevices) return false
+
+    const devices = await bluetooth.getDevices()
+    for (const device of devices) {
+      try {
+        this.device = device
+        await this.openDevice(device)
+        return true
+      } catch {
+        this.device = null
+        this.characteristic = null
+      }
+    }
+
+    return false
+  }
+
+  private async openDevice(device: any) {
+    const server = await device?.gatt?.connect()
+    if (!server) throw new Error('Bluetooth printer does not expose a GATT server')
+
+    for (const profile of BLUETOOTH_PRINTER_PROFILES) {
+      try {
+        const service = await server.getPrimaryService(profile.service)
+        for (const characteristicId of profile.characteristics) {
+          try {
+            const characteristic = await service.getCharacteristic(characteristicId)
+            const props = characteristic.properties || {}
+            if (props.write || props.writeWithoutResponse || characteristic.writeValue || characteristic.writeValueWithoutResponse) {
+              this.characteristic = characteristic
+              return
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
+    throw new Error('No writable Bluetooth receipt-printer service found')
+  }
+
+  async disconnect() {
+    try {
+      this.characteristic = null
+      if (this.device?.gatt?.connected) {
+        this.device.gatt.disconnect()
+      }
+      this.device = null
+    } catch {}
+  }
+
+  get connected(): boolean {
+    return !!this.characteristic
+  }
+
+  async printFromCommands(hexCommands: string[]) {
+    if (!this.characteristic) throw new Error('Bluetooth printer not connected')
+
+    for (const hex of hexCommands) {
+      const bytes = hexToBytes(hex)
+      for (const chunk of chunkBytes(bytes, 20)) {
+        await writeBluetoothChunk(this.characteristic, chunk)
+        await wait(15)
+      }
+    }
+  }
+}
+
 function encode(text: string): number[] {
   return Array.from(new TextEncoder().encode(text))
 }
@@ -223,7 +331,52 @@ export function isSerialSupported(): boolean {
   return !!getSerialApi()
 }
 
+export function isBluetoothSupported(): boolean {
+  return !!getBluetoothApi()
+}
+
+export function isThermalPrintingSupported(): boolean {
+  return isSerialSupported() || isBluetoothSupported()
+}
+
 function getSerialApi(): any | null {
   if (typeof navigator === 'undefined') return null
   return (navigator as any).serial || null
+}
+
+function getBluetoothApi(): any | null {
+  if (typeof navigator === 'undefined') return null
+  return (navigator as any).bluetooth || null
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  return new Uint8Array(
+    hex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
+  )
+}
+
+function chunkBytes(bytes: Uint8Array, size: number): Uint8Array[] {
+  const chunks: Uint8Array[] = []
+  for (let index = 0; index < bytes.length; index += size) {
+    chunks.push(bytes.slice(index, index + size))
+  }
+  return chunks
+}
+
+async function writeBluetoothChunk(characteristic: any, chunk: Uint8Array) {
+  if (characteristic.properties?.writeWithoutResponse && characteristic.writeValueWithoutResponse) {
+    await characteristic.writeValueWithoutResponse(chunk)
+    return
+  }
+
+  if (characteristic.writeValueWithResponse) {
+    await characteristic.writeValueWithResponse(chunk)
+    return
+  }
+
+  await characteristic.writeValue(chunk)
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

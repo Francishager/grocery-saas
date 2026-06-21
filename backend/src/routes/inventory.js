@@ -93,9 +93,6 @@ const slugify = (value = "") =>
 async function ensureTenantCategories(tenantId) {
   if (!tenantId) return;
 
-  const count = await prisma.category.count({ where: { tenantId } });
-  if (count > 0) return;
-
   await prisma.category.createMany({
     data: DEFAULT_CATEGORIES.map((category) => ({
       ...category,
