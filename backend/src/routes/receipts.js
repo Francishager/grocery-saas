@@ -14,6 +14,81 @@ function authenticateReceipt(req, res, next) {
   return authenticateToken(req, res, next);
 }
 
+async function getReceiptData(req) {
+  const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+  const sale = await prisma.sale.findFirst({
+    where: scopedWhere(scope, { id: req.params.saleId }),
+    include: {
+      items: { include: { product: true } },
+      user: { select: { fname: true, lname: true } },
+      branch: { select: { id: true, name: true } },
+    },
+  });
+
+  if (!sale) return null;
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: scope.tenantId },
+    select: { name: true, email: true, phone: true, address: true },
+  });
+
+  return { scope, sale, tenant };
+}
+
+function receiptJson(data) {
+  const { sale, tenant } = data;
+  const cashier = `${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim();
+
+  return {
+    id: sale.id,
+    receiptNo: sale.receiptNo,
+    business: {
+      name: tenant?.name || "JibuSales",
+      email: tenant?.email || null,
+      phone: tenant?.phone || null,
+      address: tenant?.address || null,
+    },
+    branch: sale.branch || null,
+    cashier,
+    paymentMethod: sale.paymentMethod || "cash",
+    createdAt: sale.createdAt,
+    subtotal: sale.subtotal || 0,
+    discount: sale.discount || 0,
+    tax: sale.tax || 0,
+    total: sale.total || 0,
+    items: sale.items.map((item) => ({
+      id: item.id,
+      name: item.product?.name || "Item",
+      sku: item.product?.sku || null,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+    })),
+  };
+}
+
+router.get("/:saleId", authenticateReceipt, async (req, res) => {
+  try {
+    const data = await getReceiptData(req);
+    if (!data) return res.status(404).json({ error: "Sale not found" });
+
+    res.json({ receipt: receiptJson(data) });
+
+    auditLog({
+      tenantId: data.scope.tenantId,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      action: "read",
+      model: "Receipt",
+      recordId: data.sale.id,
+      ip: req.ip,
+    });
+  } catch (err) {
+    console.error("Receipt data error:", err);
+    handleBranchError(res, err, "Failed to load receipt");
+  }
+});
+
 // Generate PDF receipt for a sale
 router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
   try {

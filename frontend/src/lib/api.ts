@@ -483,6 +483,11 @@ export const staffApi = {
 
 // Receipt endpoints
 export const receiptsApi = {
+  get: async (saleId: string) => {
+    const data = await api.get<any>(`/api/receipts/${saleId}`)
+    return (data?.receipt || data) as ReceiptPreview
+  },
+
   getPdf: (saleId: string) => {
     const token = getAuthToken()
     return `${API_URL}/api/receipts/${saleId}/pdf${token ? `?token=${token}` : ''}`
@@ -588,6 +593,33 @@ export interface InventoryItem {
   branchId?: string | null
   branch?: BranchOption | null
   updated_at: string
+}
+
+export interface ReceiptPreview {
+  id: string
+  receiptNo: string
+  business: {
+    name: string
+    email?: string | null
+    phone?: string | null
+    address?: string | null
+  }
+  branch?: BranchOption | null
+  cashier?: string
+  paymentMethod: string
+  createdAt: string
+  subtotal: number
+  discount: number
+  tax: number
+  total: number
+  items: Array<{
+    id: string
+    name: string
+    sku?: string | null
+    quantity: number
+    price: number
+    total: number
+  }>
 }
 
 export interface Sale {

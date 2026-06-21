@@ -55,22 +55,32 @@ export function TenantLayout() {
             ))}
             {loading && <div className="px-3 py-2 text-xs text-slate-500">Loading plan features...</div>}
           </nav>
-          <div className="border-t border-[hsl(var(--sidebar-border))] p-4">
-            <div className="mb-3 flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/20 text-base text-sky-100 lg:h-10 lg:w-10 lg:text-sm">{user?.name?.[0]?.toUpperCase() || 'U'}</div>
-              <div className="flex-1 overflow-hidden">
-                <p className="truncate text-base font-medium text-white lg:text-sm">{user?.name || 'User'}</p>
-                <p className="truncate text-sm text-slate-400 lg:text-xs">{user?.role || ''}</p>
-              </div>
-            </div>
-            <Button variant="ghost" size="sm" className="h-11 w-full justify-start text-base text-slate-300 hover:bg-white/10 hover:text-white lg:h-9 lg:text-sm" onClick={handleLogout}><LogOut className="mr-2 h-5 w-5 lg:h-4 lg:w-4" />Logout</Button>
-          </div>
         </div>
       </aside>
       <div className="lg:pl-64">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
           <div className="flex-1" />
+          <div className="group relative">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              aria-label="User profile"
+            >
+              {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+            </button>
+            <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+              <div className="mb-3 border-b pb-3">
+                <p className="truncate text-sm font-semibold">{user?.name || 'User'}</p>
+                <p className="truncate text-xs text-muted-foreground">{user?.email || ''}</p>
+                <p className="mt-1 text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
+              </div>
+              <Button variant="ghost" size="sm" className="h-10 w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </div>
         </header>
         <main className="p-4 lg:p-6"><Outlet /></main>
       </div>
