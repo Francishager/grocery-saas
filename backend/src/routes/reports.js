@@ -1,15 +1,16 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
 
 // Sales report
 router.get("/sales", authenticateToken, requireRole(["owner", "manager", "accountant"]), async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { from, to, groupBy = "day" } = req.query;
-    const where = { tenantId };
+    const where = scopedWhere(scope);
     if (from || to) {
       where.createdAt = {};
       if (from) where.createdAt.gte = new Date(from);
@@ -25,16 +26,16 @@ router.get("/sales", authenticateToken, requireRole(["owner", "manager", "accoun
     res.json({ sales, summary: { count, totalRevenue, totalDiscount, totalTax } });
   } catch (err) {
     console.error("Sales report error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 
 // Purchases report
 router.get("/purchases", authenticateToken, requireRole(["owner", "manager", "accountant"]), async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { from, to } = req.query;
-    const where = { tenantId };
+    const where = scopedWhere(scope);
     if (from || to) {
       where.createdAt = {};
       if (from) where.createdAt.gte = new Date(from);
@@ -47,16 +48,16 @@ router.get("/purchases", authenticateToken, requireRole(["owner", "manager", "ac
     res.json({ purchases, summary: { count: purchases.length, totalCost } });
   } catch (err) {
     console.error("Purchases report error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 
 // Expenses report
 router.get("/expenses", authenticateToken, requireRole(["owner", "manager", "accountant"]), async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { from, to } = req.query;
-    const where = { tenantId };
+    const where = scopedWhere(scope);
     if (from || to) {
       where.date = {};
       if (from) where.date.gte = new Date(from);
@@ -71,14 +72,14 @@ router.get("/expenses", authenticateToken, requireRole(["owner", "manager", "acc
     res.json({ expenses, summary: { count: expenses.length, totalExpenses, byCategory } });
   } catch (err) {
     console.error("Expenses report error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 
 // Profit report
 router.get("/profit", authenticateToken, requireRole(["owner", "manager", "accountant"]), async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { from, to } = req.query;
     const dateFilter = {};
     if (from || to) {
@@ -87,9 +88,9 @@ router.get("/profit", authenticateToken, requireRole(["owner", "manager", "accou
     }
 
     const [salesAgg, purchasesAgg, expensesAgg] = await Promise.all([
-      prisma.sale.aggregate({ where: { tenantId, ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}) }, _sum: { total: true } }),
-      prisma.purchase.aggregate({ where: { tenantId, ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}) }, _sum: { total: true } }),
-      prisma.expense.aggregate({ where: { tenantId, ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) }, _sum: { amount: true } }),
+      prisma.sale.aggregate({ where: scopedWhere(scope, { ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}) }), _sum: { total: true } }),
+      prisma.purchase.aggregate({ where: scopedWhere(scope, { ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}) }), _sum: { total: true } }),
+      prisma.expense.aggregate({ where: scopedWhere(scope, { ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}) }), _sum: { amount: true } }),
     ]);
 
     const revenue = salesAgg._sum.total || 0;
@@ -101,7 +102,7 @@ router.get("/profit", authenticateToken, requireRole(["owner", "manager", "accou
     res.json({ revenue, cogs, grossProfit, expenses, netProfit });
   } catch (err) {
     console.error("Profit report error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 

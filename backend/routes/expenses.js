@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
+import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -84,11 +85,11 @@ async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = pri
 // Get all expenses for tenant
 router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, category, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
-    const where = {
-      tenantId: req.tenant.id,
+    const where = scopedWhere(scope, {
       ...(category && { category }),
       ...(startDate && endDate && {
         date: {
@@ -96,7 +97,7 @@ router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'acc
           lte: new Date(endDate)
         }
       })
-    }
+    })
 
     const [expenses, total] = await Promise.all([
       prisma.expense.findMany({
@@ -104,6 +105,7 @@ router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'acc
         skip,
         take: Number(limit),
         include: {
+          branch: { select: { id: true, name: true } },
           User: userSelect
         },
         orderBy: { date: 'desc' }
@@ -122,13 +124,18 @@ router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'acc
     })
   } catch (error) {
     console.error('Get expenses error:', error)
-    res.status(500).json({ error: 'Failed to fetch expenses' })
+    handleBranchError(res, error, 'Failed to fetch expenses')
   }
 })
 
 // Create new expense
 router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
     const { 
       category, 
       description, 
@@ -149,7 +156,8 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
     const expense = await prisma.$transaction(async (tx) => {
       const createdExpense = await tx.expense.create({
         data: {
-          tenantId: req.tenant.id,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
           category: category.trim(),
           description: description.trim(),
           amount: amountValue,
@@ -193,45 +201,51 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
     res.status(201).json(withUser(expense))
   } catch (error) {
     console.error('Create expense error:', error)
-    res.status(500).json({ error: 'Failed to create expense' })
+    handleBranchError(res, error, 'Failed to create expense')
   }
 })
 
 // Update expense
 router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { category, description, amount, paymentMethod, reference, notes, date } = req.body
+    const { category, description, amount, paymentMethod, reference, notes, date, branchId } = req.body
 
     // Check if expense belongs to tenant
     const existingExpense = await prisma.expense.findFirst({
-      where: {
-        id,
-        tenantId: req.tenant.id
-      }
+      where: scopedWhere(scope, { id })
     })
 
     if (!existingExpense) {
       return res.status(404).json({ error: 'Expense not found' })
     }
 
-    const expense = await prisma.expense.update({
-      where: { id },
-      data: {
-        category,
-        description,
-        amount,
-        paymentMethod,
-        reference,
-        notes,
-        date: date ? new Date(date) : undefined
-      }
-    })
+    const data = {
+      category,
+      description,
+      amount,
+      paymentMethod,
+      reference,
+      notes,
+      date: date ? new Date(date) : undefined
+    }
+
+    if (branchId !== undefined) {
+      const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {
+        source: 'body',
+        requireBranch: true,
+        allowOwnerAll: false
+      })
+      data.branchId = targetScope.branchId
+    }
+
+    const expense = await prisma.expense.update({ where: { id }, data })
 
     res.json(expense)
   } catch (error) {
     console.error('Update expense error:', error)
-    res.status(500).json({ error: 'Failed to update expense' })
+    handleBranchError(res, error, 'Failed to update expense')
   }
 })
 
@@ -344,6 +358,7 @@ router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manag
 // Get cash flow overview
 router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
   try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { startDate, endDate } = req.query
     await ensureDefaultCashAccounts(req.tenant.id)
 
@@ -362,22 +377,18 @@ router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manag
       payablesSummary
     ] = await Promise.all([
       // Total income
-      prisma.cashTransaction.aggregate({
-        where: {
-          tenantId: req.tenant.id,
-          type: 'income',
-          ...dateFilter
-        },
-        _sum: { amount: true }
+      prisma.sale.aggregate({
+        where: scopedWhere(scope, {
+          ...(Object.keys(dateFilter).length ? { createdAt: dateFilter.createdAt } : {})
+        }),
+        _sum: { total: true }
       }),
 
       // Total expenses
-      prisma.cashTransaction.aggregate({
-        where: {
-          tenantId: req.tenant.id,
-          type: 'expense',
-          ...dateFilter
-        },
+      prisma.expense.aggregate({
+        where: scopedWhere(scope, {
+          ...(Object.keys(dateFilter).length ? { date: dateFilter.createdAt } : {})
+        }),
         _sum: { amount: true }
       }),
 
@@ -398,23 +409,25 @@ router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manag
 
       // Receivables
       prisma.customer.aggregate({
-        where: { tenantId: req.tenant.id },
+        where: scopedWhere(scope),
         _sum: { balance: true }
       }),
 
       // Payables
       prisma.supplier.aggregate({
-        where: { tenantId: req.tenant.id },
+        where: scopedWhere(scope),
         _sum: { balance: true }
       })
     ])
 
-    const netCashFlow = (totalIncome._sum.amount || 0) - (totalExpenses._sum.amount || 0)
+    const incomeAmount = totalIncome._sum.total || 0
+    const expenseAmount = totalExpenses._sum.amount || 0
+    const netCashFlow = incomeAmount - expenseAmount
 
     res.json({
       cashAccounts,
-      totalIncome: totalIncome._sum.amount || 0,
-      totalExpenses: totalExpenses._sum.amount || 0,
+      totalIncome: incomeAmount,
+      totalExpenses: expenseAmount,
       netCashFlow,
       totalReceivables: receivablesSummary._sum.balance || 0,
       totalPayables: payablesSummary._sum.balance || 0,
@@ -425,7 +438,7 @@ router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manag
     })
   } catch (error) {
     console.error('Cash flow summary error:', error)
-    res.status(500).json({ error: 'Failed to fetch cash flow summary' })
+    handleBranchError(res, error, 'Failed to fetch cash flow summary')
   }
 })
 

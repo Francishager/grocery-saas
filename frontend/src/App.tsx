@@ -19,8 +19,8 @@ import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
-import AdminPage from '@/pages/admin/AdminPage'
 import BranchesPage from '@/pages/BranchesPage'
+import StaffPage from '@/pages/StaffPage'
 import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
@@ -115,7 +115,8 @@ function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="branches" element={<BranchesPage />} />
-          <Route path="admin" element={<AdminPage />} />
+          <Route path="staff" element={<StaffPage />} />
+          <Route path="admin" element={<Navigate to="/tenant/staff" replace />} />
         </Route>
 
         {/* ========== Catch-all ========== */}

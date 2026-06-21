@@ -16,7 +16,7 @@ const navItems = [
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', roles: ['owner', 'manager', 'accountant'] },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', roles: ['owner', 'manager', 'accountant'] },
   { to: '/tenant/branches', label: 'Branches', icon: GitBranch, roles: ['owner'] },
-  { to: '/tenant/admin', label: 'Staff', icon: Users, feature: 'staff', roles: ['owner', 'manager'] },
+  { to: '/tenant/staff', label: 'Staff', icon: Users, roles: ['owner'] },
 ]
 
 export function TenantLayout() {

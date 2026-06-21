@@ -31,24 +31,25 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       return
     }
 
+    const printer = new ThermalPrinter()
     setConnectingPrinter(true)
     try {
-      const printer = new ThermalPrinter()
-      await printer.connect()
+      const connected = await printer.connectToKnownPort()
+      if (!connected) await printer.connect()
 
       setPrinting(true)
       const { commands } = await receiptsApi.getEscPos(saleId)
       await printer.printFromCommands(commands)
-      await printer.disconnect()
 
       toast({ title: 'Receipt printed successfully' })
     } catch (err: any) {
       toast({
         variant: 'destructive',
         title: 'Print failed',
-        description: err.message,
+        description: err?.message || 'Unable to print receipt',
       })
     } finally {
+      await printer.disconnect()
       setPrinting(false)
       setConnectingPrinter(false)
     }

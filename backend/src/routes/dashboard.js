@@ -1,24 +1,25 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken } from "../../middleware/auth.js";
+import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
 
 // Dashboard KPIs
 router.get("/kpis", authenticateToken, async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
     const [salesThisMonth, salesLastMonth, purchasesThisMonth, products, lowStockProducts, customers] = await Promise.all([
-      prisma.sale.aggregate({ where: { tenantId, createdAt: { gte: startOfMonth } }, _sum: { total: true }, _count: true }),
-      prisma.sale.aggregate({ where: { tenantId, createdAt: { gte: startOfLastMonth, lt: startOfMonth } }, _sum: { total: true } }),
-      prisma.purchase.aggregate({ where: { tenantId, createdAt: { gte: startOfMonth } }, _sum: { total: true } }),
-      prisma.product.count({ where: { tenantId, isActive: true } }),
-      prisma.product.count({ where: { tenantId, isActive: true, quantity: { lte: 10 } } }),
-      prisma.customer.count({ where: { tenantId } }),
+      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true }, _count: true }),
+      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
+      prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
+      prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
+      prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
+      prisma.customer.count({ where: scopedWhere(scope) }),
     ]);
 
     const revenueThisMonth = salesThisMonth._sum.total || 0;
@@ -36,14 +37,14 @@ router.get("/kpis", authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error("Dashboard KPIs error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 
 // Sales chart data
 router.get("/sales-chart", authenticateToken, async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
     const months = [];
     const data = [];
@@ -54,13 +55,13 @@ router.get("/sales-chart", authenticateToken, async (req, res) => {
       const label = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
       months.push(label);
 
-      const result = await prisma.sale.aggregate({ where: { tenantId, createdAt: { gte: start, lt: end } }, _sum: { total: true } });
+      const result = await prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } });
       data.push(result._sum.total || 0);
     }
 
     res.json({ labels: months, data });
   } catch (err) {
-    res.status(500).json({ error: "Internal server error" });
+    handleBranchError(res, err);
   }
 });
 

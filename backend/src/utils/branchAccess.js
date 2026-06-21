@@ -77,9 +77,7 @@ export async function resolveBranchScope(prisma, req, options = {}) {
 
   const assignments = await userBranches(prisma, tenantId, req.user?.id);
   if (!assignments.length) {
-    const branch = await fallbackTenantBranch(prisma, tenantId);
-    if (!branch) throw httpError(403, "No branch assigned to this user");
-    return { tenantId, branchId: branch.id, branch, canAccessAllBranches: false };
+    throw httpError(403, "No branch assigned to this user");
   }
 
   if (branchId) {

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2 } from 'lucide-react'
-import { inventoryApi, categoriesApi, type InventoryItem } from '@/lib/api'
+import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface FormData {
   product_id: string
@@ -18,6 +19,7 @@ interface FormData {
   barcode: string
   sku: string
   categoryId: string
+  branchId: string
 }
 
 const initialFormData: FormData = {
@@ -30,6 +32,7 @@ const initialFormData: FormData = {
   barcode: '',
   sku: '',
   categoryId: '',
+  branchId: '',
 }
 
 export default function InventoryPage() {
@@ -41,14 +44,33 @@ export default function InventoryPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [branchFilter, setBranchFilter] = useState('')
   const [formData, setFormData] = useState<FormData>(initialFormData)
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
+  const { user } = useJWTAuth()
+  const isOwner = user?.role === 'owner'
+  const canDeleteInventory = isOwner
 
   useEffect(() => {
     loadCategories()
     loadInventory()
   }, [])
+
+  useEffect(() => {
+    if (isOwner) {
+      loadBranches()
+      return
+    }
+
+    setBranches([])
+    setBranchFilter('')
+  }, [isOwner])
+
+  useEffect(() => {
+    loadInventory()
+  }, [branchFilter])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -79,10 +101,24 @@ export default function InventoryPage() {
     }
   }
 
+  const loadBranches = async () => {
+    try {
+      const data = await branchesApi.active()
+      setBranches(data)
+    } catch (error) {
+      console.error('Failed to load branches:', error)
+      toast({
+        variant: 'destructive',
+        title: 'Failed to load branches',
+        description: 'Branch selection is unavailable. Please refresh and try again.',
+      })
+    }
+  }
+
   const loadInventory = async () => {
     setLoading(true)
     try {
-      const data = await inventoryApi.list(searchQuery)
+      const data = await inventoryApi.list(searchQuery, isOwner ? branchFilter : undefined)
       setItems(Array.isArray(data) ? data : [])
     } catch (error: any) {
       toast({
@@ -102,6 +138,24 @@ export default function InventoryPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isOwner && branches.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'No active branch',
+        description: 'Create an active branch before adding branch inventory.',
+      })
+      return
+    }
+
+    if (isOwner && !formData.branchId) {
+      toast({
+        variant: 'destructive',
+        title: 'Select a branch',
+        description: 'Choose the branch this inventory item belongs to.',
+      })
+      return
+    }
+
     try {
       if (editingItem) {
         await inventoryApi.update(String(editingItem.id), formData)
@@ -149,6 +203,7 @@ export default function InventoryPage() {
       barcode: (item as any).barcode || '',
       sku: (item as any).sku || '',
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
+      branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
     })
     setCategoryOpen(false)
     setCategoryQuery('')
@@ -157,7 +212,10 @@ export default function InventoryPage() {
 
   const openNewForm = () => {
     setEditingItem(null)
-    setFormData(initialFormData)
+    setFormData({
+      ...initialFormData,
+      branchId: branches.length === 1 ? branches[0].id : '',
+    })
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
@@ -184,6 +242,10 @@ export default function InventoryPage() {
       category.name.toLowerCase().includes(query)
     )
   }, [categories, categoryQuery])
+
+  const branchNameById = useMemo(() => {
+    return new Map(branches.map((branch) => [String(branch.id), branch.name]))
+  }, [branches])
 
   return (
     <div className="space-y-6 p-6">
@@ -212,6 +274,19 @@ export default function InventoryPage() {
             className="pl-9"
           />
         </div>
+        {isOwner && branches.length > 1 && (
+          <select
+            value={branchFilter}
+            onChange={(event) => setBranchFilter(event.target.value)}
+            className="h-10 min-w-44 rounded-md border border-input bg-background px-3 py-2 text-sm"
+            aria-label="Filter by branch"
+          >
+            <option value="">All branches</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>{branch.name}</option>
+            ))}
+          </select>
+        )}
         <Button type="submit" variant="secondary">
           Search
         </Button>
@@ -323,6 +398,28 @@ export default function InventoryPage() {
                   )}
                 </div>
               </div>
+              {isOwner && (
+                <div className="space-y-2">
+                  <Label htmlFor="branchId">Branch</Label>
+                  <select
+                    id="branchId"
+                    value={formData.branchId}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, branchId: e.target.value }))
+                    }
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    disabled={branches.length === 0}
+                    required
+                  >
+                    <option value="">
+                      {branches.length === 0 ? 'No active branches' : 'Select branch'}
+                    </option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>{branch.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="product_name">Product Name</Label>
                 <Input
@@ -437,6 +534,7 @@ export default function InventoryPage() {
                   <tr className="border-b text-left">
                     <th className="pb-3 font-medium">SKU</th>
                     <th className="pb-3 font-medium">Product</th>
+                    {isOwner && <th className="pb-3 font-medium">Branch</th>}
                     <th className="pb-3 font-medium text-right">Qty</th>
                     <th className="pb-3 font-medium text-right">Cost</th>
                     <th className="pb-3 font-medium text-right">Price</th>
@@ -449,6 +547,11 @@ export default function InventoryPage() {
                     <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                       <td className="py-3">{item.product_id}</td>
                       <td className="py-3 font-medium">{item.product_name}</td>
+                      {isOwner && (
+                        <td className="py-3 text-sm text-muted-foreground">
+                          {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
+                        </td>
+                      )}
                       <td className="py-3 text-right">
                         <span
                           className={
@@ -476,13 +579,15 @@ export default function InventoryPage() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDelete(item.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          {canDeleteInventory && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(item.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>

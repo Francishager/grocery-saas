@@ -9,27 +9,56 @@
  */
 
 export class ThermalPrinter {
-  private port: SerialPort | null = null
+  private port: any | null = null
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null
 
   async connect(): Promise<boolean> {
-    if (!('serial' in navigator)) {
+    const serial = getSerialApi()
+    if (!serial) {
       throw new Error('Web Serial API not supported in this browser. Use Chrome or Edge.')
     }
 
     try {
-      this.port = await navigator.serial.requestPort()
-      await this.port.open({ baudRate: 9600 })
-      const writable = this.port.writable
-      if (writable) {
-        this.writer = writable.getWriter()
-      }
+      this.port = await serial.requestPort()
+      await this.openPort()
       return true
     } catch (err: any) {
       this.port = null
       this.writer = null
       throw new Error(`Printer connection failed: ${err.message}`)
     }
+  }
+
+  async connectToKnownPort(): Promise<boolean> {
+    const serial = getSerialApi()
+    if (!serial?.getPorts) return false
+
+    const ports = await serial.getPorts()
+    if (!ports.length) return false
+
+    try {
+      this.port = ports[0]
+      await this.openPort()
+      return true
+    } catch {
+      this.port = null
+      this.writer = null
+      return false
+    }
+  }
+
+  private async openPort() {
+    if (!this.port) throw new Error('No printer port selected')
+
+    if (!this.port.writable) {
+      await this.port.open({ baudRate: 9600 })
+    }
+
+    if (!this.port.writable) {
+      throw new Error('Printer port is not writable')
+    }
+
+    this.writer = this.port.writable.getWriter()
   }
 
   async disconnect() {
@@ -191,5 +220,10 @@ export interface ReceiptData {
  * Check if Web Serial API is available
  */
 export function isSerialSupported(): boolean {
-  return typeof navigator !== 'undefined' && 'serial' in navigator
+  return !!getSerialApi()
+}
+
+function getSerialApi(): any | null {
+  if (typeof navigator === 'undefined') return null
+  return (navigator as any).serial || null
 }

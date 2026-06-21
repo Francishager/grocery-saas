@@ -156,8 +156,8 @@ export const dashboardApi = {
 
 // Inventory endpoints
 export const inventoryApi = {
-  list: async (q?: string) => {
-    const data = await api.get<any>('/api/inventory', { params: { search: q } })
+  list: async (q?: string, branchId?: string) => {
+    const data = await api.get<any>('/api/inventory', { params: { search: q, branchId } })
     const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
     return products.map(mapProductToInventory)
   },
@@ -177,6 +177,7 @@ export const inventoryApi = {
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
       categoryId: data.categoryId || null,
+      branchId: data.branchId || null,
     } }),
 
   update: (id: string, data: any) =>
@@ -189,6 +190,7 @@ export const inventoryApi = {
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
       categoryId: data.categoryId || null,
+      branchId: data.branchId || null,
     } }),
 
   delete: (id: string) =>
@@ -209,6 +211,8 @@ function mapProductToInventory(p: any): InventoryItem {
     barcode: p.barcode || '',
     sku: p.sku || '',
     categoryId: p.categoryId ? String(p.categoryId) : p.category?.id ? String(p.category.id) : '',
+    branchId: p.branchId || p.branch?.id || null,
+    branch: p.branch || null,
     updated_at: p.updatedAt || p.createdAt,
   }
 }
@@ -452,6 +456,31 @@ export const tenantsApi = {
     api.put<any>(`/api/tenants/${id}/plan`, { body: { planId } }),
 }
 
+// Branch endpoints
+export const branchesApi = {
+  active: async () => {
+    const data = await api.get<any>('/api/branches/active')
+    return (Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : []) as BranchOption[]
+  },
+}
+
+// Staff endpoints
+export const staffApi = {
+  list: async () => {
+    const data = await api.get<any>('/api/staff')
+    return (Array.isArray(data?.staff) ? data.staff : Array.isArray(data) ? data : []) as StaffMember[]
+  },
+
+  create: (data: StaffPayload) =>
+    api.post<{ message: string; staff: StaffMember }>('/api/staff', { body: data }),
+
+  update: (id: string, data: Partial<StaffPayload> & { isActive?: boolean }) =>
+    api.patch<{ message: string; staff: StaffMember }>(`/api/staff/${id}`, { body: data }),
+
+  deactivate: (id: string) =>
+    api.delete<{ message: string; staff: StaffMember }>(`/api/staff/${id}`),
+}
+
 // Receipt endpoints
 export const receiptsApi = {
   getPdf: (saleId: string) => {
@@ -492,6 +521,38 @@ export interface User {
   is_active?: boolean
 }
 
+export interface BranchOption {
+  id: string
+  name: string
+  address?: string | null
+  isActive?: boolean
+}
+
+export interface StaffMember {
+  id: string
+  email: string
+  name: string
+  fname?: string
+  lname?: string
+  phone?: string | null
+  role: 'manager' | 'accountant' | 'attendant'
+  isActive: boolean
+  branchId?: string | null
+  branch?: BranchOption | null
+  branches?: Array<{ id: string; name: string; isPrimary?: boolean }>
+}
+
+export interface StaffPayload {
+  name?: string
+  fname?: string
+  lname?: string
+  email?: string
+  password?: string
+  phone?: string
+  role: 'manager' | 'accountant' | 'attendant'
+  branchId: string
+}
+
 export interface RegisterData {
   email: string
   password: string
@@ -524,6 +585,8 @@ export interface InventoryItem {
   barcode?: string
   sku?: string
   categoryId?: string
+  branchId?: string | null
+  branch?: BranchOption | null
   updated_at: string
 }
 

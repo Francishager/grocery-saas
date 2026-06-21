@@ -3,18 +3,27 @@ import PDFDocument from "pdfkit";
 import prisma from "../db.js";
 import { authenticateToken } from "../../middleware/auth.js";
 import { auditLog } from "../utils/audit.js";
+import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
 
+function authenticateReceipt(req, res, next) {
+  if (!req.headers.authorization && req.query?.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  return authenticateToken(req, res, next);
+}
+
 // Generate PDF receipt for a sale
-router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
+router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const sale = await prisma.sale.findFirst({
-      where: { id: req.params.saleId, tenantId },
+      where: scopedWhere(scope, { id: req.params.saleId }),
       include: {
         items: { include: { product: true } },
         user: { select: { fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
       },
     });
 
@@ -22,7 +31,7 @@ router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
 
     // Get tenant info for receipt header
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: scope.tenantId },
       select: { name: true, email: true, phone: true, address: true },
     });
 
@@ -46,7 +55,7 @@ router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
     doc.moveDown(0.3);
 
     // Divider
-    doc.fontSize(8).text("─".repeat(40), { align: "center" });
+    doc.fontSize(8).text("-".repeat(40), { align: "center" });
     doc.moveDown(0.2);
 
     // Receipt info
@@ -57,7 +66,7 @@ router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
     doc.moveDown(0.3);
 
     // Divider
-    doc.text("─".repeat(40), { align: "center" });
+    doc.text("-".repeat(40), { align: "center" });
     doc.moveDown(0.2);
 
     // Items
@@ -75,7 +84,7 @@ router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
     }
 
     doc.moveDown(0.2);
-    doc.text("─".repeat(40), { align: "center" });
+    doc.text("-".repeat(40), { align: "center" });
     doc.moveDown(0.2);
 
     // Totals
@@ -95,7 +104,7 @@ router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
 
     // Audit
     auditLog({
-      tenantId,
+      tenantId: scope.tenantId,
       userId: req.user.id,
       userEmail: req.user.email,
       action: "read",
@@ -105,22 +114,26 @@ router.get("/:saleId/pdf", authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error("Receipt PDF error:", err);
-    res.status(500).json({ error: "Failed to generate receipt" });
+    handleBranchError(res, err, "Failed to generate receipt");
   }
 });
 
 // Get ESC/POS raw commands for thermal printing (sent via Web Serial API from frontend)
-router.get("/:saleId/escpos", authenticateToken, async (req, res) => {
+router.get("/:saleId/escpos", authenticateReceipt, async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const sale = await prisma.sale.findFirst({
-      where: { id: req.params.saleId, tenantId },
-      include: { items: { include: { product: true } }, user: { select: { fname: true, lname: true } } },
+      where: scopedWhere(scope, { id: req.params.saleId }),
+      include: {
+        items: { include: { product: true } },
+        user: { select: { fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
+      },
     });
     if (!sale) return res.status(404).json({ error: "Sale not found" });
 
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: scope.tenantId },
       select: { name: true, phone: true, address: true },
     });
 
@@ -184,7 +197,7 @@ router.get("/:saleId/escpos", authenticateToken, async (req, res) => {
     res.json({ commands: cmds, receiptNo: sale.receiptNo });
   } catch (err) {
     console.error("ESC/POS error:", err);
-    res.status(500).json({ error: "Failed to generate ESC/POS data" });
+    handleBranchError(res, err, "Failed to generate ESC/POS data");
   }
 });
 

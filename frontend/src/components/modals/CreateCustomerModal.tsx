@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, branchesApi, type BranchOption } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface Customer {
   id: string
@@ -28,6 +29,8 @@ interface Customer {
   status: 'active' | 'inactive' | 'blocked'
   trustScore: number
   notes?: string
+  branchId?: string | null
+  branch?: BranchOption | null
 }
 
 interface CreateCustomerModalProps {
@@ -39,7 +42,9 @@ interface CreateCustomerModalProps {
 
 export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initialData }: CreateCustomerModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
+  const { user } = useJWTAuth()
   const { toast } = useToast()
+  const isOwner = user?.role === 'owner'
   
   const [formData, setFormData] = useState({
     name: '',
@@ -48,10 +53,50 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
     address: '',
     creditLimit: 0,
     notes: '',
+    branchId: '',
     ...initialData
   })
   
+  const [branches, setBranches] = useState<BranchOption[]>([])
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    setFormData({
+      name: '',
+      email: '',
+      phone: '',
+      address: '',
+      creditLimit: 0,
+      notes: '',
+      ...initialData,
+      branchId: initialData?.branchId || initialData?.branch?.id || '',
+    })
+  }, [isOpen, initialData])
+
+  useEffect(() => {
+    if (!isOpen || !isOwner) {
+      setBranches([])
+      return
+    }
+
+    branchesApi.active()
+      .then((data) => {
+        setBranches(data)
+        if (data.length === 1) {
+          setFormData((prev) => ({ ...prev, branchId: prev.branchId || data[0].id }))
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load branches:', error)
+        toast({
+          title: 'Branches unavailable',
+          description: 'Refresh and try again before saving this customer.',
+          variant: 'destructive'
+        })
+      })
+  }, [isOpen, isOwner, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,13 +113,25 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
     setLoading(true)
     
     try {
+      if (isOwner && branches.length === 0) {
+        throw new Error('Create an active branch before adding customers')
+      }
+
+      if (isOwner && !formData.branchId) {
+        throw new Error('Select the branch this customer belongs to')
+      }
+
       const url = initialData?.id 
         ? `/api/receivables/customers/${initialData.id}`
         : '/api/receivables/customers'
+      const payload = {
+        ...formData,
+        branchId: isOwner ? formData.branchId : undefined,
+      }
       
       const response = await apiFetch(url, {
         method: initialData?.id ? 'PUT' : 'POST',
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       })
 
       if (!response.ok) {
@@ -98,7 +155,8 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         phone: '',
         address: '',
         creditLimit: 0,
-        notes: ''
+        notes: '',
+        branchId: branches.length === 1 ? branches[0].id : '',
       })
     } catch (error) {
       toast({
@@ -206,6 +264,26 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
               rows={2}
             />
           </div>
+
+          {isOwner && (
+            <div className="space-y-2">
+              <Label htmlFor="customerBranch">Branch *</Label>
+              <Select
+                value={formData.branchId || ''}
+                onValueChange={(value) => handleInputChange('branchId', value)}
+                disabled={branches.length === 0 || loading}
+              >
+                <SelectTrigger id="customerBranch">
+                  <SelectValue placeholder={branches.length === 0 ? 'No active branches' : 'Select branch'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>

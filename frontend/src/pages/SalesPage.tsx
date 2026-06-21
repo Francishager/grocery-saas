@@ -1,6 +1,6 @@
  import { useEffect, useState } from 'react'
 import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode } from 'lucide-react'
-import { inventoryApi, salesApi, barcodeApi, type InventoryItem, type CartItem } from '@/lib/api'
+import { inventoryApi, salesApi, barcodeApi, receiptsApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
+import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
 
 interface RecentSale {
   id: string
@@ -98,18 +99,42 @@ export default function SalesPage() {
     0
   )
 
+  const autoPrintReceipt = async (saleId: string) => {
+    if (!isSerialSupported()) return
+
+    const printer = new ThermalPrinter()
+    try {
+      const connected = await printer.connectToKnownPort()
+      if (!connected) return
+
+      const { commands } = await receiptsApi.getEscPos(saleId)
+      await printer.printFromCommands(commands)
+      toast({ title: 'Receipt printed' })
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Auto print failed',
+        description: error?.message || 'Open the receipt and print manually.',
+      })
+    } finally {
+      await printer.disconnect()
+    }
+  }
+
   const handleCheckout = async () => {
     if (cart.length === 0) return
 
     setProcessing(true)
     try {
-      await salesApi.checkout(cart, paymentMode)
+      const result = await salesApi.checkout(cart, paymentMode)
       toast({
         title: 'Sale completed!',
         description: `${cart.length} items sold for ${formatCurrency(cartTotal)}`,
       })
       setCart([])
+      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id))
       loadRecentSales()
+      loadInventory()
     } catch (error: any) {
       toast({
         variant: 'destructive',
