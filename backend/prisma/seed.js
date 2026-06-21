@@ -109,6 +109,7 @@ async function main() {
     { name: "Switches & Sockets", slug: "switches-sockets" },
     { name: "Circuit Breakers", slug: "circuit-breakers" },
     { name: "Lighting & Bulbs", slug: "lighting-bulbs" },
+    { name: "Mobile Phones", slug: "mobile-phones" },
     { name: "Mobile Accessories", slug: "mobile-accessories" },
     { name: "Phone Chargers", slug: "phone-chargers" },
     { name: "Power Banks", slug: "power-banks" },
