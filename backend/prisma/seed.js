@@ -117,6 +117,8 @@ async function main() {
     { name: "Phone Cases", slug: "phone-cases" },
     { name: "Screen Protectors", slug: "screen-protectors" },
     { name: "Hardware Tools", slug: "hardware-tools" },
+    { name: "Cement", slug: "cement" },
+    { name: "PVC", slug: "pvc" },
     { name: "Nails & Screws", slug: "nails-screws" },
     { name: "Plumbing Accessories", slug: "plumbing-accessories" },
     { name: "Building Hardware", slug: "building-hardware" },

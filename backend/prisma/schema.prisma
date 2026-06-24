@@ -254,6 +254,7 @@ model Product {
   branch      Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   isActive    Boolean   @default(true)
   image       String?
+  expiryDate  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

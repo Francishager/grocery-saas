@@ -369,6 +369,80 @@ export const reportsApi = {
   },
 }
 
+// ==================== NEW REPORTS API (v2) ====================
+export type ReportParams = Record<string, string | number | boolean | undefined>
+
+export const reportsApiV2 = {
+  // Sales Reports
+  salesSummary: (params?: ReportParams) => api.get<any>('/api/reports/sales/summary', { params }),
+  salesDaily: (params?: ReportParams) => api.get<any>('/api/reports/sales/daily', { params }),
+  salesWeekly: (params?: ReportParams) => api.get<any>('/api/reports/sales/weekly', { params }),
+  salesMonthly: (params?: ReportParams) => api.get<any>('/api/reports/sales/monthly', { params }),
+  salesByProduct: (params?: ReportParams) => api.get<any>('/api/reports/sales/by-product', { params }),
+  salesByCategory: (params?: ReportParams) => api.get<any>('/api/reports/sales/by-category', { params }),
+  salesByCustomer: (params?: ReportParams) => api.get<any>('/api/reports/sales/by-customer', { params }),
+  salesByUser: (params?: ReportParams) => api.get<any>('/api/reports/sales/by-user', { params }),
+  salesByBranch: (params?: ReportParams) => api.get<any>('/api/reports/sales/by-branch', { params }),
+  salesDiscounts: (params?: ReportParams) => api.get<any>('/api/reports/sales/discounts', { params }),
+  salesReturns: (params?: ReportParams) => api.get<any>('/api/reports/sales/returns', { params }),
+
+  // Inventory Reports
+  inventoryStock: (params?: ReportParams) => api.get<any>('/api/reports/inventory/stock', { params }),
+  inventoryValuation: (params?: ReportParams) => api.get<any>('/api/reports/inventory/valuation', { params }),
+  inventoryLowStock: (params?: ReportParams) => api.get<any>('/api/reports/inventory/low-stock', { params }),
+  inventoryOutOfStock: (params?: ReportParams) => api.get<any>('/api/reports/inventory/out-of-stock', { params }),
+  inventoryStockMovement: (params?: ReportParams) => api.get<any>('/api/reports/inventory/stock-movement', { params }),
+  inventoryAdjustments: (params?: ReportParams) => api.get<any>('/api/reports/inventory/adjustments', { params }),
+  inventoryExpiry: (params?: ReportParams) => api.get<any>('/api/reports/inventory/expiry', { params }),
+  inventoryDamaged: (params?: ReportParams) => api.get<any>('/api/reports/inventory/damaged', { params }),
+  inventoryFastMoving: (params?: ReportParams) => api.get<any>('/api/reports/inventory/fast-moving', { params }),
+  inventorySlowMoving: (params?: ReportParams) => api.get<any>('/api/reports/inventory/slow-moving', { params }),
+
+  // Financial Reports
+  financialProfitLoss: (params?: ReportParams) => api.get<any>('/api/reports/financial/profit-loss', { params }),
+  financialIncome: (params?: ReportParams) => api.get<any>('/api/reports/financial/income', { params }),
+  financialExpense: (params?: ReportParams) => api.get<any>('/api/reports/financial/expense', { params }),
+  financialCashFlow: (params?: ReportParams) => api.get<any>('/api/reports/financial/cash-flow', { params }),
+  financialTrialBalance: (params?: ReportParams) => api.get<any>('/api/reports/financial/trial-balance', { params }),
+  financialBalanceSheet: (params?: ReportParams) => api.get<any>('/api/reports/financial/balance-sheet', { params }),
+  financialGeneralLedger: (params?: ReportParams) => api.get<any>('/api/reports/financial/general-ledger', { params }),
+  financialBankTransactions: (params?: ReportParams) => api.get<any>('/api/reports/financial/bank-transactions', { params }),
+  financialTax: (params?: ReportParams) => api.get<any>('/api/reports/financial/tax', { params }),
+
+  // Customer Reports
+  customersList: (params?: ReportParams) => api.get<any>('/api/reports/customers/list', { params }),
+  customersSales: (params?: ReportParams) => api.get<any>('/api/reports/customers/sales', { params }),
+  customersBalance: (params?: ReportParams) => api.get<any>('/api/reports/customers/balance', { params }),
+  customersReceivables: (params?: ReportParams) => api.get<any>('/api/reports/customers/receivables', { params }),
+  customersTop: (params?: ReportParams) => api.get<any>('/api/reports/customers/top', { params }),
+
+  // Supplier Reports
+  suppliersList: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/list', { params }),
+  suppliersPurchases: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/purchases', { params }),
+  suppliersPayables: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/payables', { params }),
+  suppliersBalance: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/balance', { params }),
+
+  // Receivables Reports
+  receivablesOutstanding: (params?: ReportParams) => api.get<any>('/api/reports/receivables/outstanding', { params }),
+  receivablesAging: (params?: ReportParams) => api.get<any>('/api/reports/receivables/aging', { params }),
+  receivablesCollection: (params?: ReportParams) => api.get<any>('/api/reports/receivables/collection', { params }),
+  receivablesOverdue: (params?: ReportParams) => api.get<any>('/api/reports/receivables/overdue', { params }),
+
+  // Payables Reports
+  payablesOutstanding: (params?: ReportParams) => api.get<any>('/api/reports/payables/outstanding', { params }),
+  payablesAging: (params?: ReportParams) => api.get<any>('/api/reports/payables/aging', { params }),
+  payablesPaymentHistory: (params?: ReportParams) => api.get<any>('/api/reports/payables/payment-history', { params }),
+  payablesOverdue: (params?: ReportParams) => api.get<any>('/api/reports/payables/overdue', { params }),
+
+  // Business Performance Reports
+  performanceBranch: (params?: ReportParams) => api.get<any>('/api/reports/performance/branch', { params }),
+  performanceProduct: (params?: ReportParams) => api.get<any>('/api/reports/performance/product', { params }),
+  performanceCategory: (params?: ReportParams) => api.get<any>('/api/reports/performance/category', { params }),
+  performanceUserActivity: (params?: ReportParams) => api.get<any>('/api/reports/performance/user-activity', { params }),
+  performanceTopProducts: (params?: ReportParams) => api.get<any>('/api/reports/performance/top-products', { params }),
+  performanceLeastProducts: (params?: ReportParams) => api.get<any>('/api/reports/performance/least-products', { params }),
+}
+
 // Admin endpoints
 export const adminApi = {
   getMetrics: () =>
