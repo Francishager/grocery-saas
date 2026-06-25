@@ -146,6 +146,22 @@ export const authApi = {
 
   logout: () =>
     api.post<{ message: string }>('/api/auth/logout'),
+
+  updateProfile: (data: { fname?: string; lname?: string; phone?: string }) =>
+    api.put<{ message: string; user: any }>('/api/auth/profile', { body: data }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.put<{ message: string }>('/api/auth/change-password', { body: { currentPassword, newPassword } }),
+
+  uploadAvatar: (file: File) => {
+    const formData = new FormData()
+    formData.append('avatar', file)
+    return fetch(`${API_URL}/api/auth/avatar`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+      body: formData,
+    }).then(r => r.json())
+  },
 }
 
 // Dashboard endpoints

@@ -16,7 +16,8 @@ const PERM_LABELS: Record<string, string> = {
   canCreateSupplier:'Create Supplier', canViewSupplier:'View Supplier', canEditSupplier:'Edit Supplier', canDeleteSupplier:'Delete Supplier',
   canCreateStaff:'Create Staff', canViewStaff:'View Staff', canEditStaff:'Edit Staff', canDeleteStaff:'Delete Staff',
   canCreateBranch:'Create Branch', canViewBranch:'View Branch', canEditBranch:'Edit Branch', canDeleteBranch:'Delete Branch',
-  canViewReport:'View Report', canViewSettings:'View Settings', canEditSettings:'Edit Settings', canGiveDiscount:'Give Discount',
+  canViewSalesReport:'View Sales Report',canViewInventoryReport:'View Inventory Report',canViewFinancialReport:'View Financial Report',canViewCustomerReport:'View Customer Report',canViewSupplierReport:'View Supplier Report',canViewReceivablesReport:'View Receivables Report',canViewPayablesReport:'View Payables Report',canViewPerformanceReport:'View Performance Report',canExportReport:'Export Reports',
+  canViewSettings:'View Settings', canEditSettings:'Edit Settings', canGiveDiscount:'Give Discount',
 }
 
 const PERM_GROUPS = [
@@ -28,6 +29,7 @@ const PERM_GROUPS = [
   { label: 'Suppliers', prefix: 'Supplier' },
   { label: 'Staff', prefix: 'Staff' },
   { label: 'Branches', prefix: 'Branch' },
+  { label: 'Reports', prefix: 'Report' },
 ]
 
 export default function RolesPermissionsPage() {
@@ -229,7 +231,7 @@ export default function RolesPermissionsPage() {
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Other</p>
                   <div className="grid gap-1 grid-cols-4">
-                    {['canViewReport','canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
+                    {['canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
                       <label key={key} className="flex items-center gap-1.5 text-xs">
                         <input type="checkbox" checked={!!formPerms[key]} onChange={e => setFormPerms(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
                         {PERM_LABELS[key] || key}
@@ -348,7 +350,7 @@ export default function RolesPermissionsPage() {
                         <div>
                           <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Other</p>
                           <div className="grid gap-1 grid-cols-4">
-                            {['canViewReport','canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
+                            {['canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
                               <label key={key} className="flex items-center gap-1.5 text-xs">
                                 <input type="checkbox" checked={!!permissions[key]} onChange={e => setPermissions(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
                                 {PERM_LABELS[key] || key}

@@ -1,12 +1,22 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import multer from "multer";
+import cloudinary from "cloudinary";
 import prisma from "../db.js";
 import { authenticateToken, requireRole } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 
 function permissionsForUser(user) {
   if (user.role === "saas_admin") return ["*"];
@@ -52,15 +62,26 @@ function primaryBranchId(user) {
   return primary?.branchId || null;
 }
 
-function userPayload(user) {
+function userPayload(user, userPerm) {
   const isPlatformUser = user.role === "saas_admin";
   const permissions = permissionsForUser(user);
+
+  // Merge granular UserPermission keys (canViewSalesReport, etc.) into permissions array
+  if (userPerm && !isPlatformUser) {
+    for (const [key, val] of Object.entries(userPerm)) {
+      if (key.startsWith("can") && val === true && !permissions.includes(key)) {
+        permissions.push(key);
+      }
+    }
+  }
+
   return {
     id: user.id,
     email: user.email,
     name: `${user.fname || ""} ${user.lname || ""}`.trim(),
     fname: user.fname,
     lname: user.lname,
+    avatar: user.avatar || null,
     role: user.role,
     tenantId: user.tenantId,
     branchId: primaryBranchId(user),
@@ -105,8 +126,11 @@ router.post("/login", async (req, res) => {
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
 
+    // Fetch granular permissions
+    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+
     res.json({
-      user: userPayload(user),
+      user: userPayload(user, userPerm),
       tokens: { accessToken, refreshToken, expiresIn: 86400, tokenType: "Bearer" },
     });
   } catch (err) {
@@ -156,8 +180,9 @@ router.get("/me", authenticateToken, async (req, res) => {
       },
     });
     if (!user) return res.status(404).json({ error: "User not found" });
+    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
     const { password: _, ...safe } = user;
-    res.json({ user: { ...safe, ...userPayload(user) } });
+    res.json({ user: { ...safe, ...userPayload(user, userPerm) } });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -221,6 +246,85 @@ router.post("/reset-password", async (req, res) => {
   } catch (err) {
     console.error("Reset password error:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Update profile (name, phone, avatar)
+router.put("/profile", authenticateToken, async (req, res) => {
+  try {
+    const { fname, lname, phone, avatar } = req.body;
+    const data = {};
+    if (fname !== undefined) data.fname = fname;
+    if (lname !== undefined) data.lname = lname;
+    if (phone !== undefined) data.phone = phone || null;
+    if (avatar !== undefined) data.avatar = avatar || null;
+
+    const user = await prisma.user.update({
+      where: { id: req.user.id },
+      data,
+      include: {
+        tenant: true,
+        branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
+    });
+
+    const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+    res.json({ message: "Profile updated", user: userPayload(user, userPerm) });
+  } catch (err) {
+    console.error("Update profile error:", err);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+// Change password (requires current password)
+router.put("/change-password", authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: "Current and new password required" });
+    if (String(newPassword).length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const match = await bcrypt.compare(currentPassword, user.password);
+    if (!match) return res.status(400).json({ error: "Current password is incorrect" });
+
+    const hashed = await bcrypt.hash(String(newPassword), 12);
+    await prisma.user.update({ where: { id: req.user.id }, data: { password: hashed } });
+    res.json({ message: "Password changed successfully" });
+  } catch (err) {
+    console.error("Change password error:", err);
+    res.status(500).json({ error: "Failed to change password" });
+  }
+});
+
+// Upload avatar
+router.post("/avatar", authenticateToken, upload.single("avatar"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const stream = cloudinary.v2.uploader.upload_stream(
+      { folder: `jibusales/avatars/${req.user.id}`, public_id: `avatar-${Date.now()}`, overwrite: true },
+      async (error, cloudResult) => {
+        if (error) {
+          console.error("Avatar upload error:", error);
+          return res.status(500).json({ error: "Failed to upload avatar" });
+        }
+        const avatarUrl = cloudResult.secure_url;
+        await prisma.user.update({ where: { id: req.user.id }, data: { avatar: avatarUrl } });
+
+        const user = await prisma.user.findUnique({
+          where: { id: req.user.id },
+          include: { tenant: true, branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] } },
+        });
+        const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+        res.json({ message: "Avatar uploaded", avatar: avatarUrl, user: userPayload(user, userPerm) });
+      }
+    );
+    stream.end(req.file.buffer);
+  } catch (err) {
+    console.error("Upload avatar error:", err);
+    res.status(500).json({ error: "Failed to upload avatar" });
   }
 });
 

@@ -28,6 +28,7 @@ import ReceiptSettingsPage from '@/pages/ReceiptSettingsPage'
 import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
+import UserProfilePage from '@/pages/UserProfilePage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -120,6 +121,7 @@ function App() {
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="branches" element={<BranchesPage />} />
           <Route path="staff" element={<StaffPage />} />
+          <Route path="profile" element={<UserProfilePage />} />
           <Route path="settings" element={<BusinessSettingsPage />} />
           <Route path="tax" element={<TaxManagementPage />} />
           <Route path="receipt-settings" element={<ReceiptSettingsPage />} />

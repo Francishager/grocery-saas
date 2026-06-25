@@ -19,11 +19,11 @@ const navItems = [
 ]
 
 interface ReportSubItem { id: string; label: string }
-interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; items: ReportSubItem[] }
+interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string; items: ReportSubItem[] }
 
 const reportCategories: ReportCategoryDef[] = [
   {
-    id: 'sales', label: 'Sales Reports', icon: ShoppingCart,
+    id: 'sales', label: 'Sales Reports', icon: ShoppingCart, permission: 'canViewSalesReport',
     items: [
       { id: 'salesSummary', label: 'Sales Summary' },
       { id: 'salesDaily', label: 'Daily Sales Report' },
@@ -39,7 +39,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'inventory', label: 'Inventory Reports', icon: Package,
+    id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport',
     items: [
       { id: 'inventoryStock', label: 'Current Stock Report' },
       { id: 'inventoryValuation', label: 'Stock Valuation Report' },
@@ -54,7 +54,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'financial', label: 'Financial Reports', icon: DollarSign,
+    id: 'financial', label: 'Financial Reports', icon: DollarSign, permission: 'canViewFinancialReport',
     items: [
       { id: 'financialProfitLoss', label: 'Profit & Loss Report' },
       { id: 'financialIncome', label: 'Income Report' },
@@ -68,7 +68,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'customers', label: 'Customer Reports', icon: Users,
+    id: 'customers', label: 'Customer Reports', icon: Users, permission: 'canViewCustomerReport',
     items: [
       { id: 'customersList', label: 'Customer List Report' },
       { id: 'customersSales', label: 'Customer Sales Report' },
@@ -78,7 +78,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'suppliers', label: 'Supplier Reports', icon: Building2,
+    id: 'suppliers', label: 'Supplier Reports', icon: Building2, permission: 'canViewSupplierReport',
     items: [
       { id: 'suppliersList', label: 'Supplier List Report' },
       { id: 'suppliersPurchases', label: 'Supplier Purchases Report' },
@@ -87,7 +87,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'receivables', label: 'Receivables Reports', icon: CreditCard,
+    id: 'receivables', label: 'Receivables Reports', icon: CreditCard, permission: 'canViewReceivablesReport',
     items: [
       { id: 'receivablesOutstanding', label: 'Outstanding Invoices' },
       { id: 'receivablesAging', label: 'Customer Aging Report' },
@@ -96,7 +96,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'payables', label: 'Payables Reports', icon: FileText,
+    id: 'payables', label: 'Payables Reports', icon: FileText, permission: 'canViewPayablesReport',
     items: [
       { id: 'payablesOutstanding', label: 'Outstanding Bills Report' },
       { id: 'payablesAging', label: 'Supplier Aging Report' },
@@ -105,7 +105,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'performance', label: 'Business Performance Reports', icon: BarChart3,
+    id: 'performance', label: 'Business Performance Reports', icon: BarChart3, permission: 'canViewPerformanceReport',
     items: [
       { id: 'performanceBranch', label: 'Branch Performance Report' },
       { id: 'performanceProduct', label: 'Product Performance Report' },
@@ -132,7 +132,7 @@ export function TenantLayout() {
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
-  const { user, logout } = useJWTAuth()
+  const { user, logout, hasPermission } = useJWTAuth()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const handleLogout = () => { logout(); navigate('/login') }
@@ -191,7 +191,7 @@ export function TenantLayout() {
                   </button>
                   {reportsExpanded && (
                     <div className="mt-1 space-y-1">
-                      {reportCategories.map(cat => {
+                      {reportCategories.filter(cat => hasPermission(cat.permission)).map(cat => {
                         const catExpanded = expandedCats.has(cat.id)
                         return (
                           <div key={cat.id}>
@@ -261,21 +261,42 @@ export function TenantLayout() {
           <div className="group relative">
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden"
               aria-label="User profile"
             >
-              {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
+              ) : (
+                user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'
+              )}
             </button>
             <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
-              <div className="mb-3 border-b pb-3">
-                <p className="truncate text-sm font-semibold">{user?.name || 'User'}</p>
-                <p className="truncate text-xs text-muted-foreground">{user?.email || ''}</p>
-                <p className="mt-1 text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
+              <div className="mb-3 border-b pb-3 flex items-center gap-3">
+                {user?.avatar ? (
+                  <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
+                ) : (
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                    {user?.name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-sm font-semibold">{user?.name || 'User'}</p>
+                  <p className="truncate text-xs text-muted-foreground">{user?.email || ''}</p>
+                  <p className="text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
+                </div>
               </div>
-              <Button variant="ghost" size="sm" className="h-10 w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Logout
-              </Button>
+              <div className="space-y-1 mb-2">
+                <Button variant="ghost" size="sm" className="h-9 w-full justify-start" onClick={() => navigate('/tenant/profile')}>
+                  <Users className="mr-2 h-4 w-4" />
+                  My Profile
+                </Button>
+              </div>
+              <div className="border-t pt-2">
+                <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Logout
+                </Button>
+              </div>
             </div>
           </div>
         </header>

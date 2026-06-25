@@ -1,12 +1,57 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken, requireRole, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
 
 // ==================== HELPERS ====================
 const reportRoles = ["owner", "manager", "accountant"];
+
+// Map report path prefixes to granular permissions
+const reportPermMap = {
+  sales: "canViewSalesReport",
+  inventory: "canViewInventoryReport",
+  financial: "canViewFinancialReport",
+  customers: "canViewCustomerReport",
+  suppliers: "canViewSupplierReport",
+  receivables: "canViewReceivablesReport",
+  payables: "canViewPayablesReport",
+  performance: "canViewPerformanceReport",
+  expenses: "canViewFinancialReport",
+  profit: "canViewFinancialReport",
+  purchases: "canViewPayablesReport",
+};
+
+// Middleware: check granular report permission based on route prefix
+function requireReportPermission(req, res, next) {
+  // Owner always has access
+  if (req.user?.role === "owner") return next();
+
+  // Check UserPermission table for the specific report permission
+  const pathSeg = req.path.split("/").filter(Boolean)[0]; // e.g. "sales", "inventory"
+  const permKey = reportPermMap[pathSeg];
+
+  if (!permKey) {
+    // No mapping — fall back to role check
+    return next();
+  }
+
+  // Check if user has the permission in their permissions array or specific perm key
+  const perms = req.user.permissions || [];
+  if (perms.includes("*") || perms.includes(permKey)) return next();
+
+  // Also check the user's UserPermission record
+  prisma.userPermission.findUnique({ where: { userId: req.user.id } })
+    .then((p) => {
+      if (p && p[permKey]) return next();
+      return res.status(403).json({ error: "Permission denied", required: permKey });
+    })
+    .catch(() => res.status(500).json({ error: "Failed to check permission" }));
+}
+
+// Apply granular report permission check to all routes
+router.use(authenticateToken, requireRole(reportRoles), requireReportPermission);
 
 function df(req, field = "createdAt") {
   const { from, to } = req.query;

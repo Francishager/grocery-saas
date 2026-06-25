@@ -125,19 +125,16 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
       res.send(pdf);
     });
 
-    // Logo
+    // Logo - positioned left side above business name
     if (tenant?.logo) {
       try {
         const resp = await fetch(tenant.logo);
         if (resp.ok) {
           const imgBuf = Buffer.from(await resp.arrayBuffer());
-          // Small logo for 80mm thermal receipt - max 60px wide, 40px tall
-          const logoWidth = 60;
-          const pageWidth = 226.77;
+          // Logo on left side, max 50px wide, 35px tall
+          const logoWidth = 50;
           const margin = 10;
-          const usableWidth = pageWidth - 2 * margin;
-          const x = margin + (usableWidth - logoWidth) / 2;
-          doc.image(imgBuf, x, undefined, { fit: [logoWidth, 40], align: "center" });
+          doc.image(imgBuf, margin, undefined, { fit: [logoWidth, 35], align: "left" });
           doc.moveDown(0.3);
         } else {
           console.error("Logo fetch failed:", resp.status, tenant.logo);

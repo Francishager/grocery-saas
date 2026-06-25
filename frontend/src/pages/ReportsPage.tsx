@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -28,6 +29,7 @@ interface ReportCategory {
   id: string
   label: string
   icon: IconType
+  permission: string
   items: ReportItem[]
 }
 
@@ -38,7 +40,7 @@ const textCol = (key: string, label: string) => ({ key, label, format: 'text' as
 
 const CATEGORIES: ReportCategory[] = [
   {
-    id: 'sales', label: 'Sales Reports', icon: ShoppingCart,
+    id: 'sales', label: 'Sales Reports', icon: ShoppingCart, permission: 'canViewSalesReport',
     items: [
       { id: 'salesSummary', label: 'Sales Summary', apiFn: reportsApiV2.salesSummary, renderType: 'summary',
         summaryKeys: [
@@ -83,7 +85,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'inventory', label: 'Inventory Reports', icon: Package,
+    id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport',
     items: [
       { id: 'inventoryStock', label: 'Current Stock Report', apiFn: reportsApiV2.inventoryStock, renderType: 'table',
         columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price')]
@@ -118,7 +120,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'financial', label: 'Financial Reports', icon: DollarSign,
+    id: 'financial', label: 'Financial Reports', icon: DollarSign, permission: 'canViewFinancialReport',
     items: [
       { id: 'financialProfitLoss', label: 'Profit & Loss Report', apiFn: reportsApiV2.financialProfitLoss, renderType: 'pnL' },
       { id: 'financialIncome', label: 'Income Report', apiFn: reportsApiV2.financialIncome, renderType: 'summary',
@@ -158,7 +160,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'customers', label: 'Customer Reports', icon: Users,
+    id: 'customers', label: 'Customer Reports', icon: Users, permission: 'canViewCustomerReport',
     items: [
       { id: 'customersList', label: 'Customer List Report', apiFn: reportsApiV2.customersList, renderType: 'table',
         columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), textCol('email', 'Email'), currencyCol('balance', 'Balance')]
@@ -178,7 +180,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'suppliers', label: 'Supplier Reports', icon: Building2,
+    id: 'suppliers', label: 'Supplier Reports', icon: Building2, permission: 'canViewSupplierReport',
     items: [
       { id: 'suppliersList', label: 'Supplier List Report', apiFn: reportsApiV2.suppliersList, renderType: 'table',
         columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), textCol('email', 'Email'), currencyCol('balance', 'Balance')]
@@ -195,7 +197,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'receivables', label: 'Receivables Reports', icon: CreditCard,
+    id: 'receivables', label: 'Receivables Reports', icon: CreditCard, permission: 'canViewReceivablesReport',
     items: [
       { id: 'receivablesOutstanding', label: 'Outstanding Invoices', apiFn: reportsApiV2.receivablesOutstanding, renderType: 'table',
         columns: [textCol('customer', 'Customer'), textCol('status', 'Status'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
@@ -210,7 +212,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'payables', label: 'Payables Reports', icon: FileText,
+    id: 'payables', label: 'Payables Reports', icon: FileText, permission: 'canViewPayablesReport',
     items: [
       { id: 'payablesOutstanding', label: 'Outstanding Bills Report', apiFn: reportsApiV2.payablesOutstanding, renderType: 'table',
         columns: [textCol('supplier', 'Supplier'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance'), dateCol('createdAt', 'Date')]
@@ -225,7 +227,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'performance', label: 'Business Performance Reports', icon: BarChart3,
+    id: 'performance', label: 'Business Performance Reports', icon: BarChart3, permission: 'canViewPerformanceReport',
     items: [
       { id: 'performanceBranch', label: 'Branch Performance Report', apiFn: reportsApiV2.performanceBranch, renderType: 'table',
         columns: [textCol('branch', 'Branch'), numberCol('count', 'Sales'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount'), currencyCol('avgSale', 'Avg Sale')]
@@ -455,8 +457,12 @@ export default function ReportsPage() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const { toast } = useToast()
+  const { hasPermission } = useJWTAuth()
 
-  const currentReport = useMemo(() => ALL_REPORTS.find(r => r.id === selectedReport), [selectedReport])
+  const visibleCategories = useMemo(() => CATEGORIES.filter(c => hasPermission(c.permission)), [hasPermission])
+  const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
+
+  const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])
 
   const loadReport = useCallback(async () => {
     if (!currentReport) return

@@ -17,7 +17,8 @@ const PERM_KEYS = [
   "canCreateSupplier","canViewSupplier","canEditSupplier","canDeleteSupplier",
   "canCreateStaff","canViewStaff","canEditStaff","canDeleteStaff",
   "canCreateBranch","canViewBranch","canEditBranch","canDeleteBranch",
-  "canViewReport","canViewSettings","canEditSettings","canGiveDiscount",
+  "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canExportReport",
+  "canViewSettings","canEditSettings","canGiveDiscount",
 ];
 
 const ROLE_DEFAULTS = {
@@ -30,7 +31,8 @@ const ROLE_DEFAULTS = {
     canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
-    canViewReport:true,canViewSettings:true,canEditSettings:false,canGiveDiscount:true,
+    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canExportReport:true,
+    canViewSettings:true,canEditSettings:false,canGiveDiscount:true,
   },
   accountant: {
     canCreateSale:false,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
@@ -41,7 +43,8 @@ const ROLE_DEFAULTS = {
     canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
-    canViewReport:true,canViewSettings:true,canEditSettings:false,canGiveDiscount:false,
+    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canExportReport:true,
+    canViewSettings:true,canEditSettings:false,canGiveDiscount:false,
   },
   attendant: {
     canCreateSale:true,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
@@ -52,7 +55,7 @@ const ROLE_DEFAULTS = {
     canCreateSupplier:false,canViewSupplier:false,canEditSupplier:false,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:false,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:false,canEditBranch:false,canDeleteBranch:false,
-    canViewReport:false,canViewSettings:false,canEditSettings:false,canGiveDiscount:false,
+    canViewSalesReport:false,canViewInventoryReport:false,canViewFinancialReport:false,canViewCustomerReport:false,canViewSupplierReport:false,canViewReceivablesReport:false,canViewPayablesReport:false,canViewPerformanceReport:false,canExportReport:false,
   },
 };
 

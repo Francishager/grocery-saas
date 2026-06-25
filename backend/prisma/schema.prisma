@@ -272,8 +272,16 @@ model UserPermission {
   canViewBranch   Boolean @default(true)
   canEditBranch   Boolean @default(false)
   canDeleteBranch Boolean @default(false)
-  // Reports
-  canViewReport Boolean @default(true)
+  // Reports (granular)
+  canViewSalesReport      Boolean @default(true)
+  canViewInventoryReport  Boolean @default(true)
+  canViewFinancialReport  Boolean @default(true)
+  canViewCustomerReport   Boolean @default(true)
+  canViewSupplierReport   Boolean @default(true)
+  canViewReceivablesReport Boolean @default(true)
+  canViewPayablesReport   Boolean @default(true)
+  canViewPerformanceReport Boolean @default(true)
+  canExportReport         Boolean @default(false)
   // Settings
   canViewSettings   Boolean @default(true)
   canEditSettings   Boolean @default(false)
