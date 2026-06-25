@@ -147,8 +147,7 @@ export function TenantLayout() {
   }
   const visibleNavItems = navItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false
-    if (!item.feature) return true
-    return canAccessFeature(item.feature)
+    return true
   })
 
   const toggleCat = (catId: string) => {
