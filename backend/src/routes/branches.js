@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 
 const router = Router();
 
@@ -66,7 +66,7 @@ async function findTenantBranch(req, res) {
 router.get(
   "/",
   authenticateToken,
-  requireRole(tenantRoles),
+  requirePermission("canViewBranch"),
   requireTenantUser,
   async (req, res) => {
     try {
@@ -92,7 +92,7 @@ router.get(
 router.get(
   "/active",
   authenticateToken,
-  requireRole(tenantRoles),
+  requirePermission("canViewBranch"),
   requireTenantUser,
   async (req, res) => {
     try {
@@ -113,7 +113,7 @@ router.get(
 router.get(
   "/:id",
   authenticateToken,
-  requireRole(tenantRoles),
+  requirePermission("canViewBranch"),
   requireTenantUser,
   async (req, res) => {
     try {
@@ -130,7 +130,7 @@ router.get(
 router.post(
   "/",
   authenticateToken,
-  requireRole(branchManagerRoles),
+  requirePermission("canCreateBranch"),
   requireTenantUser,
   async (req, res) => {
     try {
@@ -161,7 +161,7 @@ router.post(
 router.put(
   "/:id",
   authenticateToken,
-  requireRole(branchManagerRoles),
+  requirePermission("canEditBranch"),
   requireTenantUser,
   async (req, res) => {
     try {
@@ -193,7 +193,7 @@ router.put(
 router.patch(
   "/:id",
   authenticateToken,
-  requireRole(branchManagerRoles),
+  requirePermission("canEditBranch"),
   requireTenantUser,
   async (req, res) => {
     try {
@@ -225,7 +225,7 @@ router.patch(
 router.delete(
   "/:id",
   authenticateToken,
-  requireRole(branchManagerRoles),
+  requirePermission("canDeleteBranch"),
   requireTenantUser,
   async (req, res) => {
     try {

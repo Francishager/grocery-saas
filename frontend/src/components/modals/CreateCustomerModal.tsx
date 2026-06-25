@@ -44,7 +44,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
   const { isFeatureEnabled } = useFeatureAccess()
   const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
-  const canManageCustomers = hasPermission('create_sales') || hasPermission('view_sales')
+  const canManageCustomers = hasPermission('canCreateSale') || hasPermission('canViewSale')
   
   const [formData, setFormData] = useState({
     name: '',

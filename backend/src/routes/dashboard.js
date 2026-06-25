@@ -1,12 +1,12 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
 
 // Dashboard KPIs
-router.get("/kpis", authenticateToken, async (req, res) => {
+router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -55,7 +55,7 @@ router.get("/kpis", authenticateToken, async (req, res) => {
 });
 
 // Sales chart data (last 12 months)
-router.get("/sales-chart", authenticateToken, async (req, res) => {
+router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -84,7 +84,7 @@ router.get("/sales-chart", authenticateToken, async (req, res) => {
 });
 
 // Profit & Loss summary (last 6 months)
-router.get("/profit-loss", authenticateToken, async (req, res) => {
+router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -116,7 +116,7 @@ router.get("/profit-loss", authenticateToken, async (req, res) => {
 });
 
 // Top selling products
-router.get("/top-products", authenticateToken, async (req, res) => {
+router.get("/top-products", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -148,7 +148,7 @@ router.get("/top-products", authenticateToken, async (req, res) => {
 });
 
 // Payment method breakdown
-router.get("/payment-methods", authenticateToken, async (req, res) => {
+router.get("/payment-methods", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();

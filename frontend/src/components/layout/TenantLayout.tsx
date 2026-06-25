@@ -7,15 +7,15 @@ import { Button } from '@/components/ui/button'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
 const navItems = [
-  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'view_dashboard' },
-  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'view_sales' },
-  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'view_inventory' },
-  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', permission: 'view_sales' },
-  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', permission: 'view_purchases' },
-  { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'view_purchases' },
-  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'view_reports', isReports: true },
-  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'view_reports' },
-  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'manage_inventory', isSettings: true },
+  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard' },
+  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
+  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct' },
+  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', permission: 'canViewCustomer' },
+  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', permission: 'canViewPurchase' },
+  { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'canViewExpense' },
+  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
+  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', isSettings: true },
 ]
 
 interface ReportSubItem { id: string; label: string }

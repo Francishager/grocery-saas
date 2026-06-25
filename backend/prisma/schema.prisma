@@ -231,6 +231,8 @@ model UserPermission {
   id         String @id @default(cuid())
   userId     String
   user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Dashboard
+  canViewDashboard Boolean @default(true)
   // Sales
   canCreateSale Boolean @default(true)
   canViewSale   Boolean @default(true)
@@ -242,7 +244,9 @@ model UserPermission {
   canViewProduct   Boolean @default(true)
   canEditProduct   Boolean @default(false)
   canDeleteProduct Boolean @default(false)
-  // Purchases
+  canAdjustStock   Boolean @default(false)
+  canTransferStock Boolean @default(false)
+  // Purchases / Payables
   canCreatePurchase Boolean @default(false)
   canViewPurchase   Boolean @default(true)
   canEditPurchase   Boolean @default(false)
@@ -252,7 +256,7 @@ model UserPermission {
   canViewExpense   Boolean @default(true)
   canEditExpense   Boolean @default(false)
   canDeleteExpense Boolean @default(false)
-  // Customers
+  // Customers / Receivables
   canCreateCustomer Boolean @default(false)
   canViewCustomer   Boolean @default(true)
   canEditCustomer   Boolean @default(false)
@@ -281,12 +285,19 @@ model UserPermission {
   canViewReceivablesReport Boolean @default(true)
   canViewPayablesReport   Boolean @default(true)
   canViewPerformanceReport Boolean @default(true)
+  canViewAuditReport      Boolean @default(true)
   canExportReport         Boolean @default(false)
   // Settings
   canViewSettings   Boolean @default(true)
   canEditSettings   Boolean @default(false)
+  // Receipts
+  canViewReceipt   Boolean @default(true)
+  canCreateReceipt Boolean @default(false)
   // Discounts
   canGiveDiscount Boolean @default(false)
+  // Tax
+  canViewTax   Boolean @default(true)
+  canManageTax Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

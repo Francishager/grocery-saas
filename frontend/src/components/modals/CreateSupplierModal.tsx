@@ -42,7 +42,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
   const { isFeatureEnabled } = useFeatureAccess()
   const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
-  const canManageSuppliers = hasPermission('create_purchases') || hasPermission('view_purchases')
+  const canManageSuppliers = hasPermission('canCreatePurchase') || hasPermission('canViewPurchase')
   
   const [formData, setFormData] = useState({
     name: '',

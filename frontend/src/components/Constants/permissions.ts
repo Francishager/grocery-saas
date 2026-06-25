@@ -27,11 +27,17 @@ export const permissionCategories = [
   { id: 'tenants', name: 'Tenant Management', description: 'Business tenant management' },
   { id: 'dashboard', name: 'Dashboard' },
   { id: 'sales', name: 'Sales' },
-  { id: 'purchases', name: 'Purchases' },
+  { id: 'purchases', name: 'Purchases / Payables' },
   { id: 'inventory', name: 'Inventory' },
+  { id: 'expenses', name: 'Expenses' },
+  { id: 'customers', name: 'Customers / Receivables' },
+  { id: 'suppliers', name: 'Suppliers' },
   { id: 'reports', name: 'Reports' },
-  { id: 'users', name: 'Users & Access' },
+  { id: 'users', name: 'Staff & Access' },
+  { id: 'branches', name: 'Branches' },
   { id: 'settings', name: 'Settings' },
+  { id: 'receipts', name: 'Receipts' },
+  { id: 'tax', name: 'Tax' },
   { id: 'billing', name: 'Billing & Subscription' },
 ]
 
@@ -51,39 +57,85 @@ export const permissions: Permission[] = [
   
   // Business Data Permissions (Tenant-level only)
   // Dashboard
-  { id: 'view_dashboard', name: 'View Dashboard', description: 'View dashboard overview', category: 'dashboard', accessesBusinessData: true },
+  { id: 'canViewDashboard', name: 'View Dashboard', description: 'View dashboard overview', category: 'dashboard', accessesBusinessData: true },
   
   // Sales
-  { id: 'view_sales', name: 'View Sales', description: 'View sales list and details', category: 'sales', accessesBusinessData: true },
-  { id: 'create_sales', name: 'Create Sales', description: 'Create new sales', category: 'sales', accessesBusinessData: true },
-  { id: 'edit_sales', name: 'Edit Sales', description: 'Edit existing sales', category: 'sales', accessesBusinessData: true },
-  { id: 'delete_sales', name: 'Delete Sales', description: 'Delete sales records', category: 'sales', accessesBusinessData: true },
-  { id: 'refund_sales', name: 'Process Refunds', description: 'Process sales refunds', category: 'sales', accessesBusinessData: true },
+  { id: 'canViewSale', name: 'View Sales', description: 'View sales list and details', category: 'sales', accessesBusinessData: true },
+  { id: 'canCreateSale', name: 'Create Sales', description: 'Create new sales', category: 'sales', accessesBusinessData: true },
+  { id: 'canEditSale', name: 'Edit Sales', description: 'Edit existing sales', category: 'sales', accessesBusinessData: true },
+  { id: 'canDeleteSale', name: 'Delete Sales', description: 'Delete sales records', category: 'sales', accessesBusinessData: true },
+  { id: 'canRefundSale', name: 'Process Refunds', description: 'Process sales refunds', category: 'sales', accessesBusinessData: true },
   
-  // Purchases
-  { id: 'view_purchases', name: 'View Purchases', description: 'View purchases list and details', category: 'purchases', accessesBusinessData: true },
-  { id: 'create_purchases', name: 'Create Purchases', description: 'Create new purchases', category: 'purchases', accessesBusinessData: true },
-  { id: 'edit_purchases', name: 'Edit Purchases', description: 'Edit existing purchases', category: 'purchases', accessesBusinessData: true },
-  { id: 'delete_purchases', name: 'Delete Purchases', description: 'Delete purchase records', category: 'purchases', accessesBusinessData: true },
+  // Purchases / Payables
+  { id: 'canViewPurchase', name: 'View Purchases', description: 'View purchases list and details', category: 'purchases', accessesBusinessData: true },
+  { id: 'canCreatePurchase', name: 'Create Purchases', description: 'Create new purchases', category: 'purchases', accessesBusinessData: true },
+  { id: 'canEditPurchase', name: 'Edit Purchases', description: 'Edit existing purchases', category: 'purchases', accessesBusinessData: true },
+  { id: 'canDeletePurchase', name: 'Delete Purchases', description: 'Delete purchase records', category: 'purchases', accessesBusinessData: true },
   
   // Inventory
-  { id: 'view_inventory', name: 'View Inventory', description: 'View inventory list and details', category: 'inventory', accessesBusinessData: true },
-  { id: 'manage_inventory', name: 'Manage Inventory', description: 'Add, edit, delete inventory items', category: 'inventory', accessesBusinessData: true },
-  { id: 'adjust_stock', name: 'Adjust Stock', description: 'Make stock adjustments', category: 'inventory', accessesBusinessData: true },
-  { id: 'transfer_stock', name: 'Transfer Stock', description: 'Transfer stock between branches', category: 'inventory', accessesBusinessData: true },
+  { id: 'canViewProduct', name: 'View Inventory', description: 'View inventory list and details', category: 'inventory', accessesBusinessData: true },
+  { id: 'canCreateProduct', name: 'Create Products', description: 'Add new inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canEditProduct', name: 'Edit Products', description: 'Edit inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canDeleteProduct', name: 'Delete Products', description: 'Delete inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canAdjustStock', name: 'Adjust Stock', description: 'Make stock adjustments', category: 'inventory', accessesBusinessData: true },
+  { id: 'canTransferStock', name: 'Transfer Stock', description: 'Transfer stock between branches', category: 'inventory', accessesBusinessData: true },
   
-  // Reports
-  { id: 'view_reports', name: 'View Reports', description: 'View reports', category: 'reports', accessesBusinessData: true },
-  { id: 'export_reports', name: 'Export Reports', description: 'Export reports to file', category: 'reports', accessesBusinessData: true },
+  // Expenses
+  { id: 'canViewExpense', name: 'View Expenses', description: 'View expenses list', category: 'expenses', accessesBusinessData: true },
+  { id: 'canCreateExpense', name: 'Create Expenses', description: 'Create new expenses', category: 'expenses', accessesBusinessData: true },
+  { id: 'canEditExpense', name: 'Edit Expenses', description: 'Edit existing expenses', category: 'expenses', accessesBusinessData: true },
+  { id: 'canDeleteExpense', name: 'Delete Expenses', description: 'Delete expense records', category: 'expenses', accessesBusinessData: true },
   
-  // Users (Tenant-level)
-  { id: 'view_users', name: 'View Users', description: 'View users list', category: 'users', accessesBusinessData: true },
-  { id: 'manage_users', name: 'Manage Users', description: 'Add, edit, delete users within tenant', category: 'users', accessesBusinessData: true },
-  { id: 'assign_roles', name: 'Assign Roles', description: 'Assign roles to users', category: 'users', accessesBusinessData: true },
+  // Customers / Receivables
+  { id: 'canViewCustomer', name: 'View Customers', description: 'View customers list', category: 'customers', accessesBusinessData: true },
+  { id: 'canCreateCustomer', name: 'Create Customers', description: 'Create new customers', category: 'customers', accessesBusinessData: true },
+  { id: 'canEditCustomer', name: 'Edit Customers', description: 'Edit existing customers', category: 'customers', accessesBusinessData: true },
+  { id: 'canDeleteCustomer', name: 'Delete Customers', description: 'Delete customer records', category: 'customers', accessesBusinessData: true },
+  
+  // Suppliers
+  { id: 'canViewSupplier', name: 'View Suppliers', description: 'View suppliers list', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canCreateSupplier', name: 'Create Suppliers', description: 'Create new suppliers', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canEditSupplier', name: 'Edit Suppliers', description: 'Edit existing suppliers', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canDeleteSupplier', name: 'Delete Suppliers', description: 'Delete supplier records', category: 'suppliers', accessesBusinessData: true },
+  
+  // Reports (granular)
+  { id: 'canViewSalesReport', name: 'View Sales Reports', description: 'View sales reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewInventoryReport', name: 'View Inventory Reports', description: 'View inventory reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewFinancialReport', name: 'View Financial Reports', description: 'View financial reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewCustomerReport', name: 'View Customer Reports', description: 'View customer reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewSupplierReport', name: 'View Supplier Reports', description: 'View supplier reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewReceivablesReport', name: 'View Receivables Reports', description: 'View receivables reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewPayablesReport', name: 'View Payables Reports', description: 'View payables reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewPerformanceReport', name: 'View Performance Reports', description: 'View business performance reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canViewAuditReport', name: 'View Audit Reports', description: 'View audit log reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canExportReport', name: 'Export Reports', description: 'Export reports to file', category: 'reports', accessesBusinessData: true },
+  
+  // Staff (Tenant-level)
+  { id: 'canViewStaff', name: 'View Staff', description: 'View staff list', category: 'users', accessesBusinessData: true },
+  { id: 'canCreateStaff', name: 'Create Staff', description: 'Add new staff members', category: 'users', accessesBusinessData: true },
+  { id: 'canEditStaff', name: 'Edit Staff', description: 'Edit staff details', category: 'users', accessesBusinessData: true },
+  { id: 'canDeleteStaff', name: 'Delete Staff', description: 'Delete staff members', category: 'users', accessesBusinessData: true },
+  
+  // Branches
+  { id: 'canViewBranch', name: 'View Branches', description: 'View branches list', category: 'branches', accessesBusinessData: true },
+  { id: 'canCreateBranch', name: 'Create Branches', description: 'Create new branches', category: 'branches', accessesBusinessData: true },
+  { id: 'canEditBranch', name: 'Edit Branches', description: 'Edit existing branches', category: 'branches', accessesBusinessData: true },
+  { id: 'canDeleteBranch', name: 'Delete Branches', description: 'Delete branches', category: 'branches', accessesBusinessData: true },
   
   // Settings (Tenant-level)
-  { id: 'view_settings', name: 'View Settings', description: 'View settings', category: 'settings', accessesBusinessData: true },
-  { id: 'manage_settings', name: 'Manage Settings', description: 'Modify settings', category: 'settings', accessesBusinessData: true },
+  { id: 'canViewSettings', name: 'View Settings', description: 'View settings', category: 'settings', accessesBusinessData: true },
+  { id: 'canEditSettings', name: 'Edit Settings', description: 'Modify settings', category: 'settings', accessesBusinessData: true },
+  
+  // Receipts
+  { id: 'canViewReceipt', name: 'View Receipts', description: 'View and print receipts', category: 'receipts', accessesBusinessData: true },
+  { id: 'canCreateReceipt', name: 'Create Receipts', description: 'Generate receipts', category: 'receipts', accessesBusinessData: true },
+  
+  // Discounts
+  { id: 'canGiveDiscount', name: 'Give Discounts', description: 'Apply discounts to sales', category: 'sales', accessesBusinessData: true },
+  
+  // Tax
+  { id: 'canViewTax', name: 'View Tax', description: 'View tax settings', category: 'tax', accessesBusinessData: true },
+  { id: 'canManageTax', name: 'Manage Tax', description: 'Modify tax settings', category: 'tax', accessesBusinessData: true },
   
   // Billing (Tenant-level - for business owners)
   { id: 'view_own_billing', name: 'View Own Billing', description: 'View own subscription and billing', category: 'billing' },
@@ -127,13 +179,20 @@ export const roles: Role[] = [
     description: 'Business owner with full access',
     isSystem: true,
     permissions: [
-      'view_dashboard',
-      'view_sales', 'create_sales', 'edit_sales', 'delete_sales', 'refund_sales',
-      'view_purchases', 'create_purchases', 'edit_purchases', 'delete_purchases',
-      'view_inventory', 'manage_inventory', 'adjust_stock', 'transfer_stock',
-      'view_reports', 'export_reports',
-      'view_users', 'manage_users', 'assign_roles',
-      'view_settings', 'manage_settings',
+      'canViewDashboard',
+      'canViewSale', 'canCreateSale', 'canEditSale', 'canDeleteSale', 'canRefundSale',
+      'canViewPurchase', 'canCreatePurchase', 'canEditPurchase', 'canDeletePurchase',
+      'canViewProduct', 'canCreateProduct', 'canEditProduct', 'canDeleteProduct', 'canAdjustStock', 'canTransferStock',
+      'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense',
+      'canViewCustomer', 'canCreateCustomer', 'canEditCustomer', 'canDeleteCustomer',
+      'canViewSupplier', 'canCreateSupplier', 'canEditSupplier', 'canDeleteSupplier',
+      'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport', 'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport', 'canViewAuditReport', 'canExportReport',
+      'canViewStaff', 'canCreateStaff', 'canEditStaff', 'canDeleteStaff',
+      'canViewBranch', 'canCreateBranch', 'canEditBranch', 'canDeleteBranch',
+      'canViewSettings', 'canEditSettings',
+      'canViewReceipt', 'canCreateReceipt',
+      'canGiveDiscount',
+      'canViewTax', 'canManageTax',
     ],
   },
   {
@@ -142,11 +201,19 @@ export const roles: Role[] = [
     description: 'Financial management access',
     isSystem: true,
     permissions: [
-      'view_dashboard',
-      'view_sales', 'view_purchases',
-      'view_inventory',
-      'view_reports', 'export_reports',
-      'view_settings',
+      'canViewDashboard',
+      'canViewSale',
+      'canViewProduct',
+      'canCreatePurchase', 'canViewPurchase', 'canEditPurchase',
+      'canCreateExpense', 'canViewExpense', 'canEditExpense',
+      'canCreateCustomer', 'canViewCustomer', 'canEditCustomer',
+      'canCreateSupplier', 'canViewSupplier', 'canEditSupplier',
+      'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport', 'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport', 'canViewAuditReport', 'canExportReport',
+      'canViewStaff',
+      'canViewBranch',
+      'canViewSettings',
+      'canViewReceipt',
+      'canViewTax', 'canManageTax',
     ],
   },
   {
@@ -155,9 +222,11 @@ export const roles: Role[] = [
     description: 'Sales and basic inventory access',
     isSystem: true,
     permissions: [
-      'view_dashboard',
-      'view_sales', 'create_sales',
-      'view_inventory',
+      'canViewDashboard',
+      'canViewSale', 'canCreateSale',
+      'canViewProduct',
+      'canViewCustomer',
+      'canViewReceipt',
     ],
   },
   {
@@ -166,12 +235,20 @@ export const roles: Role[] = [
     description: 'Branch manager access',
     isSystem: false,
     permissions: [
-      'view_dashboard',
-      'view_sales', 'create_sales', 'edit_sales',
-      'view_purchases', 'create_purchases', 'edit_purchases',
-      'view_inventory', 'manage_inventory', 'adjust_stock',
-      'view_reports',
-      'view_users',
+      'canViewDashboard',
+      'canViewSale', 'canCreateSale', 'canEditSale', 'canRefundSale',
+      'canViewPurchase', 'canCreatePurchase', 'canEditPurchase',
+      'canViewProduct', 'canCreateProduct', 'canEditProduct', 'canAdjustStock', 'canTransferStock',
+      'canCreateExpense', 'canViewExpense', 'canEditExpense',
+      'canCreateCustomer', 'canViewCustomer', 'canEditCustomer',
+      'canCreateSupplier', 'canViewSupplier', 'canEditSupplier',
+      'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport', 'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport', 'canViewAuditReport', 'canExportReport',
+      'canViewStaff',
+      'canViewBranch',
+      'canViewSettings',
+      'canViewReceipt', 'canCreateReceipt',
+      'canGiveDiscount',
+      'canViewTax',
     ],
   },
 ]

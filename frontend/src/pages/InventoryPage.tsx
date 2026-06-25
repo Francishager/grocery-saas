@@ -65,9 +65,9 @@ export default function InventoryPage() {
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
-  const canManageInventory = hasPermission('manage_inventory')
-  const canDeleteInventory = hasPermission('delete_inventory')
-  const canAdjustStock = hasPermission('adjust_stock')
+  const canManageInventory = hasPermission('canCreateProduct') || hasPermission('canEditProduct')
+  const canDeleteInventory = hasPermission('canDeleteProduct')
+  const canAdjustStock = hasPermission('canAdjustStock')
 
   useEffect(() => {
     loadCategories()

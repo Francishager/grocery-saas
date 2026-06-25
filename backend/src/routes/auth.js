@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import cloudinary from "cloudinary";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 
 const router = Router();
@@ -21,40 +21,69 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 *
 function permissionsForUser(user) {
   if (user.role === "saas_admin") return ["*"];
 
-  const common = ["view_dashboard"];
+  // All granular permission keys
+  const ALL_PERMS = [
+    "canViewDashboard",
+    "canCreateSale","canViewSale","canEditSale","canDeleteSale","canRefundSale",
+    "canCreateProduct","canViewProduct","canEditProduct","canDeleteProduct","canAdjustStock","canTransferStock",
+    "canCreatePurchase","canViewPurchase","canEditPurchase","canDeletePurchase",
+    "canCreateExpense","canViewExpense","canEditExpense","canDeleteExpense",
+    "canCreateCustomer","canViewCustomer","canEditCustomer","canDeleteCustomer",
+    "canCreateSupplier","canViewSupplier","canEditSupplier","canDeleteSupplier",
+    "canCreateStaff","canViewStaff","canEditStaff","canDeleteStaff",
+    "canCreateBranch","canViewBranch","canEditBranch","canDeleteBranch",
+    "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canViewAuditReport","canExportReport",
+    "canViewSettings","canEditSettings",
+    "canViewReceipt","canCreateReceipt",
+    "canGiveDiscount",
+    "canViewTax","canManageTax",
+  ];
+
+  // Owner gets everything
+  if (user.role === "owner") return [...ALL_PERMS];
+
   const byRole = {
-    owner: [
-      "view_sales", "create_sales", "edit_sales", "delete_sales", "refund_sales",
-      "view_purchases", "create_purchases", "edit_purchases", "delete_purchases",
-      "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock", "delete_inventory",
-      "view_reports", "export_reports",
-      "view_users", "manage_users", "assign_roles",
-      "view_branches", "manage_branches",
-      "view_settings", "manage_settings", "view_own_billing",
-    ],
     manager: [
-      "view_sales", "create_sales", "edit_sales", "refund_sales",
-      "view_purchases", "create_purchases", "edit_purchases",
-      "view_inventory", "manage_inventory", "adjust_stock", "transfer_stock",
-      "view_reports", "export_reports",
-      "view_users",
-      "view_branches",
-      "view_settings",
+      "canViewDashboard",
+      "canCreateSale","canViewSale","canEditSale","canRefundSale",
+      "canCreateProduct","canViewProduct","canEditProduct","canAdjustStock","canTransferStock",
+      "canCreatePurchase","canViewPurchase","canEditPurchase",
+      "canCreateExpense","canViewExpense","canEditExpense",
+      "canCreateCustomer","canViewCustomer","canEditCustomer",
+      "canCreateSupplier","canViewSupplier","canEditSupplier",
+      "canViewStaff",
+      "canViewBranch",
+      "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canViewAuditReport","canExportReport",
+      "canViewSettings",
+      "canViewReceipt","canCreateReceipt",
+      "canGiveDiscount",
+      "canViewTax",
     ],
     accountant: [
-      "view_sales",
-      "view_purchases", "create_purchases", "edit_purchases",
-      "view_inventory",
-      "view_reports", "export_reports",
-      "view_branches",
+      "canViewDashboard",
+      "canViewSale",
+      "canViewProduct",
+      "canCreatePurchase","canViewPurchase","canEditPurchase",
+      "canCreateExpense","canViewExpense","canEditExpense",
+      "canCreateCustomer","canViewCustomer","canEditCustomer",
+      "canCreateSupplier","canViewSupplier","canEditSupplier",
+      "canViewStaff",
+      "canViewBranch",
+      "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canViewAuditReport","canExportReport",
+      "canViewSettings",
+      "canViewReceipt",
+      "canViewTax","canManageTax",
     ],
     attendant: [
-      "view_sales", "create_sales",
-      "view_inventory",
+      "canViewDashboard",
+      "canCreateSale","canViewSale",
+      "canViewProduct",
+      "canViewCustomer",
+      "canViewReceipt",
     ],
   };
 
-  return [...common, ...(byRole[user.role] || byRole.attendant)];
+  return [...(byRole[user.role] || byRole.attendant)];
 }
 
 function primaryBranchId(user) {

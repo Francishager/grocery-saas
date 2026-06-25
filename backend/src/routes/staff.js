@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 
 const router = Router();
@@ -9,58 +9,89 @@ const router = Router();
 const staffRoles = new Set(["manager", "accountant", "attendant"]);
 
 const PERM_KEYS = [
+  // Dashboard
+  "canViewDashboard",
+  // Sales
   "canCreateSale","canViewSale","canEditSale","canDeleteSale","canRefundSale",
-  "canCreateProduct","canViewProduct","canEditProduct","canDeleteProduct",
+  // Inventory
+  "canCreateProduct","canViewProduct","canEditProduct","canDeleteProduct","canAdjustStock","canTransferStock",
+  // Purchases / Payables
   "canCreatePurchase","canViewPurchase","canEditPurchase","canDeletePurchase",
+  // Expenses
   "canCreateExpense","canViewExpense","canEditExpense","canDeleteExpense",
+  // Customers / Receivables
   "canCreateCustomer","canViewCustomer","canEditCustomer","canDeleteCustomer",
+  // Suppliers
   "canCreateSupplier","canViewSupplier","canEditSupplier","canDeleteSupplier",
+  // Staff
   "canCreateStaff","canViewStaff","canEditStaff","canDeleteStaff",
+  // Branches
   "canCreateBranch","canViewBranch","canEditBranch","canDeleteBranch",
-  "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canExportReport",
-  "canViewSettings","canEditSettings","canGiveDiscount",
+  // Reports (granular)
+  "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canViewAuditReport","canExportReport",
+  // Settings
+  "canViewSettings","canEditSettings",
+  // Receipts
+  "canViewReceipt","canCreateReceipt",
+  // Discounts
+  "canGiveDiscount",
+  // Tax
+  "canViewTax","canManageTax",
 ];
 
 const ROLE_DEFAULTS = {
   manager: {
+    canViewDashboard:true,
     canCreateSale:true,canViewSale:true,canEditSale:true,canDeleteSale:false,canRefundSale:true,
-    canCreateProduct:true,canViewProduct:true,canEditProduct:true,canDeleteProduct:false,
+    canCreateProduct:true,canViewProduct:true,canEditProduct:true,canDeleteProduct:false,canAdjustStock:true,canTransferStock:true,
     canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
     canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
     canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
     canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
-    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canExportReport:true,
-    canViewSettings:true,canEditSettings:false,canGiveDiscount:true,
+    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canViewAuditReport:true,canExportReport:true,
+    canViewSettings:true,canEditSettings:false,
+    canViewReceipt:true,canCreateReceipt:true,
+    canGiveDiscount:true,
+    canViewTax:true,canManageTax:false,
   },
   accountant: {
+    canViewDashboard:true,
     canCreateSale:false,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
-    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,
+    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,canAdjustStock:false,canTransferStock:false,
     canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
     canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
     canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
     canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
-    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canExportReport:true,
-    canViewSettings:true,canEditSettings:false,canGiveDiscount:false,
+    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canViewAuditReport:true,canExportReport:true,
+    canViewSettings:true,canEditSettings:false,
+    canViewReceipt:true,canCreateReceipt:false,
+    canGiveDiscount:false,
+    canViewTax:true,canManageTax:true,
   },
   attendant: {
+    canViewDashboard:true,
     canCreateSale:true,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
-    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,
+    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,canAdjustStock:false,canTransferStock:false,
     canCreatePurchase:false,canViewPurchase:false,canEditPurchase:false,canDeletePurchase:false,
     canCreateExpense:false,canViewExpense:false,canEditExpense:false,canDeleteExpense:false,
     canCreateCustomer:false,canViewCustomer:true,canEditCustomer:false,canDeleteCustomer:false,
     canCreateSupplier:false,canViewSupplier:false,canEditSupplier:false,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:false,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:false,canEditBranch:false,canDeleteBranch:false,
-    canViewSalesReport:false,canViewInventoryReport:false,canViewFinancialReport:false,canViewCustomerReport:false,canViewSupplierReport:false,canViewReceivablesReport:false,canViewPayablesReport:false,canViewPerformanceReport:false,canExportReport:false,
+    canViewSalesReport:false,canViewInventoryReport:false,canViewFinancialReport:false,canViewCustomerReport:false,canViewSupplierReport:false,canViewReceivablesReport:false,canViewPayablesReport:false,canViewPerformanceReport:false,canViewAuditReport:false,canExportReport:false,
+    canViewSettings:false,canEditSettings:false,
+    canViewReceipt:true,canCreateReceipt:false,
+    canGiveDiscount:false,
+    canViewTax:false,canManageTax:false,
   },
 };
 
 // Get permission keys and role defaults
-router.get("/permissions/schema", authenticateToken, requireRole(["owner"]), (req, res) => {
+router.get("/permissions/schema", authenticateToken, requirePermission("canViewStaff"), (req, res) => {
   res.json({ keys: PERM_KEYS, defaults: ROLE_DEFAULTS });
 });
 
@@ -113,7 +144,7 @@ async function replacePrimaryBranch(userId, branchId) {
   });
 }
 
-router.get("/", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -136,7 +167,7 @@ router.get("/", authenticateToken, requireRole(["owner"]), async (req, res) => {
   }
 });
 
-router.post("/", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -209,7 +240,7 @@ router.post("/", authenticateToken, requireRole(["owner"]), async (req, res) => 
   }
 });
 
-router.patch("/:id", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -274,7 +305,7 @@ router.patch("/:id", authenticateToken, requireRole(["owner"]), async (req, res)
   }
 });
 
-router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -303,7 +334,7 @@ router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res
 });
 
 // Get permissions for a staff member
-router.get("/:id/permissions", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.get("/:id/permissions", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -329,7 +360,7 @@ router.get("/:id/permissions", authenticateToken, requireRole(["owner"]), async 
 });
 
 // Update permissions for a staff member
-router.put("/:id/permissions", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.put("/:id/permissions", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });

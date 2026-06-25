@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole, requirePermission } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import multer from "multer";
 import cloudinary from "cloudinary";
@@ -16,7 +16,7 @@ cloudinary.v2.config({
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 
 // Get tenant settings
-router.get("/", authenticateToken, requirePermission("view_dashboard"), async (req, res) => {
+router.get("/", authenticateToken, requirePermission("canViewSettings"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -39,7 +39,7 @@ router.get("/", authenticateToken, requirePermission("view_dashboard"), async (r
 });
 
 // Update tenant settings
-router.put("/", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
+router.put("/", authenticateToken, requirePermission("canEditSettings"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -77,7 +77,7 @@ router.put("/", authenticateToken, requirePermission("manage_inventory"), async 
 });
 
 // Upload logo to Cloudinary
-router.post("/logo", authenticateToken, requirePermission("manage_inventory"), upload.single("logo"), async (req, res) => {
+router.post("/logo", authenticateToken, requirePermission("canEditSettings"), upload.single("logo"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });

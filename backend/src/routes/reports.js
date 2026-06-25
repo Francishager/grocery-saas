@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole, requirePermission } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
@@ -51,7 +51,7 @@ function requireReportPermission(req, res, next) {
 }
 
 // Apply granular report permission check to all routes
-router.use(authenticateToken, requireRole(reportRoles), requireReportPermission);
+router.use(authenticateToken, requireReportPermission);
 
 function df(req, field = "createdAt") {
   const { from, to } = req.query;
@@ -66,7 +66,7 @@ async function getScope(req) {
 }
 
 // ==================== LEGACY ROUTES (backward compatibility) ====================
-router.get("/sales", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const where = scopedWhere(s, df(req));
@@ -75,7 +75,7 @@ router.get("/sales", authenticateToken, requireRole(reportRoles), async (req, re
   } catch (err) { console.error("Sales report error:", err); handleBranchError(res, err); }
 });
 
-router.get("/purchases", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/purchases", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const where = scopedWhere(s, df(req));
@@ -84,7 +84,7 @@ router.get("/purchases", authenticateToken, requireRole(reportRoles), async (req
   } catch (err) { console.error("Purchases report error:", err); handleBranchError(res, err); }
 });
 
-router.get("/expenses", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/expenses", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const where = scopedWhere(s, df(req, "date"));
@@ -95,7 +95,7 @@ router.get("/expenses", authenticateToken, requireRole(reportRoles), async (req,
   } catch (err) { console.error("Expenses report error:", err); handleBranchError(res, err); }
 });
 
-router.get("/profit", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/profit", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [salesAgg, purchasesAgg, expensesAgg] = await Promise.all([
@@ -111,7 +111,7 @@ router.get("/profit", authenticateToken, requireRole(reportRoles), async (req, r
 });
 
 // ==================== SALES REPORTS ====================
-router.get("/sales/summary", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/summary", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const where = scopedWhere(s, df(req));
@@ -123,7 +123,7 @@ router.get("/sales/summary", authenticateToken, requireRole(reportRoles), async 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/daily", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/daily", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), orderBy: { createdAt: "asc" } });
@@ -137,7 +137,7 @@ router.get("/sales/daily", authenticateToken, requireRole(reportRoles), async (r
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/weekly", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/weekly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), orderBy: { createdAt: "asc" } });
@@ -155,7 +155,7 @@ router.get("/sales/weekly", authenticateToken, requireRole(reportRoles), async (
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/monthly", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/monthly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), orderBy: { createdAt: "asc" } });
@@ -169,7 +169,7 @@ router.get("/sales/monthly", authenticateToken, requireRole(reportRoles), async 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/by-product", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/by-product", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: true } } } });
@@ -188,7 +188,7 @@ router.get("/sales/by-product", authenticateToken, requireRole(reportRoles), asy
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/by-category", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/by-category", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: { include: { category: true } } } } } });
@@ -205,7 +205,7 @@ router.get("/sales/by-category", authenticateToken, requireRole(reportRoles), as
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/by-customer", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/by-customer", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), include: { customer: true } });
@@ -219,7 +219,7 @@ router.get("/sales/by-customer", authenticateToken, requireRole(reportRoles), as
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/by-user", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/by-user", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { user: { select: { fname: true, lname: true } } } });
@@ -233,7 +233,7 @@ router.get("/sales/by-user", authenticateToken, requireRole(reportRoles), async 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/by-branch", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/by-branch", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { branch: { select: { name: true } } } });
@@ -247,7 +247,7 @@ router.get("/sales/by-branch", authenticateToken, requireRole(reportRoles), asyn
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/discounts", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/discounts", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), OR: [{ discount: { gt: 0 } }, { cashDiscount: { gt: 0 } }] }), include: { items: { include: { product: { select: { name: true } } } }, user: { select: { fname: true, lname: true } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } });
@@ -274,7 +274,7 @@ router.get("/sales/discounts", authenticateToken, requireRole(reportRoles), asyn
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/sales/returns", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/sales/returns", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), include: { items: { include: { product: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } });
@@ -284,7 +284,7 @@ router.get("/sales/returns", authenticateToken, requireRole(reportRoles), async 
 });
 
 // ==================== INVENTORY REPORTS ====================
-router.get("/inventory/stock", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/stock", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
@@ -293,7 +293,7 @@ router.get("/inventory/stock", authenticateToken, requireRole(reportRoles), asyn
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/valuation", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/valuation", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true } });
@@ -312,7 +312,7 @@ router.get("/inventory/valuation", authenticateToken, requireRole(reportRoles), 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/low-stock", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/low-stock", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const allProducts = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { quantity: "asc" } });
@@ -322,7 +322,7 @@ router.get("/inventory/low-stock", authenticateToken, requireRole(reportRoles), 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/out-of-stock", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/out-of-stock", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, quantity: { lte: 0 } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
@@ -331,7 +331,7 @@ router.get("/inventory/out-of-stock", authenticateToken, requireRole(reportRoles
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/stock-movement", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/stock-movement", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, purchases] = await Promise.all([
@@ -346,7 +346,7 @@ router.get("/inventory/stock-movement", authenticateToken, requireRole(reportRol
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/adjustments", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/adjustments", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const logs = await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "update", ...df(req, "createdAt") }, orderBy: { createdAt: "desc" } });
@@ -354,7 +354,7 @@ router.get("/inventory/adjustments", authenticateToken, requireRole(reportRoles)
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/expiry", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/expiry", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { expiryDate: "asc" } });
@@ -364,7 +364,7 @@ router.get("/inventory/expiry", authenticateToken, requireRole(reportRoles), asy
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/damaged", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/damaged", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const logs = await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "delete", ...df(req, "createdAt") }, orderBy: { createdAt: "desc" } });
@@ -372,7 +372,7 @@ router.get("/inventory/damaged", authenticateToken, requireRole(reportRoles), as
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/fast-moving", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/fast-moving", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: true } } } });
@@ -389,7 +389,7 @@ router.get("/inventory/fast-moving", authenticateToken, requireRole(reportRoles)
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/inventory/slow-moving", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/inventory/slow-moving", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: true } } } });
@@ -407,7 +407,7 @@ router.get("/inventory/slow-moving", authenticateToken, requireRole(reportRoles)
 });
 
 // ==================== FINANCIAL REPORTS ====================
-router.get("/financial/profit-loss", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [salesAgg, purchasesAgg, expensesAgg, salesCount] = await Promise.all([
@@ -425,7 +425,7 @@ router.get("/financial/profit-loss", authenticateToken, requireRole(reportRoles)
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/income", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/income", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [salesAgg, customerPayments] = await Promise.all([
@@ -436,7 +436,7 @@ router.get("/financial/income", authenticateToken, requireRole(reportRoles), asy
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/expense", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/expense", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const expenses = await prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), orderBy: { date: "desc" } });
@@ -447,7 +447,7 @@ router.get("/financial/expense", authenticateToken, requireRole(reportRoles), as
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/cash-flow", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/cash-flow", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [salesAgg, purchasesAgg, expensesAgg, customerPaymentsAgg, supplierPaymentsAgg] = await Promise.all([
@@ -463,7 +463,7 @@ router.get("/financial/cash-flow", authenticateToken, requireRole(reportRoles), 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/trial-balance", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [salesAgg, purchasesAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts] = await Promise.all([
@@ -489,7 +489,7 @@ router.get("/financial/trial-balance", authenticateToken, requireRole(reportRole
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/balance-sheet", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [cashAccounts, customerBalances, products, supplierBalances, salesAgg, purchasesAgg, expensesAgg] = await Promise.all([
@@ -513,7 +513,7 @@ router.get("/financial/balance-sheet", authenticateToken, requireRole(reportRole
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/general-ledger", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, purchases, expenses, customerPayments, supplierPayments] = await Promise.all([
@@ -534,7 +534,7 @@ router.get("/financial/general-ledger", authenticateToken, requireRole(reportRol
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/bank-transactions", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/bank-transactions", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const transactions = await prisma.cashTransaction.findMany({ where: { tenantId: s.tenantId, ...df(req), account: { type: "bank" } }, include: { account: { select: { name: true, type: true } } }, orderBy: { createdAt: "desc" } });
@@ -542,7 +542,7 @@ router.get("/financial/bank-transactions", authenticateToken, requireRole(report
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/financial/tax", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/financial/tax", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true, discount: true, subtotal: true } });
@@ -554,7 +554,7 @@ router.get("/financial/tax", authenticateToken, requireRole(reportRoles), async 
 });
 
 // ==================== CUSTOMER REPORTS ====================
-router.get("/customers/list", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/customers/list", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const customers = await prisma.customer.findMany({ where: scopedWhere(s), include: { branch: { select: { name: true } } }, orderBy: { name: "asc" } });
@@ -563,7 +563,7 @@ router.get("/customers/list", authenticateToken, requireRole(reportRoles), async
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/customers/sales", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/customers/sales", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), include: { customer: true } });
@@ -577,7 +577,7 @@ router.get("/customers/sales", authenticateToken, requireRole(reportRoles), asyn
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/customers/balance", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/customers/balance", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const customers = await prisma.customer.findMany({ where: scopedWhere(s, { balance: { not: 0 } }), orderBy: { balance: "desc" } });
@@ -585,7 +585,7 @@ router.get("/customers/balance", authenticateToken, requireRole(reportRoles), as
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/customers/receivables", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/customers/receivables", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { customer: true }, orderBy: { createdAt: "desc" } });
@@ -594,7 +594,7 @@ router.get("/customers/receivables", authenticateToken, requireRole(reportRoles)
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/customers/top", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/customers/top", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), include: { customer: true } });
@@ -609,7 +609,7 @@ router.get("/customers/top", authenticateToken, requireRole(reportRoles), async 
 });
 
 // ==================== SUPPLIER REPORTS ====================
-router.get("/suppliers/list", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/suppliers/list", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const suppliers = await prisma.supplier.findMany({ where: scopedWhere(s), include: { branch: { select: { name: true } } }, orderBy: { name: "asc" } });
@@ -618,7 +618,7 @@ router.get("/suppliers/list", authenticateToken, requireRole(reportRoles), async
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/suppliers/purchases", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/suppliers/purchases", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, df(req)), include: { supplier: true, items: { include: { product: { select: { name: true } } } } }, orderBy: { createdAt: "desc" } });
@@ -632,7 +632,7 @@ router.get("/suppliers/purchases", authenticateToken, requireRole(reportRoles), 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/suppliers/payables", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/suppliers/payables", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "desc" } });
@@ -641,7 +641,7 @@ router.get("/suppliers/payables", authenticateToken, requireRole(reportRoles), a
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/suppliers/balance", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/suppliers/balance", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const suppliers = await prisma.supplier.findMany({ where: scopedWhere(s, { balance: { not: 0 } }), orderBy: { balance: "desc" } });
@@ -650,7 +650,7 @@ router.get("/suppliers/balance", authenticateToken, requireRole(reportRoles), as
 });
 
 // ==================== RECEIVABLES REPORTS ====================
-router.get("/receivables/outstanding", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/receivables/outstanding", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const invoices = await prisma.invoice.findMany({ where: scopedWhere(s, { status: { in: ["unpaid", "partial", "overdue"] } }), include: { customer: true }, orderBy: { dueDate: "asc" } });
@@ -659,7 +659,7 @@ router.get("/receivables/outstanding", authenticateToken, requireRole(reportRole
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/receivables/aging", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/receivables/aging", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const customers = await prisma.customer.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { sales: { where: { balance: { gt: 0 } }, select: { balance: true, dueDate: true, createdAt: true } } } });
@@ -682,7 +682,7 @@ router.get("/receivables/aging", authenticateToken, requireRole(reportRoles), as
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/receivables/collection", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/receivables/collection", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } } }, orderBy: { createdAt: "desc" } });
@@ -691,7 +691,7 @@ router.get("/receivables/collection", authenticateToken, requireRole(reportRoles
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/receivables/overdue", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/receivables/overdue", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const now = new Date();
@@ -702,7 +702,7 @@ router.get("/receivables/overdue", authenticateToken, requireRole(reportRoles), 
 });
 
 // ==================== PAYABLES REPORTS ====================
-router.get("/payables/outstanding", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/payables/outstanding", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "asc" } });
@@ -711,7 +711,7 @@ router.get("/payables/outstanding", authenticateToken, requireRole(reportRoles),
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/payables/aging", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/payables/aging", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const suppliers = await prisma.supplier.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { purchases: { where: { balance: { gt: 0 } }, select: { balance: true, dueDate: true, createdAt: true } } } });
@@ -734,7 +734,7 @@ router.get("/payables/aging", authenticateToken, requireRole(reportRoles), async
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/payables/payment-history", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/payables/payment-history", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const payments = await prisma.supplierPayment.findMany({ where: scopedWhere(s, df(req)), include: { supplier: { select: { name: true } }, purchase: { select: { refNo: true } } }, orderBy: { createdAt: "desc" } });
@@ -743,7 +743,7 @@ router.get("/payables/payment-history", authenticateToken, requireRole(reportRol
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/payables/overdue", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/payables/overdue", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const now = new Date();
@@ -754,7 +754,7 @@ router.get("/payables/overdue", authenticateToken, requireRole(reportRoles), asy
 });
 
 // ==================== BUSINESS PERFORMANCE REPORTS ====================
-router.get("/performance/branch", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/performance/branch", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { branch: { select: { name: true } } } });
@@ -769,7 +769,7 @@ router.get("/performance/branch", authenticateToken, requireRole(reportRoles), a
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/performance/product", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/performance/product", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: true } } } });
@@ -788,7 +788,7 @@ router.get("/performance/product", authenticateToken, requireRole(reportRoles), 
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/performance/category", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/performance/category", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: { include: { category: true } } } } } });
@@ -806,7 +806,7 @@ router.get("/performance/category", authenticateToken, requireRole(reportRoles),
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/performance/user-activity", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/performance/user-activity", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const logs = await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, ...df(req, "createdAt") }, orderBy: { createdAt: "desc" }, take: 500 });
@@ -822,7 +822,7 @@ router.get("/performance/user-activity", authenticateToken, requireRole(reportRo
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/performance/top-products", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/performance/top-products", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: true } } } });
@@ -840,7 +840,7 @@ router.get("/performance/top-products", authenticateToken, requireRole(reportRol
   } catch (err) { handleBranchError(res, err); }
 });
 
-router.get("/performance/least-products", authenticateToken, requireRole(reportRoles), async (req, res) => {
+router.get("/performance/least-products", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), include: { items: { include: { product: true } } } });
