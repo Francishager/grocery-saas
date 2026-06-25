@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import CreateExpenseModal from '@/components/modals/CreateExpenseModal'
 import { 
   Wallet, 
@@ -70,7 +70,7 @@ interface CashTransaction {
 }
 
 export default function ExpensesPage() {
-  const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
+  const { hasPermission } = useJWTAuth()
   const { toast } = useToast()
   
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -84,7 +84,7 @@ export default function ExpensesPage() {
   const [endDate, setEndDate] = useState('')
   const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
   const [showExpenseModal, setShowExpenseModal] = useState(false)
-  const expensesEnabled = isFeatureEnabled('expenses')
+  const expensesEnabled = hasPermission('canViewExpense')
 
   useEffect(() => {
     if (!expensesEnabled) {
@@ -200,28 +200,13 @@ export default function ExpensesPage() {
       <TrendingDown className="h-4 w-4 text-red-600" />
   }
 
-  if (!canAccessFeature('expenses')) {
+  if (!hasPermission('canViewExpense')) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h2 className="text-lg font-semibold">Access Denied</h2>
           <p className="text-muted-foreground">You don't have permission to access expense management.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!isFeatureEnabled('expenses')) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-lg font-semibold">Feature Not Available</h2>
-          <p className="text-muted-foreground">Expense tracking is not available in your current plan.</p>
-          <Button onClick={() => window.location.href = '/admin/plans'}>
-            Upgrade Plan
-          </Button>
         </div>
       </div>
     )

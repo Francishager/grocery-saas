@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import { 
@@ -105,7 +105,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 )
 
 export default function ReceivablesPage() {
-  const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
+  const { hasPermission } = useJWTAuth()
   const { toast } = useToast()
   
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -141,7 +141,7 @@ export default function ReceivablesPage() {
     notes: '',
   })
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
-  const creditEnabled = isFeatureEnabled('credit')
+  const creditEnabled = hasPermission('canViewReceivable')
 
   useEffect(() => {
     if (!creditEnabled) {
@@ -452,28 +452,13 @@ export default function ReceivablesPage() {
     return name || 'Unknown'
   }
 
-  if (!canAccessFeature('credit')) {
+  if (!hasPermission('canViewReceivable')) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h2 className="text-lg font-semibold">Access Denied</h2>
           <p className="text-muted-foreground">You don't have permission to access receivables management.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!isFeatureEnabled('credit')) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-lg font-semibold">Feature Not Available</h2>
-          <p className="text-muted-foreground">Credit sales and receivables management is not available in your current plan.</p>
-          <Button onClick={() => window.location.href = '/admin/plans'}>
-            Upgrade Plan
-          </Button>
         </div>
       </div>
     )

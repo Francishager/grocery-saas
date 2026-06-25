@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency } from '@/lib/utils'
 import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { 
@@ -120,7 +120,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 )
 
 export default function PayablesPage() {
-  const { isFeatureEnabled, canAccessFeature } = useFeatureAccess()
+  const { hasPermission } = useJWTAuth()
   const { toast } = useToast()
   
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -152,7 +152,7 @@ export default function PayablesPage() {
     notes: '',
   })
   const [purchaseItems, setPurchaseItems] = useState<PurchaseDraftItem[]>([createEmptyPurchaseItem()])
-  const suppliersEnabled = isFeatureEnabled('suppliers')
+  const suppliersEnabled = hasPermission('canViewPayable')
 
   useEffect(() => {
     if (!suppliersEnabled) {
@@ -444,25 +444,13 @@ export default function PayablesPage() {
     return name || 'Unknown'
   }
 
-  if (!canAccessFeature('suppliers')) {
+  if (!hasPermission('canViewPayable')) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <Building2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h2 className="text-lg font-semibold">Access Denied</h2>
           <p className="text-muted-foreground">You don't have permission to access supplier management.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!isFeatureEnabled('suppliers')) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <Building2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-lg font-semibold">Feature Not Available</h2>
-          <p className="text-muted-foreground">Supplier management is not available in your current plan.</p>
         </div>
       </div>
     )
