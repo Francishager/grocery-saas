@@ -260,7 +260,7 @@ export default function BranchesPage() {
             <p className="text-sm text-muted-foreground">Create the first branch for this business.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-visible">
             <table className="w-full min-w-[720px]">
               <thead className="border-b bg-muted/40">
                 <tr>
@@ -287,7 +287,7 @@ export default function BranchesPage() {
                         {branch.isActive ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 overflow-visible">
                       <div className="relative flex items-center justify-end" ref={dropdownId === branch.id ? dropdownRef : undefined}>
                         <button
                           onClick={() => setDropdownId(dropdownId === branch.id ? null : branch.id)}
@@ -296,7 +296,7 @@ export default function BranchesPage() {
                           <MoreVertical className="h-4 w-4 text-muted-foreground" />
                         </button>
                         {dropdownId === branch.id && (
-                          <div className="absolute right-0 bottom-0 z-50 w-40 rounded-md border bg-popover p-1 shadow-md">
+                          <div className="absolute right-0 top-full mt-1 z-[100] w-40 rounded-md border bg-popover p-1 shadow-lg">
                             <button onClick={() => { startEdit(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
                               <Edit3 className="h-3.5 w-3.5" /> Edit
                             </button>

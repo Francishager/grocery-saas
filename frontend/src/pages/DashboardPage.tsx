@@ -285,12 +285,13 @@ export default function DashboardPage() {
             ) : (
               <ResponsiveContainer width="100%" height={250}>
                 <PieChart>
-                  <Pie data={paymentPieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                  <Pie data={paymentPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }} style={{ fontSize: 12, fontWeight: 600, fill: '#1f2937' }}>
                     {paymentPieData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Legend formatter={(value: string, entry: any) => <span style={{ color: '#374151', fontSize: 12, fontWeight: 500 }}>{value}</span>} />
                 </PieChart>
               </ResponsiveContainer>
             )}
