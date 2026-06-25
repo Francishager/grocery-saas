@@ -132,21 +132,46 @@ function getRoleUpdates(role) {
     updates.canCreatePayable = true;
     updates.canViewPayable = true;
     updates.canEditPayable = true;
+    updates.canDeletePayable = false;
     updates.canCreateReceivable = true;
     updates.canViewReceivable = true;
     updates.canEditReceivable = true;
+    updates.canDeleteReceivable = false;
+    updates.canCreateExpense = true;
+    updates.canViewExpense = true;
+    updates.canEditExpense = true;
+    updates.canDeleteExpense = false;
   }
 
   if (role === 'accountant') {
     updates.canCreatePayable = true;
     updates.canViewPayable = true;
     updates.canEditPayable = true;
+    updates.canDeletePayable = false;
     updates.canCreateReceivable = true;
     updates.canViewReceivable = true;
     updates.canEditReceivable = true;
+    updates.canDeleteReceivable = false;
+    updates.canCreateExpense = true;
+    updates.canViewExpense = true;
+    updates.canEditExpense = true;
+    updates.canDeleteExpense = false;
   }
 
-  // Attendant gets no Payables/Receivables permissions
+  if (role === 'attendant') {
+    updates.canCreatePayable = false;
+    updates.canViewPayable = false;
+    updates.canEditPayable = false;
+    updates.canDeletePayable = false;
+    updates.canCreateReceivable = false;
+    updates.canViewReceivable = false;
+    updates.canEditReceivable = false;
+    updates.canDeleteReceivable = false;
+    updates.canCreateExpense = false;
+    updates.canViewExpense = false;
+    updates.canEditExpense = false;
+    updates.canDeleteExpense = false;
+  }
 
   return updates;
 }

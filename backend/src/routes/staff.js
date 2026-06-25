@@ -379,15 +379,21 @@ router.put("/:id/permissions", authenticateToken, requirePermission("canEditStaf
     if (!user) return res.status(404).json({ error: "Staff not found" });
 
     const data = {};
+    console.log('[staff] Updating permissions for user:', user.id, 'Request body keys:', Object.keys(req.body));
     for (const key of PERM_KEYS) {
-      if (req.body[key] !== undefined) data[key] = Boolean(req.body[key]);
+      if (req.body[key] !== undefined) {
+        data[key] = Boolean(req.body[key]);
+        console.log(`[staff] Setting ${key} = ${data[key]}`);
+      }
     }
+    console.log('[staff] Final data to update:', Object.keys(data));
 
     const perms = await prisma.userPermission.upsert({
       where: { userId: user.id },
       update: data,
       create: { userId: user.id, ...data },
     });
+    console.log('[staff] Permissions updated successfully for user:', user.id);
     res.json({ message: "Permissions updated", permissions: perms });
   } catch (err) {
     console.error("Update permissions error:", err);
