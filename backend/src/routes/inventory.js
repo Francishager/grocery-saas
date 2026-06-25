@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken, requireRole, requirePermission } from "../../middleware/auth.js";
 import {
   handleBranchError,
   resolveBranchScope,
@@ -170,7 +170,7 @@ router.get("/categories", authenticateToken, async (req, res) => {
   }
 });
 
-router.post("/categories", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.post("/categories", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -204,7 +204,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // Create product
-router.post("/", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: "body",
@@ -234,7 +234,7 @@ router.post("/", authenticateToken, requireRole(["owner", "manager"]), async (re
 });
 
 // Update product
-router.put("/:id", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.put("/:id", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const existing = await prisma.product.findFirst({
@@ -279,7 +279,7 @@ router.put("/:id", authenticateToken, requireRole(["owner", "manager"]), async (
 });
 
 // Delete product
-router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePermission("delete_inventory"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
@@ -305,7 +305,7 @@ router.get("/:productId/units", authenticateToken, async (req, res) => {
 });
 
 // Add a selling unit to a product
-router.post("/:productId/units", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.post("/:productId/units", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }) });
@@ -318,7 +318,7 @@ router.post("/:productId/units", authenticateToken, requireRole(["owner", "manag
 });
 
 // Update a selling unit
-router.put("/:productId/units/:unitId", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.put("/:productId/units/:unitId", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
   try {
     const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
     const unit = await prisma.productUnit.findUnique({ where: { id: req.params.unitId } });
@@ -329,7 +329,7 @@ router.put("/:productId/units/:unitId", authenticateToken, requireRole(["owner",
 });
 
 // Delete a selling unit
-router.delete("/:productId/units/:unitId", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.delete("/:productId/units/:unitId", authenticateToken, requirePermission("manage_inventory"), async (req, res) => {
   try {
     const unit = await prisma.productUnit.findUnique({ where: { id: req.params.unitId } });
     if (!unit) return res.status(404).json({ error: "Unit not found" });

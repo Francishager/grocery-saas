@@ -64,9 +64,10 @@ export default function InventoryPage() {
   const [scannerFailed, setScannerFailed] = useState(false)
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
-  const { user } = useJWTAuth()
-  const isOwner = user?.role === 'owner'
-  const canDeleteInventory = isOwner
+  const { user, hasPermission } = useJWTAuth()
+  const canManageInventory = hasPermission('manage_inventory')
+  const canDeleteInventory = hasPermission('delete_inventory')
+  const canAdjustStock = hasPermission('adjust_stock')
 
   useEffect(() => {
     loadCategories()
@@ -74,14 +75,14 @@ export default function InventoryPage() {
   }, [])
 
   useEffect(() => {
-    if (isOwner) {
+    if (canManageInventory) {
       loadBranches()
       return
     }
 
     setBranches([])
     setBranchFilter('')
-  }, [isOwner])
+  }, [canManageInventory])
 
   useEffect(() => {
     loadInventory()
@@ -133,7 +134,7 @@ export default function InventoryPage() {
   const loadInventory = async () => {
     setLoading(true)
     try {
-      const data = await inventoryApi.list(searchQuery, isOwner ? branchFilter : undefined)
+      const data = await inventoryApi.list(searchQuery, canManageInventory ? branchFilter : undefined)
       setItems(Array.isArray(data) ? data : [])
     } catch (error: any) {
       toast({
@@ -172,7 +173,7 @@ export default function InventoryPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (isOwner && branches.length === 0) {
+    if (canManageInventory && branches.length === 0) {
       toast({
         variant: 'destructive',
         title: 'No active branch',
@@ -181,7 +182,7 @@ export default function InventoryPage() {
       return
     }
 
-    if (isOwner && !formData.branchId) {
+    if (canManageInventory && !formData.branchId) {
       toast({
         variant: 'destructive',
         title: 'Select a branch',
@@ -316,10 +317,12 @@ export default function InventoryPage() {
             Manage your products and stock levels
           </p>
         </div>
-        <Button onClick={openNewForm}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Item
-        </Button>
+        {canManageInventory && (
+          <Button onClick={openNewForm}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Item
+          </Button>
+        )}
       </div>
 
       {/* Search */}
@@ -333,7 +336,7 @@ export default function InventoryPage() {
             className="pl-9"
           />
         </div>
-        {isOwner && branches.length > 1 && (
+        {canManageInventory && branches.length > 1 && (
           <select
             value={branchFilter}
             onChange={(event) => setBranchFilter(event.target.value)}
@@ -483,7 +486,7 @@ export default function InventoryPage() {
                   )}
                 </div>
               </div>
-              {isOwner && (
+              {canManageInventory && (
                 <div className="space-y-2">
                   <Label htmlFor="branchId">Branch</Label>
                   <select
@@ -626,7 +629,7 @@ export default function InventoryPage() {
                     <input type="checkbox" checked={newUnit.isDefault} onChange={e => setNewUnit(prev => ({ ...prev, isDefault: e.target.checked }))} className="rounded" />
                     Default
                   </label>
-                  <Button type="button" variant="secondary" size="sm" onClick={addSellingUnit} className="h-8">
+                  <Button type="button" variant="secondary" size="sm" onClick={addSellingUnit} className="h-8" disabled={!newUnit.unitName || newUnit.conversionFactor <= 0}>
                     <Plus className="h-3 w-3 mr-1" />Add
                   </Button>
                 </div>
@@ -669,7 +672,7 @@ export default function InventoryPage() {
                   <tr className="border-b text-left">
                     <th className="pb-3 font-medium">SKU</th>
                     <th className="pb-3 font-medium">Product</th>
-                    {isOwner && <th className="pb-3 font-medium">Branch</th>}
+                    {canManageInventory && <th className="pb-3 font-medium">Branch</th>}
                     <th className="pb-3 font-medium text-right">Qty</th>
                     <th className="pb-3 font-medium text-right">Cost</th>
                     <th className="pb-3 font-medium text-right">Price</th>
@@ -682,7 +685,7 @@ export default function InventoryPage() {
                     <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                       <td className="py-3">{item.product_id}</td>
                       <td className="py-3 font-medium">{item.product_name}</td>
-                      {isOwner && (
+                      {canManageInventory && (
                         <td className="py-3 text-sm text-muted-foreground">
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
                         </td>
@@ -707,13 +710,15 @@ export default function InventoryPage() {
                       <td className="py-3 text-right">{item.low_stock_alert}</td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditForm(item)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
+                          {canManageInventory && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEditForm(item)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
                           {canDeleteInventory && (
                             <Button
                               variant="ghost"

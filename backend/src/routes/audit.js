@@ -1,11 +1,11 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken, requireRole, requirePermission } from "../../middleware/auth.js";
 
 const router = Router();
 
 // List audit logs for the current tenant
-router.get("/", authenticateToken, requireRole(["owner", "manager", "accountant"]), async (req, res) => {
+router.get("/", authenticateToken, requirePermission("view_reports"), async (req, res) => {
   try {
     const tenantId = req.user?.tenantId;
     const { model, action, userId, from, to, page = 1, limit = 50 } = req.query;
@@ -38,7 +38,7 @@ router.get("/", authenticateToken, requireRole(["owner", "manager", "accountant"
 });
 
 // Get audit log summary (counts by model and action)
-router.get("/summary", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+router.get("/summary", authenticateToken, requirePermission("view_reports"), async (req, res) => {
   try {
     const tenantId = req.user?.tenantId;
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30 days

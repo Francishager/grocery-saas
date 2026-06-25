@@ -40,9 +40,9 @@ interface CreateSupplierModalProps {
 
 export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initialData }: CreateSupplierModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
-  const { user } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
-  const isOwner = user?.role === 'owner'
+  const canManageSuppliers = hasPermission('create_purchases') || hasPermission('view_purchases')
   
   const [formData, setFormData] = useState({
     name: '',
@@ -72,7 +72,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
   }, [isOpen, initialData])
 
   useEffect(() => {
-    if (!isOpen || !isOwner) {
+    if (!isOpen || !canManageSuppliers) {
       setBranches([])
       return
     }
@@ -92,7 +92,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
           variant: 'destructive'
         })
       })
-  }, [isOpen, isOwner, toast])
+  }, [isOpen, canManageSuppliers, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -109,11 +109,11 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
     setLoading(true)
     
     try {
-      if (isOwner && branches.length === 0) {
+      if (canManageSuppliers && branches.length === 0) {
         throw new Error('Create an active branch before adding suppliers')
       }
 
-      if (isOwner && !formData.branchId) {
+      if (canManageSuppliers && !formData.branchId) {
         throw new Error('Select the branch this supplier belongs to')
       }
 
@@ -122,7 +122,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
         : '/api/payables/suppliers'
       const payload = {
         ...formData,
-        branchId: isOwner ? formData.branchId : undefined,
+        branchId: canManageSuppliers ? formData.branchId : undefined,
       }
       
       const response = await apiFetch(url, {
@@ -257,7 +257,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
             />
           </div>
 
-          {isOwner && (
+          {canManageSuppliers && (
             <div className="space-y-2">
               <Label htmlFor="supplierBranch">Branch *</Label>
               <Select

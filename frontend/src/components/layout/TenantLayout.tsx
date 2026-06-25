@@ -7,15 +7,15 @@ import { Button } from '@/components/ui/button'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
 const navItems = [
-  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', roles: ['owner', 'manager', 'attendant'] },
-  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', roles: ['owner', 'manager', 'accountant'] },
-  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', roles: ['owner', 'manager', 'accountant'] },
-  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', roles: ['owner', 'manager', 'accountant'] },
-  { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', roles: ['owner', 'manager', 'accountant'] },
-  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', roles: ['owner', 'manager', 'accountant'], isReports: true },
-  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', roles: ['owner', 'manager', 'accountant'] },
-  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, roles: ['owner'], isSettings: true },
+  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'view_dashboard' },
+  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'view_sales' },
+  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'view_inventory' },
+  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', permission: 'view_sales' },
+  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', permission: 'view_purchases' },
+  { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'view_purchases' },
+  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'view_reports', isReports: true },
+  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'view_reports' },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'manage_inventory', isSettings: true },
 ]
 
 interface ReportSubItem { id: string; label: string }
@@ -146,7 +146,7 @@ export function TenantLayout() {
     if (!settingsExpanded) setReportsExpanded(false)
   }
   const visibleNavItems = navItems.filter((item) => {
-    if (item.roles && user?.role && !item.roles.includes(user.role)) return false
+    if (item.permission && !hasPermission(item.permission)) return false
     if (!item.feature) return true
     return canAccessFeature(item.feature)
   })

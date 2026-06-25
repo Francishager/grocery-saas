@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requireRole } from "../../middleware/auth.js";
+import { authenticateToken, requireRole, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
@@ -76,7 +76,7 @@ async function checkedSaleItems(items, scope) {
 }
 
 // Create single sale
-router.post("/", authenticateToken, requireRole(saleRoles), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("create_sales"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: "body",
@@ -158,7 +158,7 @@ router.post("/", authenticateToken, requireRole(saleRoles), async (req, res) => 
 });
 
 // Checkout multiple items
-router.post("/checkout", authenticateToken, requireRole(saleRoles), async (req, res) => {
+router.post("/checkout", authenticateToken, requirePermission("create_sales"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: "body",
@@ -235,7 +235,7 @@ router.post("/checkout", authenticateToken, requireRole(saleRoles), async (req, 
 });
 
 // List sales
-router.get("/", authenticateToken, requireRole(["owner", "manager", "accountant"]), async (req, res) => {
+router.get("/", authenticateToken, requirePermission("view_sales"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { from, to, page = 1, limit = 50 } = req.query;

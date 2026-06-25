@@ -42,9 +42,9 @@ interface CreateCustomerModalProps {
 
 export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initialData }: CreateCustomerModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
-  const { user } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
-  const isOwner = user?.role === 'owner'
+  const canManageCustomers = hasPermission('create_sales') || hasPermission('view_sales')
   
   const [formData, setFormData] = useState({
     name: '',
@@ -76,7 +76,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
   }, [isOpen, initialData])
 
   useEffect(() => {
-    if (!isOpen || !isOwner) {
+    if (!isOpen || !canManageCustomers) {
       setBranches([])
       return
     }
@@ -96,7 +96,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
           variant: 'destructive'
         })
       })
-  }, [isOpen, isOwner, toast])
+  }, [isOpen, canManageCustomers, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -113,11 +113,11 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
     setLoading(true)
     
     try {
-      if (isOwner && branches.length === 0) {
+      if (canManageCustomers && branches.length === 0) {
         throw new Error('Create an active branch before adding customers')
       }
 
-      if (isOwner && !formData.branchId) {
+      if (canManageCustomers && !formData.branchId) {
         throw new Error('Select the branch this customer belongs to')
       }
 
@@ -126,7 +126,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         : '/api/receivables/customers'
       const payload = {
         ...formData,
-        branchId: isOwner ? formData.branchId : undefined,
+        branchId: canManageCustomers ? formData.branchId : undefined,
       }
       
       const response = await apiFetch(url, {
@@ -265,7 +265,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
             />
           </div>
 
-          {isOwner && (
+          {canManageCustomers && (
             <div className="space-y-2">
               <Label htmlFor="customerBranch">Branch *</Label>
               <Select
