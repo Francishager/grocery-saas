@@ -298,7 +298,7 @@ export default function DashboardPage() {
             ) : (
               <ResponsiveContainer width="100%" height={320}>
                 <PieChart>
-                  <Pie data={paymentPieData} cx="50%" cy="45%" innerRadius={55} outerRadius={95} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }} style={{ fontSize: 12, fontWeight: 600, fill: '#1f2937' }}>
+                  <Pie data={paymentPieData} cx="50%" cy="45%" innerRadius={55} outerRadius={95} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }}>
                     {paymentPieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
