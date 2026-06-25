@@ -60,6 +60,9 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
     reference: '',
     notes: '',
     date: new Date().toISOString().split('T')[0],
+    mobileProvider: '',
+    phoneNumber: '',
+    transactionId: '',
     ...initialData
   })
   
@@ -115,7 +118,10 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
         paymentMethod: 'cash',
         reference: '',
         notes: '',
-        date: new Date().toISOString().split('T')[0]
+        date: new Date().toISOString().split('T')[0],
+        mobileProvider: '',
+        phoneNumber: '',
+        transactionId: ''
       })
     } catch (error) {
       toast({
@@ -237,6 +243,61 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
             </div>
           </div>
 
+          {formData.paymentMethod === 'mobile_money' && (
+            <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Network Provider *</Label>
+                  <select
+                    value={formData.mobileProvider}
+                    onChange={(e) => handleInputChange('mobileProvider', e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select provider</option>
+                    <option value="MTN">MTN</option>
+                    <option value="Airtel">Airtel</option>
+                    <option value="Zamtel">Zamtel</option>
+                    <option value="Vodafone">Vodafone</option>
+                    <option value="M-Pesa">M-Pesa</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone Number *</Label>
+                  <Input
+                    value={formData.phoneNumber}
+                    onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+                    placeholder="e.g. 0977123456"
+                    type="tel"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Transaction ID *</Label>
+                <Input
+                  value={formData.transactionId}
+                  onChange={(e) => handleInputChange('transactionId', e.target.value)}
+                  placeholder="e.g. TXN123456789"
+                />
+              </div>
+            </div>
+          )}
+
+          {formData.paymentMethod === 'card' && (
+            <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+              <div className="space-y-2">
+                <Label>Transaction ID *</Label>
+                <Input
+                  value={formData.transactionId}
+                  onChange={(e) => handleInputChange('transactionId', e.target.value)}
+                  placeholder="e.g. TXN123456789"
+                />
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="reference">Reference</Label>
@@ -263,7 +324,10 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading ||
+              (formData.paymentMethod === 'mobile_money' ? (!formData.mobileProvider || !formData.phoneNumber?.trim() || !formData.transactionId?.trim()) : false) ||
+              (formData.paymentMethod === 'card' ? !formData.transactionId?.trim() : false)
+            }>
               {loading ? 'Saving...' : initialData?.id ? 'Update' : 'Create'}
             </Button>
           </DialogFooter>

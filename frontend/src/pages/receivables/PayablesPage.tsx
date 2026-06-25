@@ -142,6 +142,9 @@ export default function PayablesPage() {
   const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState<SupplierPurchase | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [mobileProvider, setMobileProvider] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [transactionId, setTransactionId] = useState('')
   const [purchaseForm, setPurchaseForm] = useState({
     supplierId: '',
     refNo: '',
@@ -368,6 +371,9 @@ export default function PayablesPage() {
           purchaseId: selectedPurchase.id,
           amount: parseFloat(paymentAmount),
           paymentMethod,
+          mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
+          phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
+          transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
           notes: `Payment recorded via dashboard`
         })
       })
@@ -384,6 +390,9 @@ export default function PayablesPage() {
       setSelectedPurchase(null)
       setPaymentAmount('')
       setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
       loadPurchases()
       if (activeTab === 'suppliers') loadSuppliers()
       loadSupplierOptions()
@@ -925,13 +934,70 @@ export default function PayablesPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {paymentMethod === 'mobile_money' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                  <div>
+                    <Label>Network Provider *</Label>
+                    <select
+                      value={mobileProvider}
+                      onChange={(e) => setMobileProvider(e.target.value)}
+                      className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Select provider</option>
+                      <option value="MTN">MTN</option>
+                      <option value="Airtel">Airtel</option>
+                      <option value="Zamtel">Zamtel</option>
+                      <option value="Vodafone">Vodafone</option>
+                      <option value="M-Pesa">M-Pesa</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Phone Number *</Label>
+                    <Input
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      placeholder="e.g. 0977123456"
+                      type="tel"
+                    />
+                  </div>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setShowPaymentModal(false)}>
                 Cancel
               </Button>
-              <Button onClick={recordPayment} disabled={!paymentAmount || parseFloat(paymentAmount) <= 0}>
+              <Button onClick={recordPayment} disabled={
+                !paymentAmount || parseFloat(paymentAmount) <= 0 ||
+                (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
+                (paymentMethod === 'card' ? !transactionId.trim() : false)
+              }>
                 Record Payment
               </Button>
             </div>

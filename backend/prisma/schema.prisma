@@ -608,9 +608,12 @@ model CustomerPayment {
   saleId        String?
   sale          SaleRecord? @relation(fields: [saleId], references: [id])
   amount        Float
-  paymentMethod String // cash, mobile_money, bank_transfer
-  reference     String? // Transaction reference
-  notes         String?
+  paymentMethod  String // cash, mobile_money, bank_transfer
+  mobileProvider String?
+  phoneNumber    String?
+  transactionId  String?
+  reference      String? // Transaction reference
+  notes          String?
   createdAt     DateTime    @default(now())
 
   @@index([tenantId, branchId])
@@ -738,11 +741,14 @@ model SupplierPayment {
   supplier      Supplier          @relation(fields: [supplierId], references: [id])
   purchaseId    String?
   purchase      SupplierPurchase? @relation(fields: [purchaseId], references: [id])
-  amount        Float
-  paymentMethod String
-  reference     String?
-  notes         String?
-  createdAt     DateTime          @default(now())
+  amount         Float
+  paymentMethod  String
+  mobileProvider String?
+  phoneNumber    String?
+  transactionId  String?
+  reference      String?
+  notes          String?
+  createdAt      DateTime          @default(now())
 
   @@index([tenantId, branchId])
   @@map("supplier_payments")
@@ -759,11 +765,14 @@ model Expense {
   branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   category      String // rent, transport, salaries, utilities, etc.
   description   String
-  amount        Float
-  paymentMethod String
-  reference     String?
-  notes         String?
-  userId        String // Who recorded it
+  amount         Float
+  paymentMethod  String
+  mobileProvider String?
+  phoneNumber    String?
+  transactionId  String?
+  reference      String?
+  notes          String?
+  userId         String // Who recorded it
   date          DateTime @default(now())
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

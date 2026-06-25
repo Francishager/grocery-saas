@@ -386,7 +386,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { supplierId, purchaseId, amount, paymentMethod, reference, notes } = req.body
+    const { supplierId, purchaseId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId } = req.body
     const paidAmount = toMoney(amount)
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
@@ -420,6 +420,9 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
         purchaseId,
         amount: paidAmount,
         paymentMethod,
+        mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : null,
+        phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : null,
+        transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : null,
         reference,
         notes
       }

@@ -143,7 +143,10 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
       paymentMethod, 
       reference, 
       notes,
-      date 
+      date,
+      mobileProvider,
+      phoneNumber,
+      transactionId
     } = req.body
 
     const amountValue = toMoney(amount)
@@ -162,6 +165,9 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
           description: description.trim(),
           amount: amountValue,
           paymentMethod: resolvedPaymentMethod,
+          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
           reference,
           notes,
           userId: req.user.id,
@@ -210,7 +216,7 @@ router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { category, description, amount, paymentMethod, reference, notes, date, branchId } = req.body
+    const { category, description, amount, paymentMethod, reference, notes, date, branchId, mobileProvider, phoneNumber, transactionId } = req.body
 
     // Check if expense belongs to tenant
     const existingExpense = await prisma.expense.findFirst({
@@ -226,6 +232,9 @@ router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 
       description,
       amount,
       paymentMethod,
+      mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : null,
+      phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : null,
+      transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : null,
       reference,
       notes,
       date: date ? new Date(date) : undefined
