@@ -131,10 +131,15 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
         const resp = await fetch(tenant.logo);
         if (resp.ok) {
           const imgBuf = Buffer.from(await resp.arrayBuffer());
-          doc.image(imgBuf, undefined, undefined, { width: 120, align: "center" });
-          doc.moveDown(0.3);
+          // Fit logo within 80mm width, max height 80px
+          doc.image(imgBuf, undefined, undefined, { fit: [180, 80], align: "center" });
+          doc.moveDown(0.5);
+        } else {
+          console.error("Logo fetch failed:", resp.status, tenant.logo);
         }
-      } catch {}
+      } catch (e) {
+        console.error("Logo render error:", e.message);
+      }
     }
 
     // Receipt Header

@@ -116,7 +116,7 @@ router.get("/", authenticateToken, requireRole(["owner"]), async (req, res) => {
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     const staff = await prisma.user.findMany({
-      where: { tenantId, role: { in: Array.from(staffRoles) } },
+      where: { tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
       include: {
         branches: {
           include: { branch: { select: { id: true, name: true, isActive: true } } },
@@ -212,7 +212,7 @@ router.patch("/:id", authenticateToken, requireRole(["owner"]), async (req, res)
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     const existing = await prisma.user.findFirst({
-      where: { id: req.params.id, tenantId, role: { in: Array.from(staffRoles) } },
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
     });
 
     if (!existing) return res.status(404).json({ error: "Staff not found" });
@@ -221,7 +221,7 @@ router.patch("/:id", authenticateToken, requireRole(["owner"]), async (req, res)
     const { name, fname, lname, phone, role, isActive, branchId, password } = req.body;
 
     if (role !== undefined) {
-      if (!staffRoles.has(role)) return res.status(400).json({ error: "Invalid staff role" });
+      if (!staffRoles.has(role) && role !== "owner") return res.status(400).json({ error: "Invalid staff role" });
       data.role = role;
     }
 
@@ -277,7 +277,7 @@ router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     const existing = await prisma.user.findFirst({
-      where: { id: req.params.id, tenantId, role: { in: Array.from(staffRoles) } },
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
     });
     if (!existing) return res.status(404).json({ error: "Staff not found" });
 
@@ -306,19 +306,17 @@ router.get("/:id/permissions", authenticateToken, requireRole(["owner"]), async 
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     const user = await prisma.user.findFirst({
-      where: { id: req.params.id, tenantId, role: { in: Array.from(staffRoles) } },
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
     });
     if (!user) return res.status(404).json({ error: "Staff not found" });
 
     let perms = await prisma.userPermission.findUnique({ where: { userId: user.id } });
     if (!perms) {
-      // Create default permissions based on role
-      const defaults = {
-        manager: { canCreateSale: true, canRefund: true, canManageInventory: true, canViewReports: true, canManageStaff: false, canManageBranches: false, canManageSettings: false, canAccessPurchases: true, canAccessExpenses: true, canGiveDiscount: true, canViewCustomers: true, canViewSuppliers: true },
-        accountant: { canCreateSale: false, canRefund: false, canManageInventory: false, canViewReports: true, canManageStaff: false, canManageBranches: false, canManageSettings: false, canAccessPurchases: true, canAccessExpenses: true, canGiveDiscount: false, canViewCustomers: true, canViewSuppliers: true },
-        attendant: { canCreateSale: true, canRefund: false, canManageInventory: false, canViewReports: false, canManageStaff: false, canManageBranches: false, canManageSettings: false, canAccessPurchases: false, canAccessExpenses: false, canGiveDiscount: false, canViewCustomers: true, canViewSuppliers: false },
-      };
-      perms = await prisma.userPermission.create({ data: { userId: user.id, ...(defaults[user.role] || defaults.attendant) } });
+      // Owner gets all permissions; others get role defaults
+      const defaults = user.role === "owner" ? Object.fromEntries(PERM_KEYS.map(k => [k, true])) : (ROLE_DEFAULTS[user.role] || ROLE_DEFAULTS.attendant);
+      const permData = {};
+      for (const key of PERM_KEYS) permData[key] = defaults[key] ?? false;
+      perms = await prisma.userPermission.create({ data: { userId: user.id, ...permData } });
     }
     res.json(perms);
   } catch (err) {
@@ -334,13 +332,12 @@ router.put("/:id/permissions", authenticateToken, requireRole(["owner"]), async 
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     const user = await prisma.user.findFirst({
-      where: { id: req.params.id, tenantId, role: { in: Array.from(staffRoles) } },
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
     });
     if (!user) return res.status(404).json({ error: "Staff not found" });
 
-    const permKeys = ["canCreateSale", "canRefund", "canManageInventory", "canViewReports", "canManageStaff", "canManageBranches", "canManageSettings", "canAccessPurchases", "canAccessExpenses", "canGiveDiscount", "canViewCustomers", "canViewSuppliers"];
     const data = {};
-    for (const key of permKeys) {
+    for (const key of PERM_KEYS) {
       if (req.body[key] !== undefined) data[key] = Boolean(req.body[key]);
     }
 

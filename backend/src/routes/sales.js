@@ -109,7 +109,13 @@ router.post("/", authenticateToken, requireRole(saleRoles), async (req, res) => 
     const subtotal = saleItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, i) => sum + i.discount + i.cashDiscount, 0);
     const totalDiscount = lineDiscount + invoiceCashDiscount;
-    const total = Math.max(0, subtotal - totalDiscount);
+
+    // Fetch tenant tax settings
+    const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
+    const taxRate = (tenant?.taxEnabled && tenant?.taxRate) ? tenant.taxRate / 100 : 0;
+    const taxableAmount = Math.max(0, subtotal - totalDiscount);
+    const tax = Math.round(taxableAmount * taxRate * 100) / 100;
+    const total = Math.max(0, subtotal - totalDiscount + tax);
 
     const sale = await prisma.$transaction(async (tx) => {
       const created = await tx.sale.create({
@@ -120,6 +126,7 @@ router.post("/", authenticateToken, requireRole(saleRoles), async (req, res) => 
           userId,
           total,
           subtotal,
+          tax,
           discount: lineDiscount,
           cashDiscount: invoiceCashDiscount,
           paymentMethod,
@@ -177,7 +184,13 @@ router.post("/checkout", authenticateToken, requireRole(saleRoles), async (req, 
     const subtotal = saleItems.reduce((sum, c) => sum + c.price * c.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, c) => sum + c.discount + c.cashDiscount, 0);
     const totalDiscount = lineDiscount + invoiceCashDiscount;
-    const total = Math.max(0, subtotal - totalDiscount);
+
+    // Fetch tenant tax settings
+    const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
+    const taxRate = (tenant?.taxEnabled && tenant?.taxRate) ? tenant.taxRate / 100 : 0;
+    const taxableAmount = Math.max(0, subtotal - totalDiscount);
+    const tax = Math.round(taxableAmount * taxRate * 100) / 100;
+    const total = Math.max(0, subtotal - totalDiscount + tax);
 
     const sale = await prisma.$transaction(async (tx) => {
       const created = await tx.sale.create({
@@ -188,6 +201,7 @@ router.post("/checkout", authenticateToken, requireRole(saleRoles), async (req, 
           userId,
           total,
           subtotal,
+          tax,
           discount: lineDiscount,
           cashDiscount: invoiceCashDiscount,
           paymentMethod,

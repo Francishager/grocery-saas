@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Shield, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { Shield, Plus, MoreVertical, Edit, Ban, Key, Trash2 } from 'lucide-react'
 import { staffApi, branchesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,9 +40,20 @@ export default function RolesPermissionsPage() {
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'attendant', branchId: '', phone: '' })
   const [formPerms, setFormPerms] = useState<Record<string, boolean>>({})
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'attendant', branchId: '' })
+  const [dropdownId, setDropdownId] = useState<string | null>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
   useEffect(() => { loadStaff(); loadBranches(); loadPermSchema() }, [])
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownId(null)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   const loadStaff = async () => {
     try {
@@ -95,6 +106,23 @@ export default function RolesPermissionsPage() {
     }
   }
 
+  const startEdit = (s: any) => {
+    setEditingId(s.id)
+    setEditForm({ name: s.name || '', email: s.email || '', phone: s.phone || '', role: s.role || 'attendant', branchId: s.branchId || '' })
+    setDropdownId(null)
+  }
+
+  const handleSaveEdit = async (id: string) => {
+    try {
+      await staffApi.update(id, editForm)
+      toast({ title: 'Staff updated' })
+      setEditingId(null)
+      loadStaff()
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Failed to update', description: err?.message })
+    }
+  }
+
   const handleUpdateRole = async (id: string, role: string) => {
     try {
       await staffApi.update(id, { role })
@@ -130,6 +158,7 @@ export default function RolesPermissionsPage() {
   }
 
   const roleBadgeColor: Record<string, string> = {
+    owner: 'bg-amber-100 text-amber-700',
     manager: 'bg-blue-100 text-blue-700',
     accountant: 'bg-purple-100 text-purple-700',
     attendant: 'bg-gray-100 text-gray-700',
@@ -160,14 +189,7 @@ export default function RolesPermissionsPage() {
               <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+256..." /></div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <select value={form.role} onChange={e => {
-                  const newRole = e.target.value
-                  setForm(f => ({ ...f, role: newRole }))
-                  // Apply role defaults to form perms
-                  if (permSchema?.defaults?.[newRole]) {
-                    setFormPerms({ ...permSchema.defaults[newRole] })
-                  }
-                }}
+                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   <option value="manager">Manager</option>
                   <option value="accountant">Accountant</option>
@@ -233,35 +255,74 @@ export default function RolesPermissionsPage() {
           ) : (
             <div className="space-y-3">
               {staff.map((s: any) => (
-                <div key={s.id} className="border rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                        {(s.name || s.email).charAt(0).toUpperCase()}
+                <div key={s.id} className="border rounded-lg p-4 group">
+                  {editingId === s.id ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium">Edit Staff</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div><Label className="text-xs">Name</Label><Input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className="h-8 text-sm" /></div>
+                        <div><Label className="text-xs">Email</Label><Input value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} className="h-8 text-sm" /></div>
+                        <div><Label className="text-xs">Phone</Label><Input value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} className="h-8 text-sm" /></div>
+                        <div><Label className="text-xs">Role</Label>
+                          <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm">
+                            <option value="manager">Manager</option>
+                            <option value="accountant">Accountant</option>
+                            <option value="attendant">Attendant</option>
+                          </select>
+                        </div>
+                        <div><Label className="text-xs">Branch</Label>
+                          <select value={editForm.branchId} onChange={e => setEditForm(f => ({ ...f, branchId: e.target.value }))} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm">
+                            <option value="">Select branch</option>
+                            {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium">{s.name || s.email}</p>
-                        <p className="text-sm text-muted-foreground">{s.email} {s.branch?.name && `· ${s.branch.name}`}</p>
+                      <div className="flex gap-2">
+                        <Button onClick={() => handleSaveEdit(s.id)} size="sm">Save</Button>
+                        <Button onClick={() => setEditingId(null)} variant="outline" size="sm">Cancel</Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-1 rounded-full ${roleBadgeColor[s.role] || 'bg-gray-100 text-gray-700'}`}>{s.role}</span>
-                      <span className={`text-xs px-2 py-1 rounded-full ${s.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{s.isActive ? 'Active' : 'Inactive'}</span>
-                      <select value={s.role} onChange={e => handleUpdateRole(s.id, e.target.value)}
-                        className="h-8 rounded border border-input bg-background px-2 text-xs">
-                        <option value="manager">Manager</option>
-                        <option value="accountant">Accountant</option>
-                        <option value="attendant">Attendant</option>
-                      </select>
-                      <Button variant="ghost" size="sm" onClick={() => togglePermissions(s.id)}>
-                        <Shield className="h-4 w-4 mr-1" />
-                        {expandedPermId === s.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDeactivate(s.id)} className="text-destructive">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                          {(s.name || s.email).charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-medium">{s.name || s.email}</p>
+                          <p className="text-sm text-muted-foreground">{s.email} {s.branch?.name && `· ${s.branch.name}`}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-1 rounded-full ${roleBadgeColor[s.role] || 'bg-gray-100 text-gray-700'}`}>{s.role}</span>
+                        <span className={`text-xs px-2 py-1 rounded-full ${s.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{s.isActive ? 'Active' : 'Inactive'}</span>
+                        <div className="relative" ref={dropdownId === s.id ? dropdownRef : undefined}>
+                          <button
+                            onClick={() => setDropdownId(dropdownId === s.id ? null : s.id)}
+                            className="p-1.5 rounded-md hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                          </button>
+                          {dropdownId === s.id && (
+                            <div className="absolute right-0 top-8 z-50 w-44 rounded-md border bg-popover p-1 shadow-md">
+                              <button onClick={() => startEdit(s)} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
+                                <Edit className="h-3.5 w-3.5" /> Edit
+                              </button>
+                              <button onClick={() => { togglePermissions(s.id); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
+                                <Key className="h-3.5 w-3.5" /> Permissions
+                              </button>
+                              <button onClick={() => { handleDeactivate(s.id); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-orange-600">
+                                <Ban className="h-3.5 w-3.5" /> {s.isActive ? 'Suspend' : 'Reactivate'}
+                              </button>
+                              <button onClick={() => { handleDeactivate(s.id); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-destructive">
+                                <Trash2 className="h-3.5 w-3.5" /> Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {expandedPermId === s.id && (
                     <div className="mt-4 border-t pt-4">

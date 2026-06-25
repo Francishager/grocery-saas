@@ -1,6 +1,6 @@
  import { useEffect, useState } from 'react'
 import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode } from 'lucide-react'
-import { inventoryApi, salesApi, barcodeApi, receiptsApi, type InventoryItem, type CartItem } from '@/lib/api'
+import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,11 +31,13 @@ export default function SalesPage() {
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [salesLoading, setSalesLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
+  const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
     loadInventory()
     loadRecentSales()
+    loadTaxConfig()
   }, [])
 
   const loadInventory = async () => {
@@ -100,6 +102,13 @@ export default function SalesPage() {
     setCart((prev) => prev.filter((c) => c.id !== id))
   }
 
+  const loadTaxConfig = async () => {
+    try {
+      const data = await settingsApi.get()
+      setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
+    } catch {}
+  }
+
   const cartSubtotal = cart.reduce(
     (sum, item) => sum + item.selling_price * item.qty,
     0
@@ -108,7 +117,9 @@ export default function SalesPage() {
     (sum, item) => sum + (item.cashDiscount || 0),
     0
   )
-  const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount)
+  const taxableAmount = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount)
+  const cartTax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
+  const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
 
   const autoPrintReceipt = async (saleId: string) => {
     if (!isSerialSupported() && !isBluetoothSupported()) return
@@ -407,6 +418,12 @@ export default function SalesPage() {
                         placeholder="0"
                       />
                     </div>
+                    {cartTax > 0 && (
+                      <div className="flex justify-between mb-1 text-sm">
+                        <span className="font-medium">Tax{taxConfig?.taxId ? ` (${taxConfig.taxId})` : ''}</span>
+                        <span>{formatCurrency(cartTax)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between mb-2">
                       <span className="font-medium">Total</span>
                       <span className="font-bold text-lg">
