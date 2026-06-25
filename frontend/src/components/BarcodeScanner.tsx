@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Camera, ScanBarcode, X } from 'lucide-react'
+import { Camera, ScanBarcode, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -10,19 +10,24 @@ interface BarcodeScannerProps {
 }
 
 const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+const SCAN_TIMEOUT_MS = 30000
 
 /**
  * Unified barcode scanner — auto-detects the best method:
  * - Keyboard input always active (catches USB/Bluetooth keyboard-wedge scanners)
  * - Camera auto-starts on mobile; on desktop, a "Start Camera" button is shown
- * - No manual mode selection needed
+ * - Scanning indicator with animated line
+ * - 30s timeout with "Try Again" button
  */
 export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan barcode or type SKU...' }: BarcodeScannerProps) {
   const [manualCode, setManualCode] = useState('')
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
+  const [timedOut, setTimedOut] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const scannerRef = useRef<any>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // USB/Bluetooth keyboard-wedge scanners type fast and end with Enter
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -40,10 +45,28 @@ export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan ba
     }
   }
 
+  const stopCamera = useCallback(async () => {
+    try {
+      if (scannerRef.current) {
+        await scannerRef.current.stop()
+        scannerRef.current.clear()
+        scannerRef.current = null
+      }
+    } catch {}
+    setCameraActive(false)
+    setScanning(false)
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+  }, [])
+
   const startCamera = useCallback(async () => {
     try {
       setCameraError('')
+      setTimedOut(false)
       setCameraActive(true)
+      setScanning(true)
 
       const { Html5Qrcode } = await import('html5-qrcode')
 
@@ -56,29 +79,27 @@ export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan ba
 
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 150 }, aspectRatio: 1.5 },
+        { fps: 15, qrbox: { width: 280, height: 160 }, aspectRatio: 1.5 },
         (decodedText: string) => {
           onScan(decodedText)
           stopCamera()
         },
         () => {}
       )
+
+      // Set timeout — if no scan within 30s, show try again
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => {
+        setTimedOut(true)
+        setScanning(false)
+        stopCamera()
+      }, SCAN_TIMEOUT_MS)
     } catch (err: any) {
       setCameraError(err.message || 'Camera access denied')
       setCameraActive(false)
+      setScanning(false)
     }
-  }, [onScan])
-
-  const stopCamera = useCallback(async () => {
-    try {
-      if (scannerRef.current) {
-        await scannerRef.current.stop()
-        scannerRef.current.clear()
-        scannerRef.current = null
-      }
-    } catch {}
-    setCameraActive(false)
-  }, [])
+  }, [onScan, stopCamera])
 
   // Auto-focus input for USB scanner; auto-start camera on mobile
   useEffect(() => {
@@ -120,26 +141,65 @@ export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan ba
 
       {/* Camera scanner — auto-starts on mobile, button on desktop */}
       <div className="space-y-2">
-        <div
-          id="barcode-camera-view"
-          className="w-full rounded-lg overflow-hidden border bg-black"
-          style={{ minHeight: cameraActive ? '250px' : '0' }}
-        />
+        <div className="relative w-full rounded-lg overflow-hidden border bg-black"
+          style={{ minHeight: cameraActive || timedOut ? '280px' : '0' }}
+        >
+          <div id="barcode-camera-view" className="w-full" style={{ minHeight: '280px' }} />
+
+          {/* Scanning indicator overlay */}
+          {scanning && (
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-end">
+              {/* Animated scan line */}
+              <div className="absolute inset-x-4 top-0 bottom-0 overflow-hidden">
+                <div className="w-full h-0.5 bg-red-500 animate-[scanLine_2s_ease-in-out_infinite] opacity-80 shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+              </div>
+              {/* Status badge */}
+              <div className="mb-3 flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5">
+                <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-xs font-medium text-white">Scanning...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Timeout overlay */}
+          {timedOut && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 gap-3">
+              <p className="text-sm text-white font-medium">No barcode detected</p>
+              <p className="text-xs text-slate-300">Make sure the barcode is clearly visible</p>
+              <Button onClick={startCamera} variant="outline" size="sm" className="bg-white text-black hover:bg-slate-100">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Try Again
+              </Button>
+            </div>
+          )}
+        </div>
+
         {cameraError && (
           <p className="text-sm text-destructive">{cameraError}</p>
         )}
-        {!cameraActive ? (
+
+        {!cameraActive && !timedOut && (
           <Button onClick={startCamera} variant="outline" className="w-full" size="sm">
             <Camera className="h-4 w-4 mr-2" />
             Start Camera Scanner
           </Button>
-        ) : (
+        )}
+        {cameraActive && !timedOut && (
           <Button onClick={stopCamera} variant="outline" className="w-full" size="sm">
             <Camera className="h-4 w-4 mr-2" />
             Stop Camera
           </Button>
         )}
       </div>
+
+      {/* Inline animation keyframes */}
+      <style>{`
+        @keyframes scanLine {
+          0% { transform: translateY(0); }
+          50% { transform: translateY(260px); }
+          100% { transform: translateY(0); }
+        }
+      `}</style>
     </div>
   )
 }

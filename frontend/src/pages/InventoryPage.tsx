@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2 } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
+import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -59,6 +60,7 @@ export default function InventoryPage() {
   const [formData, setFormData] = useState<FormData>(initialFormData)
   const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
   const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user } = useJWTAuth()
@@ -269,6 +271,7 @@ export default function InventoryPage() {
     setFormData(initialFormData)
     setSellingUnits([])
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setShowBarcodeScanner(false)
     setCategoryOpen(false)
     setCategoryQuery('')
   }
@@ -367,14 +370,38 @@ export default function InventoryPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="barcode">Barcode</Label>
-                <Input
-                  id="barcode"
-                  value={formData.barcode}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, barcode: e.target.value }))
-                  }
-                  placeholder="Scan or enter barcode"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="barcode"
+                    value={formData.barcode}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, barcode: e.target.value }))
+                    }
+                    placeholder="Scan or enter barcode"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setShowBarcodeScanner(!showBarcodeScanner)}
+                  >
+                    <ScanBarcode className="h-4 w-4" />
+                  </Button>
+                </div>
+                {showBarcodeScanner && (
+                  <div className="mt-2">
+                    <BarcodeScanner
+                      onScan={(code) => {
+                        setFormData((prev) => ({ ...prev, barcode: code }))
+                        setShowBarcodeScanner(false)
+                        toast({ title: 'Barcode captured', description: code })
+                      }}
+                      onClose={() => setShowBarcodeScanner(false)}
+                      placeholder="Scan barcode for this item..."
+                    />
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Category</Label>
