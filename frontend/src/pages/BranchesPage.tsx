@@ -296,7 +296,7 @@ export default function BranchesPage() {
                           <MoreVertical className="h-4 w-4 text-muted-foreground" />
                         </button>
                         {dropdownId === branch.id && (
-                          <div className="absolute right-0 top-8 z-50 w-40 rounded-md border bg-popover p-1 shadow-md">
+                          <div className="absolute right-0 bottom-0 z-50 w-40 rounded-md border bg-popover p-1 shadow-md">
                             <button onClick={() => { startEdit(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
                               <Edit3 className="h-3.5 w-3.5" /> Edit
                             </button>

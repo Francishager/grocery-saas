@@ -153,10 +153,8 @@ export function TenantLayout() {
 
   const toggleCat = (catId: string) => {
     setExpandedCats(prev => {
-      const next = new Set(prev)
-      if (next.has(catId)) next.delete(catId)
-      else next.add(catId)
-      return next
+      if (prev.has(catId)) return new Set()
+      return new Set([catId])
     })
   }
 

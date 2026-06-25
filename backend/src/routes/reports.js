@@ -224,7 +224,8 @@ router.get("/sales/discounts", authenticateToken, requireRole(reportRoles), asyn
         if (itemDiscount > 0) byProduct[pName] = (byProduct[pName] || 0) + itemDiscount;
       });
     });
-    res.json({ data: sales, summary: { count: sales.length, totalDiscount, grossSales: sales.reduce((a, x) => a + x.subtotal, 0), netSales: sales.reduce((a, x) => a + x.total, 0), byUser, byBranch, byProduct, byDate } });
+    const data = sales.map((sale) => ({ receiptNo: sale.receiptNo, status: sale.status, discount: sale.discount + sale.cashDiscount, total: sale.total }));
+    res.json({ data, summary: { count: data.length, totalDiscount, grossSales: sales.reduce((a, x) => a + x.subtotal, 0), netSales: sales.reduce((a, x) => a + x.total, 0), byUser, byBranch, byProduct, byDate } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -232,7 +233,8 @@ router.get("/sales/returns", authenticateToken, requireRole(reportRoles), async 
   try {
     const s = await getScope(req);
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), include: { items: { include: { product: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } });
-    res.json({ data: sales, summary: { count: sales.length, totalRefunded: sales.reduce((a, x) => a + x.total, 0) } });
+    const data = sales.map((sale) => ({ receiptNo: sale.receiptNo, status: sale.status, total: sale.total, paymentMethod: sale.paymentMethod }));
+    res.json({ data, summary: { count: data.length, totalRefunded: data.reduce((a, x) => a + x.total, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -241,7 +243,8 @@ router.get("/inventory/stock", authenticateToken, requireRole(reportRoles), asyn
   try {
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-    res.json({ data: products, summary: { count: products.length, totalValue: products.reduce((a, p) => a + (p.cost || 0) * p.quantity, 0) } });
+    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, cost: p.cost || 0, price: p.price || 0, sku: p.sku || "", branch: p.branch?.name || "Unassigned" }));
+    res.json({ data, summary: { count: data.length, totalValue: data.reduce((a, p) => a + p.cost * p.quantity, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -268,8 +271,9 @@ router.get("/inventory/low-stock", authenticateToken, requireRole(reportRoles), 
   try {
     const s = await getScope(req);
     const allProducts = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { quantity: "asc" } });
-    const products = allProducts.filter((p) => p.quantity <= p.minStock);
-    res.json({ data: products, summary: { count: products.length } });
+    const filtered = allProducts.filter((p) => p.quantity <= p.minStock);
+    const data = filtered.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, branch: p.branch?.name || "Unassigned" }));
+    res.json({ data, summary: { count: data.length } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -277,7 +281,8 @@ router.get("/inventory/out-of-stock", authenticateToken, requireRole(reportRoles
   try {
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, quantity: { lte: 0 } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-    res.json({ data: products, summary: { count: products.length } });
+    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", branch: p.branch?.name || "Unassigned" }));
+    res.json({ data, summary: { count: data.length } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -309,7 +314,7 @@ router.get("/inventory/expiry", authenticateToken, requireRole(reportRoles), asy
     const s = await getScope(req);
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { expiryDate: "asc" } });
     const now = new Date();
-    const data = products.map((p) => ({ ...p, daysUntilExpiry: Math.floor((new Date(p.expiryDate) - now) / 86400000), isExpired: new Date(p.expiryDate) < now }));
+    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, expiryDate: p.expiryDate, daysUntilExpiry: Math.floor((new Date(p.expiryDate) - now) / 86400000), isExpired: new Date(p.expiryDate) < now }));
     res.json({ data, summary: { count: data.length, expired: data.filter((p) => p.isExpired).length, expiringSoon: data.filter((p) => !p.isExpired && p.daysUntilExpiry <= 30).length } });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -392,7 +397,8 @@ router.get("/financial/expense", authenticateToken, requireRole(reportRoles), as
     const expenses = await prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), orderBy: { date: "desc" } });
     const byCategory = {};
     expenses.forEach((e) => { byCategory[e.category] = (byCategory[e.category] || 0) + e.amount; });
-    res.json({ data: expenses, summary: { count: expenses.length, totalExpenses: expenses.reduce((a, e) => a + e.amount, 0), byCategory } });
+    const data = expenses.map((e) => ({ category: e.category, amount: e.amount, date: e.date, description: e.description || "" }));
+    res.json({ data, summary: { count: data.length, totalExpenses: data.reduce((a, e) => a + e.amount, 0), byCategory } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -507,7 +513,8 @@ router.get("/customers/list", authenticateToken, requireRole(reportRoles), async
   try {
     const s = await getScope(req);
     const customers = await prisma.customer.findMany({ where: scopedWhere(s), include: { branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-    res.json({ data: customers, summary: { count: customers.length, totalBalance: customers.reduce((a, c) => a + c.balance, 0) } });
+    const data = customers.map((c) => ({ name: c.name, phone: c.phone || "", email: c.email || "", balance: c.balance || 0 }));
+    res.json({ data, summary: { count: data.length, totalBalance: data.reduce((a, c) => a + c.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -537,7 +544,8 @@ router.get("/customers/receivables", authenticateToken, requireRole(reportRoles)
   try {
     const s = await getScope(req);
     const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { customer: true }, orderBy: { createdAt: "desc" } });
-    res.json({ data: records, summary: { count: records.length, totalReceivable: records.reduce((a, r) => a + r.balance, 0) } });
+    const data = records.map((r) => ({ customer: r.customer?.name || "Walk-in", total: r.total, amountPaid: r.amountPaid, balance: r.balance }));
+    res.json({ data, summary: { count: data.length, totalReceivable: data.reduce((a, r) => a + r.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -560,7 +568,8 @@ router.get("/suppliers/list", authenticateToken, requireRole(reportRoles), async
   try {
     const s = await getScope(req);
     const suppliers = await prisma.supplier.findMany({ where: scopedWhere(s), include: { branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-    res.json({ data: suppliers, summary: { count: suppliers.length, totalBalance: suppliers.reduce((a, sup) => a + sup.balance, 0) } });
+    const data = suppliers.map((sup) => ({ name: sup.name, phone: sup.phone || "", email: sup.email || "", balance: sup.balance || 0 }));
+    res.json({ data, summary: { count: data.length, totalBalance: data.reduce((a, sup) => a + sup.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -582,7 +591,8 @@ router.get("/suppliers/payables", authenticateToken, requireRole(reportRoles), a
   try {
     const s = await getScope(req);
     const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "desc" } });
-    res.json({ data: purchases, summary: { count: purchases.length, totalPayable: purchases.reduce((a, p) => a + p.balance, 0) } });
+    const data = purchases.map((p) => ({ supplier: p.supplier?.name || "Unknown", total: p.total, balance: p.balance, createdAt: p.createdAt }));
+    res.json({ data, summary: { count: data.length, totalPayable: data.reduce((a, p) => a + p.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -599,7 +609,8 @@ router.get("/receivables/outstanding", authenticateToken, requireRole(reportRole
   try {
     const s = await getScope(req);
     const invoices = await prisma.invoice.findMany({ where: scopedWhere(s, { status: { in: ["unpaid", "partial", "overdue"] } }), include: { customer: true }, orderBy: { dueDate: "asc" } });
-    res.json({ data: invoices, summary: { count: invoices.length, totalOutstanding: invoices.reduce((a, inv) => a + inv.balance, 0) } });
+    const data = invoices.map((inv) => ({ customer: inv.customer?.name || "Unknown", status: inv.status, balance: inv.balance, dueDate: inv.dueDate }));
+    res.json({ data, summary: { count: data.length, totalOutstanding: data.reduce((a, inv) => a + inv.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -630,7 +641,8 @@ router.get("/receivables/collection", authenticateToken, requireRole(reportRoles
   try {
     const s = await getScope(req);
     const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } } }, orderBy: { createdAt: "desc" } });
-    res.json({ data: payments, summary: { count: payments.length, totalCollected: payments.reduce((a, p) => a + p.amount, 0) } });
+    const data = payments.map((p) => ({ createdAt: p.createdAt, customer: p.customer?.name || "Walk-in", amount: p.amount, paymentMethod: p.paymentMethod || "cash" }));
+    res.json({ data, summary: { count: data.length, totalCollected: data.reduce((a, p) => a + p.amount, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -639,7 +651,8 @@ router.get("/receivables/overdue", authenticateToken, requireRole(reportRoles), 
     const s = await getScope(req);
     const now = new Date();
     const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, { balance: { gt: 0 }, dueDate: { lt: now } }), include: { customer: true }, orderBy: { dueDate: "asc" } });
-    res.json({ data: records, summary: { count: records.length, totalOverdue: records.reduce((a, r) => a + r.balance, 0) } });
+    const data = records.map((r) => ({ customer: r.customer?.name || "Unknown", balance: r.balance, dueDate: r.dueDate }));
+    res.json({ data, summary: { count: data.length, totalOverdue: data.reduce((a, r) => a + r.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -648,7 +661,8 @@ router.get("/payables/outstanding", authenticateToken, requireRole(reportRoles),
   try {
     const s = await getScope(req);
     const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "asc" } });
-    res.json({ data: purchases, summary: { count: purchases.length, totalOutstanding: purchases.reduce((a, p) => a + p.balance, 0) } });
+    const data = purchases.map((p) => ({ supplier: p.supplier?.name || "Unknown", total: p.total, balance: p.balance, createdAt: p.createdAt }));
+    res.json({ data, summary: { count: data.length, totalOutstanding: data.reduce((a, p) => a + p.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -679,7 +693,8 @@ router.get("/payables/payment-history", authenticateToken, requireRole(reportRol
   try {
     const s = await getScope(req);
     const payments = await prisma.supplierPayment.findMany({ where: scopedWhere(s, df(req)), include: { supplier: { select: { name: true } }, purchase: { select: { refNo: true } } }, orderBy: { createdAt: "desc" } });
-    res.json({ data: payments, summary: { count: payments.length, totalPaid: payments.reduce((a, p) => a + p.amount, 0) } });
+    const data = payments.map((p) => ({ createdAt: p.createdAt, supplier: p.supplier?.name || "Unknown", amount: p.amount, paymentMethod: p.paymentMethod || "cash" }));
+    res.json({ data, summary: { count: data.length, totalPaid: data.reduce((a, p) => a + p.amount, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -688,7 +703,8 @@ router.get("/payables/overdue", authenticateToken, requireRole(reportRoles), asy
     const s = await getScope(req);
     const now = new Date();
     const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { balance: { gt: 0 }, dueDate: { lt: now } }), include: { supplier: true }, orderBy: { dueDate: "asc" } });
-    res.json({ data: purchases, summary: { count: purchases.length, totalOverdue: purchases.reduce((a, p) => a + p.balance, 0) } });
+    const data = purchases.map((p) => ({ supplier: p.supplier?.name || "Unknown", balance: p.balance, dueDate: p.dueDate }));
+    res.json({ data, summary: { count: data.length, totalOverdue: data.reduce((a, p) => a + p.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 

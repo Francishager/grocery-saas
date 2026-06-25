@@ -257,7 +257,17 @@ function formatValue(value: any, format?: string): string {
     case 'currency': return formatCurrency(Number(value) || 0)
     case 'number': return new Intl.NumberFormat('en-US').format(Number(value) || 0)
     case 'date': return value ? new Date(value).toLocaleDateString() : '—'
-    default: return String(value)
+    default:
+      if (typeof value === 'object') {
+        // Extract name from nested objects like {id, name}, {name}, etc.
+        if (value.name) return String(value.name)
+        if (value.label) return String(value.label)
+        if (value.email) return String(value.email)
+        // Fallback: stringify first key's value
+        const firstVal = Object.values(value)[0]
+        return firstVal != null ? String(firstVal) : '—'
+      }
+      return String(value)
   }
 }
 
