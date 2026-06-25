@@ -72,6 +72,12 @@ export const permissions: Permission[] = [
   { id: 'canEditPurchase', name: 'Edit Purchases', description: 'Edit existing purchases', category: 'purchases', accessesBusinessData: true },
   { id: 'canDeletePurchase', name: 'Delete Purchases', description: 'Delete purchase records', category: 'purchases', accessesBusinessData: true },
   
+  // Payables
+  { id: 'canViewPayable', name: 'View Payables', description: 'View payables list and details', category: 'purchases', accessesBusinessData: true },
+  { id: 'canCreatePayable', name: 'Create Payables', description: 'Create new payables', category: 'purchases', accessesBusinessData: true },
+  { id: 'canEditPayable', name: 'Edit Payables', description: 'Edit existing payables', category: 'purchases', accessesBusinessData: true },
+  { id: 'canDeletePayable', name: 'Delete Payables', description: 'Delete payable records', category: 'purchases', accessesBusinessData: true },
+  
   // Inventory
   { id: 'canViewProduct', name: 'View Inventory', description: 'View inventory list and details', category: 'inventory', accessesBusinessData: true },
   { id: 'canCreateProduct', name: 'Create Products', description: 'Add new inventory items', category: 'inventory', accessesBusinessData: true },
@@ -91,6 +97,12 @@ export const permissions: Permission[] = [
   { id: 'canCreateCustomer', name: 'Create Customers', description: 'Create new customers', category: 'customers', accessesBusinessData: true },
   { id: 'canEditCustomer', name: 'Edit Customers', description: 'Edit existing customers', category: 'customers', accessesBusinessData: true },
   { id: 'canDeleteCustomer', name: 'Delete Customers', description: 'Delete customer records', category: 'customers', accessesBusinessData: true },
+  
+  // Receivables
+  { id: 'canViewReceivable', name: 'View Receivables', description: 'View receivables list and details', category: 'customers', accessesBusinessData: true },
+  { id: 'canCreateReceivable', name: 'Create Receivables', description: 'Create new receivables', category: 'customers', accessesBusinessData: true },
+  { id: 'canEditReceivable', name: 'Edit Receivables', description: 'Edit existing receivables', category: 'customers', accessesBusinessData: true },
+  { id: 'canDeleteReceivable', name: 'Delete Receivables', description: 'Delete receivable records', category: 'customers', accessesBusinessData: true },
   
   // Suppliers
   { id: 'canViewSupplier', name: 'View Suppliers', description: 'View suppliers list', category: 'suppliers', accessesBusinessData: true },
@@ -182,6 +194,8 @@ export const roles: Role[] = [
       'canViewDashboard',
       'canViewSale', 'canCreateSale', 'canEditSale', 'canDeleteSale', 'canRefundSale',
       'canViewPurchase', 'canCreatePurchase', 'canEditPurchase', 'canDeletePurchase',
+      'canViewPayable', 'canCreatePayable', 'canEditPayable', 'canDeletePayable',
+      'canViewReceivable', 'canCreateReceivable', 'canEditReceivable', 'canDeleteReceivable',
       'canViewProduct', 'canCreateProduct', 'canEditProduct', 'canDeleteProduct', 'canAdjustStock', 'canTransferStock',
       'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense',
       'canViewCustomer', 'canCreateCustomer', 'canEditCustomer', 'canDeleteCustomer',
@@ -205,6 +219,8 @@ export const roles: Role[] = [
       'canViewSale',
       'canViewProduct',
       'canCreatePurchase', 'canViewPurchase', 'canEditPurchase',
+      'canCreatePayable', 'canViewPayable', 'canEditPayable',
+      'canCreateReceivable', 'canViewReceivable', 'canEditReceivable',
       'canCreateExpense', 'canViewExpense', 'canEditExpense',
       'canCreateCustomer', 'canViewCustomer', 'canEditCustomer',
       'canCreateSupplier', 'canViewSupplier', 'canEditSupplier',
@@ -238,6 +254,8 @@ export const roles: Role[] = [
       'canViewDashboard',
       'canViewSale', 'canCreateSale', 'canEditSale', 'canRefundSale',
       'canViewPurchase', 'canCreatePurchase', 'canEditPurchase',
+      'canCreatePayable', 'canViewPayable', 'canEditPayable',
+      'canCreateReceivable', 'canViewReceivable', 'canEditReceivable',
       'canViewProduct', 'canCreateProduct', 'canEditProduct', 'canAdjustStock', 'canTransferStock',
       'canCreateExpense', 'canViewExpense', 'canEditExpense',
       'canCreateCustomer', 'canViewCustomer', 'canEditCustomer',

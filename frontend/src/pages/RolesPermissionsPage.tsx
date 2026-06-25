@@ -11,8 +11,10 @@ const PERM_LABELS: Record<string, string> = {
   canCreateSale:'Create Sale', canViewSale:'View Sale', canEditSale:'Edit Sale', canDeleteSale:'Delete Sale', canRefundSale:'Refund Sale',
   canCreateProduct:'Create Product', canViewProduct:'View Product', canEditProduct:'Edit Product', canDeleteProduct:'Delete Product',
   canCreatePurchase:'Create Purchase', canViewPurchase:'View Purchase', canEditPurchase:'Edit Purchase', canDeletePurchase:'Delete Purchase',
+  canCreatePayable:'Create Payable', canViewPayable:'View Payable', canEditPayable:'Edit Payable', canDeletePayable:'Delete Payable',
   canCreateExpense:'Create Expense', canViewExpense:'View Expense', canEditExpense:'Edit Expense', canDeleteExpense:'Delete Expense',
   canCreateCustomer:'Create Customer', canViewCustomer:'View Customer', canEditCustomer:'Edit Customer', canDeleteCustomer:'Delete Customer',
+  canCreateReceivable:'Create Receivable', canViewReceivable:'View Receivable', canEditReceivable:'Edit Receivable', canDeleteReceivable:'Delete Receivable',
   canCreateSupplier:'Create Supplier', canViewSupplier:'View Supplier', canEditSupplier:'Edit Supplier', canDeleteSupplier:'Delete Supplier',
   canCreateStaff:'Create Staff', canViewStaff:'View Staff', canEditStaff:'Edit Staff', canDeleteStaff:'Delete Staff',
   canCreateBranch:'Create Branch', canViewBranch:'View Branch', canEditBranch:'Edit Branch', canDeleteBranch:'Delete Branch',
@@ -24,8 +26,10 @@ const PERM_GROUPS = [
   { label: 'Sales', prefix: 'Sale' },
   { label: 'Products', prefix: 'Product' },
   { label: 'Purchases', prefix: 'Purchase' },
+  { label: 'Payables', prefix: 'Payable' },
   { label: 'Expenses', prefix: 'Expense' },
   { label: 'Customers', prefix: 'Customer' },
+  { label: 'Receivables', prefix: 'Receivable' },
   { label: 'Suppliers', prefix: 'Supplier' },
   { label: 'Staff', prefix: 'Staff' },
   { label: 'Branches', prefix: 'Branch' },
@@ -40,10 +44,10 @@ export default function RolesPermissionsPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [expandedPermId, setExpandedPermId] = useState<string | null>(null)
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'attendant', branchId: '', phone: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '' })
   const [formPerms, setFormPerms] = useState<Record<string, boolean>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'attendant', branchId: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '' })
   const [dropdownId, setDropdownId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -89,7 +93,7 @@ export default function RolesPermissionsPage() {
       await staffApi.create({ ...form, name: form.name || form.email.split('@')[0], permissions: formPerms })
       toast({ title: 'Staff created' })
       setShowAddForm(false)
-      setForm({ name: '', email: '', password: '', role: 'attendant', branchId: '', phone: '' })
+      setForm({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '' })
       setFormPerms({})
       loadStaff()
     } catch (err: any) {
@@ -125,7 +129,7 @@ export default function RolesPermissionsPage() {
     }
   }
 
-  const handleUpdateRole = async (id: string, role: string) => {
+  const handleUpdateRole = async (id: string, role: 'attendant' | 'manager' | 'accountant') => {
     try {
       await staffApi.update(id, { role })
       toast({ title: 'Role updated' })

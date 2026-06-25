@@ -251,6 +251,10 @@ model UserPermission {
   canViewPurchase   Boolean @default(true)
   canEditPurchase   Boolean @default(false)
   canDeletePurchase Boolean @default(false)
+  canCreatePayable  Boolean @default(false)
+  canViewPayable    Boolean @default(true)
+  canEditPayable    Boolean @default(false)
+  canDeletePayable  Boolean @default(false)
   // Expenses
   canCreateExpense Boolean @default(false)
   canViewExpense   Boolean @default(true)
@@ -261,6 +265,10 @@ model UserPermission {
   canViewCustomer   Boolean @default(true)
   canEditCustomer   Boolean @default(false)
   canDeleteCustomer Boolean @default(false)
+  canCreateReceivable Boolean @default(false)
+  canViewReceivable   Boolean @default(true)
+  canEditReceivable   Boolean @default(false)
+  canDeleteReceivable Boolean @default(false)
   // Suppliers
   canCreateSupplier Boolean @default(false)
   canViewSupplier   Boolean @default(true)

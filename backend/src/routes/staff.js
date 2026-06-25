@@ -17,10 +17,12 @@ const PERM_KEYS = [
   "canCreateProduct","canViewProduct","canEditProduct","canDeleteProduct","canAdjustStock","canTransferStock",
   // Purchases / Payables
   "canCreatePurchase","canViewPurchase","canEditPurchase","canDeletePurchase",
+  "canCreatePayable","canViewPayable","canEditPayable","canDeletePayable",
   // Expenses
   "canCreateExpense","canViewExpense","canEditExpense","canDeleteExpense",
   // Customers / Receivables
   "canCreateCustomer","canViewCustomer","canEditCustomer","canDeleteCustomer",
+  "canCreateReceivable","canViewReceivable","canEditReceivable","canDeleteReceivable",
   // Suppliers
   "canCreateSupplier","canViewSupplier","canEditSupplier","canDeleteSupplier",
   // Staff
@@ -45,8 +47,10 @@ const ROLE_DEFAULTS = {
     canCreateSale:true,canViewSale:true,canEditSale:true,canDeleteSale:false,canRefundSale:true,
     canCreateProduct:true,canViewProduct:true,canEditProduct:true,canDeleteProduct:false,canAdjustStock:true,canTransferStock:true,
     canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
+    canCreatePayable:true,canViewPayable:true,canEditPayable:true,canDeletePayable:false,
     canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
     canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
+    canCreateReceivable:true,canViewReceivable:true,canEditReceivable:true,canDeleteReceivable:false,
     canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
@@ -61,6 +65,8 @@ const ROLE_DEFAULTS = {
     canCreateSale:false,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
     canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,canAdjustStock:false,canTransferStock:false,
     canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
+    canCreatePayable:true,canViewPayable:true,canEditPayable:true,canDeletePayable:false,
+    canCreateReceivable:true,canViewReceivable:true,canEditReceivable:true,canDeleteReceivable:false,
     canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
     canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
     canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
@@ -77,8 +83,10 @@ const ROLE_DEFAULTS = {
     canCreateSale:true,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
     canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,canAdjustStock:false,canTransferStock:false,
     canCreatePurchase:false,canViewPurchase:false,canEditPurchase:false,canDeletePurchase:false,
+    canCreatePayable:false,canViewPayable:false,canEditPayable:false,canDeletePayable:false,
     canCreateExpense:false,canViewExpense:false,canEditExpense:false,canDeleteExpense:false,
     canCreateCustomer:false,canViewCustomer:true,canEditCustomer:false,canDeleteCustomer:false,
+    canCreateReceivable:false,canViewReceivable:false,canEditReceivable:false,canDeleteReceivable:false,
     canCreateSupplier:false,canViewSupplier:false,canEditSupplier:false,canDeleteSupplier:false,
     canCreateStaff:false,canViewStaff:false,canEditStaff:false,canDeleteStaff:false,
     canCreateBranch:false,canViewBranch:false,canEditBranch:false,canDeleteBranch:false,
