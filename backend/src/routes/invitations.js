@@ -3,6 +3,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import { permissionsForUser } from "../utils/permissions.js";
 import { sendMail } from "../../mailer.js";
 
 const router = Router();
@@ -50,7 +51,7 @@ function invitationPublicFields(inv, plan = null) {
 
 function createTokens(user) {
   const accessToken = jwt.sign(
-    { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" },
+    { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
     JWT_SECRET,
     { expiresIn: "24h" }
   );

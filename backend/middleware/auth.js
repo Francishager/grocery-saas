@@ -1,4 +1,6 @@
 import jwt from 'jsonwebtoken';
+import prisma from '../src/db.js';
+import { permissionsForUser } from '../src/utils/permissions.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -8,25 +10,46 @@ const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 /**
  * Authenticate JWT token middleware
  */
-export const authenticateToken = (req, res, next) => {
+export const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-  
+
   if (!token) {
     return res.status(401).json({ message: 'Access token required' });
   }
-  
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) {
-      if (err.name === 'TokenExpiredError') {
-        return res.status(401).json({ message: 'Token expired', code: 'TOKEN_EXPIRED' });
-      }
-      return res.status(403).json({ message: 'Invalid token' });
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired', code: 'TOKEN_EXPIRED' });
     }
-    
+    return res.status(403).json({ message: 'Invalid token' });
+  }
+
+  try {
+    // Always attach current permissions from the database so permission changes are immediate
+    // and old tokens (issued before permissions were embedded) still work.
+    const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
+    const permissions = permissionsForUser(decoded);
+    console.log('[auth] User:', decoded.id, 'Role:', decoded.role, 'Base permissions:', permissions.length);
+    if (userPerm && decoded.role !== 'saas_admin') {
+      for (const [key, val] of Object.entries(userPerm)) {
+        if (key.startsWith('can') && val === true && !permissions.includes(key)) {
+          permissions.push(key);
+        }
+      }
+    }
+    console.log('[auth] Final permissions:', permissions);
+    req.user = { ...decoded, permissions };
+  } catch (fetchErr) {
+    console.error('Permission lookup error:', fetchErr);
+    // Fall back to decoded token permissions if available
     req.user = decoded;
-    next();
-  });
+  }
+
+  next();
 };
 
 /**
@@ -156,8 +179,10 @@ export const requirePermission = (permission) => {
     }
     
     const permissions = req.user.permissions || [];
+    console.log('[auth] Checking permission:', permission, 'User permissions:', permissions);
     
     if (!permissions.includes(permission) && !permissions.includes('*')) {
+      console.log('[auth] Permission denied - required:', permission, 'user has:', permissions);
       return res.status(403).json({ 
         message: 'Permission denied',
         required: permission,
