@@ -32,16 +32,32 @@ export const authenticateToken = async (req, res, next) => {
     // Always attach current permissions from the database so permission changes are immediate
     // and old tokens (issued before permissions were embedded) still work.
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
-    const permissions = permissionsForUser(decoded);
-    console.log('[auth] User:', decoded.id, 'Role:', decoded.role, 'Base permissions:', permissions.length);
-    if (userPerm && decoded.role !== 'saas_admin') {
+    let permissions;
+    if (userPerm && decoded.role !== 'saas_admin' && decoded.role !== 'owner') {
+      // If UserPermission record exists, use it to override role defaults:
+      // Start with role defaults, then apply explicit true/false from UserPermission
+      permissions = permissionsForUser(decoded);
       for (const [key, val] of Object.entries(userPerm)) {
-        if (key.startsWith('can') && val === true && !permissions.includes(key)) {
-          permissions.push(key);
+        if (key.startsWith('can') && typeof val === 'boolean') {
+          if (val === true) {
+            if (!permissions.includes(key)) permissions.push(key);
+          } else {
+            const idx = permissions.indexOf(key);
+            if (idx !== -1) permissions.splice(idx, 1);
+          }
+        }
+      }
+    } else {
+      permissions = permissionsForUser(decoded);
+      if (userPerm && decoded.role !== 'saas_admin') {
+        for (const [key, val] of Object.entries(userPerm)) {
+          if (key.startsWith('can') && val === true && !permissions.includes(key)) {
+            permissions.push(key);
+          }
         }
       }
     }
-    console.log('[auth] Final permissions:', permissions);
+    console.log('[auth] User:', decoded.id, 'Role:', decoded.role, 'Final permissions:', permissions.length);
     req.user = { ...decoded, permissions };
   } catch (fetchErr) {
     console.error('Permission lookup error:', fetchErr);

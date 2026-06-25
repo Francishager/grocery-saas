@@ -28,8 +28,20 @@ function userPayload(user, userPerm) {
   const isPlatformUser = user.role === "saas_admin";
   const permissions = permissionsForUser(user);
 
-  // Merge granular UserPermission keys (canViewSalesReport, etc.) into permissions array
-  if (userPerm && !isPlatformUser) {
+  // Merge granular UserPermission keys into permissions array
+  // For non-owner/non-saas_admin, UserPermission overrides role defaults (both add and remove)
+  if (userPerm && !isPlatformUser && user.role !== "owner") {
+    for (const [key, val] of Object.entries(userPerm)) {
+      if (key.startsWith("can") && typeof val === "boolean") {
+        if (val === true) {
+          if (!permissions.includes(key)) permissions.push(key);
+        } else {
+          const idx = permissions.indexOf(key);
+          if (idx !== -1) permissions.splice(idx, 1);
+        }
+      }
+    }
+  } else if (userPerm && !isPlatformUser) {
     for (const [key, val] of Object.entries(userPerm)) {
       if (key.startsWith("can") && val === true && !permissions.includes(key)) {
         permissions.push(key);
