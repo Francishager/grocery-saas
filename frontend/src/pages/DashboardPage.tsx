@@ -6,7 +6,7 @@ import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 
-const PIE_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6']
+const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#6366f1', '#84cc16']
 
 export default function DashboardPage() {
   const [kpis, setKpis] = useState<DashboardKpis | null>(null)
@@ -249,9 +249,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Bottom Row */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Products */}
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
             <CardTitle>Top Selling Products</CardTitle>
             <CardDescription>By revenue this month</CardDescription>
@@ -283,15 +283,15 @@ export default function DashboardPage() {
             {paymentPieData.length === 0 ? (
               <p className="text-sm text-muted-foreground py-8 text-center">No payment data</p>
             ) : (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={320}>
                 <PieChart>
-                  <Pie data={paymentPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }} style={{ fontSize: 12, fontWeight: 600, fill: '#1f2937' }}>
+                  <Pie data={paymentPieData} cx="50%" cy="45%" innerRadius={55} outerRadius={95} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }} style={{ fontSize: 13, fontWeight: 600, fill: '#1f2937' }}>
                     {paymentPieData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                  <Legend formatter={(value: string, entry: any) => <span style={{ color: '#374151', fontSize: 12, fontWeight: 500 }}>{value}</span>} />
+                  <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{ borderRadius: 8, fontSize: 13 }} />
+                  <Legend verticalAlign="bottom" height={36} formatter={(value: string, entry: any) => <span style={{ color: entry.color, fontSize: 13, fontWeight: 600 }}>{value}</span>} />
                 </PieChart>
               </ResponsiveContainer>
             )}
