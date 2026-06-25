@@ -305,6 +305,31 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     persistAuth(user, newTokens)
   }, [user])
 
+  // Refresh user data from server on mount (syncs avatar, permissions, etc. across devices)
+  useEffect(() => {
+    if (!tokens?.accessToken || !user) return
+
+    const refreshUser = async () => {
+      try {
+        const response = await fetch(`${apiEndpoint}/me`, {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        })
+        if (response.ok) {
+          const data = await response.json()
+          if (data.user) {
+            setUser(data.user)
+            persistAuth(data.user, tokens)
+          }
+        }
+      } catch {
+        // Silently ignore - stale localStorage data is still usable
+      }
+    }
+
+    refreshUser()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Run once on mount
+
   // Auto refresh tokens before expiry
   useEffect(() => {
     if (!autoRefresh || !tokens) return
