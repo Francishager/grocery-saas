@@ -31,6 +31,7 @@ export default function SalesPage() {
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [salesLoading, setSalesLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
+  const [barcodeInput, setBarcodeInput] = useState('')
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const { toast } = useToast()
 
@@ -233,14 +234,47 @@ export default function SalesPage() {
                 <Button type="submit" variant="secondary">
                   Search
                 </Button>
+              </form>
+
+              {/* Barcode input — always visible for quick scan or manual entry */}
+              <div className="flex gap-2 mt-2">
+                <div className="relative flex-1">
+                  <ScanBarcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Scan or type barcode..."
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter' && barcodeInput.trim()) {
+                        e.preventDefault()
+                        try {
+                          const result = await barcodeApi.lookup(barcodeInput.trim())
+                          const products = Array.isArray(result?.products) ? result.products : []
+                          if (products.length > 0) {
+                            addToCart(products[0])
+                            toast({ title: `Added: ${products[0].product_name}` })
+                          } else {
+                            toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${barcodeInput.trim()}` })
+                          }
+                        } catch {
+                          toast({ variant: 'destructive', title: 'Barcode lookup failed' })
+                        }
+                        setBarcodeInput('')
+                      }
+                    }}
+                    className="pl-9"
+                  />
+                </div>
                 <Button
                   type="button"
                   variant={showScanner ? 'default' : 'outline'}
+                  size="icon"
                   onClick={() => setShowScanner(!showScanner)}
+                  title="Camera scanner"
                 >
                   <ScanBarcode className="h-4 w-4" />
                 </Button>
-              </form>
+              </div>
 
               {showScanner && (
                 <div className="mt-3">
