@@ -1,6 +1,7 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import { tenantIdFromUser } from "../utils/branchAccess.js";
 
 const router = Router();
 
