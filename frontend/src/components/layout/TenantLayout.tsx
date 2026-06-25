@@ -173,8 +173,7 @@ export function TenantLayout() {
         <div className="flex h-full flex-col">
           <div className="flex h-16 items-center justify-between border-b border-[hsl(var(--sidebar-border))] px-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary"><Package className="h-5 w-5 text-primary-foreground" /></div>
-              <span className="text-lg font-bold text-white">jibuSales</span>
+              <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
             </div>
             <Button variant="ghost" size="icon" className="text-slate-200 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></Button>
           </div>
