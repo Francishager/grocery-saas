@@ -150,8 +150,7 @@ class FeatureAccessService {
   // Load usage limits
   private async loadUsageLimits(tenantId: string) {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${API_URL}/api/tenants/${tenantId}/limits`)
+      const response = await apiFetch(`/api/tenants/${tenantId}/limits`)
       
       if (response.ok) {
         const data = await response.json()
