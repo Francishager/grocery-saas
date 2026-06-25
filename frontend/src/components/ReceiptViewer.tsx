@@ -24,7 +24,6 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const [receipt, setReceipt] = useState<ReceiptPreview | null>(null)
   const [loadingReceipt, setLoadingReceipt] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
-  const [printingMode, setPrintingMode] = useState<'serial' | 'bluetooth' | null>(null)
   const { toast } = useToast()
   const pdfUrl = receiptsApi.getPdf(saleId)
 
@@ -50,33 +49,53 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     link.remove()
   }
 
-  const handleThermalPrint = async (mode: 'serial' | 'bluetooth') => {
-    if (mode === 'serial' && !isSerialSupported()) {
+  const handleAutoPrint = async () => {
+    if (!isSerialSupported() && !isBluetoothSupported()) {
       toast({
         variant: 'destructive',
         title: 'Not supported',
-        description: 'Web Serial API requires Chrome or Edge desktop browser',
+        description: 'Thermal printing requires Chrome or Edge with Serial/Bluetooth support.',
       })
       return
     }
 
-    if (mode === 'bluetooth' && !isBluetoothSupported()) {
-      toast({
-        variant: 'destructive',
-        title: 'Not supported',
-        description: 'Web Bluetooth API requires Chrome or Edge.',
-      })
-      return
-    }
-
-    const printer: BluetoothThermalPrinter | ThermalPrinter = mode === 'bluetooth' ? new BluetoothThermalPrinter() : new ThermalPrinter()
     setConnectingPrinter(true)
-    setPrintingMode(mode)
+    let printer: BluetoothThermalPrinter | ThermalPrinter | null = null
+
     try {
-      const connected = mode === 'bluetooth'
-        ? await (printer as BluetoothThermalPrinter).connectToKnownDevice()
-        : await (printer as ThermalPrinter).connectToKnownPort()
-      if (!connected) await printer.connect()
+      // Try serial (USB) first
+      if (isSerialSupported()) {
+        const serialPrinter = new ThermalPrinter()
+        try {
+          if (await serialPrinter.connectToKnownPort()) {
+            printer = serialPrinter
+          } else {
+            // No previously granted port — ask user to select one
+            if (await serialPrinter.connect()) printer = serialPrinter
+          }
+        } catch {
+          await serialPrinter.disconnect()
+        }
+      }
+
+      // Fallback to Bluetooth
+      if (!printer && isBluetoothSupported()) {
+        const btPrinter = new BluetoothThermalPrinter()
+        try {
+          if (await btPrinter.connectToKnownDevice()) {
+            printer = btPrinter
+          } else {
+            if (await btPrinter.connect()) printer = btPrinter
+          }
+        } catch {
+          await btPrinter.disconnect()
+        }
+      }
+
+      if (!printer) {
+        toast({ variant: 'destructive', title: 'No printer found', description: 'Could not connect to any thermal printer.' })
+        return
+      }
 
       setPrinting(true)
       const { commands } = await receiptsApi.getEscPos(saleId)
@@ -90,18 +109,16 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
         description: err?.message || 'Unable to print receipt',
       })
     } finally {
-      await printer.disconnect()
+      await printer?.disconnect()
       setPrinting(false)
       setConnectingPrinter(false)
-      setPrintingMode(null)
     }
   }
 
-  const printLabel = (mode: 'serial' | 'bluetooth', idleLabel: string) => {
-    if (printingMode !== mode) return idleLabel
-    if (connectingPrinter) return 'Connect...'
+  const printLabel = () => {
+    if (connectingPrinter) return 'Connecting...'
     if (printing) return 'Printing...'
-    return idleLabel
+    return 'Print'
   }
 
   return (
@@ -117,29 +134,16 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
           Receipt
         </Button>
 
-        {isSerialSupported() && (
+        {(isSerialSupported() || isBluetoothSupported()) && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleThermalPrint('serial')}
+            onClick={handleAutoPrint}
             disabled={printing || connectingPrinter}
             className="flex items-center gap-1"
           >
             <Printer className="h-4 w-4" />
-            {printLabel('serial', 'USB')}
-          </Button>
-        )}
-
-        {isBluetoothSupported() && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleThermalPrint('bluetooth')}
-            disabled={printing || connectingPrinter}
-            className="flex items-center gap-1"
-          >
-            <Printer className="h-4 w-4" />
-            {printLabel('bluetooth', 'Bluetooth')}
+            {printLabel()}
           </Button>
         )}
 
@@ -259,16 +263,10 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
-              {isSerialSupported() && (
-                <Button variant="outline" size="sm" onClick={() => handleThermalPrint('serial')} disabled={printing || connectingPrinter}>
+              {(isSerialSupported() || isBluetoothSupported()) && (
+                <Button variant="outline" size="sm" onClick={handleAutoPrint} disabled={printing || connectingPrinter}>
                   <Printer className="mr-2 h-4 w-4" />
-                  {printLabel('serial', 'USB')}
-                </Button>
-              )}
-              {isBluetoothSupported() && (
-                <Button variant="outline" size="sm" onClick={() => handleThermalPrint('bluetooth')} disabled={printing || connectingPrinter}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  {printLabel('bluetooth', 'Bluetooth')}
+                  {printLabel()}
                 </Button>
               )}
             </div>
