@@ -61,6 +61,7 @@ export default function InventoryPage() {
   const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
   const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
+  const [scannerFailed, setScannerFailed] = useState(false)
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user } = useJWTAuth()
@@ -272,6 +273,7 @@ export default function InventoryPage() {
     setSellingUnits([])
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
     setShowBarcodeScanner(false)
+    setScannerFailed(false)
     setCategoryOpen(false)
     setCategoryQuery('')
   }
@@ -384,7 +386,7 @@ export default function InventoryPage() {
                     type="button"
                     variant="outline"
                     size="icon"
-                    onClick={() => setShowBarcodeScanner(!showBarcodeScanner)}
+                    onClick={() => { setShowBarcodeScanner(!showBarcodeScanner); if (!showBarcodeScanner) setScannerFailed(false) }}
                   >
                     <ScanBarcode className="h-4 w-4" />
                   </Button>
@@ -395,9 +397,11 @@ export default function InventoryPage() {
                       onScan={(code) => {
                         setFormData((prev) => ({ ...prev, barcode: code }))
                         setShowBarcodeScanner(false)
+                        setScannerFailed(false)
                         toast({ title: 'Barcode captured', description: code })
                       }}
                       onClose={() => setShowBarcodeScanner(false)}
+                      onFail={() => { setShowBarcodeScanner(false); setScannerFailed(true) }}
                       placeholder="Scan barcode for this item..."
                     />
                   </div>

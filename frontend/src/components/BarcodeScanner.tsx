@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 interface BarcodeScannerProps {
   onScan: (barcode: string) => void
   onClose?: () => void
+  onFail?: () => void
   placeholder?: string
 }
 
@@ -19,7 +20,7 @@ const SCAN_TIMEOUT_MS = 30000
  * - Scanning indicator with animated line
  * - 30s timeout with "Try Again" button
  */
-export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan barcode or type SKU...' }: BarcodeScannerProps) {
+export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 'Scan barcode or type SKU...' }: BarcodeScannerProps) {
   const [manualCode, setManualCode] = useState('')
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
@@ -93,11 +94,13 @@ export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan ba
         setTimedOut(true)
         setScanning(false)
         stopCamera()
+        onFail?.()
       }, SCAN_TIMEOUT_MS)
     } catch (err: any) {
       setCameraError(err.message || 'Camera access denied')
       setCameraActive(false)
       setScanning(false)
+      onFail?.()
     }
   }, [onScan, stopCamera])
 
@@ -123,21 +126,23 @@ export default function BarcodeScanner({ onScan, onClose, placeholder = 'Scan ba
         )}
       </div>
 
-      {/* Keyboard input — always visible for USB/Bluetooth scanners & manual entry */}
-      <div className="flex gap-2">
-        <Input
-          ref={inputRef}
-          value={manualCode}
-          onChange={(e) => setManualCode(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          className="flex-1"
-          autoFocus
-        />
-        <Button onClick={handleManualSubmit} size="sm">
-          Search
-        </Button>
-      </div>
+      {/* Manual input — only shown when camera failed or timed out */}
+      {(timedOut || cameraError) && (
+        <div className="flex gap-2">
+          <Input
+            ref={inputRef}
+            value={manualCode}
+            onChange={(e) => setManualCode(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            className="flex-1"
+            autoFocus
+          />
+          <Button onClick={handleManualSubmit} size="sm">
+            Search
+          </Button>
+        </div>
+      )}
 
       {/* Camera scanner — auto-starts on mobile, button on desktop */}
       <div className="space-y-2">
