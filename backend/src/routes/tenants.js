@@ -133,8 +133,11 @@ router.put("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
 // Get tenant usage limits
 router.get("/:id/limits", authenticateToken, async (req, res) => {
   try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
     const tenant = await prisma.tenant.findUnique({
-      where: { id: req.params.id },
+      where: { id: tenantId },
       include: { plan: true },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
