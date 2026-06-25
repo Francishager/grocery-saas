@@ -9,6 +9,14 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
+interface SellingUnit {
+  id?: string
+  unitName: string
+  conversionFactor: number
+  sellingPrice: number
+  isDefault: boolean
+}
+
 interface FormData {
   product_id: string
   product_name: string
@@ -20,6 +28,7 @@ interface FormData {
   sku: string
   categoryId: string
   branchId: string
+  baseUnit: string
 }
 
 const initialFormData: FormData = {
@@ -33,6 +42,7 @@ const initialFormData: FormData = {
   sku: '',
   categoryId: '',
   branchId: '',
+  baseUnit: 'Piece',
 }
 
 export default function InventoryPage() {
@@ -47,6 +57,8 @@ export default function InventoryPage() {
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [branchFilter, setBranchFilter] = useState('')
   const [formData, setFormData] = useState<FormData>(initialFormData)
+  const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
+  const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user } = useJWTAuth()
@@ -136,6 +148,25 @@ export default function InventoryPage() {
     loadInventory()
   }
 
+  const saveSellingUnits = async (productId: string) => {
+    // For edit: delete existing units that were removed, add new ones
+    // Simple approach: delete all existing then recreate
+    if (editingItem) {
+      const existing = (editingItem as any).units || []
+      for (const u of existing) {
+        if (u.id) await inventoryApi.deleteUnit(productId, u.id)
+      }
+    }
+    for (const u of sellingUnits) {
+      await inventoryApi.addUnit(productId, {
+        unitName: u.unitName,
+        conversionFactor: u.conversionFactor,
+        sellingPrice: u.sellingPrice,
+        isDefault: u.isDefault,
+      })
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isOwner && branches.length === 0) {
@@ -159,9 +190,14 @@ export default function InventoryPage() {
     try {
       if (editingItem) {
         await inventoryApi.update(String(editingItem.id), formData)
+        // Save selling units
+        await saveSellingUnits(String(editingItem.id))
         toast({ title: 'Item updated successfully' })
       } else {
-        await inventoryApi.create(formData)
+        const result = await inventoryApi.create(formData)
+        // Save selling units for new product
+        const newId = result?.id || (result as any)?.product?.id
+        if (newId) await saveSellingUnits(String(newId))
         toast({ title: 'Item created successfully' })
       }
       closeForm()
@@ -204,7 +240,11 @@ export default function InventoryPage() {
       sku: (item as any).sku || '',
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
       branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
+      baseUnit: (item as any).baseUnit || 'Piece',
     })
+    // Load selling units for this product
+    const units = (item as any).units || []
+    setSellingUnits(units.map((u: any) => ({ id: u.id, unitName: u.unitName, conversionFactor: u.conversionFactor, sellingPrice: u.sellingPrice, isDefault: u.isDefault })))
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
@@ -216,6 +256,8 @@ export default function InventoryPage() {
       ...initialFormData,
       branchId: branches.length === 1 ? branches[0].id : '',
     })
+    setSellingUnits([])
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
@@ -225,8 +267,20 @@ export default function InventoryPage() {
     setShowForm(false)
     setEditingItem(null)
     setFormData(initialFormData)
+    setSellingUnits([])
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
     setCategoryOpen(false)
     setCategoryQuery('')
+  }
+
+  const addSellingUnit = () => {
+    if (!newUnit.unitName || newUnit.conversionFactor <= 0) return
+    setSellingUnits(prev => [...prev, { ...newUnit }])
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+  }
+
+  const removeSellingUnit = (idx: number) => {
+    setSellingUnits(prev => prev.filter((_, i) => i !== idx))
   }
 
   const selectedCategory = categories.find(
@@ -495,6 +549,56 @@ export default function InventoryPage() {
                   }
                   required
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="baseUnit">Base Unit</Label>
+                <Input
+                  id="baseUnit"
+                  value={formData.baseUnit}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, baseUnit: e.target.value }))
+                  }
+                  placeholder="e.g. KG, Bottle, Piece, Tablet"
+                />
+              </div>
+              {/* Selling Units */}
+              <div className="sm:col-span-2 space-y-3 border rounded-lg p-4">
+                <Label className="text-base font-semibold">Selling Units (Multi-UOM)</Label>
+                <p className="text-xs text-muted-foreground">Add different selling units with conversion factors and prices. Stock is tracked in the base unit ({formData.baseUnit || 'Piece'}).</p>
+                {sellingUnits.length > 0 && (
+                  <div className="space-y-2">
+                    {sellingUnits.map((u, idx) => (
+                      <div key={idx} className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
+                        <span className="flex-1 text-sm font-medium">{u.unitName}</span>
+                        <span className="text-xs text-muted-foreground">{u.conversionFactor} {formData.baseUnit}</span>
+                        <span className="text-sm">{formatCurrency(u.sellingPrice)}</span>
+                        {u.isDefault && <span className="text-xs text-primary font-medium">Default</span>}
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeSellingUnit(idx)}><Trash2 className="h-3 w-3" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex-1 min-w-[120px]">
+                    <Label className="text-xs">Unit Name</Label>
+                    <Input value={newUnit.unitName} onChange={e => setNewUnit(prev => ({ ...prev, unitName: e.target.value }))} placeholder="e.g. Half KG" className="h-8 text-sm" />
+                  </div>
+                  <div className="w-24">
+                    <Label className="text-xs">Factor</Label>
+                    <Input type="number" step="any" min="0.01" value={newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" />
+                  </div>
+                  <div className="w-28">
+                    <Label className="text-xs">Price</Label>
+                    <Input type="number" step="any" min="0" value={newUnit.sellingPrice} onChange={e => setNewUnit(prev => ({ ...prev, sellingPrice: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" />
+                  </div>
+                  <label className="flex items-center gap-1 text-xs h-8">
+                    <input type="checkbox" checked={newUnit.isDefault} onChange={e => setNewUnit(prev => ({ ...prev, isDefault: e.target.checked }))} className="rounded" />
+                    Default
+                  </label>
+                  <Button type="button" variant="secondary" size="sm" onClick={addSellingUnit} className="h-8">
+                    <Plus className="h-3 w-3 mr-1" />Add
+                  </Button>
+                </div>
               </div>
               <div className="sm:col-span-2 flex gap-2">
                 <Button type="submit">

@@ -29,7 +29,7 @@ async function getReceiptData(req) {
 
   const tenant = await prisma.tenant.findUnique({
     where: { id: scope.tenantId },
-    select: { name: true, email: true, phone: true, address: true },
+    select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
   });
 
   return { scope, sale, tenant };
@@ -47,6 +47,10 @@ function receiptJson(data) {
       email: tenant?.email || null,
       phone: tenant?.phone || null,
       address: tenant?.address || null,
+      logo: tenant?.logo || null,
+      taxEnabled: tenant?.taxEnabled || false,
+      taxRate: tenant?.taxRate || 0,
+      taxId: tenant?.taxId || null,
     },
     branch: sale.branch || null,
     cashier,
@@ -107,7 +111,7 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
     // Get tenant info for receipt header
     const tenant = await prisma.tenant.findUnique({
       where: { id: scope.tenantId },
-      select: { name: true, email: true, phone: true, address: true },
+      select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
 
     const doc = new PDFDocument({ size: [226.77, 600], margin: 10 }); // 80mm thermal width
@@ -121,12 +125,27 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
       res.send(pdf);
     });
 
+    // Logo
+    if (tenant?.logo) {
+      try {
+        const resp = await fetch(tenant.logo);
+        if (resp.ok) {
+          const imgBuf = Buffer.from(await resp.arrayBuffer());
+          doc.image(imgBuf, undefined, undefined, { width: 120, align: "center" });
+          doc.moveDown(0.3);
+        }
+      } catch {}
+    }
+
     // Receipt Header
     doc.fontSize(14).font("Helvetica-Bold").text(tenant?.name || "JibuSales", { align: "center" });
     doc.moveDown(0.3);
     if (tenant?.address) doc.fontSize(8).font("Helvetica").text(tenant.address, { align: "center" });
-    if (tenant?.phone) doc.fontSize(8).text(`Tel: ${tenant.phone}`, { align: "center" });
-    if (tenant?.email) doc.fontSize(8).text(tenant.email, { align: "center" });
+    // Phone + Email on same row
+    const contactParts = [tenant?.phone ? `Tel: ${tenant.phone}` : "", tenant?.email || ""].filter(Boolean).join(" | ");
+    if (contactParts) doc.fontSize(8).text(contactParts, { align: "center" });
+    // Branch on same row
+    if (sale.branch?.name) doc.fontSize(8).text(`Branch: ${sale.branch.name}`, { align: "center" });
     doc.moveDown(0.3);
 
     // Divider
@@ -166,12 +185,16 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
     doc.fontSize(8).font("Helvetica");
     doc.text(`Subtotal:${formatNum(sale.subtotal).padStart(32)}`);
     if (sale.discount > 0) doc.text(`Discount:${formatNum(sale.discount).padStart(31)}`);
-    if (sale.tax > 0) doc.text(`Tax:${formatNum(sale.tax).padStart(35)}`);
+    if (tenant?.taxEnabled && sale.tax > 0) doc.text(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(28)}`);
+    else if (!tenant?.taxEnabled) doc.text(`Tax: 0.00`);
     doc.fontSize(10).font("Helvetica-Bold").text(`TOTAL:${formatNum(sale.total).padStart(33)}`);
     doc.moveDown(0.5);
 
     // Footer
-    doc.fontSize(8).font("Helvetica").text("Thank you for your purchase!", { align: "center" });
+    doc.fontSize(8).font("Helvetica");
+    if (tenant?.receiptHeader) doc.text(tenant.receiptHeader, { align: "center" });
+    doc.text("Thank you for your purchase!", { align: "center" });
+    if (tenant?.receiptFooter) doc.text(tenant.receiptFooter, { align: "center" });
     doc.moveDown(0.2);
     doc.text("Powered by JibuSales", { align: "center" });
 
@@ -209,7 +232,7 @@ router.get("/:saleId/escpos", authenticateReceipt, async (req, res) => {
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: scope.tenantId },
-      select: { name: true, phone: true, address: true },
+      select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
 
     // Build ESC/POS command array (hex strings)
@@ -224,7 +247,10 @@ router.get("/:saleId/escpos", authenticateReceipt, async (req, res) => {
     // Header
     cmds.push(escText(tenant?.name || "JibuSales", true));
     if (tenant?.address) cmds.push(escText(tenant.address));
-    if (tenant?.phone) cmds.push(escText(`Tel: ${tenant.phone}`));
+    // Phone + Email on same row
+    const escContact = [tenant?.phone ? `Tel: ${tenant.phone}` : "", tenant?.email || ""].filter(Boolean).join(" | ");
+    if (escContact) cmds.push(escText(escContact));
+    if (sale.branch?.name) cmds.push(escText(`Branch: ${sale.branch.name}`));
     cmds.push(escText(""));
 
     // Left align
@@ -256,12 +282,15 @@ router.get("/:saleId/escpos", authenticateReceipt, async (req, res) => {
     // Totals
     cmds.push(escText(`Subtotal:${formatNum(sale.subtotal).padStart(27)}`));
     if (sale.discount > 0) cmds.push(escText(`Discount:${formatNum(sale.discount).padStart(26)}`));
-    if (sale.tax > 0) cmds.push(escText(`Tax:${formatNum(sale.tax).padStart(30)}`));
+    if (tenant?.taxEnabled && sale.tax > 0) cmds.push(escText(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(24)}`));
+    else if (!tenant?.taxEnabled) cmds.push(escText(`Tax: 0.00`));
     cmds.push(escDoubleText(`TOTAL:${formatNum(sale.total).padStart(28)}`));
 
     cmds.push(escText(""));
     cmds.push("1B6101"); // Center
+    if (tenant?.receiptHeader) cmds.push(escText(tenant.receiptHeader));
     cmds.push(escText("Thank you for your purchase!"));
+    if (tenant?.receiptFooter) cmds.push(escText(tenant.receiptFooter));
     cmds.push(escText("Powered by JibuSales"));
 
     // Feed and cut

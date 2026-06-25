@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
 import prisma from "./db.js";
 
 import authRoutes from "./routes/auth.js";
@@ -18,6 +19,7 @@ import auditRoutes from "./routes/audit.js";
 import receiptRoutes from "./routes/receipts.js";
 import branchRoutes from "./routes/branches.js";
 import staffRoutes from "./routes/staff.js";
+import settingsRoutes from "./routes/settings.js";
 
 import receivablesRouter from "../routes/receivables.js";
 import payablesRouter from "../routes/payables.js";
@@ -38,6 +40,9 @@ if (resolvedDatabaseUrl && !process.env.DATABASE_URL) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Serve uploaded files
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // Validate env
 const missingEnvVars = ["DATABASE_URL", "JWT_SECRET"].filter(
@@ -120,6 +125,7 @@ app.use("/api/audit", auditRoutes);
 app.use("/api/receipts", receiptRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/staff", staffRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Legacy feature routes
 app.use("/api/receivables", receivablesRouter);

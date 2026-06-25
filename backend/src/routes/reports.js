@@ -205,8 +205,26 @@ router.get("/sales/by-branch", authenticateToken, requireRole(reportRoles), asyn
 router.get("/sales/discounts", authenticateToken, requireRole(reportRoles), async (req, res) => {
   try {
     const s = await getScope(req);
-    const sales = await prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), discount: { gt: 0 } }), include: { items: true, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } });
-    res.json({ data: sales, summary: { count: sales.length, totalDiscount: sales.reduce((a, x) => a + x.discount, 0) } });
+    const sales = await prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), OR: [{ discount: { gt: 0 } }, { cashDiscount: { gt: 0 } }] }), include: { items: { include: { product: { select: { name: true } } } }, user: { select: { fname: true, lname: true } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } });
+    const totalDiscount = sales.reduce((a, x) => a + x.discount + x.cashDiscount, 0);
+    const byUser = {};
+    const byBranch = {};
+    const byProduct = {};
+    const byDate = {};
+    sales.forEach((sale) => {
+      const userName = `${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim() || "Unknown";
+      const branchName = sale.branch?.name || "Unassigned";
+      const date = new Date(sale.createdAt).toISOString().slice(0, 10);
+      byUser[userName] = (byUser[userName] || 0) + sale.discount + sale.cashDiscount;
+      byBranch[branchName] = (byBranch[branchName] || 0) + sale.discount + sale.cashDiscount;
+      byDate[date] = (byDate[date] || 0) + sale.discount + sale.cashDiscount;
+      (sale.items || []).forEach((item) => {
+        const pName = item.product?.name || "Unknown";
+        const itemDiscount = item.discount + (item.cashDiscount || 0);
+        if (itemDiscount > 0) byProduct[pName] = (byProduct[pName] || 0) + itemDiscount;
+      });
+    });
+    res.json({ data: sales, summary: { count: sales.length, totalDiscount, grossSales: sales.reduce((a, x) => a + x.subtotal, 0), netSales: sales.reduce((a, x) => a + x.total, 0), byUser, byBranch, byProduct, byDate } });
   } catch (err) { handleBranchError(res, err); }
 });
 

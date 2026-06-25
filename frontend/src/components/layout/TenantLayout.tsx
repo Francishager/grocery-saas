@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useSearchParams } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload } from 'lucide-react'
 import { useState, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -15,8 +15,7 @@ const navItems = [
   { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', roles: ['owner', 'manager', 'accountant'] },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', roles: ['owner', 'manager', 'accountant'], isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', roles: ['owner', 'manager', 'accountant'] },
-  { to: '/tenant/branches', label: 'Branches', icon: GitBranch, roles: ['owner'] },
-  { to: '/tenant/staff', label: 'Staff', icon: Users, roles: ['owner'] },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, roles: ['owner'], isSettings: true },
 ]
 
 interface ReportSubItem { id: string; label: string }
@@ -118,9 +117,18 @@ const reportCategories: ReportCategoryDef[] = [
   },
 ]
 
+const settingsSubItems = [
+  { to: '/tenant/settings', label: 'Business Profile', icon: Building2 },
+  { to: '/tenant/branches', label: 'Branches', icon: GitBranch },
+  { to: '/tenant/tax', label: 'Tax Management', icon: DollarSign },
+  { to: '/tenant/receipt-settings', label: 'Receipt Settings', icon: FileText },
+  { to: '/tenant/roles', label: 'Roles & Permissions', icon: Shield },
+]
+
 export function TenantLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [reportsExpanded, setReportsExpanded] = useState(false)
+  const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
@@ -128,6 +136,15 @@ export function TenantLayout() {
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const handleLogout = () => { logout(); navigate('/login') }
+
+  const toggleReports = () => {
+    setReportsExpanded(prev => !prev)
+    if (!reportsExpanded) setSettingsExpanded(false)
+  }
+  const toggleSettings = () => {
+    setSettingsExpanded(prev => !prev)
+    if (!settingsExpanded) setReportsExpanded(false)
+  }
   const visibleNavItems = navItems.filter((item) => {
     if (item.roles && user?.role && !item.roles.includes(user.role)) return false
     if (!item.feature) return true
@@ -168,7 +185,7 @@ export function TenantLayout() {
               item.isReports ? (
                 <div key={item.to}>
                   <button
-                    onClick={() => setReportsExpanded(prev => !prev)}
+                    onClick={() => toggleReports()}
                     className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', reportsExpanded || activeReportId ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
                   >
                     <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
@@ -205,6 +222,27 @@ export function TenantLayout() {
                           </div>
                         )
                       })}
+                    </div>
+                  )}
+                </div>
+              ) : item.isSettings ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleSettings()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', settingsExpanded ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {settingsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {settingsExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {settingsSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-1.5 text-xs transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-3.5 w-3.5" />{sub.label}
+                        </NavLink>
+                      ))}
                     </div>
                   )}
                 </div>

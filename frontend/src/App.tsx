@@ -21,6 +21,10 @@ import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import BranchesPage from '@/pages/BranchesPage'
 import StaffPage from '@/pages/StaffPage'
+import BusinessSettingsPage from '@/pages/BusinessSettingsPage'
+import RolesPermissionsPage from '@/pages/RolesPermissionsPage'
+import TaxManagementPage from '@/pages/TaxManagementPage'
+import ReceiptSettingsPage from '@/pages/ReceiptSettingsPage'
 import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
@@ -116,7 +120,11 @@ function App() {
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="branches" element={<BranchesPage />} />
           <Route path="staff" element={<StaffPage />} />
-          <Route path="admin" element={<Navigate to="/tenant/staff" replace />} />
+          <Route path="settings" element={<BusinessSettingsPage />} />
+          <Route path="tax" element={<TaxManagementPage />} />
+          <Route path="receipt-settings" element={<ReceiptSettingsPage />} />
+          <Route path="roles" element={<RolesPermissionsPage />} />
+          <Route path="admin" element={<Navigate to="/tenant/roles" replace />} />
         </Route>
 
         {/* ========== Catch-all ========== */}

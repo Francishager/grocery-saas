@@ -128,7 +128,7 @@ router.get("/", authenticateToken, async (req, res) => {
       ];
       const products = await prisma.product.findMany({
         where,
-        include: { category: true, branch: true },
+        include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
         orderBy: { name: "asc" },
         skip: (Number(page) - 1) * Number(limit),
         take: Number(limit),
@@ -142,7 +142,7 @@ router.get("/", authenticateToken, async (req, res) => {
 
     const products = await prisma.product.findMany({
       where: { ...where, isActive: { not: false } },
-      include: { category: true, branch: true },
+      include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
       orderBy: { name: "asc" },
       skip: (Number(page) - 1) * Number(limit),
       take: Number(limit),
@@ -223,7 +223,7 @@ router.post("/", authenticateToken, requireRole(["owner", "manager"]), async (re
 
     const product = await prisma.product.create({
       data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
-      include: { category: true, branch: true },
+      include: { category: true, branch: true, units: true },
     });
     res.status(201).json({ message: "Product created", product });
   } catch (err) {
@@ -268,7 +268,7 @@ router.put("/:id", authenticateToken, requireRole(["owner", "manager"]), async (
     const product = await prisma.product.update({
       where: { id: existing.id },
       data,
-      include: { category: true, branch: true },
+      include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
     });
     res.json({ message: "Product updated", product });
   } catch (err) {
@@ -289,6 +289,53 @@ router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res
   } catch (err) {
     handleBranchError(res, err);
   }
+});
+
+// ==================== PRODUCT UNITS (Multi-UOM) ====================
+
+// Get units for a product
+router.get("/:productId/units", authenticateToken, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }) });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    const units = await prisma.productUnit.findMany({ where: { productId: product.id }, orderBy: { conversionFactor: "asc" } });
+    res.json({ units, baseUnit: product.baseUnit });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Add a selling unit to a product
+router.post("/:productId/units", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }) });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
+    if (!unitName || conversionFactor == null || sellingPrice == null) return res.status(400).json({ error: "unitName, conversionFactor, and sellingPrice are required" });
+    const unit = await prisma.productUnit.create({ data: { productId: product.id, unitName, conversionFactor: parseFloat(conversionFactor), sellingPrice: parseFloat(sellingPrice), isDefault: isDefault || false } });
+    res.status(201).json(unit);
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Update a selling unit
+router.put("/:productId/units/:unitId", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+  try {
+    const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
+    const unit = await prisma.productUnit.findUnique({ where: { id: req.params.unitId } });
+    if (!unit) return res.status(404).json({ error: "Unit not found" });
+    const updated = await prisma.productUnit.update({ where: { id: unit.id }, data: { ...(unitName && { unitName }), ...(conversionFactor != null && { conversionFactor: parseFloat(conversionFactor) }), ...(sellingPrice != null && { sellingPrice: parseFloat(sellingPrice) }), ...(isDefault != null && { isDefault }) } });
+    res.json(updated);
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Delete a selling unit
+router.delete("/:productId/units/:unitId", authenticateToken, requireRole(["owner", "manager"]), async (req, res) => {
+  try {
+    const unit = await prisma.productUnit.findUnique({ where: { id: req.params.unitId } });
+    if (!unit) return res.status(404).json({ error: "Unit not found" });
+    await prisma.productUnit.delete({ where: { id: unit.id } });
+    res.json({ message: "Unit deleted" });
+  } catch (err) { handleBranchError(res, err); }
 });
 
 export default router;

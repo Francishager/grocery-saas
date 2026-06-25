@@ -25,6 +25,7 @@ export default function SalesPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
   const [paymentMode, setPaymentMode] = useState('cash')
+  const [invoiceCashDiscount, setInvoiceCashDiscount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
@@ -58,23 +59,28 @@ export default function SalesPage() {
     loadInventory()
   }
 
-  const addToCart = (item: InventoryItem) => {
+  const addToCart = (item: InventoryItem, unitName?: string, conversionFactor?: number, sellingPrice?: number) => {
     setCart((prev) => {
-      const existing = prev.find((c) => c.id === item.id)
+      const cartKey = unitName ? `${item.id}-${unitName}` : String(item.id)
+      const existing = prev.find((c) => c.id === cartKey)
       if (existing) {
         return prev.map((c) =>
-          c.id === item.id ? { ...c, qty: c.qty + 1 } : c
+          c.id === cartKey ? { ...c, qty: c.qty + 1 } : c
         )
       }
       return [
         ...prev,
         {
-          id: item.id,
+          id: cartKey,
+          productId: item.id,
           product_id: item.product_id,
-          name: item.product_name,
+          name: unitName ? `${item.product_name} (${unitName})` : item.product_name,
           qty: 1,
-          selling_price: item.unit_price,
+          selling_price: sellingPrice || item.unit_price,
           cost_price: item.cost_price,
+          unitName: unitName || null,
+          conversionFactor: conversionFactor ?? null,
+          cashDiscount: 0,
         },
       ]
     })
@@ -94,10 +100,15 @@ export default function SalesPage() {
     setCart((prev) => prev.filter((c) => c.id !== id))
   }
 
-  const cartTotal = cart.reduce(
+  const cartSubtotal = cart.reduce(
     (sum, item) => sum + item.selling_price * item.qty,
     0
   )
+  const lineCashDiscounts = cart.reduce(
+    (sum, item) => sum + (item.cashDiscount || 0),
+    0
+  )
+  const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount)
 
   const autoPrintReceipt = async (saleId: string) => {
     if (!isSerialSupported() && !isBluetoothSupported()) return
@@ -143,12 +154,13 @@ export default function SalesPage() {
 
     setProcessing(true)
     try {
-      const result = await salesApi.checkout(cart, paymentMode)
+      const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount)
       toast({
         title: 'Sale completed!',
         description: `${cart.length} items sold for ${formatCurrency(cartTotal)}`,
       })
       setCart([])
+      setInvoiceCashDiscount(0)
       if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id))
       loadRecentSales()
       loadInventory()
@@ -252,23 +264,51 @@ export default function SalesPage() {
                 </p>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {filteredInventory.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => addToCart(item)}
-                      className="flex items-center justify-between rounded-lg border p-3 text-left hover:bg-muted transition-colors"
-                    >
-                      <div>
-                        <p className="font-medium">{item.product_name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {item.quantity} in stock
-                        </p>
+                  {filteredInventory.map((item) => {
+                    const units = (item as any).units || []
+                    const baseUnit = (item as any).baseUnit || 'Piece'
+                    return (
+                      <div key={item.id} className="rounded-lg border p-3 hover:bg-muted transition-colors">
+                        <div className="flex items-center justify-between mb-1">
+                          <div>
+                            <p className="font-medium">{item.product_name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {item.quantity} {baseUnit} in stock
+                            </p>
+                          </div>
+                          <p className="font-bold text-primary">
+                            {formatCurrency(item.unit_price)}
+                          </p>
+                        </div>
+                        {units.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            <button
+                              onClick={() => addToCart(item)}
+                              className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                            >
+                              {baseUnit} (1)
+                            </button>
+                            {units.map((u: any) => (
+                              <button
+                                key={u.id}
+                                onClick={() => addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
+                                className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                              >
+                                {u.unitName} ({u.conversionFactor})
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => addToCart(item)}
+                            className="mt-2 w-full rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                          >
+                            Add to Cart
+                          </button>
+                        )}
                       </div>
-                      <p className="font-bold text-primary">
-                        {formatCurrency(item.unit_price)}
-                      </p>
-                    </button>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </CardContent>
@@ -304,7 +344,22 @@ export default function SalesPage() {
                           <p className="font-medium truncate">{item.name}</p>
                           <p className="text-sm text-muted-foreground">
                             {formatCurrency(item.selling_price)} each
+                            {item.unitName && <span className="ml-1 text-xs">({item.unitName})</span>}
                           </p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="text-xs text-muted-foreground">Disc:</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={item.cashDiscount || 0}
+                              onChange={(e) =>
+                                setCart((prev) => prev.map((c) => c.id === item.id ? { ...c, cashDiscount: parseFloat(e.target.value) || 0 } : c))
+                              }
+                              className="w-20 h-6 text-xs"
+                              placeholder="0"
+                            />
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <Input
@@ -330,6 +385,28 @@ export default function SalesPage() {
                   </div>
 
                   <div className="border-t pt-4">
+                    <div className="flex justify-between mb-1">
+                      <span className="font-medium">Subtotal</span>
+                      <span>{formatCurrency(cartSubtotal)}</span>
+                    </div>
+                    {lineCashDiscounts > 0 && (
+                      <div className="flex justify-between mb-1 text-sm text-muted-foreground">
+                        <span>Line Discounts</span>
+                        <span>-{formatCurrency(lineCashDiscounts)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <span className="text-sm font-medium">Invoice Discount</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={invoiceCashDiscount}
+                        onChange={(e) => setInvoiceCashDiscount(parseFloat(e.target.value) || 0)}
+                        className="w-28 h-8 text-sm text-right"
+                        placeholder="0"
+                      />
+                    </div>
                     <div className="flex justify-between mb-2">
                       <span className="font-medium">Total</span>
                       <span className="font-bold text-lg">

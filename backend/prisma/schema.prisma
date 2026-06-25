@@ -111,6 +111,17 @@ model Tenant {
   usageLimit   UsageLimit? @relation(fields: [usageLimitId], references: [id])
 
   // =====================
+  // BUSINESS SETTINGS
+  // =====================
+  currency      String   @default("UGX")
+  timezone      String   @default("Africa/Kampala")
+  taxRate       Float    @default(0) // e.g. 18 for 18% VAT
+  taxEnabled    Boolean  @default(false) // toggle tax on/off
+  taxId         String?  // VAT/GST registration number
+  receiptHeader String?  // Custom text at top of receipts
+  receiptFooter String?  // Custom text at bottom of receipts
+
+  // =====================
   // TIMESTAMPS
   // =====================
   createdAt DateTime @default(now())
@@ -154,7 +165,8 @@ model User {
   lname    String?
   phone    String?
   avatar   String?
-  role     UserRole @default(attendant)
+  role              UserRole              @default(attendant)
+  discountPermission DiscountPermission    @default(none)
 
   // =========================
   // TENANT (many users per tenant)
@@ -194,6 +206,7 @@ model User {
   // BRANCH ASSIGNMENTS
   // =========================
   branches UserBranch[]
+  permissions UserPermission[]
 
   @@map("users")
 }
@@ -204,6 +217,73 @@ enum UserRole {
   manager // Business manager
   accountant // Business accountant
   attendant // Sales attendant
+}
+
+enum DiscountPermission {
+  none // Cannot give discounts
+  lineItem // Can give line item discounts
+  invoice // Can give invoice-level discounts
+  managerApproval // Requires manager approval for discounts
+}
+
+// Granular user permissions
+model UserPermission {
+  id         String @id @default(cuid())
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Sales
+  canCreateSale Boolean @default(true)
+  canViewSale   Boolean @default(true)
+  canEditSale   Boolean @default(false)
+  canDeleteSale Boolean @default(false)
+  canRefundSale Boolean @default(false)
+  // Inventory
+  canCreateProduct Boolean @default(false)
+  canViewProduct   Boolean @default(true)
+  canEditProduct   Boolean @default(false)
+  canDeleteProduct Boolean @default(false)
+  // Purchases
+  canCreatePurchase Boolean @default(false)
+  canViewPurchase   Boolean @default(true)
+  canEditPurchase   Boolean @default(false)
+  canDeletePurchase Boolean @default(false)
+  // Expenses
+  canCreateExpense Boolean @default(false)
+  canViewExpense   Boolean @default(true)
+  canEditExpense   Boolean @default(false)
+  canDeleteExpense Boolean @default(false)
+  // Customers
+  canCreateCustomer Boolean @default(false)
+  canViewCustomer   Boolean @default(true)
+  canEditCustomer   Boolean @default(false)
+  canDeleteCustomer Boolean @default(false)
+  // Suppliers
+  canCreateSupplier Boolean @default(false)
+  canViewSupplier   Boolean @default(true)
+  canEditSupplier   Boolean @default(false)
+  canDeleteSupplier Boolean @default(false)
+  // Staff
+  canCreateStaff Boolean @default(false)
+  canViewStaff   Boolean @default(true)
+  canEditStaff   Boolean @default(false)
+  canDeleteStaff Boolean @default(false)
+  // Branches
+  canCreateBranch Boolean @default(false)
+  canViewBranch   Boolean @default(true)
+  canEditBranch   Boolean @default(false)
+  canDeleteBranch Boolean @default(false)
+  // Reports
+  canViewReport Boolean @default(true)
+  // Settings
+  canViewSettings   Boolean @default(true)
+  canEditSettings   Boolean @default(false)
+  // Discounts
+  canGiveDiscount Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId])
+  @@map("user_permissions")
 }
 
 // Invitations for new business owners
@@ -255,6 +335,7 @@ model Product {
   isActive    Boolean   @default(true)
   image       String?
   expiryDate  DateTime?
+  baseUnit    String    @default("Piece") // Base unit of measure: KG, Bottle, Piece, Tablet, etc.
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -265,11 +346,28 @@ model Product {
   // New relations
   saleRecordItems       SaleRecordItem[]
   supplierPurchaseItems SupplierPurchaseItem[]
+  units                 ProductUnit[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
   @@index([tenantId, branchId])
   @@map("products")
+}
+
+// Product Selling Units (Multi-UOM)
+model ProductUnit {
+  id             String   @id @default(cuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitName       String   // e.g. "Quarter KG", "Pack", "Crate"
+  conversionFactor Float  // e.g. 0.25, 6, 24 — how many base units in this selling unit
+  sellingPrice   Float    // Price for this unit
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([productId, unitName])
+  @@map("product_units")
 }
 
 // Audit Log — tracks all data mutations
@@ -317,6 +415,7 @@ model Sale {
   subtotal      Float
   tax           Float      @default(0)
   discount      Float      @default(0)
+  cashDiscount  Float      @default(0) // Invoice-level cash discount
   paymentMethod String
   status        SaleStatus @default(completed)
   notes         String?
@@ -345,7 +444,10 @@ model SaleItem {
   product   Product  @relation(fields: [productId], references: [id])
   quantity  Int
   price     Float
-  discount  Float    @default(0)
+  discount         Float    @default(0)
+  cashDiscount     Float    @default(0) // Cash discount amount on this line item
+  unitName         String?  // Selling unit name (e.g. "Half KG", "Pack")
+  conversionFactor Float?   // Conversion factor used at time of sale
   total     Float
   createdAt DateTime @default(now())
 
@@ -440,6 +542,7 @@ model SaleRecord {
   subtotal      Float
   tax           Float             @default(0)
   discount      Float             @default(0)
+  cashDiscount  Float             @default(0) // Invoice-level cash discount
   amountPaid    Float             @default(0)
   balance       Float             @default(0) // Remaining balance for credit sales
   paymentMethod String
@@ -481,7 +584,10 @@ model SaleRecordItem {
   product   Product    @relation(fields: [productId], references: [id])
   quantity  Int
   price     Float
-  discount  Float      @default(0)
+  discount         Float      @default(0)
+  cashDiscount     Float      @default(0) // Cash discount on this line item
+  unitName         String?    // Selling unit name
+  conversionFactor Float?     // Conversion factor used at time of sale
   total     Float
   createdAt DateTime   @default(now())
 

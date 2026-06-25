@@ -178,6 +178,7 @@ export const inventoryApi = {
       barcode: data.barcode || null,
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
+      baseUnit: data.baseUnit || 'Piece',
     } }),
 
   update: (id: string, data: any) =>
@@ -191,10 +192,24 @@ export const inventoryApi = {
       barcode: data.barcode || null,
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
+      baseUnit: data.baseUnit || 'Piece',
     } }),
 
   delete: (id: string) =>
     api.delete<{ message: string }>(`/api/inventory/${id}`),
+
+  // Product Units (Multi-UOM)
+  getUnits: (productId: string) =>
+    api.get<any>(`/api/inventory/${productId}/units`),
+
+  addUnit: (productId: string, data: { unitName: string; conversionFactor: number; sellingPrice: number; isDefault?: boolean }) =>
+    api.post<any>(`/api/inventory/${productId}/units`, { body: data }),
+
+  updateUnit: (productId: string, unitId: string, data: { unitName?: string; conversionFactor?: number; sellingPrice?: number; isDefault?: boolean }) =>
+    api.put<any>(`/api/inventory/${productId}/units/${unitId}`, { body: data }),
+
+  deleteUnit: (productId: string, unitId: string) =>
+    api.delete<any>(`/api/inventory/${productId}/units/${unitId}`),
 }
 
 // Map backend Product model to frontend InventoryItem
@@ -214,6 +229,8 @@ function mapProductToInventory(p: any): InventoryItem {
     branchId: p.branchId || p.branch?.id || null,
     branch: p.branch || null,
     updated_at: p.updatedAt || p.createdAt,
+    baseUnit: p.baseUnit || 'Piece',
+    units: p.units || [],
   }
 }
 
@@ -230,16 +247,20 @@ export const salesApi = {
   create: (data: Partial<Sale>) =>
     api.post<Sale>('/api/sales', { body: data }),
 
-  checkout: (cart: CartItem[], payment_mode: string) =>
+  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number) =>
     api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
       body: {
         cart: cart.map(c => ({
-          productId: c.id,
+          productId: c.productId || c.id,
           qty: c.qty,
           price: c.selling_price,
           discount: c.discount || 0,
+          cashDiscount: c.cashDiscount || 0,
+          unitName: c.unitName || null,
+          conversionFactor: c.conversionFactor ?? null,
         })),
         paymentMethod: payment_mode,
+        cashDiscount: cashDiscount || 0,
       },
     }),
 }
@@ -536,6 +557,16 @@ export const branchesApi = {
     const data = await api.get<any>('/api/branches/active')
     return (Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : []) as BranchOption[]
   },
+  list: async () => {
+    const data = await api.get<any>('/api/branches')
+    return (Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : []) as BranchOption[]
+  },
+  create: (data: { name: string; address?: string; isActive?: boolean }) =>
+    api.post<{ message: string; branch: any }>('/api/branches', { body: data }),
+  update: (id: string, data: { name?: string; address?: string; isActive?: boolean }) =>
+    api.put<{ message: string; branch: any }>(`/api/branches/${id}`, { body: data }),
+  delete: (id: string) =>
+    api.delete<{ message: string }>(`/api/branches/${id}`),
 }
 
 // Staff endpoints
@@ -553,6 +584,34 @@ export const staffApi = {
 
   deactivate: (id: string) =>
     api.delete<{ message: string; staff: StaffMember }>(`/api/staff/${id}`),
+
+  getPermissions: (id: string) =>
+    api.get<any>(`/api/staff/${id}/permissions`),
+
+  getPermissionsSchema: () =>
+    api.get<{ keys: string[]; defaults: Record<string, Record<string, boolean>> }>('/api/staff/permissions/schema'),
+
+  updatePermissions: (id: string, data: Record<string, boolean>) =>
+    api.put<{ message: string; permissions: any }>(`/api/staff/${id}/permissions`, { body: data }),
+}
+
+// Settings endpoints
+export const settingsApi = {
+  get: () =>
+    api.get<any>('/api/settings'),
+
+  update: (data: Record<string, any>) =>
+    api.put<{ message: string; tenant: any }>('/api/settings', { body: data }),
+
+  uploadLogo: (file: File) => {
+    const formData = new FormData()
+    formData.append('logo', file)
+    return fetch(`${API_URL}/api/settings/logo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+      body: formData,
+    }).then(r => r.json())
+  },
 }
 
 // Receipt endpoints
@@ -630,6 +689,7 @@ export interface StaffPayload {
   phone?: string
   role: 'manager' | 'accountant' | 'attendant'
   branchId: string
+  permissions?: Record<string, boolean>
 }
 
 export interface RegisterData {
@@ -729,6 +789,7 @@ export interface Purchase {
 
 export interface CartItem {
   id: string | number
+  productId?: string | number
   product_id: string
   name: string
   qty: number
@@ -736,6 +797,9 @@ export interface CartItem {
   cost_price: number
   discount?: number
   tax?: number
+  cashDiscount?: number
+  unitName?: string | null
+  conversionFactor?: number | null
 }
 
 export interface PurchaseItem {

@@ -8,6 +8,59 @@ const router = Router();
 
 const staffRoles = new Set(["manager", "accountant", "attendant"]);
 
+const PERM_KEYS = [
+  "canCreateSale","canViewSale","canEditSale","canDeleteSale","canRefundSale",
+  "canCreateProduct","canViewProduct","canEditProduct","canDeleteProduct",
+  "canCreatePurchase","canViewPurchase","canEditPurchase","canDeletePurchase",
+  "canCreateExpense","canViewExpense","canEditExpense","canDeleteExpense",
+  "canCreateCustomer","canViewCustomer","canEditCustomer","canDeleteCustomer",
+  "canCreateSupplier","canViewSupplier","canEditSupplier","canDeleteSupplier",
+  "canCreateStaff","canViewStaff","canEditStaff","canDeleteStaff",
+  "canCreateBranch","canViewBranch","canEditBranch","canDeleteBranch",
+  "canViewReport","canViewSettings","canEditSettings","canGiveDiscount",
+];
+
+const ROLE_DEFAULTS = {
+  manager: {
+    canCreateSale:true,canViewSale:true,canEditSale:true,canDeleteSale:false,canRefundSale:true,
+    canCreateProduct:true,canViewProduct:true,canEditProduct:true,canDeleteProduct:false,
+    canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
+    canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
+    canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
+    canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
+    canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
+    canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
+    canViewReport:true,canViewSettings:true,canEditSettings:false,canGiveDiscount:true,
+  },
+  accountant: {
+    canCreateSale:false,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
+    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,
+    canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
+    canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
+    canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
+    canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
+    canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
+    canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
+    canViewReport:true,canViewSettings:true,canEditSettings:false,canGiveDiscount:false,
+  },
+  attendant: {
+    canCreateSale:true,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
+    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,
+    canCreatePurchase:false,canViewPurchase:false,canEditPurchase:false,canDeletePurchase:false,
+    canCreateExpense:false,canViewExpense:false,canEditExpense:false,canDeleteExpense:false,
+    canCreateCustomer:false,canViewCustomer:true,canEditCustomer:false,canDeleteCustomer:false,
+    canCreateSupplier:false,canViewSupplier:false,canEditSupplier:false,canDeleteSupplier:false,
+    canCreateStaff:false,canViewStaff:false,canEditStaff:false,canDeleteStaff:false,
+    canCreateBranch:false,canViewBranch:false,canEditBranch:false,canDeleteBranch:false,
+    canViewReport:false,canViewSettings:false,canEditSettings:false,canGiveDiscount:false,
+  },
+};
+
+// Get permission keys and role defaults
+router.get("/permissions/schema", authenticateToken, requireRole(["owner"]), (req, res) => {
+  res.json({ keys: PERM_KEYS, defaults: ROLE_DEFAULTS });
+});
+
 function splitName(name = "") {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   return {
@@ -85,7 +138,7 @@ router.post("/", authenticateToken, requireRole(["owner"]), async (req, res) => 
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    const { name, email, password, fname, lname, phone, role = "attendant", branchId } = req.body;
+    const { name, email, password, fname, lname, phone, role = "attendant", branchId, permissions } = req.body;
     const normalizedEmail = String(email || "").trim().toLowerCase();
     if (!normalizedEmail) return res.status(400).json({ error: "Email is required" });
     if (!password || String(password).length < 6) {
@@ -101,6 +154,16 @@ router.post("/", authenticateToken, requireRole(["owner"]), async (req, res) => 
 
     const parsed = splitName(name);
     const hashed = await bcrypt.hash(String(password), 12);
+
+    // Build permission data from request or role defaults
+    const permData = {};
+    for (const key of PERM_KEYS) {
+      if (permissions && permissions[key] !== undefined) {
+        permData[key] = Boolean(permissions[key]);
+      } else {
+        permData[key] = ROLE_DEFAULTS[role]?.[key] ?? ROLE_DEFAULTS.attendant[key];
+      }
+    }
 
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
@@ -118,6 +181,10 @@ router.post("/", authenticateToken, requireRole(["owner"]), async (req, res) => 
 
       await tx.userBranch.create({
         data: { userId: created.id, branchId, isPrimary: true },
+      });
+
+      await tx.userPermission.create({
+        data: { userId: created.id, ...permData },
       });
 
       return tx.user.findUnique({
@@ -229,6 +296,63 @@ router.delete("/:id", authenticateToken, requireRole(["owner"]), async (req, res
   } catch (err) {
     console.error("Deactivate staff error:", err);
     res.status(500).json({ error: "Failed to deactivate staff" });
+  }
+});
+
+// Get permissions for a staff member
+router.get("/:id/permissions", authenticateToken, requireRole(["owner"]), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: Array.from(staffRoles) } },
+    });
+    if (!user) return res.status(404).json({ error: "Staff not found" });
+
+    let perms = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    if (!perms) {
+      // Create default permissions based on role
+      const defaults = {
+        manager: { canCreateSale: true, canRefund: true, canManageInventory: true, canViewReports: true, canManageStaff: false, canManageBranches: false, canManageSettings: false, canAccessPurchases: true, canAccessExpenses: true, canGiveDiscount: true, canViewCustomers: true, canViewSuppliers: true },
+        accountant: { canCreateSale: false, canRefund: false, canManageInventory: false, canViewReports: true, canManageStaff: false, canManageBranches: false, canManageSettings: false, canAccessPurchases: true, canAccessExpenses: true, canGiveDiscount: false, canViewCustomers: true, canViewSuppliers: true },
+        attendant: { canCreateSale: true, canRefund: false, canManageInventory: false, canViewReports: false, canManageStaff: false, canManageBranches: false, canManageSettings: false, canAccessPurchases: false, canAccessExpenses: false, canGiveDiscount: false, canViewCustomers: true, canViewSuppliers: false },
+      };
+      perms = await prisma.userPermission.create({ data: { userId: user.id, ...(defaults[user.role] || defaults.attendant) } });
+    }
+    res.json(perms);
+  } catch (err) {
+    console.error("Get permissions error:", err);
+    res.status(500).json({ error: "Failed to load permissions" });
+  }
+});
+
+// Update permissions for a staff member
+router.put("/:id/permissions", authenticateToken, requireRole(["owner"]), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: Array.from(staffRoles) } },
+    });
+    if (!user) return res.status(404).json({ error: "Staff not found" });
+
+    const permKeys = ["canCreateSale", "canRefund", "canManageInventory", "canViewReports", "canManageStaff", "canManageBranches", "canManageSettings", "canAccessPurchases", "canAccessExpenses", "canGiveDiscount", "canViewCustomers", "canViewSuppliers"];
+    const data = {};
+    for (const key of permKeys) {
+      if (req.body[key] !== undefined) data[key] = Boolean(req.body[key]);
+    }
+
+    const perms = await prisma.userPermission.upsert({
+      where: { userId: user.id },
+      update: data,
+      create: { userId: user.id, ...data },
+    });
+    res.json({ message: "Permissions updated", permissions: perms });
+  } catch (err) {
+    console.error("Update permissions error:", err);
+    res.status(500).json({ error: "Failed to update permissions" });
   }
 });
 
