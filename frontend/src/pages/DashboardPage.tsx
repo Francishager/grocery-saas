@@ -76,8 +76,21 @@ export default function DashboardPage() {
     net: profitLoss?.netProfit?.[i] || 0,
   }))
 
+  const formatMethodName = (method: string) => {
+    const labels: Record<string, string> = {
+      mobile_money: 'MoMo',
+      cash: 'Cash',
+      card: 'Card',
+      bank_transfer: 'Bank',
+      cheque: 'Cheque',
+      credit: 'Credit',
+    }
+    if (labels[method]) return labels[method]
+    return method.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  }
+
   const paymentPieData = paymentMethods.map((m) => ({
-    name: m.method.charAt(0).toUpperCase() + m.method.slice(1),
+    name: formatMethodName(m.method),
     value: m.total,
     count: m.count,
   }))
@@ -285,9 +298,9 @@ export default function DashboardPage() {
             ) : (
               <ResponsiveContainer width="100%" height={320}>
                 <PieChart>
-                  <Pie data={paymentPieData} cx="50%" cy="45%" innerRadius={55} outerRadius={95} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }} style={{ fontSize: 13, fontWeight: 600, fill: '#1f2937' }}>
-                    {paymentPieData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  <Pie data={paymentPieData} cx="50%" cy="45%" innerRadius={55} outerRadius={95} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: '#6b7280', strokeWidth: 1 }} style={{ fontSize: 12, fontWeight: 600, fill: '#1f2937' }}>
+                    {paymentPieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} stroke={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{ borderRadius: 8, fontSize: 13 }} />
