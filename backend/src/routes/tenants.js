@@ -130,4 +130,27 @@ router.put("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
   }
 });
 
+// Get tenant usage limits
+router.get("/:id/limits", authenticateToken, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.params.id },
+      include: { plan: true },
+    });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+
+    // Return limits based on plan or default values
+    const limits = tenant.plan?.limits || {
+      maxUsers: 5,
+      maxProducts: 1000,
+      maxBranches: 3,
+      maxSalesPerMonth: 1000,
+    };
+    res.json({ limits });
+  } catch (err) {
+    console.error("Get tenant limits error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
