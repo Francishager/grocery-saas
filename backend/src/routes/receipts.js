@@ -131,9 +131,14 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
         const resp = await fetch(tenant.logo);
         if (resp.ok) {
           const imgBuf = Buffer.from(await resp.arrayBuffer());
-          // Fit logo within 80mm width, max height 80px
-          doc.image(imgBuf, undefined, undefined, { fit: [180, 80], align: "center" });
-          doc.moveDown(0.5);
+          // Small logo for 80mm thermal receipt - max 60px wide, 40px tall
+          const logoWidth = 60;
+          const pageWidth = 226.77;
+          const margin = 10;
+          const usableWidth = pageWidth - 2 * margin;
+          const x = margin + (usableWidth - logoWidth) / 2;
+          doc.image(imgBuf, x, undefined, { fit: [logoWidth, 40], align: "center" });
+          doc.moveDown(0.3);
         } else {
           console.error("Logo fetch failed:", resp.status, tenant.logo);
         }

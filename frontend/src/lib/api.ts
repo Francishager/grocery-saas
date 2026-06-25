@@ -152,6 +152,18 @@ export const authApi = {
 export const dashboardApi = {
   getKpis: () =>
     api.get<DashboardKpis>('/api/dashboard/kpis'),
+
+  getSalesChart: () =>
+    api.get<SalesChartData>('/api/dashboard/sales-chart'),
+
+  getProfitLoss: () =>
+    api.get<ProfitLossData>('/api/dashboard/profit-loss'),
+
+  getTopProducts: () =>
+    api.get<TopProduct[]>('/api/dashboard/top-products'),
+
+  getPaymentMethods: () =>
+    api.get<PaymentMethodData[]>('/api/dashboard/payment-methods'),
 }
 
 // Inventory endpoints
@@ -706,10 +718,43 @@ export interface DashboardKpis {
   revenue: number
   revenueChange: number
   salesCount: number
+  taxCollected: number
+  totalDiscount: number
   purchases: number
+  expenses: number
+  grossProfit: number
+  netProfit: number
   productCount: number
   lowStockCount: number
   customerCount: number
+  receivablesOutstanding: number
+  receivablesCount: number
+}
+
+export interface SalesChartData {
+  labels: string[]
+  revenue: number[]
+  expenses: number[]
+}
+
+export interface ProfitLossData {
+  labels: string[]
+  grossProfit: number[]
+  netProfit: number[]
+}
+
+export interface TopProduct {
+  productId: string
+  name: string
+  quantity: number
+  revenue: number
+  salesCount: number
+}
+
+export interface PaymentMethodData {
+  method: string
+  total: number
+  count: number
 }
 
 export interface InventoryItem {
