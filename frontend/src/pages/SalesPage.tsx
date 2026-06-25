@@ -25,6 +25,9 @@ export default function SalesPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
   const [paymentMode, setPaymentMode] = useState('cash')
+  const [mobileProvider, setMobileProvider] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [transactionId, setTransactionId] = useState('')
   const [invoiceCashDiscount, setInvoiceCashDiscount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
@@ -167,13 +170,20 @@ export default function SalesPage() {
 
     setProcessing(true)
     try {
-      const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount)
+      const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount, {
+        mobileProvider: paymentMode === 'mobile_money' ? mobileProvider : undefined,
+        phoneNumber: paymentMode === 'mobile_money' ? phoneNumber : undefined,
+        transactionId: ['mobile_money', 'card'].includes(paymentMode) ? transactionId : undefined,
+      })
       toast({
         title: 'Sale completed!',
         description: `${cart.length} items sold for ${formatCurrency(cartTotal)}`,
       })
       setCart([])
       setInvoiceCashDiscount(0)
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
       if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id))
       loadRecentSales()
       loadInventory()
@@ -504,10 +514,69 @@ export default function SalesPage() {
                       </select>
                     </div>
 
+                    {/* Mobile Money fields */}
+                    {paymentMode === 'mobile_money' && (
+                      <div className="space-y-3 mb-4 p-3 rounded-lg border bg-muted/30">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                        <div>
+                          <label className="text-sm font-medium">Network Provider *</label>
+                          <select
+                            value={mobileProvider}
+                            onChange={(e) => setMobileProvider(e.target.value)}
+                            className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          >
+                            <option value="">Select provider</option>
+                            <option value="MTN">MTN</option>
+                            <option value="Airtel">Airtel</option>
+                            <option value="Zamtel">Zamtel</option>
+                            <option value="Vodafone">Vodafone</option>
+                            <option value="M-Pesa">M-Pesa</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Phone Number *</label>
+                          <Input
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            placeholder="e.g. 0977123456"
+                            type="tel"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Transaction ID *</label>
+                          <Input
+                            value={transactionId}
+                            onChange={(e) => setTransactionId(e.target.value)}
+                            placeholder="e.g. TXN123456789"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card fields */}
+                    {paymentMode === 'card' && (
+                      <div className="space-y-3 mb-4 p-3 rounded-lg border bg-muted/30">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                        <div>
+                          <label className="text-sm font-medium">Transaction ID *</label>
+                          <Input
+                            value={transactionId}
+                            onChange={(e) => setTransactionId(e.target.value)}
+                            placeholder="e.g. TXN123456789"
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <Button
                       className="w-full"
                       onClick={handleCheckout}
-                      disabled={processing}
+                      disabled={processing || (
+                        paymentMode === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
+                        paymentMode === 'card' ? !transactionId.trim() :
+                        false
+                      )}
                     >
                       {processing ? 'Processing...' : 'Complete Sale'}
                     </Button>

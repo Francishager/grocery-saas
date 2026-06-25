@@ -417,6 +417,9 @@ model Sale {
   discount      Float      @default(0)
   cashDiscount  Float      @default(0) // Invoice-level cash discount
   paymentMethod String
+  mobileProvider String?
+  phoneNumber    String?
+  transactionId  String?
   status        SaleStatus @default(completed)
   notes         String?
   items         SaleItem[]

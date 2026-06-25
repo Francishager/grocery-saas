@@ -84,7 +84,7 @@ router.post("/", authenticateToken, requireRole(saleRoles), async (req, res) => 
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0 } = req.body;
+    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId } = req.body;
     if (!items.length) return res.status(400).json({ error: "Items required" });
 
     // Check discount permission
@@ -130,6 +130,9 @@ router.post("/", authenticateToken, requireRole(saleRoles), async (req, res) => 
           discount: lineDiscount,
           cashDiscount: invoiceCashDiscount,
           paymentMethod,
+          mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
+          phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
+          transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           notes,
           items: { create: saleItems.map(({ baseQty, ...rest }) => rest) },
         },
@@ -163,7 +166,7 @@ router.post("/checkout", authenticateToken, requireRole(saleRoles), async (req, 
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { cart = [], paymentMethod = "cash", cashDiscount = 0 } = req.body;
+    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
 
     // Check discount permission
@@ -205,6 +208,9 @@ router.post("/checkout", authenticateToken, requireRole(saleRoles), async (req, 
           discount: lineDiscount,
           cashDiscount: invoiceCashDiscount,
           paymentMethod,
+          mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
+          phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
+          transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           items: { create: saleItems.map(({ baseQty, ...rest }) => rest) },
         },
         include: { items: true, branch: true },

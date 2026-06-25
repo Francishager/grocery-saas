@@ -259,7 +259,7 @@ export const salesApi = {
   create: (data: Partial<Sale>) =>
     api.post<Sale>('/api/sales', { body: data }),
 
-  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number) =>
+  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number, paymentDetails?: { mobileProvider?: string; phoneNumber?: string; transactionId?: string }) =>
     api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
       body: {
         cart: cart.map(c => ({
@@ -273,6 +273,9 @@ export const salesApi = {
         })),
         paymentMethod: payment_mode,
         cashDiscount: cashDiscount || 0,
+        mobileProvider: paymentDetails?.mobileProvider,
+        phoneNumber: paymentDetails?.phoneNumber,
+        transactionId: paymentDetails?.transactionId,
       },
     }),
 }
