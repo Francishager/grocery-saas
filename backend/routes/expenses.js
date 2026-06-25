@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
@@ -83,7 +83,7 @@ async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = pri
 // === EXPENSES ===
 
 // Get all expenses for tenant
-router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, category, startDate, endDate } = req.query
@@ -129,7 +129,7 @@ router.get('/expenses', authenticateToken, requireRole(['owner', 'manager', 'acc
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -212,7 +212,7 @@ router.post('/expenses', authenticateToken, requireRole(['owner', 'manager', 'ac
 })
 
 // Update expense
-router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -261,7 +261,7 @@ router.put('/expenses/:id', authenticateToken, requireRole(['owner', 'manager', 
 // === CASH ACCOUNTS ===
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
     await ensureDefaultCashAccounts(req.tenant.id)
 
@@ -281,7 +281,7 @@ router.get('/cash-accounts', authenticateToken, requireRole(['owner', 'manager',
 })
 
 // Create cash account
-router.post('/cash-accounts', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
+router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
     const { name, type, currency = 'UGX' } = req.body
 
@@ -316,7 +316,7 @@ router.post('/cash-accounts', authenticateToken, requireRole(['owner', 'manager'
 // === CASH TRANSACTIONS ===
 
 // Get cash transactions
-router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/cash-transactions', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, accountId, type, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -365,7 +365,7 @@ router.get('/cash-transactions', authenticateToken, requireRole(['owner', 'manag
 // === CASH FLOW SUMMARY ===
 
 // Get cash flow overview
-router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { startDate, endDate } = req.query
@@ -454,7 +454,7 @@ router.get('/cash-flow/summary', authenticateToken, requireRole(['owner', 'manag
 // === EXPENSE CATEGORIES ===
 
 // Get expense categories
-router.get('/expense-categories', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/expense-categories', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
     const categories = [
       { name: 'rent', displayName: 'Rent', icon: '🏢' },

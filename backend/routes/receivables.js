@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requireRole, requireTenant } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
@@ -30,7 +30,7 @@ const withUser = (record) => {
 // === CUSTOMERS ===
 
 // Get all customers for tenant
-router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/customers', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, search, status } = req.query
@@ -73,7 +73,7 @@ router.get('/customers', authenticateToken, requireRole(['owner', 'manager', 'ac
 })
 
 // Create new customer
-router.post('/customers', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
+router.post('/customers', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -121,7 +121,7 @@ router.post('/customers', authenticateToken, requireRole(['owner', 'manager']), 
 })
 
 // Update customer
-router.put('/customers/:id', authenticateToken, requireRole(['owner', 'manager']), requireTenant, async (req, res) => {
+router.put('/customers/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -171,7 +171,7 @@ router.put('/customers/:id', authenticateToken, requireRole(['owner', 'manager']
 // === SALES RECORDS (Credit Sales) ===
 
 // Get all sales records
-router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accountant', 'attendant']), requireTenant, async (req, res) => {
+router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, customerId, paymentStatus, startDate, endDate } = req.query
@@ -224,7 +224,7 @@ router.get('/sales', authenticateToken, requireRole(['owner', 'manager', 'accoun
 })
 
 // Create new sale (credit or cash)
-router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accountant', 'attendant']), requireTenant, async (req, res) => {
+router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -365,7 +365,7 @@ router.post('/sales', authenticateToken, requireRole(['owner', 'manager', 'accou
 // === CUSTOMER PAYMENTS ===
 
 // Get customer payments
-router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/payments', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, customerId, startDate, endDate } = req.query
@@ -411,7 +411,7 @@ router.get('/payments', authenticateToken, requireRole(['owner', 'manager', 'acc
 })
 
 // Record customer payment
-router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.post('/payments', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -492,7 +492,7 @@ router.post('/payments', authenticateToken, requireRole(['owner', 'manager', 'ac
 // === RECEIVABLES REPORTS ===
 
 // Get receivables summary
-router.get('/receivables/summary', authenticateToken, requireRole(['owner', 'manager', 'accountant']), requireTenant, async (req, res) => {
+router.get('/receivables/summary', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const receivableWhere = scopedWhere(scope)
