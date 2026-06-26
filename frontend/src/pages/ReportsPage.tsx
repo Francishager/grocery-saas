@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown
 } from 'lucide-react'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +14,7 @@ import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { exportToExcel, exportToPDF, printReport } from '@/lib/exportUtils'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -551,16 +552,27 @@ export default function ReportsPage() {
                   Generate
                 </Button>
                 {canExport && (
-                  <Button onClick={handleExportExcel} variant="outline" size="sm">
-                    <FileSpreadsheet className="h-4 w-4" />
-                    Excel
-                  </Button>
-                )}
-                {canExport && (
-                  <Button onClick={handleExportPDF} variant="outline" size="sm">
-                    <Download className="h-4 w-4" />
-                    PDF
-                  </Button>
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Download className="h-4 w-4" />
+                        Export
+                        <ChevronDown className="h-3 w-3 ml-0.5" />
+                      </Button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content className="min-w-[140px] bg-popover text-popover-foreground rounded-md border shadow-md z-50 p-1" sideOffset={4}>
+                        <DropdownMenu.Item className="flex items-center gap-2 px-3 py-2 text-sm outline-none cursor-pointer hover:bg-accent rounded-sm" onSelect={handleExportExcel}>
+                          <FileSpreadsheet className="h-4 w-4" />
+                          Excel
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item className="flex items-center gap-2 px-3 py-2 text-sm outline-none cursor-pointer hover:bg-accent rounded-sm" onSelect={handleExportPDF}>
+                          <Download className="h-4 w-4" />
+                          PDF
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
                 )}
                 <Button onClick={handlePrint} variant="outline" size="sm">
                   <Printer className="h-4 w-4" />
