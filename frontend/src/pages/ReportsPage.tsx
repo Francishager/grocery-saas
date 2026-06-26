@@ -9,7 +9,7 @@ import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -553,12 +553,10 @@ export default function ReportsPage() {
                 </Button>
                 {canExport && (
                   <DropdownMenu.Root>
-                    <DropdownMenu.Trigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Download className="h-4 w-4" />
-                        Export
-                        <ChevronDown className="h-3 w-3 ml-0.5" />
-                      </Button>
+                    <DropdownMenu.Trigger className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>
+                      <Download className="h-4 w-4" />
+                      Export
+                      <ChevronDown className="h-3 w-3 ml-0.5" />
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Portal>
                       <DropdownMenu.Content className="min-w-[140px] bg-popover text-popover-foreground rounded-md border shadow-md z-50 p-1" sideOffset={4}>
