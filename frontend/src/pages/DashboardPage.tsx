@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, AlertTriangle, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Package, AlertTriangle, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard } from 'lucide-react'
 import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
 export default function DashboardPage() {
+  const { hasPermission } = useJWTAuth()
   const [kpis, setKpis] = useState<DashboardKpis | null>(null)
   const [salesChart, setSalesChart] = useState<SalesChartData | null>(null)
   const [profitLoss, setProfitLoss] = useState<ProfitLossData | null>(null)
@@ -18,8 +20,12 @@ export default function DashboardPage() {
   const { toast } = useToast()
 
   useEffect(() => {
-    loadDashboard()
-  }, [])
+    if (hasPermission('canViewDashboard')) {
+      loadDashboard()
+    } else {
+      setLoading(false)
+    }
+  }, [hasPermission])
 
   const loadDashboard = async () => {
     try {
@@ -44,6 +50,18 @@ export default function DashboardPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (!hasPermission('canViewDashboard')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <LayoutDashboard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-lg font-semibold">Access Denied</h2>
+          <p className="text-muted-foreground">You don't have permission to access the dashboard.</p>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
