@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 
 const PERM_LABELS: Record<string, string> = {
+  canViewDashboard:'View Dashboard',
   canCreateSale:'Create Sale', canViewSale:'View Sale', canEditSale:'Edit Sale', canDeleteSale:'Delete Sale', canRefundSale:'Refund Sale',
   canCreateProduct:'Create Product', canViewProduct:'View Product', canEditProduct:'Edit Product', canDeleteProduct:'Delete Product',
   canCreatePurchase:'Create Purchase', canViewPurchase:'View Purchase', canEditPurchase:'Edit Purchase', canDeletePurchase:'Delete Purchase',
@@ -23,6 +24,7 @@ const PERM_LABELS: Record<string, string> = {
 }
 
 const PERM_GROUPS = [
+  { label: 'Dashboard', prefix: 'Dashboard' },
   { label: 'Sales', prefix: 'Sale' },
   { label: 'Products', prefix: 'Product' },
   { label: 'Purchases', prefix: 'Purchase' },
