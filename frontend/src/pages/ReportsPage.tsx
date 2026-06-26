@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer
+  FileText, Printer, Download, FileSpreadsheet
 } from 'lucide-react'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { exportToExcel, exportToPDF, printReport } from '@/lib/exportUtils'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -489,8 +490,35 @@ export default function ReportsPage() {
     }
   }, [selectedReport])
 
+  const canExport = hasPermission('canExportReport')
+
   const handlePrint = () => {
-    window.print()
+    printReport(
+      reportData?.data || reportData,
+      currentReport?.label || 'Report',
+      currentReport?.categoryLabel || '',
+      currentReport?.columns,
+      reportData?.summary
+    )
+  }
+
+  const handleExportExcel = () => {
+    exportToExcel(
+      reportData?.data || reportData,
+      currentReport?.label || 'Report',
+      currentReport?.columns,
+      reportData?.summary
+    )
+  }
+
+  const handleExportPDF = () => {
+    exportToPDF(
+      reportData?.data || reportData,
+      currentReport?.label || 'Report',
+      currentReport?.categoryLabel,
+      currentReport?.columns,
+      reportData?.summary
+    )
   }
 
   return (
@@ -522,6 +550,18 @@ export default function ReportsPage() {
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
                   Generate
                 </Button>
+                {canExport && (
+                  <Button onClick={handleExportExcel} variant="outline" size="sm">
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Excel
+                  </Button>
+                )}
+                {canExport && (
+                  <Button onClick={handleExportPDF} variant="outline" size="sm">
+                    <Download className="h-4 w-4" />
+                    PDF
+                  </Button>
+                )}
                 <Button onClick={handlePrint} variant="outline" size="sm">
                   <Printer className="h-4 w-4" />
                   Print
