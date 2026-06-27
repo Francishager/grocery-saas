@@ -866,7 +866,7 @@ router.get("/services/summary", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const where = scopedWhere(s, { ...df(req), itemType: "service", isActive: { not: false } });
     const [agg, count] = await Promise.all([
-      prisma.product.aggregate({ where, _sum: { unit_price: true }, _avg: { unit_price: true } }),
+      prisma.product.aggregate({ where, _sum: { price: true }, _avg: { price: true } }),
       prisma.product.count({ where }),
     ]);
     // Count how many times services were sold
@@ -880,7 +880,7 @@ router.get("/services/summary", authenticateToken, async (req, res) => {
       count,
       totalRevenue,
       totalQuantity,
-      avgPrice: agg._avg.unit_price || 0,
+      avgPrice: agg._avg.price || 0,
       salesCount: saleItems.length,
     });
   } catch (err) { handleBranchError(res, err); }
@@ -897,7 +897,7 @@ router.get("/services/list", authenticateToken, async (req, res) => {
     const data = services.map((p) => ({
       name: p.name,
       category: p.serviceCategory || p.category?.name || "Uncategorized",
-      price: p.unit_price || 0,
+      price: p.price || 0,
       estimatedHours: p.estimatedHours || 0,
       branch: p.branch?.name || "Unassigned",
     }));
@@ -910,14 +910,14 @@ router.get("/services/sales", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const saleItems = await prisma.saleItem.findMany({
       where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
-      include: { product: { select: { name: true, serviceCategory: true } }, sale: { select: { receiptNo: true, createdAt: true, customerName: true } } },
+      include: { product: { select: { name: true, serviceCategory: true } }, sale: { select: { receiptNo: true, createdAt: true } } },
       orderBy: { createdAt: "desc" },
     });
     const data = saleItems.map((i) => ({
       service: i.product?.name || "Unknown",
       category: i.product?.serviceCategory || "Uncategorized",
       receiptNo: i.sale?.receiptNo || "",
-      customer: i.sale?.customerName || "Walk-in",
+      customer: "Walk-in",
       quantity: i.quantity,
       total: i.total,
       date: i.createdAt,
