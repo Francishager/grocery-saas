@@ -214,6 +214,11 @@ export default function SalesPage() {
     item.product_name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  // Separate items by type for display
+  const sellableItems = filteredInventory.filter((item) => (item as any).itemType !== 'rental')
+  const serviceItems = sellableItems.filter((item) => (item as any).itemType === 'service')
+  const productItems = sellableItems.filter((item) => (item as any).itemType !== 'service')
+
   return (
     <div className="space-y-6">
       <div>
@@ -228,9 +233,9 @@ export default function SalesPage() {
         <div className="lg:col-span-2">
           <Card>
             <CardHeader>
-              <CardTitle>Products</CardTitle>
+              <CardTitle>Products & Services</CardTitle>
               <CardDescription>
-                Click on a product to add it to the cart
+                Click on an item to add it to the cart
               </CardDescription>
               <form onSubmit={handleSearch} className="flex gap-2 mt-2">
                 <div className="relative flex-1">
@@ -339,57 +344,90 @@ export default function SalesPage() {
                 <div className="flex items-center justify-center h-32">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                 </div>
-              ) : filteredInventory.length === 0 ? (
+              ) : sellableItems.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">
-                  No products found
+                  No items found
                 </p>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {filteredInventory.map((item) => {
-                    const units = (item as any).units || []
-                    const baseUnit = (item as any).baseUnit || 'Piece'
-                    return (
-                      <div key={item.id} className="rounded-lg border p-3 hover:bg-muted transition-colors">
-                        <div className="flex items-center justify-between mb-1">
-                          <div>
-                            <p className="font-medium">{item.product_name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {item.quantity} {baseUnit} in stock
-                            </p>
-                          </div>
-                          <p className="font-bold text-primary">
-                            {formatCurrency(item.unit_price)}
-                          </p>
-                        </div>
-                        {units.length > 0 ? (
-                          <div className="flex flex-wrap gap-1 mt-2">
+                <div className="space-y-4">
+                  {productItems.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Products</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {productItems.map((item) => {
+                          const units = (item as any).units || []
+                          const baseUnit = (item as any).baseUnit || 'Piece'
+                          return (
+                            <div key={item.id} className="rounded-lg border p-3 hover:bg-muted transition-colors">
+                              <div className="flex items-center justify-between mb-1">
+                                <div>
+                                  <p className="font-medium">{item.product_name}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {item.quantity} {baseUnit} in stock
+                                  </p>
+                                </div>
+                                <p className="font-bold text-primary">
+                                  {formatCurrency(item.unit_price)}
+                                </p>
+                              </div>
+                              {units.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  <button
+                                    onClick={() => addToCart(item)}
+                                    className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                                  >
+                                    {baseUnit} (1)
+                                  </button>
+                                  {units.map((u: any) => (
+                                    <button
+                                      key={u.id}
+                                      onClick={() => addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
+                                      className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                                    >
+                                      {u.unitName} ({u.conversionFactor})
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => addToCart(item)}
+                                  className="mt-2 w-full rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                                >
+                                  Add to Cart
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {serviceItems.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Services</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {serviceItems.map((item) => (
+                          <div key={item.id} className="rounded-lg border p-3 hover:bg-muted transition-colors">
+                            <div className="flex items-center justify-between mb-1">
+                              <div>
+                                <p className="font-medium">{item.product_name}</p>
+                                <p className="text-sm text-muted-foreground">Service</p>
+                              </div>
+                              <p className="font-bold text-primary">
+                                {formatCurrency(item.unit_price)}
+                              </p>
+                            </div>
                             <button
                               onClick={() => addToCart(item)}
-                              className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                              className="mt-2 w-full rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
                             >
-                              {baseUnit} (1)
+                              Add to Cart
                             </button>
-                            {units.map((u: any) => (
-                              <button
-                                key={u.id}
-                                onClick={() => addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
-                                className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
-                              >
-                                {u.unitName} ({u.conversionFactor})
-                              </button>
-                            ))}
                           </div>
-                        ) : (
-                          <button
-                            onClick={() => addToCart(item)}
-                            className="mt-2 w-full rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
-                          >
-                            Add to Cart
-                          </button>
-                        )}
+                        ))}
                       </div>
-                    )
-                  })}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

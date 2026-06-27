@@ -615,6 +615,7 @@ model Customer {
   name        String
   email       String?
   phone       String?
+  nin         String?
   address     String?
   tenantId    String
   branchId    String?
@@ -1032,6 +1033,15 @@ model Rental {
   balance         Float        @default(0)           // Outstanding hire charge
   paymentStatus   String       @default("unpaid")    // paid, partial, unpaid
   paymentMethod   String?      @default("cash")
+  mobileProvider  String?
+  phoneNumber     String?
+  transactionId   String?
+  discount        Float        @default(0)
+  taxRate         Float        @default(0)
+  taxAmount       Float        @default(0)
+  guarantorName   String?
+  guarantorPhone  String?
+  customerNin     String?
   status          RentalStatus @default(active)
   notes           String?
   items           RentalItem[]

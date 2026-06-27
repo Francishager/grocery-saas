@@ -1,21 +1,25 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench } from 'lucide-react'
-import { useState, type ComponentType } from 'react'
+import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
+const inventorySubItems = [
+  { to: '/tenant/inventory', label: 'Products', icon: Package, permission: 'canViewProduct' },
+  { to: '/tenant/inventory?type=service', label: 'Services', icon: Wrench, permission: 'canViewService' },
+  { to: '/tenant/inventory?type=rental', label: 'Rental Items', icon: Clock, permission: 'canViewRental' },
+]
+
 const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
-  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct' },
-  { to: '/tenant/inventory?type=service', label: 'Services', icon: Wrench, permission: 'canViewService' },
-  { to: '/tenant/inventory?type=rental', label: 'Rental Items', icon: Clock, permission: 'canViewRental' },
+  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
   { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', permission: 'canViewReceivable' },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', permission: 'canViewPayable' },
   { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'canViewExpense' },
-  { to: '/tenant/rentals', label: 'Rentals', icon: Clock, permission: 'canViewRental' },
+  { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
   { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', isSettings: true },
@@ -132,6 +136,7 @@ export function TenantLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [reportsExpanded, setReportsExpanded] = useState(false)
   const [settingsExpanded, setSettingsExpanded] = useState(false)
+  const [inventoryExpanded, setInventoryExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
@@ -143,13 +148,26 @@ export function TenantLayout() {
 
   const toggleReports = () => {
     setReportsExpanded(prev => !prev)
-    if (!reportsExpanded) setSettingsExpanded(false)
+    if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false) }
   }
   const toggleSettings = () => {
     setSettingsExpanded(prev => !prev)
-    if (!settingsExpanded) setReportsExpanded(false)
+    if (!settingsExpanded) { setReportsExpanded(false); setInventoryExpanded(false) }
   }
+  const toggleInventory = () => {
+    setInventoryExpanded(prev => !prev)
+    if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false) }
+  }
+
+  // Auto-expand inventory when on an inventory page
+  useEffect(() => {
+    if (location.pathname === '/tenant/inventory') setInventoryExpanded(true)
+  }, [location.pathname, location.search])
   const visibleNavItems = navItems.filter((item) => {
+    if (item.permission && !hasPermission(item.permission)) return false
+    return true
+  })
+  const visibleInventorySubItems = inventorySubItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false
     return true
   })
@@ -182,7 +200,32 @@ export function TenantLayout() {
           </div>
           <nav className="flex-1 space-y-2 overflow-y-auto p-4 sm:p-5 lg:space-y-1 lg:p-4">
             {visibleNavItems.map((item) =>
-              item.isReports ? (
+              item.isInventory ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleInventory()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', inventoryExpanded || location.pathname === '/tenant/inventory' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {inventoryExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {inventoryExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleInventorySubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => {
+                            const fullPath = location.pathname + location.search
+                            const isExact = fullPath === sub.to
+                            return cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isExact ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')
+                          }}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isReports ? (
                 <div key={item.to}>
                   <button
                     onClick={() => toggleReports()}
@@ -212,7 +255,7 @@ export function TenantLayout() {
                                   <button
                                     key={rpt.id}
                                     onClick={() => selectReport(rpt.id)}
-                                    className={cn('flex w-full items-center rounded-md px-3 py-1.5 text-left text-xs transition-colors', activeReportId === rpt.id ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}
+                                    className={cn('flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors', activeReportId === rpt.id ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}
                                   >
                                     {rpt.label}
                                   </button>
@@ -239,8 +282,8 @@ export function TenantLayout() {
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
                       {settingsSubItems.map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
-                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-1.5 text-xs transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
-                          <sub.icon className="h-3.5 w-3.5" />{sub.label}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
                         </NavLink>
                       ))}
                     </div>
@@ -257,7 +300,7 @@ export function TenantLayout() {
                 </NavLink>
               )
             )}
-            {loading && <div className="px-3 py-2 text-xs text-slate-500">Loading plan features...</div>}
+            {loading && <div className="px-3 py-2 text-sm text-slate-500">Loading plan features...</div>}
           </nav>
         </div>
       </aside>

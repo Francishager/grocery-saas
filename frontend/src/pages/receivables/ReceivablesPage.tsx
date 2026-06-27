@@ -274,9 +274,13 @@ export default function ReceivablesPage() {
 
   const handleSaleProductChange = (index: number, productId: string) => {
     const product = products.find((item) => String(item.id) === productId)
+    const itemType = (product as any)?.itemType
+    const defaultPrice = itemType === 'rental'
+      ? (product as any)?.rentalPrice || product?.unit_price
+      : product?.unit_price
     updateSaleItem(index, {
       productId,
-      price: product ? String(product.unit_price) : '',
+      price: product ? String(defaultPrice) : '',
     })
   }
 
@@ -304,7 +308,7 @@ export default function ReceivablesPage() {
     if (!saleForm.customerId || items.length === 0) {
       toast({
         title: 'Missing sale details',
-        description: 'Select a customer and at least one product.',
+        description: 'Select a customer and at least one item.',
         variant: 'destructive'
       })
       return
@@ -835,18 +839,30 @@ export default function ReceivablesPage() {
                   </Button>
                 </div>
 
-                {saleItems.map((item, index) => (
+                {saleItems.map((item, index) => {
+                  const selectedItem = products.find((p) => String(p.id) === item.productId)
+                  const selectedItemType = (selectedItem as any)?.itemType
+                  const isService = selectedItemType === 'service'
+                  const isRental = selectedItemType === 'rental'
+                  return (
                   <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]">
                     <Select value={item.productId} onValueChange={(value) => handleSaleProductChange(index, value)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Product" />
+                        <SelectValue placeholder="Select item" />
                       </SelectTrigger>
                       <SelectContent>
-                        {products.map((product) => (
+                        {products.map((product) => {
+                          const pType = (product as any)?.itemType || 'product'
+                          const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
+                          return (
                           <SelectItem key={product.id} value={String(product.id)}>
-                            {product.product_name} {product.product_id ? `(${product.product_id})` : ''}
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-xs text-muted-foreground">[{typeLabel}]</span>
+                              {product.product_name} {product.product_id ? `(${product.product_id})` : ''}
+                            </span>
                           </SelectItem>
-                        ))}
+                          )
+                        })}
                       </SelectContent>
                     </Select>
                     <Input
@@ -854,7 +870,7 @@ export default function ReceivablesPage() {
                       min="1"
                       value={item.quantity}
                       onChange={(event) => updateSaleItem(index, { quantity: event.target.value })}
-                      placeholder="Qty"
+                      placeholder={isService ? 'Hours' : isRental ? 'Periods' : 'Qty'}
                     />
                     <Input
                       type="number"
@@ -882,7 +898,8 @@ export default function ReceivablesPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">

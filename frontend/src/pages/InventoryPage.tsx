@@ -87,9 +87,35 @@ export default function InventoryPage() {
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
-  const canManageInventory = hasPermission('canCreateProduct') || hasPermission('canEditProduct')
-  const canDeleteInventory = hasPermission('canDeleteProduct')
+  const canCreateProduct = hasPermission('canCreateProduct')
+  const canEditProduct = hasPermission('canEditProduct')
+  const canCreateService = hasPermission('canCreateService')
+  const canEditService = hasPermission('canEditService')
+  const canCreateRental = hasPermission('canCreateRental')
+  const canEditRental = hasPermission('canEditRental')
+  const canDeleteProduct = hasPermission('canDeleteProduct')
+  const canDeleteService = hasPermission('canDeleteService')
+  const canDeleteRental = hasPermission('canDeleteRental')
   const canAdjustStock = hasPermission('canAdjustStock')
+
+  // Determine create/edit/delete permission based on the active item type
+  const activeType = lockedType || itemTypeFilter
+  const canCreateCurrent =
+    activeType === 'service' ? canCreateService :
+    activeType === 'rental' ? canCreateRental :
+    activeType === 'product' ? canCreateProduct :
+    canCreateProduct || canCreateService || canCreateRental
+  const canEditCurrent =
+    activeType === 'service' ? canEditService :
+    activeType === 'rental' ? canEditRental :
+    activeType === 'product' ? canEditProduct :
+    canEditProduct || canEditService || canEditRental
+  const canDeleteCurrent =
+    activeType === 'service' ? canDeleteService :
+    activeType === 'rental' ? canDeleteRental :
+    activeType === 'product' ? canDeleteProduct :
+    canDeleteProduct || canDeleteService || canDeleteRental
+  const canManageInventory = canCreateCurrent || canEditCurrent
 
   useEffect(() => {
     if (lockedType) setItemTypeFilter(lockedType)
@@ -1032,7 +1058,7 @@ export default function InventoryPage() {
                               <Edit className="h-4 w-4" />
                             </Button>
                           )}
-                          {canDeleteInventory && (
+                          {canDeleteCurrent && (
                             <Button
                               variant="ghost"
                               size="icon"

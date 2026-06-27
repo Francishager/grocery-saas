@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X } from 'lucide-react'
-import { rentalsApi, inventoryApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
+import { rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -62,13 +62,23 @@ export default function RentalsPage() {
   const [customerId, setCustomerId] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [hireDate, setHireDate] = useState(new Date().toISOString().split('T')[0])
   const [expectedReturnDate, setExpectedReturnDate] = useState('')
   const [depositAmount, setDepositAmount] = useState(0)
   const [amountPaid, setAmountPaid] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [mobileProvider, setMobileProvider] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+  const [discount, setDiscount] = useState(0)
+  const [guarantorName, setGuarantorName] = useState('')
+  const [guarantorPhone, setGuarantorPhone] = useState('')
+  const [customerNin, setCustomerNin] = useState('')
+  const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const [notes, setNotes] = useState('')
   const [branchId, setBranchId] = useState('')
   const [selectedItems, setSelectedItems] = useState<{ productId: string; quantity: number; unitHirePrice: number; rentalPeriod: string; periods: number; conditionOut: string }[]>([])
+  const formRef = useRef<HTMLDivElement>(null)
 
   // Return form state
   const [returnConditions, setReturnConditions] = useState<Record<string, string>>({})
@@ -85,8 +95,16 @@ export default function RentalsPage() {
   useEffect(() => {
     loadRentals()
     loadBranches()
+    loadTaxConfig()
     if (canViewReport) loadSummary()
   }, [statusFilter])
+
+  const loadTaxConfig = async () => {
+    try {
+      const data = await settingsApi.get()
+      setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
+    } catch {}
+  }
 
   const loadRentals = async () => {
     setLoading(true)
@@ -133,13 +151,24 @@ export default function RentalsPage() {
     setCustomerId('')
     setCustomerName('')
     setCustomerPhone('')
+    setHireDate(new Date().toISOString().split('T')[0])
     setExpectedReturnDate('')
     setDepositAmount(0)
     setAmountPaid(0)
     setPaymentMethod('cash')
+    setMobileProvider('')
+    setPhoneNumber('')
+    setTransactionId('')
+    setDiscount(0)
+    setGuarantorName('')
+    setGuarantorPhone('')
+    setCustomerNin('')
     setNotes('')
     setSelectedItems([])
     loadRentalItems()
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 100)
   }
 
   const openReturnForm = (rental: Rental) => {
@@ -185,7 +214,10 @@ export default function RentalsPage() {
     setSelectedItems(selectedItems.filter((si) => si.productId !== productId))
   }
 
-  const totalAmount = selectedItems.reduce((sum, si) => sum + si.unitHirePrice * si.quantity * si.periods, 0)
+  const subtotal = selectedItems.reduce((sum, si) => sum + si.unitHirePrice * si.quantity * si.periods, 0)
+  const taxableAmount = Math.max(0, subtotal - discount)
+  const taxAmount = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
+  const totalAmount = Math.max(0, taxableAmount + taxAmount)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -204,10 +236,18 @@ export default function RentalsPage() {
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         items: selectedItems,
+        hireDate,
         expectedReturnDate,
         depositAmount,
         amountPaid,
         paymentMethod,
+        mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
+        phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
+        transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
+        discount,
+        guarantorName: guarantorName || undefined,
+        guarantorPhone: guarantorPhone || undefined,
+        customerNin: customerNin || undefined,
         notes,
         branchId: branchId || undefined,
       })
@@ -295,6 +335,21 @@ export default function RentalsPage() {
               <div><span className="font-medium">Deposit:</span> {formatCurrency(selectedRental.depositAmount)} ({selectedRental.depositStatus})</div>
               <div><span className="font-medium">Paid:</span> {formatCurrency(selectedRental.amountPaid)}</div>
               <div><span className="font-medium">Balance:</span> {formatCurrency(selectedRental.balance)}</div>
+              {(selectedRental as any).discount > 0 && (
+                <div><span className="font-medium">Discount:</span> {formatCurrency((selectedRental as any).discount)}</div>
+              )}
+              {(selectedRental as any).taxAmount > 0 && (
+                <div><span className="font-medium">Tax:</span> {formatCurrency((selectedRental as any).taxAmount)}</div>
+              )}
+              {(selectedRental as any).guarantorName && (
+                <div><span className="font-medium">Guarantor:</span> {(selectedRental as any).guarantorName} ({(selectedRental as any).guarantorPhone || '—'})</div>
+              )}
+              {(selectedRental as any).customerNin && (
+                <div><span className="font-medium">National ID (NIN):</span> {(selectedRental as any).customerNin}</div>
+              )}
+              {selectedRental.paymentMethod && selectedRental.paymentMethod !== 'cash' && (
+                <div><span className="font-medium">Payment:</span> {selectedRental.paymentMethod}{(selectedRental as any).transactionId ? ` — ${(selectedRental as any).transactionId}` : ''}</div>
+              )}
             </div>
             {selectedRental.notes && (
               <div className="text-sm"><span className="font-medium">Notes:</span> {selectedRental.notes}</div>
@@ -512,34 +567,57 @@ export default function RentalsPage() {
 
       {/* New Rental Form */}
       {showForm && (
-        <Card>
+        <Card ref={formRef}>
           <CardHeader>
             <CardTitle>New Hire — Hire Out Items</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Customer info */}
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-5">
                 <div className="space-y-2">
-                  <Label htmlFor="customerName">Customer Name</Label>
+                  <Label htmlFor="customerName">Customer Name *</Label>
                   <Input
                     id="customerName"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Walk-in or customer name"
+                    placeholder="Customer full name"
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="customerPhone">Customer Phone</Label>
+                  <Label htmlFor="customerPhone">Customer Phone *</Label>
                   <Input
                     id="customerPhone"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="Phone number"
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="expectedReturnDate">Expected Return Date</Label>
+                  <Label htmlFor="customerNin">National ID No. (NIN) *</Label>
+                  <Input
+                    id="customerNin"
+                    value={customerNin}
+                    onChange={(e) => setCustomerNin(e.target.value)}
+                    placeholder="e.g. CF9802001234567"
+                    maxLength={20}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hireDate">Hire Date *</Label>
+                  <Input
+                    id="hireDate"
+                    type="date"
+                    value={hireDate}
+                    onChange={(e) => setHireDate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="expectedReturnDate">Expected Return Date *</Label>
                   <Input
                     id="expectedReturnDate"
                     type="date"
@@ -667,14 +745,33 @@ export default function RentalsPage() {
                       )
                     })}
                   </div>
-                  <div className="text-right text-sm font-medium">
-                    Total: {formatCurrency(totalAmount)}
+                  <div className="space-y-1 text-right text-sm">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Subtotal:</span> <span>{formatCurrency(subtotal)}</span></div>
+                    {discount > 0 && (
+                      <div className="flex justify-between text-muted-foreground"><span>Discount:</span> <span>-{formatCurrency(discount)}</span></div>
+                    )}
+                    {taxAmount > 0 && (
+                      <div className="flex justify-between text-muted-foreground"><span>Tax{taxConfig?.taxId ? ` (${taxConfig.taxId})` : ''}:</span> <span>{formatCurrency(taxAmount)}</span></div>
+                    )}
+                    <div className="flex justify-between font-medium"><span>Total:</span> <span>{formatCurrency(totalAmount)}</span></div>
                   </div>
                 </div>
               )}
 
-              {/* Payment */}
+              {/* Discount & Payment */}
               <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="discount">Discount</Label>
+                  <Input
+                    id="discount"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={discount}
+                    onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="depositAmount">Security Deposit</Label>
                   <Input
@@ -697,19 +794,100 @@ export default function RentalsPage() {
                     onChange={(e) => setAmountPaid(parseFloat(e.target.value) || 0)}
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paymentMethod">Payment Method *</Label>
+                <select
+                  id="paymentMethod"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  required
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="mobile_money">Mobile Money</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                </select>
+              </div>
+
+              {/* Mobile Money fields */}
+              {paymentMethod === 'mobile_money' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <Label className="text-sm font-medium">Network Provider *</Label>
+                      <select
+                        value={mobileProvider}
+                        onChange={(e) => setMobileProvider(e.target.value)}
+                        className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="">Select provider</option>
+                        <option value="MTN">MTN</option>
+                        <option value="Airtel">Airtel</option>
+                        <option value="Zamtel">Zamtel</option>
+                        <option value="Vodafone">Vodafone</option>
+                        <option value="M-Pesa">M-Pesa</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">Phone Number *</Label>
+                      <Input
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        placeholder="e.g. 0977123456"
+                        type="tel"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">Transaction ID *</Label>
+                      <Input
+                        value={transactionId}
+                        onChange={(e) => setTransactionId(e.target.value)}
+                        placeholder="e.g. TXN123456789"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Card fields */}
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                  <div>
+                    <Label className="text-sm font-medium">Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Guarantor (optional) */}
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="paymentMethod">Payment Method</Label>
-                  <select
-                    id="paymentMethod"
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="mobile_money">Mobile Money</option>
-                    <option value="card">Card</option>
-                    <option value="bank_transfer">Bank Transfer</option>
-                  </select>
+                  <Label htmlFor="guarantorName">Guarantor Name <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <Input
+                    id="guarantorName"
+                    value={guarantorName}
+                    onChange={(e) => setGuarantorName(e.target.value)}
+                    placeholder="Guarantor full name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guarantorPhone">Guarantor Phone <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <Input
+                    id="guarantorPhone"
+                    value={guarantorPhone}
+                    onChange={(e) => setGuarantorPhone(e.target.value)}
+                    placeholder="Guarantor phone number"
+                  />
                 </div>
               </div>
 
@@ -728,7 +906,20 @@ export default function RentalsPage() {
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
                   Cancel
                 </Button>
-                <Button type="submit">
+                <Button
+                  type="submit"
+                  disabled={
+                    !customerName.trim() ||
+                    !customerPhone.trim() ||
+                    !customerNin.trim() ||
+                    !hireDate ||
+                    !expectedReturnDate ||
+                    selectedItems.length === 0 ||
+                    (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
+                     paymentMethod === 'card' ? !transactionId.trim() :
+                     false)
+                  }
+                >
                   <Clock className="mr-2 h-4 w-4" />
                   Hire Out Items
                 </Button>

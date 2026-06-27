@@ -10,6 +10,26 @@ import {
 
 const router = Router();
 
+// Check the correct permission based on itemType in the request body
+function requireItemTypePermission(action) {
+  const permMap = {
+    create: { product: 'canCreateProduct', service: 'canCreateService', rental: 'canCreateRental' },
+    edit:   { product: 'canEditProduct',   service: 'canEditService',   rental: 'canEditRental' },
+    delete: { product: 'canDeleteProduct', service: 'canDeleteService', rental: 'canDeleteRental' },
+  };
+  return (req, res, next) => {
+    const itemType = req.body?.itemType || 'product';
+    const perm = permMap[action]?.[itemType] || permMap[action]?.product;
+    if (!perm) return res.status(403).json({ error: 'Permission denied' });
+    // Reuse requirePermission logic
+    const userPerms = req.user?.permissions || [];
+    if (!userPerms.includes(perm) && !userPerms.includes('*')) {
+      return res.status(403).json({ error: `Permission denied: ${perm} required` });
+    }
+    next();
+  };
+}
+
 const DEFAULT_CATEGORIES = [
   // Product categories
   { name: "Electrical Supplies", slug: "electrical-supplies", categoryType: "product" },
@@ -375,7 +395,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // Create product
-router.post("/", authenticateToken, requirePermission("canCreateProduct"), async (req, res) => {
+router.post("/", authenticateToken, requireItemTypePermission('create'), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: "body",
@@ -426,13 +446,22 @@ router.post("/", authenticateToken, requirePermission("canCreateProduct"), async
 });
 
 // Update product
-router.put("/:id", authenticateToken, requirePermission("canEditProduct"), async (req, res) => {
+router.put("/:id", authenticateToken, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const existing = await prisma.product.findFirst({
       where: scopedWhere(scope, { id: req.params.id }),
     });
     if (!existing) return res.status(404).json({ error: "Product not found" });
+
+    // Check permission based on the existing item's type
+    const existingType = existing.itemType || 'product';
+    const editPermMap = { product: 'canEditProduct', service: 'canEditService', rental: 'canEditRental' };
+    const requiredPerm = editPermMap[existingType] || 'canEditProduct';
+    const userPerms = req.user?.permissions || [];
+    if (!userPerms.includes(requiredPerm) && !userPerms.includes('*')) {
+      return res.status(403).json({ error: `Permission denied: ${requiredPerm} required` });
+    }
 
     const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
     const data = { ...body };
@@ -484,11 +513,21 @@ router.put("/:id", authenticateToken, requirePermission("canEditProduct"), async
 });
 
 // Delete product
-router.delete("/:id", authenticateToken, requirePermission("canDeleteProduct"), async (req, res) => {
+router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
     if (!product) return res.status(404).json({ error: "Product not found" });
+
+    // Check permission based on the item's type
+    const itemType = product.itemType || 'product';
+    const deletePermMap = { product: 'canDeleteProduct', service: 'canDeleteService', rental: 'canDeleteRental' };
+    const requiredPerm = deletePermMap[itemType] || 'canDeleteProduct';
+    const userPerms = req.user?.permissions || [];
+    if (!userPerms.includes(requiredPerm) && !userPerms.includes('*')) {
+      return res.status(403).json({ error: `Permission denied: ${requiredPerm} required` });
+    }
+
     await prisma.product.update({ where: { id: product.id }, data: { isActive: false } });
     res.json({ message: "Product deactivated" });
   } catch (err) {

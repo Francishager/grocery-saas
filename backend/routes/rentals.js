@@ -88,15 +88,36 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), async 
     const {
       customerId,
       items,
+      hireDate,
       expectedReturnDate,
       paymentMethod = "cash",
       amountPaid = 0,
       depositAmount = 0,
+      discount = 0,
       notes,
+      guarantorName,
+      guarantorPhone,
+      customerNin,
+      mobileProvider,
+      phoneNumber,
+      transactionId,
     } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "At least one rental item is required" });
     if (!expectedReturnDate) return res.status(400).json({ error: "Expected return date is required" });
+    if (hireDate && new Date(hireDate) > new Date(expectedReturnDate)) {
+      return res.status(400).json({ error: "Expected return date must be after hire date" });
+    }
+    if (!customerName?.trim()) return res.status(400).json({ error: "Customer name is required" });
+    if (!customerPhone?.trim()) return res.status(400).json({ error: "Customer phone is required" });
+    if (!customerNin?.trim()) return res.status(400).json({ error: "Customer National ID (NIN) is required" });
+    if (!paymentMethod) return res.status(400).json({ error: "Payment method is required" });
+    if (paymentMethod === "mobile_money" && (!mobileProvider || !phoneNumber || !transactionId)) {
+      return res.status(400).json({ error: "Mobile money requires provider, phone number, and transaction ID" });
+    }
+    if (paymentMethod === "card" && !transactionId) {
+      return res.status(400).json({ error: "Card payment requires a transaction ID" });
+    }
 
     // Verify customer if provided
     let customer = null;
@@ -140,7 +161,16 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), async 
       };
     });
 
-    const totalAmount = rentalItems.reduce((sum, i) => sum + i.totalAmount, 0);
+    const subtotal = rentalItems.reduce((sum, i) => sum + i.totalAmount, 0);
+    const discountAmount = toMoney(discount);
+    const taxableAmount = Math.max(0, subtotal - discountAmount);
+
+    // Fetch tenant tax settings
+    const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
+    const taxRate = (tenant?.taxEnabled && tenant?.taxRate) ? tenant.taxRate / 100 : 0;
+    const taxAmount = Math.round(taxableAmount * taxRate * 100) / 100;
+    const totalAmount = Math.max(0, taxableAmount + taxAmount);
+
     const deposit = toMoney(depositAmount);
     const paid = Math.min(toMoney(amountPaid), totalAmount);
     const balance = Math.max(0, totalAmount - paid);
@@ -155,6 +185,7 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), async 
           branchId: scope.branchId,
           customerId: customerId || null,
           userId: req.user.id,
+          hireDate: hireDate ? new Date(hireDate) : undefined,
           expectedReturnDate: new Date(expectedReturnDate),
           totalAmount,
           depositAmount: deposit,
@@ -163,6 +194,15 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), async 
           balance,
           paymentStatus,
           paymentMethod,
+          mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
+          phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
+          transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
+          discount: discountAmount,
+          taxRate: tenant?.taxRate || 0,
+          taxAmount,
+          guarantorName: guarantorName || null,
+          guarantorPhone: guarantorPhone || null,
+          customerNin: customerNin || null,
           status: "active",
           notes,
           items: {
