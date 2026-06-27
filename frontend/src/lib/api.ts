@@ -184,8 +184,8 @@ export const dashboardApi = {
 
 // Inventory endpoints
 export const inventoryApi = {
-  list: async (q?: string, branchId?: string) => {
-    const data = await api.get<any>('/api/inventory', { params: { search: q, branchId } })
+  list: async (q?: string, branchId?: string, itemType?: string) => {
+    const data = await api.get<any>('/api/inventory', { params: { search: q, branchId, itemType } })
     const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
     return products.map(mapProductToInventory)
   },
@@ -207,6 +207,15 @@ export const inventoryApi = {
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
       baseUnit: data.baseUnit || 'Piece',
+      itemType: data.itemType || 'product',
+      serviceCategory: data.serviceCategory || null,
+      estimatedHours: data.estimatedHours || null,
+      duration: data.duration || null,
+      description: data.description || null,
+      rentalPrice: data.rentalPrice || null,
+      rentalPeriod: data.rentalPeriod || null,
+      depositAmount: data.depositAmount || null,
+      replacementValue: data.replacementValue || null,
     } }),
 
   update: (id: string, data: any) =>
@@ -221,6 +230,15 @@ export const inventoryApi = {
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
       baseUnit: data.baseUnit || 'Piece',
+      itemType: data.itemType || 'product',
+      serviceCategory: data.serviceCategory || null,
+      estimatedHours: data.estimatedHours || null,
+      duration: data.duration || null,
+      description: data.description || null,
+      rentalPrice: data.rentalPrice || null,
+      rentalPeriod: data.rentalPeriod || null,
+      depositAmount: data.depositAmount || null,
+      replacementValue: data.replacementValue || null,
     } }),
 
   delete: (id: string) =>
@@ -259,7 +277,44 @@ function mapProductToInventory(p: any): InventoryItem {
     updated_at: p.updatedAt || p.createdAt,
     baseUnit: p.baseUnit || 'Piece',
     units: p.units || [],
+    itemType: p.itemType || 'product',
+    serviceCategory: p.serviceCategory || null,
+    estimatedHours: p.estimatedHours || null,
+    duration: p.duration || null,
+    description: p.description || null,
+    rentalPrice: p.rentalPrice || null,
+    rentalPeriod: p.rentalPeriod || null,
+    depositAmount: p.depositAmount || null,
+    replacementValue: p.replacementValue || null,
   }
+}
+
+// Rentals endpoints
+export const rentalsApi = {
+  list: async (params?: { status?: string; customerId?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
+    const data = await api.get<any>('/api/rentals', { params })
+    return data
+  },
+
+  get: async (id: string) => {
+    const data = await api.get<any>(`/api/rentals/${id}`)
+    return data
+  },
+
+  create: (data: any) =>
+    api.post<any>('/api/rentals', { body: data }),
+
+  return: (id: string, data: { items?: any[]; depositStatus?: string; damageFees?: Record<string, number> }) =>
+    api.post<any>(`/api/rentals/${id}/return`, { body: data }),
+
+  update: (id: string, data: any) =>
+    api.put<any>(`/api/rentals/${id}`, { body: data }),
+
+  cancel: (id: string) =>
+    api.delete<any>(`/api/rentals/${id}`),
+
+  summary: () =>
+    api.get<any>('/api/rentals/report/summary'),
 }
 
 // Sales endpoints
@@ -327,8 +382,9 @@ export const purchasesApi = {
 
 // Categories endpoint
 export const categoriesApi = {
-  list: async () => {
-    const data = await api.get<any>('/api/inventory/categories')
+  list: async (type?: string) => {
+    const url = type ? `/api/inventory/categories?type=${type}` : '/api/inventory/categories'
+    const data = await api.get<any>(url)
     const categories = Array.isArray(data)
       ? data
       : Array.isArray(data?.categories)
@@ -791,6 +847,17 @@ export interface InventoryItem {
   branchId?: string | null
   branch?: BranchOption | null
   updated_at: string
+  baseUnit?: string
+  units?: any[]
+  itemType?: 'product' | 'service' | 'rental'
+  serviceCategory?: string | null
+  estimatedHours?: number | null
+  duration?: string | null
+  description?: string | null
+  rentalPrice?: number | null
+  rentalPeriod?: string | null
+  depositAmount?: number | null
+  replacementValue?: number | null
 }
 
 export interface ReceiptPreview {

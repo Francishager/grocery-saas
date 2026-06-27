@@ -11,76 +11,240 @@ import {
 const router = Router();
 
 const DEFAULT_CATEGORIES = [
-  { name: "Electrical Supplies", slug: "electrical-supplies" },
-  { name: "Electric Cables & Wires", slug: "electric-cables-wires" },
-  { name: "Switches & Sockets", slug: "switches-sockets" },
-  { name: "Circuit Breakers", slug: "circuit-breakers" },
-  { name: "Lighting & Bulbs", slug: "lighting-bulbs" },
-  { name: "Mobile Phones", slug: "mobile-phones" },
-  { name: "Mobile Accessories", slug: "mobile-accessories" },
-  { name: "Phone Chargers", slug: "phone-chargers" },
-  { name: "Power Banks", slug: "power-banks" },
-  { name: "Earphones & Headsets", slug: "earphones-headsets" },
-  { name: "Phone Cases", slug: "phone-cases" },
-  { name: "Screen Protectors", slug: "screen-protectors" },
-  { name: "Hardware Tools", slug: "hardware-tools" },
-  { name: "Nails & Screws", slug: "nails-screws" },
-  { name: "Plumbing Accessories", slug: "plumbing-accessories" },
-  { name: "Building Hardware", slug: "building-hardware" },
-  { name: "General Merchandise", slug: "general-merchandise" },
-  { name: "Wholesale Goods", slug: "wholesale-goods" },
-  { name: "Supermarket Essentials", slug: "supermarket-essentials" },
-  { name: "Groceries", slug: "groceries" },
-  { name: "Beverages", slug: "beverages" },
-  { name: "Dairy Products", slug: "dairy-products" },
-  { name: "Bakery", slug: "bakery" },
-  { name: "Snacks", slug: "snacks" },
-  { name: "Confectionery", slug: "confectionery" },
-  { name: "Fruits", slug: "fruits" },
-  { name: "Vegetables", slug: "vegetables" },
-  { name: "Meat & Poultry", slug: "meat-poultry" },
-  { name: "Frozen Foods", slug: "frozen-foods" },
-  { name: "Household Items", slug: "household-items" },
-  { name: "Personal Care", slug: "personal-care" },
-  { name: "Baby Products", slug: "baby-products" },
-  { name: "Cleaning Supplies", slug: "cleaning-supplies" },
-  { name: "Laundry Products", slug: "laundry-products" },
-  { name: "Stationery", slug: "stationery" },
-  { name: "Books", slug: "books" },
-  { name: "Office Supplies", slug: "office-supplies" },
-  { name: "Hardware", slug: "hardware" },
-  { name: "Building Materials", slug: "building-materials" },
-  { name: "Paints", slug: "paints" },
-  { name: "Plumbing", slug: "plumbing" },
-  { name: "Electrical", slug: "electrical" },
-  { name: "Electronics", slug: "electronics" },
-  { name: "Phone Accessories", slug: "phone-accessories" },
-  { name: "Computers", slug: "computers" },
-  { name: "Printers", slug: "printers" },
-  { name: "Cosmetics", slug: "cosmetics" },
-  { name: "Beauty Products", slug: "beauty-products" },
-  { name: "Salon Supplies", slug: "salon-supplies" },
-  { name: "Pharmaceuticals", slug: "pharmaceuticals" },
-  { name: "Medical Supplies", slug: "medical-supplies" },
-  { name: "Clothing", slug: "clothing" },
-  { name: "Shoes", slug: "shoes" },
-  { name: "Bags", slug: "bags" },
-  { name: "Fashion Accessories", slug: "fashion-accessories" },
-  { name: "Jewelry", slug: "jewelry" },
-  { name: "Home Appliances", slug: "home-appliances" },
-  { name: "Kitchenware", slug: "kitchenware" },
-  { name: "Furniture", slug: "furniture" },
-  { name: "Bedding", slug: "bedding" },
-  { name: "Pet Supplies", slug: "pet-supplies" },
-  { name: "Agricultural Inputs", slug: "agricultural-inputs" },
-  { name: "Seeds", slug: "seeds" },
-  { name: "Animal Feeds", slug: "animal-feeds" },
-  { name: "Restaurant Supplies", slug: "restaurant-supplies" },
-  { name: "Liquor & Wines", slug: "liquor-wines" },
-  { name: "Water", slug: "water" },
-  { name: "Industrial Supplies", slug: "industrial-supplies" },
-  { name: "Spare Parts", slug: "spare-parts" },
-  { name: "Other", slug: "other" },
+  // Product categories
+  { name: "Electrical Supplies", slug: "electrical-supplies", categoryType: "product" },
+  { name: "Electric Cables & Wires", slug: "electric-cables-wires", categoryType: "product" },
+  { name: "Switches & Sockets", slug: "switches-sockets", categoryType: "product" },
+  { name: "Circuit Breakers", slug: "circuit-breakers", categoryType: "product" },
+  { name: "Lighting & Bulbs", slug: "lighting-bulbs", categoryType: "product" },
+  { name: "Mobile Phones", slug: "mobile-phones", categoryType: "product" },
+  { name: "Mobile Accessories", slug: "mobile-accessories", categoryType: "product" },
+  { name: "Phone Chargers", slug: "phone-chargers", categoryType: "product" },
+  { name: "Power Banks", slug: "power-banks", categoryType: "product" },
+  { name: "Earphones & Headsets", slug: "earphones-headsets", categoryType: "product" },
+  { name: "Phone Cases", slug: "phone-cases", categoryType: "product" },
+  { name: "Screen Protectors", slug: "screen-protectors", categoryType: "product" },
+  { name: "Hardware Tools", slug: "hardware-tools", categoryType: "product" },
+  { name: "Nails & Screws", slug: "nails-screws", categoryType: "product" },
+  { name: "Plumbing Accessories", slug: "plumbing-accessories", categoryType: "product" },
+  { name: "Building Hardware", slug: "building-hardware", categoryType: "product" },
+  { name: "General Merchandise", slug: "general-merchandise", categoryType: "product" },
+  { name: "Wholesale Goods", slug: "wholesale-goods", categoryType: "product" },
+  { name: "Supermarket Essentials", slug: "supermarket-essentials", categoryType: "product" },
+  { name: "Groceries", slug: "groceries", categoryType: "product" },
+  { name: "Beverages", slug: "beverages", categoryType: "product" },
+  { name: "Dairy Products", slug: "dairy-products", categoryType: "product" },
+  { name: "Bakery", slug: "bakery", categoryType: "product" },
+  { name: "Snacks", slug: "snacks", categoryType: "product" },
+  { name: "Confectionery", slug: "confectionery", categoryType: "product" },
+  { name: "Fruits", slug: "fruits", categoryType: "product" },
+  { name: "Vegetables", slug: "vegetables", categoryType: "product" },
+  { name: "Meat & Poultry", slug: "meat-poultry", categoryType: "product" },
+  { name: "Frozen Foods", slug: "frozen-foods", categoryType: "product" },
+  { name: "Household Items", slug: "household-items", categoryType: "product" },
+  { name: "Personal Care", slug: "personal-care", categoryType: "product" },
+  { name: "Baby Products", slug: "baby-products", categoryType: "product" },
+  { name: "Cleaning Supplies", slug: "cleaning-supplies", categoryType: "product" },
+  { name: "Laundry Products", slug: "laundry-products", categoryType: "product" },
+  { name: "Stationery", slug: "stationery", categoryType: "product" },
+  { name: "Books", slug: "books", categoryType: "product" },
+  { name: "Office Supplies", slug: "office-supplies", categoryType: "product" },
+  { name: "Hardware", slug: "hardware", categoryType: "product" },
+  { name: "Building Materials", slug: "building-materials", categoryType: "product" },
+  { name: "Paints", slug: "paints", categoryType: "product" },
+  { name: "Plumbing", slug: "plumbing", categoryType: "product" },
+  { name: "Electrical", slug: "electrical", categoryType: "product" },
+  { name: "Electronics", slug: "electronics", categoryType: "product" },
+  { name: "Phone Accessories", slug: "phone-accessories", categoryType: "product" },
+  { name: "Computers", slug: "computers", categoryType: "product" },
+  { name: "Printers", slug: "printers", categoryType: "product" },
+  { name: "Cosmetics", slug: "cosmetics", categoryType: "product" },
+  { name: "Beauty Products", slug: "beauty-products", categoryType: "product" },
+  { name: "Salon Supplies", slug: "salon-supplies", categoryType: "product" },
+  { name: "Pharmaceuticals", slug: "pharmaceuticals", categoryType: "product" },
+  { name: "Medical Supplies", slug: "medical-supplies", categoryType: "product" },
+  { name: "Clothing", slug: "clothing", categoryType: "product" },
+  { name: "Shoes", slug: "shoes", categoryType: "product" },
+  { name: "Bags", slug: "bags", categoryType: "product" },
+  { name: "Fashion Accessories", slug: "fashion-accessories", categoryType: "product" },
+  { name: "Jewelry", slug: "jewelry", categoryType: "product" },
+  { name: "Home Appliances", slug: "home-appliances", categoryType: "product" },
+  { name: "Kitchenware", slug: "kitchenware", categoryType: "product" },
+  { name: "Furniture", slug: "furniture", categoryType: "product" },
+  { name: "Bedding", slug: "bedding", categoryType: "product" },
+  { name: "Pet Supplies", slug: "pet-supplies", categoryType: "product" },
+  { name: "Agricultural Inputs", slug: "agricultural-inputs", categoryType: "product" },
+  { name: "Seeds", slug: "seeds", categoryType: "product" },
+  { name: "Animal Feeds", slug: "animal-feeds", categoryType: "product" },
+  { name: "Restaurant Supplies", slug: "restaurant-supplies", categoryType: "product" },
+  { name: "Liquor & Wines", slug: "liquor-wines", categoryType: "product" },
+  { name: "Water", slug: "water", categoryType: "product" },
+  { name: "Industrial Supplies", slug: "industrial-supplies", categoryType: "product" },
+  { name: "Spare Parts", slug: "spare-parts", categoryType: "product" },
+  { name: "Other", slug: "other", categoryType: "product" },
+  // Service categories
+  { name: "IT Services", slug: "it-services", categoryType: "service" },
+  { name: "Web Development", slug: "web-development", categoryType: "service" },
+  { name: "Graphic Design", slug: "graphic-design", categoryType: "service" },
+  { name: "Legal Services", slug: "legal-services", categoryType: "service" },
+  { name: "Accounting Services", slug: "accounting-services", categoryType: "service" },
+  { name: "Consulting", slug: "consulting", categoryType: "service" },
+  { name: "Cleaning Services", slug: "cleaning-services", categoryType: "service" },
+  { name: "Repairs & Maintenance", slug: "repairs-maintenance", categoryType: "service" },
+  { name: "Beauty & Salon", slug: "beauty-salon", categoryType: "service" },
+  { name: "Barbershop", slug: "barbershop", categoryType: "service" },
+  { name: "Bride & Groom", slug: "bride-groom", categoryType: "service" },
+  { name: "Spa & Wellness", slug: "spa-wellness", categoryType: "service" },
+  { name: "Transport Services", slug: "transport-services", categoryType: "service" },
+  { name: "Marketing Services", slug: "marketing-services", categoryType: "service" },
+  { name: "Printing & Photocopy", slug: "printing-photocopy", categoryType: "service" },
+  { name: "Photography & Videography", slug: "photography-videography", categoryType: "service" },
+  { name: "Catering Services", slug: "catering-services", categoryType: "service" },
+  { name: "Event Planning", slug: "event-planning", categoryType: "service" },
+  { name: "Training & Coaching", slug: "training-coaching", categoryType: "service" },
+  { name: "Healthcare Services", slug: "healthcare-services", categoryType: "service" },
+  { name: "Real Estate Services", slug: "real-estate-services", categoryType: "service" },
+  { name: "Insurance Services", slug: "insurance-services", categoryType: "service" },
+  { name: "Security Services", slug: "security-services", categoryType: "service" },
+  { name: "Courier & Delivery", slug: "courier-delivery", categoryType: "service" },
+  { name: "Installation Services", slug: "installation-services", categoryType: "service" },
+  { name: "Support Contracts", slug: "support-contracts", categoryType: "service" },
+  { name: "Maintenance Plans", slug: "maintenance-plans", categoryType: "service" },
+  { name: "Other Services", slug: "other-services", categoryType: "service" },
+  // More service categories
+  { name: "Laundry & Dry Cleaning", slug: "laundry-dry-cleaning", categoryType: "service" },
+  { name: "Tailoring & Alterations", slug: "tailoring-alterations", categoryType: "service" },
+  { name: "Car Wash & Valet", slug: "car-wash-valet", categoryType: "service" },
+  { name: "Auto Repair Services", slug: "auto-repair-services", categoryType: "service" },
+  { name: "Electrician Services", slug: "electrician-services", categoryType: "service" },
+  { name: "Plumbing Services", slug: "plumbing-services", categoryType: "service" },
+  { name: "Carpentry Services", slug: "carpentry-services", categoryType: "service" },
+  { name: "Masonry Services", slug: "masonry-services", categoryType: "service" },
+  { name: "Roofing Services", slug: "roofing-services", categoryType: "service" },
+  { name: "Painting Services", slug: "painting-services", categoryType: "service" },
+  { name: "Landscaping & Gardening", slug: "landscaping-gardening", categoryType: "service" },
+  { name: "Pest Control", slug: "pest-control", categoryType: "service" },
+  { name: "Moving & Relocation", slug: "moving-relocation", categoryType: "service" },
+  { name: "Storage Services", slug: "storage-services", categoryType: "service" },
+  { name: "Tutoring & Education", slug: "tutoring-education", categoryType: "service" },
+  { name: "Music Lessons", slug: "music-lessons", categoryType: "service" },
+  { name: "Fitness & Personal Training", slug: "fitness-personal-training", categoryType: "service" },
+  { name: "Yoga & Meditation", slug: "yoga-meditation", categoryType: "service" },
+  { name: "Massage Therapy", slug: "massage-therapy", categoryType: "service" },
+  { name: "Nail Services", slug: "nail-services", categoryType: "service" },
+  { name: "Hairdressing", slug: "hairdressing", categoryType: "service" },
+  { name: "Makeup Services", slug: "makeup-services", categoryType: "service" },
+  { name: "Event Decor", slug: "event-decor", categoryType: "service" },
+  { name: "DJ Services", slug: "dj-services", categoryType: "service" },
+  { name: "MC & Hosting", slug: "mc-hosting", categoryType: "service" },
+  { name: "Catering & Food Services", slug: "catering-food-services", categoryType: "service" },
+  { name: "Bakery Services", slug: "bakery-services", categoryType: "service" },
+  { name: "Cooking Classes", slug: "cooking-classes", categoryType: "service" },
+  { name: "Translation Services", slug: "translation-services", categoryType: "service" },
+  { name: "Writing & Copywriting", slug: "writing-copywriting", categoryType: "service" },
+  { name: "Video Editing", slug: "video-editing", categoryType: "service" },
+  { name: "Social Media Management", slug: "social-media-management", categoryType: "service" },
+  { name: "SEO Services", slug: "seo-services", categoryType: "service" },
+  { name: "App Development", slug: "app-development", categoryType: "service" },
+  { name: "Software Installation", slug: "software-installation", categoryType: "service" },
+  { name: "Computer Repair", slug: "computer-repair", categoryType: "service" },
+  { name: "Phone Repair", slug: "phone-repair", categoryType: "service" },
+  { name: "Data Recovery", slug: "data-recovery", categoryType: "service" },
+  { name: "Network Setup", slug: "network-setup", categoryType: "service" },
+  { name: "Cybersecurity Services", slug: "cybersecurity-services", categoryType: "service" },
+  { name: "Bookkeeping", slug: "bookkeeping", categoryType: "service" },
+  { name: "Tax Preparation", slug: "tax-preparation", categoryType: "service" },
+  { name: "Audit Services", slug: "audit-services", categoryType: "service" },
+  { name: "Business Registration", slug: "business-registration", categoryType: "service" },
+  { name: "Notary Services", slug: "notary-services", categoryType: "service" },
+  { name: "Immigration Services", slug: "immigration-services", categoryType: "service" },
+  { name: "Logistics & Freight", slug: "logistics-freight", categoryType: "service" },
+  { name: "Customs Clearance", slug: "customs-clearance", categoryType: "service" },
+  { name: "Waste Management", slug: "waste-management", categoryType: "service" },
+  { name: "Solar Installation", slug: "solar-installation", categoryType: "service" },
+  { name: "Generator Servicing", slug: "generator-servicing", categoryType: "service" },
+  { name: "AC & Refrigeration", slug: "ac-refrigeration", categoryType: "service" },
+  { name: "Interior Design", slug: "interior-design", categoryType: "service" },
+  { name: "Architecture Services", slug: "architecture-services", categoryType: "service" },
+  { name: "Surveying Services", slug: "surveying-services", categoryType: "service" },
+  { name: "Veterinary Services", slug: "veterinary-services", categoryType: "service" },
+  { name: "Laboratory Services", slug: "laboratory-services", categoryType: "service" },
+  { name: "Ambulance Services", slug: "ambulance-services", categoryType: "service" },
+  { name: "Home Nursing", slug: "home-nursing", categoryType: "service" },
+  { name: "Counseling Services", slug: "counseling-services", categoryType: "service" },
+  { name: "Childcare Services", slug: "childcare-services", categoryType: "service" },
+  { name: "Elderly Care", slug: "elderly-care", categoryType: "service" },
+  { name: "Housekeeping", slug: "housekeeping", categoryType: "service" },
+  { name: "Pool Cleaning", slug: "pool-cleaning", categoryType: "service" },
+  { name: "Fumigation Services", slug: "fumigation-services", categoryType: "service" },
+  { name: "Equipment Servicing", slug: "equipment-servicing", categoryType: "service" },
+  { name: "Welding Services", slug: "welding-services", categoryType: "service" },
+  { name: "Fabrication Services", slug: "fabrication-services", categoryType: "service" },
+  { name: "Engraving Services", slug: "engraving-services", categoryType: "service" },
+  { name: "3D Printing Services", slug: "3d-printing-services", categoryType: "service" },
+  { name: "Photocopy & Scanning", slug: "photocopy-scanning", categoryType: "service" },
+  { name: "Document Certification", slug: "document-certification", categoryType: "service" },
+  { name: "Visa Processing", slug: "visa-processing", categoryType: "service" },
+  { name: "Ticketing & Travel", slug: "ticketing-travel", categoryType: "service" },
+  { name: "Tour Guide Services", slug: "tour-guide-services", categoryType: "service" },
+  { name: "Hotel Booking Services", slug: "hotel-booking-services", categoryType: "service" },
+  // Rental categories
+  { name: "Wedding & Bridal Rentals", slug: "wedding-bridal-rentals", categoryType: "rental" },
+  { name: "Bride & Groom Attire", slug: "bride-groom-attire", categoryType: "rental" },
+  { name: "Wedding Decor Rentals", slug: "wedding-decor-rentals", categoryType: "rental" },
+  { name: "Event Tent Rentals", slug: "event-tent-rentals", categoryType: "rental" },
+  { name: "Tables & Chairs Rentals", slug: "tables-chairs-rentals", categoryType: "rental" },
+  { name: "Sound System Rentals", slug: "sound-system-rentals", categoryType: "rental" },
+  { name: "Lighting Equipment Rentals", slug: "lighting-equipment-rentals", categoryType: "rental" },
+  { name: "Generator Rentals", slug: "generator-rentals", categoryType: "rental" },
+  { name: "Construction Equipment Rentals", slug: "construction-equipment-rentals", categoryType: "rental" },
+  { name: "Power Tools Rentals", slug: "power-tools-rentals", categoryType: "rental" },
+  { name: "Heavy Machinery Rentals", slug: "heavy-machinery-rentals", categoryType: "rental" },
+  { name: "Scaffolding Rentals", slug: "scaffolding-rentals", categoryType: "rental" },
+  { name: "Ladder Rentals", slug: "ladder-rentals", categoryType: "rental" },
+  { name: "Vehicle Rentals", slug: "vehicle-rentals", categoryType: "rental" },
+  { name: "Car Rentals", slug: "car-rentals", categoryType: "rental" },
+  { name: "Truck Rentals", slug: "truck-rentals", categoryType: "rental" },
+  { name: "Motorcycle Rentals", slug: "motorcycle-rentals", categoryType: "rental" },
+  { name: "Bicycle Rentals", slug: "bicycle-rentals", categoryType: "rental" },
+  { name: "Boat Rentals", slug: "boat-rentals", categoryType: "rental" },
+  { name: "Camera & Photography Rentals", slug: "camera-photography-rentals", categoryType: "rental" },
+  { name: "Video Equipment Rentals", slug: "video-equipment-rentals", categoryType: "rental" },
+  { name: "Audio Equipment Rentals", slug: "audio-equipment-rentals", categoryType: "rental" },
+  { name: "DJ Equipment Rentals", slug: "dj-equipment-rentals", categoryType: "rental" },
+  { name: "Stage & Platform Rentals", slug: "stage-platform-rentals", categoryType: "rental" },
+  { name: "Party Supplies Rentals", slug: "party-supplies-rentals", categoryType: "rental" },
+  { name: "Furniture Rentals", slug: "furniture-rentals", categoryType: "rental" },
+  { name: "Office Equipment Rentals", slug: "office-equipment-rentals", categoryType: "rental" },
+  { name: "Computer & Laptop Rentals", slug: "computer-laptop-rentals", categoryType: "rental" },
+  { name: "Printer Rentals", slug: "printer-rentals", categoryType: "rental" },
+  { name: "Projector Rentals", slug: "projector-rentals", categoryType: "rental" },
+  { name: "TV & Display Rentals", slug: "tv-display-rentals", categoryType: "rental" },
+  { name: "Gaming Equipment Rentals", slug: "gaming-equipment-rentals", categoryType: "rental" },
+  { name: "Sports Equipment Rentals", slug: "sports-equipment-rentals", categoryType: "rental" },
+  { name: "Camping Gear Rentals", slug: "camping-gear-rentals", categoryType: "rental" },
+  { name: "Outdoor Equipment Rentals", slug: "outdoor-equipment-rentals", categoryType: "rental" },
+  { name: "Costume Rentals", slug: "costume-rentals", categoryType: "rental" },
+  { name: "Formal Wear Rentals", slug: "formal-wear-rentals", categoryType: "rental" },
+  { name: "Suit & Tuxedo Rentals", slug: "suit-tuxedo-rentals", categoryType: "rental" },
+  { name: "Gown Rentals", slug: "gown-rentals", categoryType: "rental" },
+  { name: "Jewelry Rentals", slug: "jewelry-rentals", categoryType: "rental" },
+  { name: "Linens & Bedding Rentals", slug: "linens-bedding-rentals", categoryType: "rental" },
+  { name: "Tableware Rentals", slug: "tableware-rentals", categoryType: "rental" },
+  { name: "Kitchen Equipment Rentals", slug: "kitchen-equipment-rentals", categoryType: "rental" },
+  { name: "Cooler & Fridge Rentals", slug: "cooler-fridge-rentals", categoryType: "rental" },
+  { name: "Industrial Equipment Rentals", slug: "industrial-equipment-rentals", categoryType: "rental" },
+  { name: "Medical Equipment Rentals", slug: "medical-equipment-rentals", categoryType: "rental" },
+  { name: "Wheelchair Rentals", slug: "wheelchair-rentals", categoryType: "rental" },
+  { name: "Baby Equipment Rentals", slug: "baby-equipment-rentals", categoryType: "rental" },
+  { name: "Bounce House Rentals", slug: "bounce-house-rentals", categoryType: "rental" },
+  { name: "Inflatable Rentals", slug: "inflatable-rentals", categoryType: "rental" },
+  { name: "Catering Equipment Rentals", slug: "catering-equipment-rentals", categoryType: "rental" },
+  { name: "Storage Container Rentals", slug: "storage-container-rentals", categoryType: "rental" },
+  { name: "Waste Bin Rentals", slug: "waste-bin-rentals", categoryType: "rental" },
+  { name: "Security Equipment Rentals", slug: "security-equipment-rentals", categoryType: "rental" },
+  { name: "Telecom Equipment Rentals", slug: "telecom-equipment-rentals", categoryType: "rental" },
+  { name: "Other Rentals", slug: "other-rentals", categoryType: "rental" },
 ];
 
 const slugify = (value = "") =>
@@ -107,8 +271,11 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const tenantId = scope.tenantId;
-    const { search, category, page = 1, limit = 100, lowStock, barcode } = req.query;
+    const { search, category, page = 1, limit = 100, lowStock, barcode, itemType } = req.query;
     const where = scopedWhere(scope, { isActive: { not: false } });
+
+    // Filter by itemType if provided
+    if (itemType) where.itemType = String(itemType);
 
     // Barcode exact lookup (highest priority)
     if (barcode) {
@@ -162,7 +329,10 @@ router.get("/categories", authenticateToken, async (req, res) => {
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     await ensureTenantCategories(tenantId);
-    const categories = await prisma.category.findMany({ where: { tenantId }, orderBy: { name: "asc" } });
+    const { type } = req.query;
+    const where = { tenantId };
+    if (type) where.categoryType = String(type);
+    const categories = await prisma.category.findMany({ where, orderBy: { name: "asc" } });
     res.json(categories);
   } catch (err) {
     console.error("List categories error:", err);
@@ -179,7 +349,8 @@ router.post("/categories", authenticateToken, requirePermission("canCreateProduc
     if (!name) return res.status(400).json({ error: "Category name is required" });
 
     const slug = slugify(req.body?.slug || name);
-    const category = await prisma.category.create({ data: { name, slug, tenantId } });
+    const categoryType = ["service", "rental"].includes(req.body?.categoryType) ? req.body.categoryType : "product";
+    const category = await prisma.category.create({ data: { name, slug, tenantId, categoryType } });
     res.status(201).json({ message: "Category created", category });
   } catch (err) {
     if (err?.code === "P2002") return res.status(409).json({ error: "Category already exists" });
@@ -211,7 +382,28 @@ router.post("/", authenticateToken, requirePermission("canCreateProduct"), async
       requireBranch: true,
       allowOwnerAll: false,
     });
-    const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, ...body } = req.body;
+    const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
+
+    // Set itemType (default to product, allow rental)
+    const itemTypeValue = ["service", "rental"].includes(itemType) ? itemType : "product";
+    body.itemType = itemTypeValue;
+
+    // For service items, zero out inventory fields
+    if (itemTypeValue === "service") {
+      body.quantity = 0;
+      body.minStock = 0;
+      body.cost = null;
+      body.barcode = null;
+      body.sku = body.sku || null;
+      body.baseUnit = "Service";
+    }
+    // For rental items, keep stock tracking but set defaults
+    if (itemTypeValue === "rental") {
+      body.rentalPrice = body.rentalPrice || body.price || 0;
+      body.rentalPeriod = body.rentalPeriod || "daily";
+      body.depositAmount = body.depositAmount || 0;
+      body.replacementValue = body.replacementValue || 0;
+    }
 
     if (categoryId) {
       const category = await prisma.category.findFirst({
@@ -242,8 +434,21 @@ router.put("/:id", authenticateToken, requirePermission("canEditProduct"), async
     });
     if (!existing) return res.status(404).json({ error: "Product not found" });
 
-    const { tenantId: _tenantId, branchId, id: _id, categoryId, ...body } = req.body;
+    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
     const data = { ...body };
+
+    // Handle itemType update
+    if (itemType === "service") {
+      data.itemType = "service";
+      data.quantity = 0;
+      data.minStock = 0;
+      data.cost = null;
+      data.baseUnit = "Service";
+    } else if (itemType === "product") {
+      data.itemType = "product";
+    } else if (itemType === "rental") {
+      data.itemType = "rental";
+    }
 
     if (categoryId !== undefined) {
       if (categoryId) {

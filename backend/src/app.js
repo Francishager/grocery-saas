@@ -25,6 +25,7 @@ import receivablesRouter from "../routes/receivables.js";
 import payablesRouter from "../routes/payables.js";
 import expensesRouter from "../routes/expenses.js";
 import platformNewRouter from "../routes/platform-new.js";
+import rentalsRouter from "../routes/rentals.js";
 
 import { auditMiddleware } from "./utils/audit.js";
 
@@ -132,6 +133,7 @@ app.use("/api/receivables", receivablesRouter);
 app.use("/api/payables", payablesRouter);
 app.use("/api/expenses", expensesRouter);
 app.use("/api/platform", platformNewRouter);
+app.use("/api/rentals", rentalsRouter);
 
 // 404
 app.use("/{*path}", (req, res) => {

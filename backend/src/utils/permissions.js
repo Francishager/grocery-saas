@@ -19,6 +19,10 @@ export function permissionsForUser(user) {
     "canViewReceipt", "canCreateReceipt",
     "canGiveDiscount",
     "canViewTax", "canManageTax",
+    // Services
+    "canViewService", "canCreateService", "canEditService", "canDeleteService", "canManageServiceCategory", "canViewServiceReport",
+    // Rentals
+    "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental", "canProcessRentalReturn", "canViewRentalReport",
   ];
 
   if (user.role === "owner") return [...ALL_PERMS];
@@ -41,6 +45,10 @@ export function permissionsForUser(user) {
       "canViewReceipt", "canCreateReceipt",
       "canGiveDiscount",
       "canViewTax",
+      // Services
+      "canViewService", "canCreateService", "canEditService", "canManageServiceCategory", "canViewServiceReport",
+      // Rentals
+      "canViewRental", "canCreateRental", "canEditRental", "canProcessRentalReturn", "canViewRentalReport",
     ],
     accountant: [
       "canViewDashboard",
@@ -58,6 +66,10 @@ export function permissionsForUser(user) {
       "canViewSettings",
       "canViewReceipt",
       "canViewTax", "canManageTax",
+      // Services
+      "canViewService", "canCreateService", "canEditService", "canViewServiceReport",
+      // Rentals
+      "canViewRental", "canViewRentalReport",
     ],
     attendant: [
       "canViewDashboard",
@@ -65,6 +77,10 @@ export function permissionsForUser(user) {
       "canViewProduct",
       "canViewCustomer",
       "canViewReceipt",
+      // Services
+      "canViewService",
+      // Rentals
+      "canViewRental", "canCreateRental", "canProcessRentalReturn",
     ],
   };
 

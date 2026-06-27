@@ -21,6 +21,9 @@ const PERM_LABELS: Record<string, string> = {
   canCreateBranch:'Create Branch', canViewBranch:'View Branch', canEditBranch:'Edit Branch', canDeleteBranch:'Delete Branch',
   canViewSalesReport:'View Sales Report',canViewInventoryReport:'View Inventory Report',canViewFinancialReport:'View Financial Report',canViewCustomerReport:'View Customer Report',canViewSupplierReport:'View Supplier Report',canViewReceivablesReport:'View Receivables Report',canViewPayablesReport:'View Payables Report',canViewPerformanceReport:'View Performance Report',canExportReport:'Export Reports',
   canViewSettings:'View Settings', canEditSettings:'Edit Settings', canGiveDiscount:'Give Discount',
+  canViewTax:'View Tax', canManageTax:'Manage Tax',
+  canViewService:'View Service', canCreateService:'Create Service', canEditService:'Edit Service', canDeleteService:'Delete Service', canManageServiceCategory:'Manage Service Categories', canViewServiceReport:'View Service Report',
+  canViewRental:'View Rentals', canCreateRental:'Create Rental', canEditRental:'Edit Rental', canDeleteRental:'Cancel Rental', canProcessRentalReturn:'Process Return', canViewRentalReport:'View Rental Report',
 }
 
 const PERM_GROUPS = [
@@ -36,6 +39,12 @@ const PERM_GROUPS = [
   { label: 'Staff', prefix: 'Staff' },
   { label: 'Branches', prefix: 'Branch' },
   { label: 'Reports', prefix: 'Report' },
+  { label: 'Settings', prefix: 'Settings' },
+  { label: 'Receipts', prefix: 'Receipt' },
+  { label: 'Discounts', prefix: 'Discount' },
+  { label: 'Tax', prefix: 'Tax' },
+  { label: 'Services', prefix: 'Service' },
+  { label: 'Rentals', prefix: 'Rental' },
 ]
 
 export default function RolesPermissionsPage() {

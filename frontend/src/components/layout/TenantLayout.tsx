@@ -1,5 +1,5 @@
-import { Outlet, NavLink, useNavigate, useSearchParams } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload } from 'lucide-react'
+import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench } from 'lucide-react'
 import { useState, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -10,9 +10,12 @@ const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
   { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct' },
+  { to: '/tenant/inventory?type=service', label: 'Services', icon: Wrench, permission: 'canViewService' },
+  { to: '/tenant/inventory?type=rental', label: 'Rental Items', icon: Clock, permission: 'canViewRental' },
   { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', permission: 'canViewReceivable' },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', permission: 'canViewPayable' },
   { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'canViewExpense' },
+  { to: '/tenant/rentals', label: 'Rentals', icon: Clock, permission: 'canViewRental' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
   { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', isSettings: true },
@@ -135,6 +138,7 @@ export function TenantLayout() {
   const { user, logout, hasPermission } = useJWTAuth()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
+  const location = useLocation()
   const handleLogout = () => { logout(); navigate('/login') }
 
   const toggleReports = () => {
@@ -244,7 +248,11 @@ export function TenantLayout() {
                 </div>
               ) : (
                 <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
-                  className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                  className={({ isActive }) => {
+                    const fullPath = location.pathname + location.search
+                    const isExact = fullPath === item.to || (isActive && !item.to.includes('?'))
+                    return cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isExact ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')
+                  }}>
                   <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />{item.label}
                 </NavLink>
               )

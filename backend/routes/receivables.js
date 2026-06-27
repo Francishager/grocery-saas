@@ -268,7 +268,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       const itemDiscount = toMoney(item.discount)
       const lineTotal = Math.max(0, price * quantity - itemDiscount)
 
-      if (product.quantity < quantity) {
+      if (product.itemType !== 'service' && product.quantity < quantity) {
         throw Object.assign(new Error(`${product.name} has only ${product.quantity} in stock`), { statusCode: 400 })
       }
 
@@ -342,8 +342,10 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       }))
     })
 
-    // Update product quantities
+    // Update product quantities (skip service items)
     for (const item of saleItems) {
+      const product = productsById.get(item.productId)
+      if (product && product.itemType === 'service') continue
       await prisma.product.update({
         where: { id: item.productId },
         data: {

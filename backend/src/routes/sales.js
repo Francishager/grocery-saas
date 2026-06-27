@@ -52,8 +52,8 @@ async function checkedSaleItems(items, scope) {
       }
     }
 
-    // Check stock in base units
-    if (product.quantity < baseQty) {
+    // Check stock in base units (skip for service items)
+    if (product.itemType !== "service" && product.quantity < baseQty) {
       const error = new Error(`${product.name} has only ${product.quantity} ${product.baseUnit} in stock`);
       error.statusCode = 400;
       throw error;
@@ -70,6 +70,7 @@ async function checkedSaleItems(items, scope) {
       cashDiscount: item.cashDiscount,
       unitName,
       conversionFactor,
+      itemType: product.itemType || "product",
       total: Math.max(0, lineTotal - totalDiscount),
     };
   });
@@ -134,13 +135,14 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), async (r
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           notes,
-          items: { create: saleItems.map(({ baseQty, ...rest }) => rest) },
+          items: { create: saleItems.map(({ baseQty, itemType, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
       });
 
-      // Deduct stock in base units
+      // Deduct stock in base units (skip service items)
       for (const item of saleItems) {
+        if (item.itemType === "service") continue;
         await tx.product.update({
           where: { id: item.productId },
           data: { quantity: { decrement: item.baseQty } },
@@ -211,13 +213,14 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
-          items: { create: saleItems.map(({ baseQty, ...rest }) => rest) },
+          items: { create: saleItems.map(({ baseQty, itemType, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
       });
 
-      // Deduct stock in base units
+      // Deduct stock in base units (skip service items)
       for (const item of saleItems) {
+        if (item.itemType === "service") continue;
         await tx.product.update({
           where: { id: item.productId },
           data: { quantity: { decrement: item.baseQty } },

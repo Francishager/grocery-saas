@@ -38,6 +38,8 @@ export const permissionCategories = [
   { id: 'settings', name: 'Settings' },
   { id: 'receipts', name: 'Receipts' },
   { id: 'tax', name: 'Tax' },
+  { id: 'services', name: 'Services' },
+  { id: 'rentals', name: 'Rentals' },
   { id: 'billing', name: 'Billing & Subscription' },
 ]
 
@@ -148,6 +150,22 @@ export const permissions: Permission[] = [
   // Tax
   { id: 'canViewTax', name: 'View Tax', description: 'View tax settings', category: 'tax', accessesBusinessData: true },
   { id: 'canManageTax', name: 'Manage Tax', description: 'Modify tax settings', category: 'tax', accessesBusinessData: true },
+
+  // Services
+  { id: 'canViewService', name: 'View Services', description: 'View service items', category: 'services', accessesBusinessData: true },
+  { id: 'canCreateService', name: 'Create Services', description: 'Create new service items', category: 'services', accessesBusinessData: true },
+  { id: 'canEditService', name: 'Edit Services', description: 'Edit existing service items', category: 'services', accessesBusinessData: true },
+  { id: 'canDeleteService', name: 'Delete Services', description: 'Delete service items', category: 'services', accessesBusinessData: true },
+  { id: 'canManageServiceCategory', name: 'Manage Service Categories', description: 'Create and edit service categories', category: 'services', accessesBusinessData: true },
+  { id: 'canViewServiceReport', name: 'View Service Reports', description: 'View service-related reports', category: 'services', accessesBusinessData: true },
+
+  // Rentals / Hire
+  { id: 'canViewRental', name: 'View Rentals', description: 'View rental/hire records', category: 'rentals', accessesBusinessData: true },
+  { id: 'canCreateRental', name: 'Create Rentals', description: 'Hire out items to customers', category: 'rentals', accessesBusinessData: true },
+  { id: 'canEditRental', name: 'Edit Rentals', description: 'Edit existing rental records', category: 'rentals', accessesBusinessData: true },
+  { id: 'canDeleteRental', name: 'Cancel Rentals', description: 'Cancel rental bookings', category: 'rentals', accessesBusinessData: true },
+  { id: 'canProcessRentalReturn', name: 'Process Returns', description: 'Process return of hired items', category: 'rentals', accessesBusinessData: true },
+  { id: 'canViewRentalReport', name: 'View Rental Reports', description: 'View rental-related reports', category: 'rentals', accessesBusinessData: true },
   
   // Billing (Tenant-level - for business owners)
   { id: 'view_own_billing', name: 'View Own Billing', description: 'View own subscription and billing', category: 'billing' },
@@ -207,6 +225,10 @@ export const roles: Role[] = [
       'canViewReceipt', 'canCreateReceipt',
       'canGiveDiscount',
       'canViewTax', 'canManageTax',
+      // Services
+      'canViewService', 'canCreateService', 'canEditService', 'canDeleteService', 'canManageServiceCategory', 'canViewServiceReport',
+      // Rentals
+      'canViewRental', 'canCreateRental', 'canEditRental', 'canDeleteRental', 'canProcessRentalReturn', 'canViewRentalReport',
     ],
   },
   {
@@ -230,6 +252,10 @@ export const roles: Role[] = [
       'canViewSettings',
       'canViewReceipt',
       'canViewTax', 'canManageTax',
+      // Services
+      'canViewService', 'canCreateService', 'canEditService', 'canViewServiceReport',
+      // Rentals
+      'canViewRental', 'canViewRentalReport',
     ],
   },
   {
@@ -243,6 +269,10 @@ export const roles: Role[] = [
       'canViewProduct',
       'canViewCustomer',
       'canViewReceipt',
+      // Services
+      'canViewService',
+      // Rentals
+      'canViewRental', 'canCreateRental', 'canProcessRentalReturn',
     ],
   },
   {
@@ -267,6 +297,10 @@ export const roles: Role[] = [
       'canViewReceipt', 'canCreateReceipt',
       'canGiveDiscount',
       'canViewTax',
+      // Services
+      'canViewService', 'canCreateService', 'canEditService', 'canManageServiceCategory', 'canViewServiceReport',
+      // Rentals
+      'canViewRental', 'canCreateRental', 'canEditRental', 'canProcessRentalReturn', 'canViewRentalReport',
     ],
   },
 ]

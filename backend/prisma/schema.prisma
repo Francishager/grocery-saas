@@ -31,6 +31,7 @@ model Branch {
   supplierPurchases SupplierPurchase[]
   supplierPayments SupplierPayment[]
   expenses Expense[]
+  rentals  Rental[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -58,14 +59,15 @@ model UserBranch {
 
 // Tenant/Business - each business is a tenant in the SaaS
 model Tenant {
-  id      String       @id @default(cuid())
-  name    String
-  slug    String       @unique
-  email   String       @unique
-  phone   String?
-  address String?
-  logo    String?
-  status  TenantStatus @default(active)
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  email       String       @unique
+  phone       String?
+  address     String?
+  logo        String?
+  status      TenantStatus @default(active)
+  businessType String?     // retail, pharmacy, hardware, supermarket, wholesale, restaurant, service, salon_spa, repair_shop, manufacturing, other
 
   // =====================
   // PLAN RELATION
@@ -103,6 +105,7 @@ model Tenant {
   cashAccounts     CashAccount[]
   expenses         Expense[]
   cashTransactions CashTransaction[]
+  rentals          Rental[]
 
   // =====================
   // USAGE LIMIT
@@ -122,6 +125,12 @@ model Tenant {
   receiptFooter String?  // Custom text at bottom of receipts
 
   // =====================
+  // MODULE DEFAULTS (based on businessType, overridable by feature control)
+  // =====================
+  inventoryEnabled  Boolean @default(true)  // On for product-based, off for service-based
+  servicesEnabled   Boolean @default(true)  // On for all business types
+
+  // =====================
   // TIMESTAMPS
   // =====================
   createdAt DateTime @default(now())
@@ -135,6 +144,47 @@ enum TenantStatus {
   suspended
   cancelled
   trial
+}
+
+// Item Types - Product (consumable inventory), Service (no inventory), Rental (returnable inventory)
+enum ItemType {
+  product
+  service
+  rental
+}
+
+// Rental period for hire items
+enum RentalPeriod {
+  hourly
+  daily
+  weekly
+  weekend
+  monthly
+  custom
+}
+
+// Rental record status
+enum RentalStatus {
+  active     // Items are out on hire
+  returned   // Items have been returned
+  overdue    // Past expected return date
+  lost       // Item not returned, marked as lost
+  cancelled  // Booking cancelled before hire
+}
+
+// Condition of rental item
+enum ItemCondition {
+  good
+  fair
+  damaged
+  broken
+}
+
+// Category Types - Product categories or Service categories
+enum CategoryType {
+  product
+  service
+  rental
 }
 
 // Subscription Plans
@@ -201,6 +251,7 @@ model User {
   supplierPurchases SupplierPurchase[]
   expenses          Expense[]
   cashTransactions  CashTransaction[]
+  rentals           Rental[]
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -306,6 +357,20 @@ model UserPermission {
   // Tax
   canViewTax   Boolean @default(true)
   canManageTax Boolean @default(false)
+  // Services
+  canViewService       Boolean @default(true)
+  canCreateService     Boolean @default(false)
+  canEditService       Boolean @default(false)
+  canDeleteService     Boolean @default(false)
+  canManageServiceCategory Boolean @default(false)
+  canViewServiceReport Boolean @default(true)
+  // Rentals / Hire
+  canViewRental       Boolean @default(true)
+  canCreateRental     Boolean @default(false)
+  canEditRental       Boolean @default(false)
+  canDeleteRental     Boolean @default(false)
+  canProcessRentalReturn Boolean @default(false)
+  canViewRentalReport Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -347,6 +412,24 @@ enum InvitationStatus {
 model Product {
   id          String    @id @default(cuid())
   name        String
+  // =====================
+  // ITEM TYPE (Product or Service)
+  // =====================
+  itemType    ItemType  @default(product)
+  // Service-specific fields (null for products/rentals)
+  serviceCategory String?  // e.g. "IT Services", "Legal Services", "Consulting"
+  estimatedHours  Float?   // Estimated duration for service delivery
+  duration        String?  // Human-readable duration: "2 hours", "1 week", etc.
+  // =====================
+  // RENTAL-SPECIFIC FIELDS (null for products/services)
+  // =====================
+  rentalPrice       Float?      // Hire charge per period (e.g. per day)
+  rentalPeriod      RentalPeriod? // Default billing period for this item
+  depositAmount     Float?      // Security deposit required
+  replacementValue  Float?      // Cost if item is lost/damaged beyond repair
+  // =====================
+  // PRODUCT FIELDS (ignored for services, used for rental stock tracking)
+  // =====================
   sku         String?
   barcode     String?
   description String?
@@ -374,6 +457,7 @@ model Product {
   saleRecordItems       SaleRecordItem[]
   supplierPurchaseItems SupplierPurchaseItem[]
   units                 ProductUnit[]
+  rentalItems           RentalItem[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
@@ -417,13 +501,14 @@ model AuditLog {
 
 // Categories
 model Category {
-  id        String    @id @default(cuid())
-  name      String
-  slug      String
-  tenantId  String
-  products  Product[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id            String        @id @default(cuid())
+  name          String
+  slug          String
+  tenantId      String
+  categoryType  CategoryType  @default(product) // product or service
+  products      Product[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@unique([tenantId, slug])
   @@map("categories")
@@ -545,6 +630,7 @@ model Customer {
   sales    SaleRecord[]
   payments CustomerPayment[]
   invoices Invoice[]
+  rentals  Rental[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, branchId, phone])
@@ -921,3 +1007,61 @@ model UsageLimit {
 // Update Product to include new relations
 // Update Sale to use SaleRecord instead
 // Update Purchase to use SupplierPurchase instead
+
+// =====================================================
+// RENTALS - Hire / Rental System
+// =====================================================
+
+model Rental {
+  id              String       @id @default(cuid())
+  rentalNo        String       // e.g. HIRE-1234567890
+  tenantId        String
+  branchId        String?
+  branch          Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId      String?
+  customer        Customer?    @relation(fields: [customerId], references: [id])
+  userId          String
+  User            User         @relation(fields: [userId], references: [id])
+  hireDate        DateTime     @default(now())      // When items go out
+  expectedReturnDate DateTime                       // When items should come back
+  actualReturnDate DateTime?                        // When items actually returned
+  totalAmount     Float        @default(0)           // Total hire charge
+  depositAmount   Float        @default(0)           // Security deposit collected
+  depositStatus   String       @default("collected") // collected, refunded, forfeited
+  amountPaid      Float        @default(0)           // Hire charge paid so far
+  balance         Float        @default(0)           // Outstanding hire charge
+  paymentStatus   String       @default("unpaid")    // paid, partial, unpaid
+  paymentMethod   String?      @default("cash")
+  status          RentalStatus @default(active)
+  notes           String?
+  items           RentalItem[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  Tenant          Tenant       @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, branchId])
+  @@index([customerId])
+  @@map("rentals")
+}
+
+model RentalItem {
+  id              String        @id @default(cuid())
+  rentalId        String
+  rental          Rental        @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  quantity        Int           @default(1)
+  unitHirePrice   Float         @default(0)   // Price per period
+  rentalPeriod    RentalPeriod  @default(daily)
+  periods         Int           @default(1)   // Number of periods (e.g. 3 days)
+  totalAmount     Float         @default(0)   // quantity * unitHirePrice * periods
+  conditionOut    ItemCondition @default(good) // Condition when hired out
+  conditionReturn ItemCondition?               // Condition when returned (null if not yet returned)
+  damageFee       Float?                       // Fee charged if item returned damaged
+  notes           String?
+  createdAt       DateTime      @default(now())
+
+  @@index([rentalId])
+  @@index([productId])
+  @@map("rental_items")
+}

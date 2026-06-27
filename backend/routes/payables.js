@@ -310,8 +310,10 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
       }))
     })
 
-    // Update product quantities and costs
+    // Update product quantities and costs (skip service items)
     for (const item of purchaseItems) {
+      const product = productsById.get(item.productId)
+      if (product && product.itemType === 'service') continue
       await prisma.product.update({
         where: { id: item.productId },
         data: {

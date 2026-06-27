@@ -39,6 +39,10 @@ const PERM_KEYS = [
   "canGiveDiscount",
   // Tax
   "canViewTax","canManageTax",
+  // Services
+  "canViewService","canCreateService","canEditService","canDeleteService","canManageServiceCategory","canViewServiceReport",
+  // Rentals / Hire
+  "canViewRental","canCreateRental","canEditRental","canDeleteRental","canProcessRentalReturn","canViewRentalReport",
 ];
 
 const ROLE_DEFAULTS = {
@@ -59,6 +63,10 @@ const ROLE_DEFAULTS = {
     canViewReceipt:true,canCreateReceipt:true,
     canGiveDiscount:true,
     canViewTax:true,canManageTax:false,
+    // Services
+    canViewService:true,canCreateService:true,canEditService:true,canDeleteService:false,canManageServiceCategory:true,canViewServiceReport:true,
+    // Rentals
+    canViewRental:true,canCreateRental:true,canEditRental:true,canDeleteRental:false,canProcessRentalReturn:true,canViewRentalReport:true,
   },
   accountant: {
     canViewDashboard:true,
@@ -77,6 +85,10 @@ const ROLE_DEFAULTS = {
     canViewReceipt:true,canCreateReceipt:false,
     canGiveDiscount:false,
     canViewTax:true,canManageTax:true,
+    // Services
+    canViewService:true,canCreateService:true,canEditService:true,canDeleteService:false,canManageServiceCategory:false,canViewServiceReport:true,
+    // Rentals
+    canViewRental:true,canCreateRental:false,canEditRental:false,canDeleteRental:false,canProcessRentalReturn:false,canViewRentalReport:true,
   },
   attendant: {
     canViewDashboard:true,
@@ -95,6 +107,10 @@ const ROLE_DEFAULTS = {
     canViewReceipt:true,canCreateReceipt:false,
     canGiveDiscount:false,
     canViewTax:false,canManageTax:false,
+    // Services
+    canViewService:true,canCreateService:false,canEditService:false,canDeleteService:false,canManageServiceCategory:false,canViewServiceReport:false,
+    // Rentals
+    canViewRental:true,canCreateRental:true,canEditRental:false,canDeleteRental:false,canProcessRentalReturn:true,canViewRentalReport:false,
   },
 };
 
