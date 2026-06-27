@@ -864,15 +864,16 @@ router.get("/performance/least-products", authenticateToken, async (req, res) =>
 router.get("/services/summary", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const where = scopedWhere(s, { ...df(req), itemType: "service", isActive: { not: false } });
+    const where = { ...scopedWhere(s), itemType: "service", isActive: { not: false } };
     const [agg, count] = await Promise.all([
       prisma.product.aggregate({ where, _sum: { price: true }, _avg: { price: true } }),
       prisma.product.count({ where }),
     ]);
     // Count how many times services were sold
+    const saleItemWhere = { product: { ...scopedWhere(s), itemType: "service" } };
     const saleItems = await prisma.saleItem.findMany({
-      where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
-      include: { product: { select: { name: true } }, sale: { select: { createdAt: true } } },
+      where: saleItemWhere,
+      include: { product: { select: { name: true } } },
     });
     const totalRevenue = saleItems.reduce((a, i) => a + i.total, 0);
     const totalQuantity = saleItems.reduce((a, i) => a + i.quantity, 0);
@@ -883,7 +884,7 @@ router.get("/services/summary", authenticateToken, async (req, res) => {
       avgPrice: agg._avg.price || 0,
       salesCount: saleItems.length,
     });
-  } catch (err) { handleBranchError(res, err); }
+  } catch (err) { console.error("services/summary error:", err); handleBranchError(res, err); }
 });
 
 router.get("/services/list", authenticateToken, async (req, res) => {
