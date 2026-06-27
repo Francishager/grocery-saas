@@ -122,6 +122,32 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'performanceLeastProducts', label: 'Least Selling Products' },
     ],
   },
+  {
+    id: 'services', label: 'Service Reports', icon: Wrench, permission: 'canViewServiceReport',
+    items: [
+      { id: 'servicesSummary', label: 'Service Summary' },
+      { id: 'servicesList', label: 'Service List' },
+      { id: 'servicesSales', label: 'Service Sales Report' },
+      { id: 'servicesByCategory', label: 'Service Sales by Category' },
+      { id: 'servicesByBranch', label: 'Service Sales by Branch' },
+      { id: 'servicesTop', label: 'Top Services' },
+    ],
+  },
+  {
+    id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport',
+    items: [
+      { id: 'rentalsSummary', label: 'Rental Summary' },
+      { id: 'rentalsList', label: 'Rental List Report' },
+      { id: 'rentalsByItem', label: 'Rental by Item' },
+      { id: 'rentalsByCustomer', label: 'Rental by Customer' },
+      { id: 'rentalsByBranch', label: 'Rental by Branch' },
+      { id: 'rentalsActive', label: 'Active Rentals' },
+      { id: 'rentalsOverdue', label: 'Overdue Rentals' },
+      { id: 'rentalsReturns', label: 'Rental Returns Report' },
+      { id: 'rentalsDaily', label: 'Daily Rental Report' },
+      { id: 'rentalsMonthly', label: 'Monthly Rental Report' },
+    ],
+  },
 ]
 
 const settingsSubItems = [

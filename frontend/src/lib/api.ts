@@ -549,6 +549,26 @@ export const reportsApiV2 = {
   performanceUserActivity: (params?: ReportParams) => api.get<any>('/api/reports/performance/user-activity', { params }),
   performanceTopProducts: (params?: ReportParams) => api.get<any>('/api/reports/performance/top-products', { params }),
   performanceLeastProducts: (params?: ReportParams) => api.get<any>('/api/reports/performance/least-products', { params }),
+
+  // Service Reports
+  servicesSummary: (params?: ReportParams) => api.get<any>('/api/reports/services/summary', { params }),
+  servicesList: (params?: ReportParams) => api.get<any>('/api/reports/services/list', { params }),
+  servicesSales: (params?: ReportParams) => api.get<any>('/api/reports/services/sales', { params }),
+  servicesByCategory: (params?: ReportParams) => api.get<any>('/api/reports/services/by-category', { params }),
+  servicesByBranch: (params?: ReportParams) => api.get<any>('/api/reports/services/by-branch', { params }),
+  servicesTop: (params?: ReportParams) => api.get<any>('/api/reports/services/top', { params }),
+
+  // Rental Reports
+  rentalsSummary: (params?: ReportParams) => api.get<any>('/api/reports/rentals/summary', { params }),
+  rentalsList: (params?: ReportParams) => api.get<any>('/api/reports/rentals/list', { params }),
+  rentalsByItem: (params?: ReportParams) => api.get<any>('/api/reports/rentals/by-item', { params }),
+  rentalsByCustomer: (params?: ReportParams) => api.get<any>('/api/reports/rentals/by-customer', { params }),
+  rentalsByBranch: (params?: ReportParams) => api.get<any>('/api/reports/rentals/by-branch', { params }),
+  rentalsActive: (params?: ReportParams) => api.get<any>('/api/reports/rentals/active', { params }),
+  rentalsOverdue: (params?: ReportParams) => api.get<any>('/api/reports/rentals/overdue', { params }),
+  rentalsReturns: (params?: ReportParams) => api.get<any>('/api/reports/rentals/returns', { params }),
+  rentalsDaily: (params?: ReportParams) => api.get<any>('/api/reports/rentals/daily', { params }),
+  rentalsMonthly: (params?: ReportParams) => api.get<any>('/api/reports/rentals/monthly', { params }),
 }
 
 // Admin endpoints

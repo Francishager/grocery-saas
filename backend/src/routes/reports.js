@@ -21,6 +21,8 @@ const reportPermMap = {
   expenses: "canViewFinancialReport",
   profit: "canViewFinancialReport",
   purchases: "canViewPayablesReport",
+  services: "canViewServiceReport",
+  rentals: "canViewRentalReport",
 };
 
 // Middleware: check granular report permission based on route prefix
@@ -855,6 +857,342 @@ router.get("/performance/least-products", authenticateToken, async (req, res) =>
       });
     });
     res.json({ data: Object.values(map).sort((a, b) => a.quantity - b.quantity).slice(0, 20) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// ==================== SERVICE REPORTS ====================
+router.get("/services/summary", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, { ...df(req), itemType: "service", isActive: { not: false } });
+    const [agg, count] = await Promise.all([
+      prisma.product.aggregate({ where, _sum: { unit_price: true }, _avg: { unit_price: true } }),
+      prisma.product.count({ where }),
+    ]);
+    // Count how many times services were sold
+    const saleItems = await prisma.saleItem.findMany({
+      where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
+      include: { product: { select: { name: true } }, sale: { select: { createdAt: true } } },
+    });
+    const totalRevenue = saleItems.reduce((a, i) => a + i.total, 0);
+    const totalQuantity = saleItems.reduce((a, i) => a + i.quantity, 0);
+    res.json({
+      count,
+      totalRevenue,
+      totalQuantity,
+      avgPrice: agg._avg.unit_price || 0,
+      salesCount: saleItems.length,
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/services/list", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const services = await prisma.product.findMany({
+      where: scopedWhere(s, { itemType: "service", isActive: { not: false } }),
+      include: { category: true, branch: { select: { name: true } } },
+      orderBy: { name: "asc" },
+    });
+    const data = services.map((p) => ({
+      name: p.name,
+      category: p.serviceCategory || p.category?.name || "Uncategorized",
+      price: p.unit_price || 0,
+      estimatedHours: p.estimatedHours || 0,
+      branch: p.branch?.name || "Unassigned",
+    }));
+    res.json({ data, summary: { count: data.length, totalValue: data.reduce((a, p) => a + p.price, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/services/sales", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const saleItems = await prisma.saleItem.findMany({
+      where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
+      include: { product: { select: { name: true, serviceCategory: true } }, sale: { select: { receiptNo: true, createdAt: true, customerName: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const data = saleItems.map((i) => ({
+      service: i.product?.name || "Unknown",
+      category: i.product?.serviceCategory || "Uncategorized",
+      receiptNo: i.sale?.receiptNo || "",
+      customer: i.sale?.customerName || "Walk-in",
+      quantity: i.quantity,
+      total: i.total,
+      date: i.createdAt,
+    }));
+    res.json({ data, summary: { count: data.length, totalRevenue: data.reduce((a, d) => a + d.total, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/services/by-category", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const saleItems = await prisma.saleItem.findMany({
+      where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
+      include: { product: { select: { name: true, serviceCategory: true } } },
+    });
+    const map = {};
+    saleItems.forEach((i) => {
+      const cat = i.product?.serviceCategory || "Uncategorized";
+      if (!map[cat]) map[cat] = { category: cat, quantity: 0, revenue: 0, count: 0 };
+      map[cat].quantity += i.quantity;
+      map[cat].revenue += i.total;
+      map[cat].count++;
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.revenue - a.revenue) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/services/by-branch", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const saleItems = await prisma.saleItem.findMany({
+      where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
+      include: { product: { select: { name: true } }, sale: { select: { branch: { select: { name: true } } } } },
+    });
+    const map = {};
+    saleItems.forEach((i) => {
+      const branch = i.sale?.branch?.name || "Unassigned";
+      if (!map[branch]) map[branch] = { branch, count: 0, revenue: 0 };
+      map[branch].count++;
+      map[branch].revenue += i.total;
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.revenue - a.revenue) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/services/top", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const saleItems = await prisma.saleItem.findMany({
+      where: { product: { ...scopedWhere(s, df(req)), itemType: "service" } },
+      include: { product: { select: { name: true } } },
+    });
+    const map = {};
+    saleItems.forEach((i) => {
+      const name = i.product?.name || "Unknown";
+      if (!map[name]) map[name] = { service: name, quantity: 0, revenue: 0 };
+      map[name].quantity += i.quantity;
+      map[name].revenue += i.total;
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 20) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// ==================== RENTAL REPORTS ====================
+router.get("/rentals/summary", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req, "hireDate"));
+    const [agg, count, activeCount, returnedCount, cancelledCount] = await Promise.all([
+      prisma.rental.aggregate({ where, _sum: { totalAmount: true, depositAmount: true, amountPaid: true, balance: true, discount: true, taxAmount: true } }),
+      prisma.rental.count({ where }),
+      prisma.rental.count({ where: { ...where, status: "active" } }),
+      prisma.rental.count({ where: { ...where, status: "returned" } }),
+      prisma.rental.count({ where: { ...where, status: "cancelled" } }),
+    ]);
+    res.json({
+      count,
+      totalRevenue: agg._sum.totalAmount || 0,
+      totalDeposit: agg._sum.depositAmount || 0,
+      totalPaid: agg._sum.amountPaid || 0,
+      totalBalance: agg._sum.balance || 0,
+      totalDiscount: agg._sum.discount || 0,
+      totalTax: agg._sum.taxAmount || 0,
+      activeCount,
+      returnedCount,
+      cancelledCount,
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/list", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({
+      where: scopedWhere(s, df(req, "hireDate")),
+      include: { customer: { select: { name: true, phone: true } }, branch: { select: { name: true } }, items: { include: { product: { select: { name: true } } } } },
+      orderBy: { hireDate: "desc" },
+    });
+    const data = rentals.map((r) => ({
+      rentalNo: r.rentalNo,
+      customer: r.customer?.name || r.customerName || "Walk-in",
+      phone: r.customer?.phone || r.customerPhone || "",
+      branch: r.branch?.name || "Unassigned",
+      hireDate: r.hireDate,
+      expectedReturnDate: r.expectedReturnDate,
+      actualReturnDate: r.actualReturnDate,
+      status: r.status,
+      totalAmount: r.totalAmount,
+      deposit: r.depositAmount,
+      paid: r.amountPaid,
+      balance: r.balance,
+      itemCount: r.items.length,
+    }));
+    res.json({ data, summary: { count: data.length, totalRevenue: data.reduce((a, d) => a + d.totalAmount, 0), totalDeposit: data.reduce((a, d) => a + d.deposit, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/by-item", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({
+      where: scopedWhere(s, df(req, "hireDate")),
+      include: { items: { include: { product: { select: { name: true } } } } },
+    });
+    const map = {};
+    rentals.forEach((r) => {
+      r.items.forEach((i) => {
+        const name = i.product?.name || "Unknown";
+        if (!map[name]) map[name] = { item: name, hireCount: 0, totalRevenue: 0, totalDeposit: 0 };
+        map[name].hireCount++;
+        map[name].totalRevenue += i.totalAmount;
+        map[name].totalDeposit += r.depositAmount || 0;
+      });
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.totalRevenue - a.totalRevenue) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/by-customer", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({
+      where: scopedWhere(s, df(req, "hireDate")),
+      include: { customer: { select: { name: true } } },
+    });
+    const map = {};
+    rentals.forEach((r) => {
+      const name = r.customer?.name || r.customerName || "Walk-in";
+      if (!map[name]) map[name] = { customer: name, count: 0, totalRevenue: 0, totalDeposit: 0, balance: 0 };
+      map[name].count++;
+      map[name].totalRevenue += r.totalAmount;
+      map[name].totalDeposit += r.depositAmount;
+      map[name].balance += r.balance;
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.totalRevenue - a.totalRevenue) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/by-branch", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({
+      where: scopedWhere(s, df(req, "hireDate")),
+      include: { branch: { select: { name: true } } },
+    });
+    const map = {};
+    rentals.forEach((r) => {
+      const name = r.branch?.name || "Unassigned";
+      if (!map[name]) map[name] = { branch: name, count: 0, revenue: 0, deposit: 0 };
+      map[name].count++;
+      map[name].revenue += r.totalAmount;
+      map[name].deposit += r.depositAmount;
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.revenue - a.revenue) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/active", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({
+      where: scopedWhere(s, { status: "active" }),
+      include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true } } } } },
+      orderBy: { expectedReturnDate: "asc" },
+    });
+    const now = new Date();
+    const data = rentals.map((r) => ({
+      rentalNo: r.rentalNo,
+      customer: r.customer?.name || r.customerName || "Walk-in",
+      phone: r.customer?.phone || r.customerPhone || "",
+      hireDate: r.hireDate,
+      expectedReturnDate: r.expectedReturnDate,
+      daysOverdue: r.expectedReturnDate < now ? Math.floor((now - new Date(r.expectedReturnDate)) / 86400000) : 0,
+      totalAmount: r.totalAmount,
+      balance: r.balance,
+      itemCount: r.items.length,
+    }));
+    res.json({ data, summary: { count: data.length, overdue: data.filter((d) => d.daysOverdue > 0).length, totalBalance: data.reduce((a, d) => a + d.balance, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/overdue", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const now = new Date();
+    const rentals = await prisma.rental.findMany({
+      where: { ...scopedWhere(s, { status: "active" }), expectedReturnDate: { lt: now } },
+      include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true } } } } },
+      orderBy: { expectedReturnDate: "asc" },
+    });
+    const data = rentals.map((r) => ({
+      rentalNo: r.rentalNo,
+      customer: r.customer?.name || r.customerName || "Walk-in",
+      phone: r.customer?.phone || r.customerPhone || "",
+      hireDate: r.hireDate,
+      expectedReturnDate: r.expectedReturnDate,
+      daysOverdue: Math.floor((now - new Date(r.expectedReturnDate)) / 86400000),
+      totalAmount: r.totalAmount,
+      balance: r.balance,
+      itemCount: r.items.length,
+    }));
+    res.json({ data, summary: { count: data.length, totalBalance: data.reduce((a, d) => a + d.balance, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/returns", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({
+      where: scopedWhere(s, { ...df(req, "actualReturnDate"), status: "returned" }),
+      include: { customer: { select: { name: true } }, items: true },
+      orderBy: { actualReturnDate: "desc" },
+    });
+    const data = rentals.map((r) => ({
+      rentalNo: r.rentalNo,
+      customer: r.customer?.name || r.customerName || "Walk-in",
+      hireDate: r.hireDate,
+      actualReturnDate: r.actualReturnDate,
+      totalAmount: r.totalAmount,
+      depositStatus: r.depositStatus,
+      damageFees: r.items.reduce((a, i) => a + (i.damageFee || 0), 0),
+    }));
+    res.json({ data, summary: { count: data.length, totalDamageFees: data.reduce((a, d) => a + d.damageFees, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/daily", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({ where: scopedWhere(s, df(req, "hireDate")), orderBy: { hireDate: "asc" } });
+    const map = {};
+    rentals.forEach((r) => {
+      const day = new Date(r.hireDate).toISOString().slice(0, 10);
+      if (!map[day]) map[day] = { date: day, count: 0, revenue: 0, deposit: 0 };
+      map[day].count++;
+      map[day].revenue += r.totalAmount;
+      map[day].deposit += r.depositAmount;
+    });
+    res.json({ data: Object.values(map) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/rentals/monthly", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const rentals = await prisma.rental.findMany({ where: scopedWhere(s, df(req, "hireDate")), orderBy: { hireDate: "asc" } });
+    const map = {};
+    rentals.forEach((r) => {
+      const m = new Date(r.hireDate).toISOString().slice(0, 7);
+      if (!map[m]) map[m] = { month: m, count: 0, revenue: 0, deposit: 0 };
+      map[m].count++;
+      map[m].revenue += r.totalAmount;
+      map[m].deposit += r.depositAmount;
+    });
+    res.json({ data: Object.values(map) });
   } catch (err) { handleBranchError(res, err); }
 });
 

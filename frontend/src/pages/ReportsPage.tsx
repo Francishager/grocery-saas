@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet, ChevronDown
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock
 } from 'lucide-react'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -248,6 +248,79 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'performanceLeastProducts', label: 'Least Selling Products', apiFn: reportsApiV2.performanceLeastProducts, renderType: 'table',
         columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue'), currencyCol('profit', 'Profit')]
+      },
+    ]
+  },
+  {
+    id: 'services', label: 'Service Reports', icon: Wrench, permission: 'canViewServiceReport',
+    items: [
+      { id: 'servicesSummary', label: 'Service Summary', apiFn: reportsApiV2.servicesSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'count', label: 'Total Services', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'totalQuantity', label: 'Total Quantity Sold', format: 'number' },
+          { key: 'avgPrice', label: 'Average Price', format: 'currency' },
+          { key: 'salesCount', label: 'Sales Count', format: 'number' },
+        ]
+      },
+      { id: 'servicesList', label: 'Service List', apiFn: reportsApiV2.servicesList, renderType: 'table',
+        columns: [textCol('name', 'Service'), textCol('category', 'Category'), currencyCol('price', 'Price'), numberCol('estimatedHours', 'Est. Hours'), textCol('branch', 'Branch')]
+      },
+      { id: 'servicesSales', label: 'Service Sales Report', apiFn: reportsApiV2.servicesSales, renderType: 'table',
+        columns: [textCol('service', 'Service'), textCol('category', 'Category'), textCol('receiptNo', 'Receipt'), textCol('customer', 'Customer'), numberCol('quantity', 'Qty'), currencyCol('total', 'Total'), dateCol('date', 'Date')]
+      },
+      { id: 'servicesByCategory', label: 'Service Sales by Category', apiFn: reportsApiV2.servicesByCategory, renderType: 'table',
+        columns: [textCol('category', 'Category'), numberCol('count', 'Sales Count'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'servicesByBranch', label: 'Service Sales by Branch', apiFn: reportsApiV2.servicesByBranch, renderType: 'table',
+        columns: [textCol('branch', 'Branch'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'servicesTop', label: 'Top Services', apiFn: reportsApiV2.servicesTop, renderType: 'table',
+        columns: [textCol('service', 'Service'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      },
+    ]
+  },
+  {
+    id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport',
+    items: [
+      { id: 'rentalsSummary', label: 'Rental Summary', apiFn: reportsApiV2.rentalsSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'count', label: 'Total Rentals', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'totalDeposit', label: 'Total Deposits', format: 'currency' },
+          { key: 'totalPaid', label: 'Total Paid', format: 'currency' },
+          { key: 'totalBalance', label: 'Outstanding Balance', format: 'currency' },
+          { key: 'activeCount', label: 'Active Rentals', format: 'number' },
+          { key: 'returnedCount', label: 'Returned', format: 'number' },
+          { key: 'cancelledCount', label: 'Cancelled', format: 'number' },
+        ]
+      },
+      { id: 'rentalsList', label: 'Rental List Report', apiFn: reportsApiV2.rentalsList, renderType: 'table',
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), textCol('branch', 'Branch'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), textCol('status', 'Status'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsByItem', label: 'Rental by Item', apiFn: reportsApiV2.rentalsByItem, renderType: 'table',
+        columns: [textCol('item', 'Item'), numberCol('hireCount', 'Hire Count'), currencyCol('totalRevenue', 'Revenue'), currencyCol('totalDeposit', 'Deposits')]
+      },
+      { id: 'rentalsByCustomer', label: 'Rental by Customer', apiFn: reportsApiV2.rentalsByCustomer, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), numberCol('count', 'Rentals'), currencyCol('totalRevenue', 'Revenue'), currencyCol('totalDeposit', 'Deposits'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsByBranch', label: 'Rental by Branch', apiFn: reportsApiV2.rentalsByBranch, renderType: 'table',
+        columns: [textCol('branch', 'Branch'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
+      },
+      { id: 'rentalsActive', label: 'Active Rentals', apiFn: reportsApiV2.rentalsActive, renderType: 'table',
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), numberCol('daysOverdue', 'Days Overdue'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsOverdue', label: 'Overdue Rentals', apiFn: reportsApiV2.rentalsOverdue, renderType: 'table',
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), dateCol('expectedReturnDate', 'Expected Return'), numberCol('daysOverdue', 'Days Overdue'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsReturns', label: 'Rental Returns Report', apiFn: reportsApiV2.rentalsReturns, renderType: 'table',
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), dateCol('hireDate', 'Hire Date'), dateCol('actualReturnDate', 'Return Date'), currencyCol('totalAmount', 'Total'), textCol('depositStatus', 'Deposit Status'), currencyCol('damageFees', 'Damage Fees')]
+      },
+      { id: 'rentalsDaily', label: 'Daily Rental Report', apiFn: reportsApiV2.rentalsDaily, renderType: 'table',
+        columns: [dateCol('date', 'Date'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
+      },
+      { id: 'rentalsMonthly', label: 'Monthly Rental Report', apiFn: reportsApiV2.rentalsMonthly, renderType: 'table',
+        columns: [textCol('month', 'Month'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
       },
     ]
   },
@@ -528,7 +601,7 @@ export default function ReportsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <BarChart3 className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-lg font-medium">Select a report from the sidebar</p>
-            <p className="mt-1 text-sm text-muted-foreground">Choose from 48 report types across 8 categories</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose from 64 report types across 10 categories</p>
           </div>
         ) : (
           <div className="space-y-4">
