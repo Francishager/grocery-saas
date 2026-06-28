@@ -1,40 +1,175 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard } from 'lucide-react'
 
-interface Feature { id: string; name: string; displayName: string; slug: string; category: string; description: string; isActive: boolean }
+interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 interface PlanFeature { featureId: string; planId: string; enabled: boolean; feature: { id: string; name: string; slug: string } }
 interface Plan { id: string; name: string }
 
-const emptyFeatureForm = { name: '', displayName: '', category: 'core', description: '', isActive: true }
+const emptyFeatureForm = { name: '', displayName: '', category: 'core', module: '', description: '', isActive: true }
 
 const MODULES = [
-  { id: 'financial', name: 'Financial Management', icon: DollarSign, color: 'text-green-600 bg-green-100', features: [
-    { name: 'bookkeeping', displayName: 'Bookkeeping' }, { name: 'income_tracking', displayName: 'Income Tracking' },
-    { name: 'expense_management', displayName: 'Expense Management' }, { name: 'payables_management', displayName: 'Payables Management' },
-    { name: 'receivables_management', displayName: 'Receivables Management' }, { name: 'cash_flow_monitoring', displayName: 'Cash Flow Monitoring' },
-    { name: 'profitability_analysis', displayName: 'Profitability Analysis' },
-  ]},
-  { id: 'inventory', name: 'Inventory Management', icon: Package, color: 'text-orange-600 bg-orange-100', features: [
-    { name: 'product_tracking', displayName: 'Product Tracking' }, { name: 'stock_movement', displayName: 'Stock Movement Monitoring' },
-    { name: 'low_stock_alerts', displayName: 'Low-Stock Alerts' }, { name: 'purchase_management', displayName: 'Purchase Management' },
-    { name: 'supplier_management', displayName: 'Supplier Management' }, { name: 'inventory_valuation', displayName: 'Inventory Valuation' },
-  ]},
-  { id: 'sales', name: 'Sales Management', icon: ShoppingCart, color: 'text-blue-600 bg-blue-100', features: [
-    { name: 'pos_sales', displayName: 'POS Sales Processing' }, { name: 'invoice_generation', displayName: 'Invoice Generation' },
-    { name: 'customer_transactions', displayName: 'Customer Transactions' }, { name: 'sales_tracking', displayName: 'Sales Tracking' },
-    { name: 'payment_management', displayName: 'Payment Management' },
-  ]},
-  { id: 'operations', name: 'Business Operations', icon: Briefcase, color: 'text-purple-600 bg-purple-100', features: [
-    { name: 'staff_management', displayName: 'Staff Management' }, { name: 'role_access_control', displayName: 'Role-Based Access Control' },
-    { name: 'activity_logs', displayName: 'Activity Logs' }, { name: 'branch_management', displayName: 'Branch Management' },
-    { name: 'workflow_organization', displayName: 'Workflow Organization' },
-  ]},
-  { id: 'reporting', name: 'Reporting & Insights', icon: BarChart3, color: 'text-cyan-600 bg-cyan-100', features: [
-    { name: 'financial_reports', displayName: 'Financial Reports' }, { name: 'sales_reports', displayName: 'Sales Reports' },
-    { name: 'inventory_reports', displayName: 'Inventory Reports' }, { name: 'performance_dashboards', displayName: 'Business Performance Dashboards' },
-    { name: 'decision_analytics', displayName: 'Decision-Support Analytics' },
-  ]},
+  {
+    id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, color: 'text-indigo-600 bg-indigo-100', features: [
+      { name: 'dashboard', displayName: 'Dashboard' },
+      { name: 'dashboard.analytics', displayName: 'Analytics Widgets' },
+    ]
+  },
+  {
+    id: 'sales', name: 'Sales Management', icon: ShoppingCart, color: 'text-blue-600 bg-blue-100', features: [
+      { name: 'sales', displayName: 'Sales / POS' },
+      { name: 'sales.pos', displayName: 'POS' },
+      { name: 'sales.quotes', displayName: 'Quotes' },
+      { name: 'sales.returns', displayName: 'Returns & Refunds' },
+      { name: 'sales.discounts', displayName: 'Discounts' },
+      { name: 'sales.suspended', displayName: 'Suspended Sales' },
+    ]
+  },
+  {
+    id: 'inventory', name: 'Inventory Management', icon: Package, color: 'text-orange-600 bg-orange-100', features: [
+      { name: 'inventory', displayName: 'Inventory Management' },
+      { name: 'inventory.products', displayName: 'Products' },
+      { name: 'inventory.services', displayName: 'Services' },
+      { name: 'inventory.rentals', displayName: 'Rental Items' },
+      { name: 'inventory.categories', displayName: 'Categories' },
+      { name: 'inventory.brands', displayName: 'Brands' },
+      { name: 'inventory.adjustments', displayName: 'Stock Adjustments' },
+      { name: 'inventory.transfers', displayName: 'Stock Transfers' },
+      { name: 'inventory.counts', displayName: 'Stock Counts' },
+      { name: 'inventory.multi_unit', displayName: 'Multi Units of Measure' },
+      { name: 'inventory.batch_numbers', displayName: 'Batch Numbers' },
+      { name: 'inventory.expiry_tracking', displayName: 'Expiry Tracking' },
+      { name: 'inventory.barcode_printing', displayName: 'Barcode Printing' },
+    ]
+  },
+  {
+    id: 'customers', name: 'Customer Management', icon: Users, color: 'text-teal-600 bg-teal-100', features: [
+      { name: 'customers', displayName: 'Customer Management' },
+      { name: 'customers.groups', displayName: 'Customer Groups' },
+      { name: 'customers.loyalty', displayName: 'Loyalty Program' },
+      { name: 'customers.wallet', displayName: 'Customer Wallet' },
+      { name: 'customers.statements', displayName: 'Customer Statements' },
+    ]
+  },
+  {
+    id: 'suppliers', name: 'Supplier Management', icon: Building2, color: 'text-amber-600 bg-amber-100', features: [
+      { name: 'suppliers', displayName: 'Supplier Management' },
+      { name: 'suppliers.purchase_orders', displayName: 'Purchase Orders' },
+      { name: 'suppliers.grn', displayName: 'Goods Received Notes' },
+      { name: 'suppliers.statements', displayName: 'Supplier Statements' },
+    ]
+  },
+  {
+    id: 'financial', name: 'Financial Management', icon: DollarSign, color: 'text-green-600 bg-green-100', features: [
+      { name: 'expenses', displayName: 'Expense Tracking' },
+      { name: 'financial.income', displayName: 'Income Tracking' },
+      { name: 'financial.cashbook', displayName: 'Cashbook' },
+      { name: 'financial.bank_accounts', displayName: 'Bank Accounts' },
+      { name: 'financial.petty_cash', displayName: 'Petty Cash' },
+    ]
+  },
+  {
+    id: 'receivables', name: 'Receivables', icon: CreditCard, color: 'text-cyan-600 bg-cyan-100', features: [
+      { name: 'receivables', displayName: 'Receivables' },
+      { name: 'receivables.payments', displayName: 'Customer Payments' },
+      { name: 'receivables.aging', displayName: 'Aging Report' },
+    ]
+  },
+  {
+    id: 'payables', name: 'Payables', icon: FileText, color: 'text-rose-600 bg-rose-100', features: [
+      { name: 'payables', displayName: 'Payables' },
+      { name: 'payables.payments', displayName: 'Supplier Payments' },
+      { name: 'payables.aging', displayName: 'Payables Aging' },
+    ]
+  },
+  {
+    id: 'accounting', name: 'Accounting', icon: Briefcase, color: 'text-purple-600 bg-purple-100', features: [
+      { name: 'accounting', displayName: 'Accounting' },
+      { name: 'accounting.chart_of_accounts', displayName: 'Chart of Accounts' },
+      { name: 'accounting.journal_entries', displayName: 'Journal Entries' },
+      { name: 'accounting.general_ledger', displayName: 'General Ledger' },
+      { name: 'accounting.trial_balance', displayName: 'Trial Balance' },
+      { name: 'accounting.profit_loss', displayName: 'Profit & Loss' },
+      { name: 'accounting.balance_sheet', displayName: 'Balance Sheet' },
+    ]
+  },
+  {
+    id: 'reports', name: 'Reports & Insights', icon: BarChart3, color: 'text-sky-600 bg-sky-100', features: [
+      { name: 'reports', displayName: 'Reports' },
+      { name: 'reports.sales', displayName: 'Sales Reports' },
+      { name: 'reports.inventory', displayName: 'Inventory Reports' },
+      { name: 'reports.customers', displayName: 'Customer Reports' },
+      { name: 'reports.suppliers', displayName: 'Supplier Reports' },
+      { name: 'reports.financial', displayName: 'Financial Reports' },
+      { name: 'reports.audit', displayName: 'Audit Reports' },
+      { name: 'reports.services', displayName: 'Service Reports' },
+      { name: 'reports.rentals', displayName: 'Rental Reports' },
+      { name: 'reports.performance', displayName: 'Performance Reports' },
+    ]
+  },
+  {
+    id: 'hr', name: 'HR Management', icon: Users, color: 'text-pink-600 bg-pink-100', features: [
+      { name: 'hr', displayName: 'HR Management' },
+      { name: 'hr.employees', displayName: 'Employees' },
+      { name: 'hr.attendance', displayName: 'Attendance' },
+      { name: 'hr.payroll', displayName: 'Payroll' },
+      { name: 'hr.leave', displayName: 'Leave Management' },
+    ]
+  },
+  {
+    id: 'service', name: 'Service Business', icon: Wrench, color: 'text-yellow-600 bg-yellow-100', features: [
+      { name: 'service', displayName: 'Service Business' },
+      { name: 'service.appointments', displayName: 'Appointments' },
+      { name: 'service.work_orders', displayName: 'Work Orders' },
+      { name: 'service.job_cards', displayName: 'Job Cards' },
+      { name: 'service.technicians', displayName: 'Technician Assignment' },
+      { name: 'service.contracts', displayName: 'Service Contracts' },
+    ]
+  },
+  {
+    id: 'multi_branch', name: 'Multi-Branch', icon: GitBranch, color: 'text-lime-600 bg-lime-100', features: [
+      { name: 'multi_branch', displayName: 'Multi-Branch' },
+      { name: 'multi_branch.transfers', displayName: 'Branch Transfers' },
+      { name: 'multi_branch.reports', displayName: 'Branch Reports' },
+    ]
+  },
+  {
+    id: 'rentals', name: 'Rental Bookings', icon: Clock, color: 'text-violet-600 bg-violet-100', features: [
+      { name: 'rentals', displayName: 'Rental Bookings' },
+    ]
+  },
+  {
+    id: 'communication', name: 'Communication', icon: MessageSquare, color: 'text-blue-400 bg-blue-50', features: [
+      { name: 'communication.sms', displayName: 'SMS Notifications' },
+      { name: 'communication.email', displayName: 'Email Notifications' },
+      { name: 'communication.whatsapp', displayName: 'WhatsApp Integration' },
+      { name: 'communication.notifications', displayName: 'In-App Notifications' },
+    ]
+  },
+  {
+    id: 'integrations', name: 'Integrations', icon: CreditCard, color: 'text-emerald-600 bg-emerald-100', features: [
+      { name: 'integrations.mobile_money', displayName: 'Mobile Money' },
+      { name: 'integrations.stripe', displayName: 'Stripe' },
+      { name: 'integrations.flutterwave', displayName: 'Flutterwave' },
+      { name: 'integrations.qr_payments', displayName: 'QR Payments' },
+      { name: 'integrations.api_access', displayName: 'API Access' },
+    ]
+  },
+  {
+    id: 'settings', name: 'Settings', icon: Settings, color: 'text-slate-600 bg-slate-200', features: [
+      { name: 'settings', displayName: 'Business Settings' },
+      { name: 'settings.taxes', displayName: 'Taxes' },
+      { name: 'settings.currencies', displayName: 'Currencies' },
+      { name: 'settings.units', displayName: 'Units' },
+      { name: 'settings.roles', displayName: 'Roles & Permissions' },
+      { name: 'settings.users', displayName: 'Users' },
+    ]
+  },
+  {
+    id: 'audit', name: 'Audit & Security', icon: ClipboardList, color: 'text-red-600 bg-red-100', features: [
+      { name: 'audit', displayName: 'Audit Log' },
+    ]
+  },
 ]
 
 export const FeaturesPage: React.FC = () => {
@@ -77,7 +212,7 @@ export const FeaturesPage: React.FC = () => {
       // so toggling always works even before "Seed All Modules" is run.
       let feat = features.find(f => f.name === mf.name)
       if (!feat) {
-        const cRes = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: mf.name, displayName: mf.displayName, category, description: mf.displayName, isActive: true }) })
+        const cRes = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: mf.name, displayName: mf.displayName, category, module: category, description: mf.displayName, isActive: true }) })
         if (!cRes.ok) { const e = await cRes.json().catch(() => ({})); throw new Error(e.error || 'Failed to create feature') }
         const created = await cRes.json()
         feat = created.feature
@@ -99,7 +234,7 @@ export const FeaturesPage: React.FC = () => {
     for (const mod of MODULES) {
       for (const f of mod.features) {
         if (!features.find(ef => ef.name === f.name)) {
-          await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: f.name, displayName: f.displayName, category: mod.id, description: f.displayName, isActive: true, slug: f.name }) })
+          await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: f.name, displayName: f.displayName, category: mod.id, module: mod.id, description: f.displayName, isActive: true, slug: f.name }) })
         }
       }
     }
@@ -119,6 +254,7 @@ export const FeaturesPage: React.FC = () => {
           name,
           displayName,
           category: featureForm.category.trim() || 'core',
+          module: featureForm.module.trim() || name.split('.')[0] || 'core',
           description: featureForm.description.trim() || displayName,
           isActive: featureForm.isActive,
         }),
@@ -238,6 +374,10 @@ export const FeaturesPage: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium mb-1 text-slate-300">Category</label>
                 <input value={featureForm.category} onChange={e => setFeatureForm(p => ({ ...p, category: e.target.value }))} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg" placeholder="core" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-300">Module</label>
+                <input value={featureForm.module} onChange={e => setFeatureForm(p => ({ ...p, module: e.target.value }))} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg" placeholder="sales, inventory, customers..." />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 text-slate-300">Description</label>

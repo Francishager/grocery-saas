@@ -101,12 +101,12 @@ router.get("/features", authenticateToken, requirePlatformAdmin, async (req, res
 // Create feature
 router.post("/features", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { name, displayName, description, category, isActive } = req.body;
+    const { name, displayName, description, category, module: featureModule, isActive } = req.body;
     if (!name || !displayName) {
       return res.status(400).json({ error: "name and displayName are required" });
     }
     const feature = await prisma.feature.create({
-      data: { name, displayName, description: description || null, category: category || "core", isActive: isActive !== false }
+      data: { name, displayName, description: description || null, category: category || "core", module: featureModule || name.split(".")[0] || "core", isActive: isActive !== false }
     });
     res.status(201).json({ message: "Feature created", feature });
   } catch (err) {
