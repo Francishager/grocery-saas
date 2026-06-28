@@ -108,12 +108,14 @@ async function seedFeatures() {
     { name: 'multi_branch.reports', displayName: 'Branch Reports', module: 'multi_branch', category: 'advanced', description: 'Per-branch reporting' },
 
     // ===== Communication =====
+    { name: 'communication', displayName: 'Communication', module: 'communication', category: 'integration', description: 'Notifications and messaging' },
     { name: 'communication.sms', displayName: 'SMS Notifications', module: 'communication', category: 'integration', description: 'Send SMS reminders and alerts' },
     { name: 'communication.email', displayName: 'Email Notifications', module: 'communication', category: 'integration', description: 'Send email notifications' },
     { name: 'communication.whatsapp', displayName: 'WhatsApp Integration', module: 'communication', category: 'integration', description: 'Send notifications via WhatsApp' },
     { name: 'communication.notifications', displayName: 'In-App Notifications', module: 'communication', category: 'integration', description: 'In-app notification system' },
 
     // ===== Integrations =====
+    { name: 'integrations', displayName: 'Integrations', module: 'integrations', category: 'integration', description: 'Third-party integrations and payment providers' },
     { name: 'integrations.mobile_money', displayName: 'Mobile Money', module: 'integrations', category: 'integration', description: 'Mobile money payment integration' },
     { name: 'integrations.stripe', displayName: 'Stripe', module: 'integrations', category: 'integration', description: 'Stripe payment integration' },
     { name: 'integrations.flutterwave', displayName: 'Flutterwave', module: 'integrations', category: 'integration', description: 'Flutterwave payment integration' },

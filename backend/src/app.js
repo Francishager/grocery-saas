@@ -26,6 +26,12 @@ import payablesRouter from "../routes/payables.js";
 import expensesRouter from "../routes/expenses.js";
 import platformNewRouter from "../routes/platform-new.js";
 import rentalsRouter from "../routes/rentals.js";
+import returnsRouter from "../routes/returns.js";
+import accountingRouter from "../routes/accounting.js";
+import hrRouter from "../routes/hr.js";
+import transfersRouter from "../routes/transfers.js";
+import notificationsRouter from "../routes/notifications.js";
+import integrationsRouter from "../routes/integrations.js";
 
 import { auditMiddleware } from "./utils/audit.js";
 
@@ -134,6 +140,12 @@ app.use("/api/payables", payablesRouter);
 app.use("/api/expenses", expensesRouter);
 app.use("/api/platform", platformNewRouter);
 app.use("/api/rentals", rentalsRouter);
+app.use("/api/returns", returnsRouter);
+app.use("/api/accounting", accountingRouter);
+app.use("/api/hr", hrRouter);
+app.use("/api/transfers", transfersRouter);
+app.use("/api/notifications", notificationsRouter);
+app.use("/api/integrations", integrationsRouter);
 
 // 404
 app.use("/{*path}", (req, res) => {

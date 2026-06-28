@@ -30,6 +30,12 @@ import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
 import RentalsPage from '@/pages/RentalsPage'
+import ReturnsPage from '@/pages/ReturnsPage'
+import AccountingPage from '@/pages/AccountingPage'
+import HRPage from '@/pages/HRPage'
+import TransfersPage from '@/pages/TransfersPage'
+import CommunicationPage from '@/pages/CommunicationPage'
+import IntegrationsPage from '@/pages/IntegrationsPage'
 import UserProfilePage from '@/pages/UserProfilePage'
  
 // SaaS Admin Pages
@@ -120,6 +126,12 @@ function App() {
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
           <Route path="expenses" element={<FeatureGuard feature="expenses"><ExpensesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
+          <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
+          <Route path="accounting" element={<FeatureGuard feature="accounting"><AccountingPage /></FeatureGuard>} />
+          <Route path="hr" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
+          <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
+          <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
+          <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
           <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />

@@ -140,6 +140,7 @@ const MODULES = [
   },
   {
     id: 'communication', name: 'Communication', icon: MessageSquare, color: 'text-blue-400 bg-blue-50', features: [
+      { name: 'communication', displayName: 'Communication' },
       { name: 'communication.sms', displayName: 'SMS Notifications' },
       { name: 'communication.email', displayName: 'Email Notifications' },
       { name: 'communication.whatsapp', displayName: 'WhatsApp Integration' },
@@ -148,6 +149,7 @@ const MODULES = [
   },
   {
     id: 'integrations', name: 'Integrations', icon: CreditCard, color: 'text-emerald-600 bg-emerald-100', features: [
+      { name: 'integrations', displayName: 'Integrations' },
       { name: 'integrations.mobile_money', displayName: 'Mobile Money' },
       { name: 'integrations.stripe', displayName: 'Stripe' },
       { name: 'integrations.flutterwave', displayName: 'Flutterwave' },

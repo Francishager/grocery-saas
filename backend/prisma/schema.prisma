@@ -32,6 +32,11 @@ model Branch {
   supplierPayments SupplierPayment[]
   expenses Expense[]
   rentals  Rental[]
+  saleReturns      SaleReturn[]
+  journalEntries   JournalEntry[]
+  employees        Employee[]
+  stockTransfersFrom StockTransfer[] @relation("TransferFrom")
+  stockTransfersTo   StockTransfer[] @relation("TransferTo")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -106,6 +111,16 @@ model Tenant {
   expenses         Expense[]
   cashTransactions CashTransaction[]
   rentals          Rental[]
+  saleReturns      SaleReturn[]
+  accounts         Account[]
+  journalEntries   JournalEntry[]
+  employees        Employee[]
+  attendance       Attendance[]
+  leaveRequests    LeaveRequest[]
+  payrollRecords   PayrollRecord[]
+  stockTransfers   StockTransfer[]
+  notifications    Notification[]
+  integrations     IntegrationConfig[]
 
   // =====================
   // USAGE LIMIT
@@ -252,6 +267,10 @@ model User {
   expenses          Expense[]
   cashTransactions  CashTransaction[]
   rentals           Rental[]
+  saleReturns       SaleReturn[]
+  journalEntries    JournalEntry[]
+  stockTransfers    StockTransfer[]
+  notifications     Notification[]
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -458,6 +477,8 @@ model Product {
   supplierPurchaseItems SupplierPurchaseItem[]
   units                 ProductUnit[]
   rentalItems           RentalItem[]
+  saleReturnItems       SaleReturnItem[]
+  stockTransferItems    StockTransferItem[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
@@ -535,6 +556,7 @@ model Sale {
   status        SaleStatus @default(completed)
   notes         String?
   items         SaleItem[]
+  saleReturns   SaleReturn[]
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
@@ -632,6 +654,7 @@ model Customer {
   payments CustomerPayment[]
   invoices Invoice[]
   rentals  Rental[]
+  saleReturns SaleReturn[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, branchId, phone])
@@ -1075,4 +1098,293 @@ model RentalItem {
   @@index([rentalId])
   @@index([productId])
   @@map("rental_items")
+}
+
+// =====================================================
+// SALE RETURNS & REFUNDS
+// =====================================================
+
+model SaleReturn {
+  id            String   @id @default(cuid())
+  returnNo      String
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  saleId        String?
+  sale          Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  total         Float    @default(0)
+  reason        String?
+  refundMethod  String   @default("cash") // cash, credit, mobile_money
+  status        String   @default("completed") // completed, pending
+  items         SaleReturnItem[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, returnNo])
+  @@index([tenantId, branchId])
+  @@index([saleId])
+  @@map("sale_returns")
+}
+
+model SaleReturnItem {
+  id          String     @id @default(cuid())
+  returnId    String
+  return      SaleReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product    @relation(fields: [productId], references: [id])
+  quantity    Int
+  price       Float
+  total       Float
+  reason      String?
+  createdAt   DateTime   @default(now())
+
+  @@index([returnId])
+  @@map("sale_return_items")
+}
+
+// =====================================================
+// ACCOUNTING
+// =====================================================
+
+model Account {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code        String   // e.g. "1000", "2001"
+  name        String   // e.g. "Cash", "Accounts Receivable"
+  type        String   // asset, liability, equity, revenue, expense
+  subType     String?  // current_asset, fixed_asset, current_liability, etc.
+  parentId    String?
+  parent      Account? @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children    Account[] @relation("AccountHierarchy")
+  balance     Float    @default(0)
+  isActive    Boolean  @default(true)
+  description String?
+  journalLines JournalLine[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("accounts")
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  entryNo     String
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  date        DateTime @default(now())
+  description String?
+  reference   String?  // e.g. sale receipt no, invoice no
+  status      String   @default("posted") // draft, posted, reversed
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  lines       JournalLine[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, entryNo])
+  @@index([tenantId])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id          String       @id @default(cuid())
+  entryId     String
+  entry       JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     Account      @relation(fields: [accountId], references: [id])
+  debit       Float        @default(0)
+  credit      Float        @default(0)
+  description String?
+  createdAt   DateTime     @default(now())
+
+  @@index([entryId])
+  @@map("journal_lines")
+}
+
+// =====================================================
+// HR MANAGEMENT
+// =====================================================
+
+model Employee {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  position    String?  // e.g. "Cashier", "Manager"
+  department  String?
+  salary      Float    @default(0)
+  payFrequency String  @default("monthly") // weekly, biweekly, monthly
+  hireDate    DateTime @default(now())
+  terminationDate DateTime?
+  status      String   @default("active") // active, terminated, on_leave
+  address     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attendance    Attendance[]
+  leaveRequests LeaveRequest[]
+  payrollRecords PayrollRecord[]
+
+  @@index([tenantId])
+  @@map("employees")
+}
+
+model Attendance {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date        DateTime @default(now())
+  checkIn     DateTime?
+  checkOut    DateTime?
+  status      String   @default("present") // present, absent, late, half_day, holiday
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@unique([employeeId, date])
+  @@index([tenantId, employeeId])
+  @@map("attendance")
+}
+
+model LeaveRequest {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType   String   @default("annual") // annual, sick, casual, maternity
+  startDate   DateTime
+  endDate     DateTime
+  days        Int
+  reason      String?
+  status      String   @default("pending") // pending, approved, rejected
+  approvedBy  String?
+  approvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, employeeId])
+  @@map("leave_requests")
+}
+
+model PayrollRecord {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  period      String   // e.g. "2025-01" for Jan 2025
+  grossSalary Float   @default(0)
+  deductions  Float   @default(0)
+  netSalary   Float   @default(0)
+  bonus       Float   @default(0)
+  status      String  @default("pending") // pending, paid
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([employeeId, period])
+  @@index([tenantId])
+  @@map("payroll_records")
+}
+
+// =====================================================
+// STOCK TRANSFERS (Branch Transfers)
+// =====================================================
+
+model StockTransfer {
+  id            String   @id @default(cuid())
+  transferNo    String
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromBranchId  String?
+  fromBranch    Branch?  @relation("TransferFrom", fields: [fromBranchId], references: [id], onDelete: SetNull)
+  toBranchId    String?
+  toBranch      Branch?  @relation("TransferTo", fields: [toBranchId], references: [id], onDelete: SetNull)
+  status        String   @default("pending") // pending, in_transit, received, cancelled
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  notes         String?
+  items         StockTransferItem[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, transferNo])
+  @@index([tenantId])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id          String        @id @default(cuid())
+  transferId  String
+  transfer    StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product       @relation(fields: [productId], references: [id])
+  quantity    Int
+  notes       String?
+  createdAt   DateTime      @default(now())
+
+  @@index([transferId])
+  @@map("stock_transfer_items")
+}
+
+// =====================================================
+// NOTIFICATIONS (Communication)
+// =====================================================
+
+model Notification {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel     String   @default("in_app") // in_app, sms, email, whatsapp
+  title       String
+  message     String
+  type        String   @default("info") // info, warning, success, error
+  isRead      Boolean  @default(false)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, userId])
+  @@map("notifications")
+}
+
+// =====================================================
+// INTEGRATION CONFIG
+// =====================================================
+
+model IntegrationConfig {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  provider    String   // stripe, flutterwave, mobile_money, qr_payments
+  displayName String
+  isActive    Boolean  @default(false)
+  credentials Json?    // encrypted credentials
+  settings    Json?    // provider-specific settings
+  webhookUrl  String?
+  lastSyncAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, provider])
+  @@index([tenantId])
+  @@map("integration_configs")
 }
