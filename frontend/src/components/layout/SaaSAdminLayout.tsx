@@ -43,10 +43,12 @@ export function SaaSAdminLayout() {
               <span className="text-lg font-bold text-white">jibuSales</span>
               <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded font-medium text-white">ADMIN</span>
             </div>
+            {(() => { const DashIcon = navItems[0].icon; return (
             <NavLink to={navItems[0].to} onClick={() => setSidebarOpen(false)}
               className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white')}>
-              <navItems[0].icon className="h-5 w-5" />{navItems[0].label}
+              <DashIcon className="h-5 w-5" />{navItems[0].label}
             </NavLink>
+            ) })()}
           </div>
           {/* Scrollable nav items */}
           <nav className="flex-1 space-y-1 overflow-y-auto p-4">
