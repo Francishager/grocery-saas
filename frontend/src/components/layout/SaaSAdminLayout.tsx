@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, X, Shield } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -24,19 +24,23 @@ export function SaaSAdminLayout() {
   return (
     <div className="min-h-screen bg-slate-950">
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {/* Full-width navbar at top */}
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 lg:px-6">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="lg:hidden text-white hover:bg-slate-800" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600"><Shield className="h-5 w-5 text-white" /></div>
+            <span className="text-lg font-bold text-white">jibuSales</span>
+            <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded font-medium text-white">ADMIN</span>
+          </div>
+        </div>
+        <div className="flex-1" />
+      </header>
       <aside className={cn(
-        'fixed left-0 top-0 z-50 h-full w-64 transform bg-slate-900 shadow-lg transition-transform duration-200 ease-in-out lg:translate-x-0',
+        'fixed left-0 top-16 z-50 h-[calc(100vh-4rem)] w-64 transform bg-slate-900 shadow-lg transition-transform duration-200 ease-in-out lg:translate-x-0',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="flex h-full flex-col text-white">
-          <div className="flex h-16 items-center justify-between border-b border-slate-800 px-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600"><Shield className="h-5 w-5 text-white" /></div>
-              <span className="text-lg font-bold">jibuSales</span>
-              <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded font-medium">ADMIN</span>
-            </div>
-            <Button variant="ghost" size="icon" className="lg:hidden text-white hover:bg-slate-800" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></Button>
-          </div>
           <nav className="flex-1 space-y-1 p-4">
             {navItems.map((item) => (
               <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
@@ -58,10 +62,6 @@ export function SaaSAdminLayout() {
         </div>
       </aside>
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 lg:px-6">
-          <Button variant="ghost" size="icon" className="lg:hidden text-white hover:bg-slate-800" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
-          <div className="flex-1" />
-        </header>
         <main className="p-4 lg:p-6"><Outlet /></main>
       </div>
     </div>

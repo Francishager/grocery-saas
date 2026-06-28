@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, X, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -222,17 +222,62 @@ export function TenantLayout() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {/* Full-width navbar at top */}
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
+          <div className="flex items-center gap-2">
+            <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
+          </div>
+        </div>
+        <div className="flex-1" />
+        <div className="group relative">
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden"
+            aria-label="User profile"
+          >
+            {user?.avatar ? (
+              <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
+            ) : (
+              user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'
+            )}
+          </button>
+          <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+            <div className="mb-3 border-b pb-3 flex items-center gap-3">
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
+              ) : (
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                  {user?.name?.[0]?.toUpperCase() || 'U'}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-sm font-semibold">{user?.name || 'User'}</p>
+                <p className="truncate text-xs text-muted-foreground">{user?.email || ''}</p>
+                <p className="text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
+              </div>
+            </div>
+            <div className="space-y-1 mb-2">
+              <Button variant="ghost" size="sm" className="h-9 w-full justify-start" onClick={() => navigate('/tenant/profile')}>
+                <Users className="mr-2 h-4 w-4" />
+                My Profile
+              </Button>
+            </div>
+            <div className="border-t pt-2">
+              <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
       <aside className={cn(
-        'fixed left-0 top-0 z-50 h-full w-80 max-w-[88vw] transform bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] shadow-xl transition-transform duration-200 ease-in-out lg:w-64 lg:max-w-none lg:translate-x-0',
+        'fixed left-0 top-16 z-50 h-[calc(100vh-4rem)] w-80 max-w-[88vw] transform bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] shadow-xl transition-transform duration-200 ease-in-out lg:w-64 lg:max-w-none lg:translate-x-0',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="flex h-full flex-col">
-          <div className="flex h-16 items-center justify-between border-b border-[hsl(var(--sidebar-border))] px-4">
-            <div className="flex items-center gap-2">
-              <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
-            </div>
-            <Button variant="ghost" size="icon" className="text-slate-200 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setSidebarOpen(false)}><X className="h-5 w-5" /></Button>
-          </div>
           <nav className="flex-1 space-y-2 overflow-y-auto p-4 sm:p-5 lg:space-y-1 lg:p-4">
             {visibleNavItems.map((item) =>
               item.isInventory ? (
@@ -340,51 +385,6 @@ export function TenantLayout() {
         </div>
       </aside>
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
-          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
-          <div className="flex-1" />
-          <div className="group relative">
-            <button
-              type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden"
-              aria-label="User profile"
-            >
-              {user?.avatar ? (
-                <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
-              ) : (
-                user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'
-              )}
-            </button>
-            <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
-              <div className="mb-3 border-b pb-3 flex items-center gap-3">
-                {user?.avatar ? (
-                  <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
-                ) : (
-                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                    {user?.name?.[0]?.toUpperCase() || 'U'}
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-semibold">{user?.name || 'User'}</p>
-                  <p className="truncate text-xs text-muted-foreground">{user?.email || ''}</p>
-                  <p className="text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
-                </div>
-              </div>
-              <div className="space-y-1 mb-2">
-                <Button variant="ghost" size="sm" className="h-9 w-full justify-start" onClick={() => navigate('/tenant/profile')}>
-                  <Users className="mr-2 h-4 w-4" />
-                  My Profile
-                </Button>
-              </div>
-              <div className="border-t pt-2">
-                <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Logout
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
         <main className="p-4 lg:p-6"><Outlet /></main>
       </div>
     </div>
