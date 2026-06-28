@@ -66,11 +66,6 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
       featureAccess[feature.name] = { enabled: false, source: 'default' }
     }
 
-    const jsonFeatures = Array.isArray(tenant.plan?.features) ? tenant.plan.features : []
-    jsonFeatures.filter(Boolean).forEach((name) => {
-      featureAccess[name] = { enabled: true, source: 'plan' }
-    })
-
     planFeatures.forEach((pf) => {
       if (pf.feature?.name) featureAccess[pf.feature.name] = { enabled: true, source: 'plan' }
     })
@@ -258,6 +253,20 @@ router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, re
 })
 
 // === TENANT MANAGEMENT ===
+
+// Lightweight tenant list for dropdowns
+router.get('/tenants/list', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenants = await prisma.tenant.findMany({
+      select: { id: true, name: true, planId: true, plan: { select: { name: true } } },
+      orderBy: { name: 'asc' }
+    })
+    res.json(tenants)
+  } catch (error) {
+    console.error('Get tenant list error:', error)
+    res.status(500).json({ error: 'Failed to fetch tenant list' })
+  }
+})
 
 // Get all tenants with usage stats
 router.get('/tenants', authenticateToken, requirePlatformAdmin, async (req, res) => {

@@ -518,7 +518,6 @@ router.get("/me/features", authenticateToken, async (req, res) => {
         include: { plan: true },
       });
 
-      const jsonFeatures = Array.isArray(tenant?.plan?.features) ? tenant.plan.features : [];
       const planFeatureRows = tenant?.planId
         ? await prisma.planFeature.findMany({
             where: { planId: tenant.planId, enabled: true },
@@ -530,10 +529,9 @@ router.get("/me/features", authenticateToken, async (req, res) => {
         include: { feature: true },
       });
 
-      const effective = new Set([
-        ...jsonFeatures.filter(Boolean),
-        ...planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean),
-      ]);
+      const effective = new Set(
+        planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean)
+      );
 
       tenantOverrides.forEach((tf) => {
         if (!tf.feature?.name) return;
