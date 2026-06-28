@@ -304,6 +304,15 @@ router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, re
       }
     }
 
+    // Invalidate feature cache for all tenants on this plan
+    const affectedTenants = await prisma.tenant.findMany({
+      where: { planId: id },
+      select: { id: true },
+    })
+    for (const t of affectedTenants) {
+      invalidateFeatureCache(t.id)
+    }
+
     res.json(plan)
   } catch (error) {
     console.error('Update plan error:', error)
@@ -365,6 +374,7 @@ router.post('/tenant-features', authenticateToken, requirePlatformAdmin, async (
       update: { enabled },
       create: { tenantId, featureId, enabled }
     })
+    invalidateFeatureCache(tenantId)
     res.json({ message: 'Tenant feature override saved', tenantFeature: tf })
   } catch (err) {
     console.error('Override feature error:', err)

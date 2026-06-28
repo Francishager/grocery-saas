@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
+import { featureAccessService } from '@/services/featureAccessService'
 
 export interface User {
   id: string
@@ -175,6 +176,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       setUser(userData)
       setTokens(tokenData)
       persistAuth(userData, tokenData)
+      // Reset feature access service on login so stale features from previous session don't persist
+      featureAccessService.reset()
       onLogin?.(userData, tokenData)
       return { user: userData, tokens: tokenData }
     } catch (err) {
@@ -203,6 +206,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       setUser(null)
       setTokens(null)
       persistAuth(null, null)
+      // Reset feature access service on logout
+      featureAccessService.reset()
       setLoading(false)
       onLogout?.()
     }

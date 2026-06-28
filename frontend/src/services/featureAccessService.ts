@@ -298,7 +298,7 @@ export function useFeatureAccess() {
     }
 
     return unsubscribe
-  }, [user?.tenantId])
+  }, [user?.tenantId, user?.id])
 
   const isFeatureEnabled = (featureName: string) => {
     return featureAccessService.isFeatureEnabled(featureName)
