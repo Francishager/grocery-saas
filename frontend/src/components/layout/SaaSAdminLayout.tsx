@@ -28,11 +28,6 @@ export function SaaSAdminLayout() {
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 lg:px-6">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="lg:hidden text-white hover:bg-slate-800" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600"><Shield className="h-5 w-5 text-white" /></div>
-            <span className="text-lg font-bold text-white">jibuSales</span>
-            <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded font-medium text-white">ADMIN</span>
-          </div>
         </div>
         <div className="flex-1" />
       </header>
@@ -41,8 +36,21 @@ export function SaaSAdminLayout() {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="flex h-full flex-col text-white">
-          <nav className="flex-1 space-y-1 p-4">
-            {navItems.map((item) => (
+          {/* Fixed logo + Dashboard */}
+          <div className="border-b border-slate-800 px-4 pt-4 pb-2">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600"><Shield className="h-5 w-5 text-white" /></div>
+              <span className="text-lg font-bold text-white">jibuSales</span>
+              <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded font-medium text-white">ADMIN</span>
+            </div>
+            <NavLink to={navItems[0].to} onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white')}>
+              <navItems[0].icon className="h-5 w-5" />{navItems[0].label}
+            </NavLink>
+          </div>
+          {/* Scrollable nav items */}
+          <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+            {navItems.slice(1).map((item) => (
               <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white')}>
                 <item.icon className="h-5 w-5" />{item.label}

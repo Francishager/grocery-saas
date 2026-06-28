@@ -226,9 +226,6 @@ export function TenantLayout() {
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
-          <div className="flex items-center gap-2">
-            <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
-          </div>
         </div>
         <div className="flex-1" />
         <div className="group relative">
@@ -278,8 +275,21 @@ export function TenantLayout() {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         <div className="flex h-full flex-col">
+          {/* Fixed logo + Dashboard */}
+          <div className="border-b border-white/10 px-4 pt-4 pb-2">
+            <div className="flex items-center gap-2 mb-3">
+              <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
+            </div>
+            {(() => { const dashItem = visibleNavItems.find(i => i.feature === 'dashboard') || navItems[0]; const DashIcon = dashItem.icon; return (
+              <NavLink to={dashItem.to} onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                <DashIcon className="h-6 w-6 lg:h-5 lg:w-5" />{dashItem.label}
+              </NavLink>
+            ) })()}
+          </div>
+          {/* Scrollable nav items */}
           <nav className="flex-1 space-y-2 overflow-y-auto p-4 sm:p-5 lg:space-y-1 lg:p-4">
-            {visibleNavItems.map((item) =>
+            {visibleNavItems.filter(i => i.feature !== 'dashboard').map((item) =>
               item.isInventory ? (
                 <div key={item.to}>
                   <button
