@@ -66,6 +66,7 @@ class FeatureAccessService {
     if (!tenantId) return
 
     this.loading = true
+    this.features = {} // Clear stale features immediately so they don't show during reload
     this.error = null
     this.notifyListeners()
 
@@ -278,12 +279,9 @@ export function useFeatureAccess() {
     // Sync immediately in case the service already has data
     syncState()
 
-    // Initial load if we have a tenant
+    // Initial load if we have a tenant — always reload to get fresh data
     if (user?.tenantId) {
-      // Only load if not already loaded (avoid redundant API calls)
-      if (!featureAccessService.isLoading() && Object.keys(featureAccessService.getFeatureAccess()).length === 0) {
-        featureAccessService.loadFeatures(user.tenantId)
-      }
+      featureAccessService.loadFeatures(user.tenantId)
     } else {
       // No tenantId — not loading
       setLoading(false)
