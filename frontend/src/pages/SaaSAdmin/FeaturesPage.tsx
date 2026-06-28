@@ -3,8 +3,6 @@ import React, { useState, useEffect } from 'react'
 import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
-interface PlanFeature { featureId: string; planId: string; enabled: boolean; feature: { id: string; name: string; slug: string } }
-interface Plan { id: string; name: string }
 
 const emptyFeatureForm = { name: '', displayName: '', category: 'core', module: '', description: '', isActive: true }
 
@@ -198,17 +196,11 @@ interface TenantFeatureAccess { [key: string]: { enabled: boolean; source: strin
 
 export const FeaturesPage: React.FC = () => {
   const [features, setFeatures] = useState<Feature[]>([])
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [planFeatures, setPlanFeatures] = useState<PlanFeature[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [selectedPlan, setSelectedPlan] = useState<string>('')
   const [error, setError] = useState('')
   const [showFeatureForm, setShowFeatureForm] = useState(false)
   const [featureForm, setFeatureForm] = useState(emptyFeatureForm)
-
-  // Tab state: 'plan' or 'tenant'
-  const [activeTab, setActiveTab] = useState<'plan' | 'tenant'>('plan')
 
   // Tenant override state
   const [tenants, setTenants] = useState<TenantListItem[]>([])
@@ -219,16 +211,10 @@ export const FeaturesPage: React.FC = () => {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [fRes, pRes] = await Promise.all([apiFetch('/api/platform/features'), apiFetch('/api/platform/plans')])
+      const fRes = await apiFetch('/api/platform/features')
       if (fRes.ok) setFeatures(await fRes.json())
-      if (pRes.ok) { const p = await pRes.json(); setPlans(p); if (p.length && !selectedPlan) setSelectedPlan(p[0].id) }
     } catch {}
     setLoading(false)
-  }
-
-  const fetchPlanFeatures = async (planId: string) => {
-    if (!planId) return
-    try { const res = await apiFetch(`/api/platform/plans/${planId}/features`); if (res.ok) setPlanFeatures(await res.json()) } catch {}
   }
 
   const fetchTenants = async () => {
@@ -256,34 +242,10 @@ export const FeaturesPage: React.FC = () => {
   }
 
   useEffect(() => { fetchData() }, [])
-  useEffect(() => { if (selectedPlan) fetchPlanFeatures(selectedPlan) }, [selectedPlan])
-  useEffect(() => { if (activeTab === 'tenant') fetchTenants() }, [activeTab])
+  useEffect(() => { fetchTenants() }, [])
   useEffect(() => { if (selectedTenant) fetchTenantFeatures(selectedTenant) }, [selectedTenant])
 
-  const isFeatureEnabled = (featureName: string) => planFeatures.some(pf => pf.feature?.name === featureName && pf.enabled)
   const toFeatureName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-
-  const handleToggle = async (mf: { name: string; displayName: string }, category: string, enabled: boolean) => {
-    if (!selectedPlan) { setError('Select a plan first'); return }
-    setSaving(true); setError('')
-    try {
-      let feat = features.find(f => f.name === mf.name)
-      if (!feat) {
-        const cRes = await apiFetch('/api/platform/features', { method: 'POST', body: JSON.stringify({ name: mf.name, displayName: mf.displayName, category, module: category, description: mf.displayName, isActive: true }) })
-        if (!cRes.ok) { const e = await cRes.json().catch(() => ({})); throw new Error(e.error || 'Failed to create feature') }
-        const created = await cRes.json()
-        feat = created.feature
-        if (feat) setFeatures(prev => [...prev, feat as Feature])
-      }
-      if (!feat) throw new Error('Feature unavailable')
-      const res = await apiFetch('/api/platform/plan-features', { method: 'POST', body: JSON.stringify({ planId: selectedPlan, featureId: feat.id, enabled }) })
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed to update toggle') }
-      await fetchPlanFeatures(selectedPlan)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong')
-    }
-    setSaving(false)
-  }
 
   const handleTenantToggle = async (mf: { name: string; displayName: string }, enabled: boolean) => {
     if (!selectedTenant) { setError('Select a tenant first'); return }
@@ -357,7 +319,7 @@ export const FeaturesPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-white">Features</h1><p className="text-slate-400">Manage jibuSales modules, plan assignments & tenant overrides</p></div>
+        <div><h1 className="text-2xl font-bold text-white">Features</h1><p className="text-slate-400">Manage feature catalog & tenant overrides — plan features are assigned in Plans & Pricing</p></div>
         <div className="flex gap-2">
           <button onClick={fetchData} className="px-3 py-2 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-800"><RefreshCw size={18} /></button>
           <button onClick={() => setShowFeatureForm(true)} disabled={saving} className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 flex items-center gap-2 disabled:opacity-50">
@@ -376,170 +338,89 @@ export const FeaturesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab Switcher */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setActiveTab('plan')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'plan' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
-        >
-          Plan Features
-        </button>
-        <button
-          onClick={() => setActiveTab('tenant')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'tenant' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
-        >
-          Tenant Custom Overrides
-        </button>
+      {/* === TENANT OVERRIDES === */}
+      <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-slate-300">Customize features for tenant:</label>
+          <select value={selectedTenant} onChange={e => setSelectedTenant(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg text-sm min-w-[200px]">
+            {tenants.map(t => <option key={t.id} value={t.id}>{t.name} ({t.plan?.name || 'No Plan'})</option>)}
+          </select>
+          {selectedTenant && (
+            <span className="text-xs text-slate-400">
+              Green = enabled (override or plan), Red = explicitly disabled (override), Gray = not in plan
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* === PLAN FEATURES TAB === */}
-      {activeTab === 'plan' && (
-        <>
-          <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
-            <div className="flex items-center gap-4">
-              <label className="text-sm font-medium text-slate-300">Assign features for plan:</label>
-              <select value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg text-sm">
-                {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
-          ) : (
-            <div className="space-y-4">
-              {MODULES.map(mod => {
-                const ModIcon = mod.icon
-                return (
-                  <div key={mod.id} className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-                    <div className="p-4 border-b border-slate-800 flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${mod.color}`}><ModIcon className="w-5 h-5" /></div>
-                      <div><h2 className="font-semibold text-white">{mod.name}</h2><p className="text-xs text-slate-400">{mod.features.length} features</p></div>
-                    </div>
-                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                      {mod.features.map(mf => {
-                        const enabled = isFeatureEnabled(mf.name)
-                        return (
-                          <div key={mf.name} className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
-                            <span className="text-sm text-slate-200">{mf.displayName}</span>
-                            <button onClick={() => handleToggle(mf, mod.id, !enabled)} disabled={saving} className="flex items-center gap-1">
-                              {enabled ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-
-              {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).length > 0 && (
-                <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-                  <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other Features</h2></div>
-                  <div className="divide-y divide-slate-800">
-                    {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).map(f => (
-                      <div key={f.id} className="flex items-center justify-between p-4">
-                        <div><p className="font-medium text-sm text-slate-200">{f.displayName || f.name}</p><p className="text-xs text-slate-400">{f.category}</p></div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => handleToggle({ name: f.name, displayName: f.displayName || f.name }, f.category, !isFeatureEnabled(f.name))} disabled={saving}>
-                            {isFeatureEnabled(f.name) ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5 text-slate-500" />}
-                          </button>
-                          <button onClick={() => handleDeleteFeature(f.id)} className="p-1 hover:bg-red-900 text-red-400 rounded"><Trash2 size={14} /></button>
+      {tenantLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
+      ) : selectedTenant ? (
+        <div className="space-y-4">
+          {MODULES.map(mod => {
+            const ModIcon = mod.icon
+            return (
+              <div key={mod.id} className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+                <div className="p-4 border-b border-slate-800 flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${mod.color}`}><ModIcon className="w-5 h-5" /></div>
+                  <div><h2 className="font-semibold text-white">{mod.name}</h2><p className="text-xs text-slate-400">{mod.features.length} features</p></div>
+                </div>
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {mod.features.map(mf => {
+                    const state = getTenantFeatureState(mf.name)
+                    const isOn = state === 'enabled'
+                    const isOverride = state === 'enabled' || state === 'disabled'
+                    return (
+                      <div key={mf.name} className={`flex items-center justify-between rounded-lg px-3 py-2 ${isOverride ? 'bg-slate-700 ring-1 ring-blue-500/30' : 'bg-slate-800'}`}>
+                        <div className="flex flex-col">
+                          <span className="text-sm text-slate-200">{mf.displayName}</span>
+                          {isOverride && <span className="text-[10px] text-blue-400">custom override</span>}
                         </div>
+                        <button
+                          onClick={() => handleTenantToggle(mf, !isOn)}
+                          disabled={saving}
+                          className="flex items-center gap-1"
+                          title={isOverride ? 'Click to remove override' : 'Click to override plan setting'}
+                        >
+                          {isOn ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className={`w-5 h-5 ${state === 'disabled' ? 'text-red-500' : 'text-slate-500'}`} />}
+                        </button>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
-              )}
+              </div>
+            )
+          })}
+
+          {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).length > 0 && (
+            <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+              <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other Features</h2></div>
+              <div className="divide-y divide-slate-800">
+                {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).map(f => {
+                  const state = getTenantFeatureState(f.name)
+                  const isOn = state === 'enabled'
+                  const isOverride = state === 'enabled' || state === 'disabled'
+                  return (
+                    <div key={f.id} className={`flex items-center justify-between p-4 ${isOverride ? 'bg-slate-800/50' : ''}`}>
+                      <div>
+                        <p className="font-medium text-sm text-slate-200">{f.displayName || f.name}</p>
+                        <p className="text-xs text-slate-400">{f.category}{isOverride && ' · custom override'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleTenantToggle({ name: f.name, displayName: f.displayName || f.name }, !isOn)} disabled={saving}>
+                          {isOn ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className={`w-5 h-5 ${state === 'disabled' ? 'text-red-500' : 'text-slate-500'}`} />}
+                        </button>
+                        <button onClick={() => handleDeleteFeature(f.id)} className="p-1 hover:bg-red-900 text-red-400 rounded"><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
-        </>
-      )}
-
-      {/* === TENANT OVERRIDES TAB === */}
-      {activeTab === 'tenant' && (
-        <>
-          <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
-            <div className="flex items-center gap-4">
-              <label className="text-sm font-medium text-slate-300">Customize features for tenant:</label>
-              <select value={selectedTenant} onChange={e => setSelectedTenant(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-lg text-sm min-w-[200px]">
-                {tenants.map(t => <option key={t.id} value={t.id}>{t.name} ({t.plan?.name || 'No Plan'})</option>)}
-              </select>
-              {selectedTenant && (
-                <span className="text-xs text-slate-400">
-                  Green = enabled (override or plan), Red = explicitly disabled (override), Gray = not in plan
-                </span>
-              )}
-            </div>
-          </div>
-
-          {tenantLoading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
-          ) : selectedTenant ? (
-            <div className="space-y-4">
-              {MODULES.map(mod => {
-                const ModIcon = mod.icon
-                return (
-                  <div key={mod.id} className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-                    <div className="p-4 border-b border-slate-800 flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${mod.color}`}><ModIcon className="w-5 h-5" /></div>
-                      <div><h2 className="font-semibold text-white">{mod.name}</h2><p className="text-xs text-slate-400">{mod.features.length} features</p></div>
-                    </div>
-                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                      {mod.features.map(mf => {
-                        const state = getTenantFeatureState(mf.name)
-                        const isOn = state === 'enabled'
-                        const isOverride = state === 'enabled' || state === 'disabled'
-                        return (
-                          <div key={mf.name} className={`flex items-center justify-between rounded-lg px-3 py-2 ${isOverride ? 'bg-slate-700 ring-1 ring-blue-500/30' : 'bg-slate-800'}`}>
-                            <div className="flex flex-col">
-                              <span className="text-sm text-slate-200">{mf.displayName}</span>
-                              {isOverride && <span className="text-[10px] text-blue-400">custom override</span>}
-                            </div>
-                            <button
-                              onClick={() => handleTenantToggle(mf, !isOn)}
-                              disabled={saving}
-                              className="flex items-center gap-1"
-                              title={isOverride ? 'Click to remove override' : 'Click to override plan setting'}
-                            >
-                              {isOn ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className={`w-5 h-5 ${state === 'disabled' ? 'text-red-500' : 'text-slate-500'}`} />}
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-
-              {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).length > 0 && (
-                <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-                  <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other Features</h2></div>
-                  <div className="divide-y divide-slate-800">
-                    {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).map(f => {
-                      const state = getTenantFeatureState(f.name)
-                      const isOn = state === 'enabled'
-                      const isOverride = state === 'enabled' || state === 'disabled'
-                      return (
-                        <div key={f.id} className={`flex items-center justify-between p-4 ${isOverride ? 'bg-slate-800/50' : ''}`}>
-                          <div>
-                            <p className="font-medium text-sm text-slate-200">{f.displayName || f.name}</p>
-                            <p className="text-xs text-slate-400">{f.category}{isOverride && ' · custom override'}</p>
-                          </div>
-                          <button onClick={() => handleTenantToggle({ name: f.name, displayName: f.displayName || f.name }, !isOn)} disabled={saving}>
-                            {isOn ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className={`w-5 h-5 ${state === 'disabled' ? 'text-red-500' : 'text-slate-500'}`} />}
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-12 text-slate-400">Select a tenant to customize features</div>
-          )}
-        </>
+        </div>
+      ) : (
+        <div className="text-center py-12 text-slate-400">Select a tenant to customize features</div>
       )}
 
       {showFeatureForm && (

@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePlatformAdmin } from '../middleware/auth.js'
+import { invalidateFeatureCache } from '../middleware/featureCheck.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -313,9 +314,27 @@ router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, re
 // Delete plan
 router.delete('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
+    // Get all tenants on this plan before nullifying
+    const affectedTenants = await prisma.tenant.findMany({
+      where: { planId: req.params.id },
+      select: { id: true },
+    })
+
+    // Nullify planId on all tenants that had this plan — they lose feature access
+    // but their business data stays intact
+    await prisma.tenant.updateMany({
+      where: { planId: req.params.id },
+      data: { planId: null },
+    })
     await prisma.planFeature.deleteMany({ where: { planId: req.params.id } })
     await prisma.plan.delete({ where: { id: req.params.id } })
-    res.json({ message: 'Plan deleted' })
+
+    // Invalidate feature cache for all affected tenants so they immediately lose access
+    for (const t of affectedTenants) {
+      invalidateFeatureCache(t.id)
+    }
+
+    res.json({ message: `Plan deleted — ${affectedTenants.length} tenant(s) unassigned and lost feature access` })
   } catch (err) {
     console.error('Delete plan error:', err)
     res.status(500).json({ error: 'Internal server error' })
@@ -332,23 +351,6 @@ router.get('/plans/:planId/features', authenticateToken, requirePlatformAdmin, a
     res.json(pfs)
   } catch (err) {
     console.error('Get plan features error:', err)
-    res.status(500).json({ error: 'Internal server error' })
-  }
-})
-
-// Assign/toggle feature for plan
-router.post('/plan-features', authenticateToken, requirePlatformAdmin, async (req, res) => {
-  try {
-    const { planId, featureId, enabled = true } = req.body
-    if (!planId || !featureId) return res.status(400).json({ error: 'planId and featureId required' })
-    const pf = await prisma.planFeature.upsert({
-      where: { planId_featureId: { planId, featureId } },
-      update: { enabled },
-      create: { planId, featureId, enabled }
-    })
-    res.status(201).json({ message: 'Feature assigned to plan', planFeature: pf })
-  } catch (err) {
-    console.error('Assign feature error:', err)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
