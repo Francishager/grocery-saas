@@ -13,6 +13,9 @@ function withOwnerSummary(tenant) {
     planName: tenant.plan?.name || null,
     ownerName: owner ? `${owner.fname || ""} ${owner.lname || ""}`.trim() || owner.email : null,
     ownerEmail: owner?.email || null,
+    subscriptionStart: tenant.subscriptionStart || null,
+    subscriptionEnd: tenant.subscriptionEnd || null,
+    trialEndsAt: tenant.trialEndsAt || null,
   };
 }
 
@@ -102,16 +105,45 @@ router.post("/:id/suspend", authenticateToken, requirePlatformAdmin, async (req,
   }
 });
 
-// Update tenant plan
+// Update tenant plan (with subscription period)
 router.put("/:id/plan", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { planId } = req.body;
+    const { planId, subscriptionStart, subscriptionEnd, trialEndsAt } = req.body;
     if (!planId) return res.status(400).json({ error: "planId required" });
 
     const plan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!plan) return res.status(404).json({ error: "Plan not found" });
 
-    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { planId }, include: { plan: true } });
+    // Build subscription data
+    const data = { planId };
+
+    // Set subscription start date — default to now if not provided
+    const startDate = subscriptionStart ? new Date(subscriptionStart) : new Date();
+    data.subscriptionStart = startDate;
+
+    // Set subscription end date — use provided value or auto-calculate from billingCycle
+    if (subscriptionEnd) {
+      data.subscriptionEnd = new Date(subscriptionEnd);
+    } else {
+      const endDate = new Date(startDate);
+      if (plan.billingCycle === 'yearly') {
+        endDate.setFullYear(endDate.getFullYear() + 1);
+      } else {
+        endDate.setMonth(endDate.getMonth() + 1);
+      }
+      data.subscriptionEnd = endDate;
+    }
+
+    // Set trial end date if provided
+    if (trialEndsAt) {
+      data.trialEndsAt = new Date(trialEndsAt);
+    }
+
+    const tenant = await prisma.tenant.update({
+      where: { id: req.params.id },
+      data,
+      include: { plan: true },
+    });
     res.json({ message: "Plan updated", tenant });
   } catch (err) {
     if (err?.code === "P2025") return res.status(404).json({ error: "Tenant not found" });

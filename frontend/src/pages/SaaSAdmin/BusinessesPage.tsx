@@ -6,6 +6,9 @@ import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, A
 interface Tenant {
   id: string; name: string; slug: string; status: string; planId?: string | null
   ownerName: string; ownerEmail: string; createdAt: string
+  subscriptionStart?: string | null
+  subscriptionEnd?: string | null
+  trialEndsAt?: string | null
   _count?: { users: number; customers: number; suppliers: number }
   plan?: { id: string; name: string; price: number; currency: string; billingCycle: string } | null
 }
@@ -28,6 +31,9 @@ export const BusinessesPage: React.FC = () => {
   const [selected, setSelected] = useState<Tenant | null>(null)
   const [planTenant, setPlanTenant] = useState<Tenant | null>(null)
   const [planChanging, setPlanChanging] = useState<string | null>(null)
+  const [subStart, setSubStart] = useState('')
+  const [subEnd, setSubEnd] = useState('')
+  const [autoEnd, setAutoEnd] = useState(true)
   const navigate = useNavigate()
 
   const fetchTenants = async () => {
@@ -65,21 +71,34 @@ export const BusinessesPage: React.FC = () => {
   const handleChangePlan = async (tenant: Tenant, planId: string) => {
     setPlanChanging(planId)
     try {
+      const body: Record<string, string> = { planId }
+      if (subStart) body.subscriptionStart = subStart
+      if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
       const res = await apiFetch(`/api/tenants/${tenant.id}/plan`, {
         method: 'PUT',
-        body: JSON.stringify({ planId }),
+        body: JSON.stringify(body),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || data.message || 'Failed to change plan')
 
       await fetchTenants()
       setPlanTenant(null)
+      setSubStart('')
+      setSubEnd('')
+      setAutoEnd(true)
       if (selected?.id === tenant.id) setSelected(null)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to change plan')
     } finally {
       setPlanChanging(null)
     }
+  }
+
+  const openPlanModal = (tenant: Tenant) => {
+    setPlanTenant(tenant)
+    setSubStart(tenant.subscriptionStart ? tenant.subscriptionStart.split('T')[0] : new Date().toISOString().split('T')[0])
+    setSubEnd(tenant.subscriptionEnd ? tenant.subscriptionEnd.split('T')[0] : '')
+    setAutoEnd(true)
   }
 
   const statusBadge = (s: string) => {
@@ -146,7 +165,7 @@ export const BusinessesPage: React.FC = () => {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setSelected(t)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="View"><Eye size={16} /></button>
-                      <button onClick={() => setPlanTenant(t)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
+                      <button onClick={() => openPlanModal(t)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
                       <button onClick={() => handleAction(t.id, t.status === 'suspended' ? 'activate' : 'suspend')} disabled={actionLoading === t.id} className={`p-1 rounded ${t.status === 'suspended' ? 'text-green-600 hover:bg-green-50' : 'text-red-600 hover:bg-red-50'}`} title={t.status === 'suspended' ? 'Activate' : 'Suspend'}>
                         {actionLoading === t.id ? <Loader2 size={16} className="animate-spin" /> : t.status === 'suspended' ? <CheckCircle size={16} /> : <Ban size={16} />}
                       </button>
@@ -172,9 +191,11 @@ export const BusinessesPage: React.FC = () => {
               <div className="flex justify-between"><span className="text-gray-500">Users</span><span>{selected._count?.users || 0}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Customers</span><span>{selected._count?.customers || 0}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Created</span><span>{fmtDate(selected.createdAt)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Sub. Start</span><span>{selected.subscriptionStart ? fmtDate(selected.subscriptionStart) : '-'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Sub. End</span><span>{selected.subscriptionEnd ? fmtDate(selected.subscriptionEnd) : '-'}</span></div>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={() => setPlanTenant(selected)} className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+              <button onClick={() => openPlanModal(selected)} className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
                 Change Plan
               </button>
               <button onClick={() => handleAction(selected.id, selected.status === 'suspended' ? 'activate' : 'suspend')} className={`flex-1 px-4 py-2 rounded-lg text-white ${selected.status === 'suspended' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
@@ -199,7 +220,7 @@ export const BusinessesPage: React.FC = () => {
                 <span className="font-medium">{planTenant.plan?.name || '-'}</span>
               </div>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 mb-4">
               {plans.length === 0 ? (
                 <p className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">No plans are available yet.</p>
               ) : (
@@ -214,6 +235,28 @@ export const BusinessesPage: React.FC = () => {
                     <span className="text-sm text-gray-500">{fmtMoney(plan.price, plan.currency)}/{plan.billingCycle}</span>
                   </button>
                 ))
+              )}
+            </div>
+            <div className="space-y-3 border-t pt-4">
+              <div className="text-sm font-medium text-gray-700">Subscription Period</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+                  <input type="date" value={subStart} onChange={e => setSubStart(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+                  <input type="date" value={subEnd} onChange={e => setSubEnd(e.target.value)} disabled={autoEnd} className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input type="checkbox" checked={autoEnd} onChange={e => { setAutoEnd(e.target.checked); if (e.target.checked) setSubEnd('') }} />
+                Auto-calculate end date from plan billing cycle
+              </label>
+              {planTenant.subscriptionStart && (
+                <div className="text-xs text-gray-500">
+                  Current: {fmtDate(planTenant.subscriptionStart)} → {planTenant.subscriptionEnd ? fmtDate(planTenant.subscriptionEnd) : '—'}
+                </div>
               )}
             </div>
             <button onClick={() => setPlanTenant(null)} className="mt-4 w-full px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>

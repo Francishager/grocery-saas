@@ -35,8 +35,9 @@ function subscriptionPayload(tenant) {
   return {
     id: tenant.id,
     status: tenant.status || "active",
-    startDate: tenant.createdAt,
-    endDate: null,
+    startDate: tenant.subscriptionStart || tenant.createdAt,
+    endDate: tenant.subscriptionEnd || null,
+    trialEndsAt: tenant.trialEndsAt || null,
     tenant: { id: tenant.id, name: tenant.name, status: tenant.status },
     plan: tenant.plan ? { id: tenant.plan.id, name: tenant.plan.name, price: tenant.plan.price, currency: tenant.plan.currency || "UGX", billingCycle: tenant.plan.billingCycle || "monthly" } : null,
   };
@@ -44,8 +45,10 @@ function subscriptionPayload(tenant) {
 
 async function updateSubscription(req, res) {
   try {
-    const { planId, status } = req.body;
-    if (!planId && !status) return res.status(400).json({ error: "planId or status required" });
+    const { planId, status, subscriptionStart, subscriptionEnd, trialEndsAt } = req.body;
+    if (!planId && !status && !subscriptionStart && !subscriptionEnd && !trialEndsAt) {
+      return res.status(400).json({ error: "planId, status, or subscription dates required" });
+    }
 
     if (planId) {
       const plan = await prisma.plan.findUnique({ where: { id: planId } });
@@ -59,6 +62,23 @@ async function updateSubscription(req, res) {
     const data = {};
     if (planId) data.planId = planId;
     if (status) data.status = status;
+    if (subscriptionStart) data.subscriptionStart = new Date(subscriptionStart);
+    if (subscriptionEnd) data.subscriptionEnd = new Date(subscriptionEnd);
+    if (trialEndsAt) data.trialEndsAt = new Date(trialEndsAt);
+
+    // Auto-calculate end date from plan billingCycle if planId is set but no end date
+    if (planId && !subscriptionEnd) {
+      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+      const startDate = subscriptionStart ? new Date(subscriptionStart) : new Date();
+      const endDate = new Date(startDate);
+      if (plan?.billingCycle === 'yearly') {
+        endDate.setFullYear(endDate.getFullYear() + 1);
+      } else {
+        endDate.setMonth(endDate.getMonth() + 1);
+      }
+      data.subscriptionStart = startDate;
+      data.subscriptionEnd = endDate;
+    }
 
     const tenant = await prisma.tenant.update({
       where: { id: req.params.id },

@@ -1,14 +1,14 @@
 ﻿import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft } from 'lucide-react'
+import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar } from 'lucide-react'
 
 interface Subscription {
-  id: string; status: string; startDate: string; endDate: string | null
+  id: string; status: string; startDate: string; endDate: string | null; trialEndsAt: string | null
   tenant: { id: string; name: string; status: string }
   plan: { id: string; name: string; price: number; currency: string; billingCycle: string }
 }
 
-interface Plan { id: string; name: string; price: number; currency: string }
+interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string }
 
 export const SubscriptionsPage: React.FC = () => {
   const [subs, setSubs] = useState<Subscription[]>([])
@@ -17,6 +17,11 @@ export const SubscriptionsPage: React.FC = () => {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Subscription | null>(null)
   const [changing, setChanging] = useState<string | null>(null)
+  const [editDates, setEditDates] = useState(false)
+  const [subStart, setSubStart] = useState('')
+  const [subEnd, setSubEnd] = useState('')
+  const [trialEnd, setTrialEnd] = useState('')
+  const [autoEnd, setAutoEnd] = useState(true)
 
   const fetchData = async () => {
     setLoading(true)
@@ -33,17 +38,53 @@ export const SubscriptionsPage: React.FC = () => {
 
   useEffect(() => { fetchData() }, [])
 
+  const openModal = (sub: Subscription) => {
+    setSelected(sub)
+    setEditDates(false)
+    setSubStart(sub.startDate ? sub.startDate.split('T')[0] : new Date().toISOString().split('T')[0])
+    setSubEnd(sub.endDate ? sub.endDate.split('T')[0] : '')
+    setTrialEnd(sub.trialEndsAt ? sub.trialEndsAt.split('T')[0] : '')
+    setAutoEnd(!sub.endDate)
+  }
+
+  const handleSave = async () => {
+    if (!selected) return
+    setChanging(selected.id)
+    try {
+      const body: Record<string, string> = {}
+      if (subStart) body.subscriptionStart = subStart
+      if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
+      if (trialEnd) body.trialEndsAt = trialEnd
+      const res = await apiFetch(`/api/admin/subscriptions/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      if (res.ok) { fetchData(); setSelected(null) }
+      else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to update subscription') }
+    } catch { alert('Request failed') }
+    setChanging(null)
+  }
+
   const handleChangePlan = async (subId: string, planId: string) => {
     setChanging(subId)
     try {
-      const res = await apiFetch(`/api/admin/subscriptions/${subId}`, { method: 'PUT', body: JSON.stringify({ planId }) })
+      const body: Record<string, string> = { planId }
+      if (subStart) body.subscriptionStart = subStart
+      if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
+      const res = await apiFetch(`/api/admin/subscriptions/${subId}`, { method: 'PUT', body: JSON.stringify(body) })
       if (res.ok) { fetchData(); setSelected(null) } else alert('Failed to change plan')
     } catch { alert('Request failed') }
     setChanging(null)
   }
 
+  const isExpired = (endDate: string | null) => endDate && new Date(endDate) < new Date()
+  const isTrialActive = (trialEndsAt: string | null) => trialEndsAt && new Date(trialEndsAt) > new Date()
+
+  const effectiveStatus = (s: Subscription) => {
+    if (isExpired(s.endDate)) return 'expired'
+    if (isTrialActive(s.trialEndsAt)) return 'trial'
+    return s.status
+  }
+
   const statusBadge = (s: string) => {
-    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', trial: 'bg-blue-100 text-blue-800', past_due: 'bg-yellow-100 text-yellow-800', cancelled: 'bg-red-100 text-red-800', expired: 'bg-gray-100 text-gray-800' }
+    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', trial: 'bg-blue-100 text-blue-800', past_due: 'bg-yellow-100 text-yellow-800', cancelled: 'bg-red-100 text-red-800', expired: 'bg-gray-100 text-gray-800', suspended: 'bg-red-100 text-red-800' }
     const label = (s || 'unknown').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
     return <span className={`px-2 py-1 rounded text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-800'}`}>{label}</span>
   }
@@ -77,22 +118,30 @@ export const SubscriptionsPage: React.FC = () => {
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Status</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Start</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">End</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Trial Ends</th>
                 <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {subs.filter(s => !search || (s.tenant?.name || '').toLowerCase().includes(search.toLowerCase())).map(s => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3"><div className="text-sm font-medium">{s.tenant?.name || '-'}</div><span className={`text-xs px-2 py-0.5 rounded ${s.tenant?.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{s.tenant?.status || '-'}</span></td>
-                  <td className="px-4 py-3"><div className="text-sm font-medium">{s.plan?.name || 'No Plan'}</div><div className="text-xs text-gray-500">{fmt(s.plan?.price || 0, s.plan?.currency || 'UGX')}/{s.plan?.billingCycle || '-'}</div></td>
-                  <td className="px-4 py-3">{statusBadge(s.status)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.startDate)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.endDate)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => setSelected(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
-                  </td>
-                </tr>
-              ))}
+              {subs.filter(s => !search || (s.tenant?.name || '').toLowerCase().includes(search.toLowerCase())).map(s => {
+                const effStatus = effectiveStatus(s)
+                return (
+                  <tr key={s.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3"><div className="text-sm font-medium">{s.tenant?.name || '-'}</div><span className={`text-xs px-2 py-0.5 rounded ${s.tenant?.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{s.tenant?.status || '-'}</span></td>
+                    <td className="px-4 py-3"><div className="text-sm font-medium">{s.plan?.name || 'No Plan'}</div><div className="text-xs text-gray-500">{fmt(s.plan?.price || 0, s.plan?.currency || 'UGX')}/{s.plan?.billingCycle || '-'}</div></td>
+                    <td className="px-4 py-3">{statusBadge(effStatus)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.startDate)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      {fmtDate(s.endDate)}
+                      {isExpired(s.endDate) && <span className="ml-1 text-xs text-red-600">expired</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.trialEndsAt)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => openModal(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Manage Subscription"><ArrowRightLeft size={16} /></button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -100,18 +149,56 @@ export const SubscriptionsPage: React.FC = () => {
 
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">Change Plan - {selected.tenant?.name}</h2><button onClick={() => setSelected(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
+          <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">Manage Subscription - {selected.tenant?.name}</h2><button onClick={() => setSelected(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
             <div className="space-y-3 text-sm mb-4">
-              <div className="flex justify-between"><span className="text-gray-500">Current Plan</span><span className="font-medium">{selected.plan?.name}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(selected.status)}</div>
+              <div className="flex justify-between"><span className="text-gray-500">Current Plan</span><span className="font-medium">{selected.plan?.name || '-'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(effectiveStatus(selected))}</div>
+              <div className="flex justify-between"><span className="text-gray-500">Start</span><span>{fmtDate(selected.startDate)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">End</span><span>{fmtDate(selected.endDate)}</span></div>
+              {selected.trialEndsAt && <div className="flex justify-between"><span className="text-gray-500">Trial Ends</span><span>{fmtDate(selected.trialEndsAt)}</span></div>}
             </div>
-            <div><label className="block text-sm font-medium mb-2">Select New Plan</label>
+
+            <div className="border-t pt-4 mb-4">
+              <button onClick={() => setEditDates(!editDates)} className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700">
+                <Calendar size={16} />
+                {editDates ? 'Hide Date Editor' : 'Edit Subscription Period'}
+              </button>
+              {editDates && (
+                <div className="mt-3 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+                      <input type="date" value={subStart} onChange={e => setSubStart(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+                      <input type="date" value={subEnd} onChange={e => setSubEnd(e.target.value)} disabled={autoEnd} className="w-full px-3 py-2 border rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Trial End Date (optional)</label>
+                    <input type="date" value={trialEnd} onChange={e => setTrialEnd(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" checked={autoEnd} onChange={e => { setAutoEnd(e.target.checked); if (e.target.checked) setSubEnd('') }} />
+                    Auto-calculate end date from plan billing cycle
+                  </label>
+                  <button onClick={handleSave} disabled={changing === selected.id} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                    {changing === selected.id ? <Loader2 size={16} className="animate-spin" /> : <Calendar size={16} />}
+                    Save Subscription Period
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="border-t pt-4">
+              <label className="block text-sm font-medium mb-2">Change Plan</label>
               <div className="space-y-2">
                 {plans.map(p => (
                   <button key={p.id} onClick={() => handleChangePlan(selected.id, p.id)} disabled={changing === selected.id} className={`w-full flex items-center justify-between p-3 border rounded-lg hover:bg-blue-50 ${p.id === selected.plan?.id ? 'border-blue-500 bg-blue-50' : ''}`}>
                     <span className="font-medium text-sm">{p.name}</span>
-                    <span className="text-sm text-gray-500">{fmt(p.price, p.currency)}</span>
+                    <span className="text-sm text-gray-500">{fmt(p.price, p.currency)}/{p.billingCycle}</span>
                   </button>
                 ))}
               </div>

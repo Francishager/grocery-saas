@@ -84,6 +84,13 @@ model Tenant {
   plan   Plan?   @relation(fields: [planId], references: [id])
 
   // =====================
+  // SUBSCRIPTION PERIOD
+  // =====================
+  subscriptionStart DateTime?
+  subscriptionEnd   DateTime?
+  trialEndsAt       DateTime?
+
+  // =====================
   // OWNERSHIP (1-1)
   // =====================
   ownerId String? @unique
