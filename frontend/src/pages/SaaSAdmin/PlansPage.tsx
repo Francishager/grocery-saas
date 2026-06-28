@@ -1,44 +1,208 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { CreditCard, Plus, Edit, Trash2, Loader2, RefreshCw, Save, X } from 'lucide-react'
+import { CreditCard, Plus, Edit, Trash2, Loader2, RefreshCw, Save, X, LayoutDashboard, ShoppingCart, Package, Users, Building2, DollarSign, FileText, Briefcase, BarChart3, Clock, Wrench, GitBranch, MessageSquare, Settings, ClipboardList, UtensilsCrossed } from 'lucide-react'
+
+interface PlanFeatureRow {
+  featureId: string
+  planId: string
+  enabled: boolean
+  feature: { id: string; name: string; displayName?: string }
+}
 
 interface Plan {
   id: string; name: string; slug: string; price: number; currency: string; billingCycle: string
   features: string[]; maxUsers: number; maxProducts: number
   isDefault: boolean; _count?: { tenants: number }
+  planFeatures?: PlanFeatureRow[]
 }
 
 interface Feature {
-  id: string; name: string; displayName?: string; category?: string; isActive?: boolean
+  id: string; name: string; displayName?: string; category?: string; module?: string; isActive?: boolean
 }
 
-const FEATURE_MODULES = [
-  { id: 'financial', name: 'Financial Management', features: [
-    { name: 'bookkeeping', displayName: 'Bookkeeping' }, { name: 'income_tracking', displayName: 'Income Tracking' },
-    { name: 'expense_management', displayName: 'Expense Management' }, { name: 'payables_management', displayName: 'Payables Management' },
-    { name: 'receivables_management', displayName: 'Receivables Management' }, { name: 'cash_flow_monitoring', displayName: 'Cash Flow Monitoring' },
-    { name: 'profitability_analysis', displayName: 'Profitability Analysis' },
-  ]},
-  { id: 'inventory', name: 'Inventory Management', features: [
-    { name: 'product_tracking', displayName: 'Product Tracking' }, { name: 'stock_movement', displayName: 'Stock Movement Monitoring' },
-    { name: 'low_stock_alerts', displayName: 'Low-Stock Alerts' }, { name: 'purchase_management', displayName: 'Purchase Management' },
-    { name: 'supplier_management', displayName: 'Supplier Management' }, { name: 'inventory_valuation', displayName: 'Inventory Valuation' },
-  ]},
-  { id: 'sales', name: 'Sales Management', features: [
-    { name: 'pos_sales', displayName: 'POS Sales Processing' }, { name: 'invoice_generation', displayName: 'Invoice Generation' },
-    { name: 'customer_transactions', displayName: 'Customer Transactions' }, { name: 'sales_tracking', displayName: 'Sales Tracking' },
-    { name: 'payment_management', displayName: 'Payment Management' },
-  ]},
-  { id: 'operations', name: 'Business Operations', features: [
-    { name: 'staff_management', displayName: 'Staff Management' }, { name: 'role_access_control', displayName: 'Role-Based Access Control' },
-    { name: 'activity_logs', displayName: 'Activity Logs' }, { name: 'branch_management', displayName: 'Branch Management' },
-    { name: 'workflow_organization', displayName: 'Workflow Organization' },
-  ]},
-  { id: 'reporting', name: 'Reporting & Insights', features: [
-    { name: 'financial_reports', displayName: 'Financial Reports' }, { name: 'sales_reports', displayName: 'Sales Reports' },
-    { name: 'inventory_reports', displayName: 'Inventory Reports' }, { name: 'performance_dashboards', displayName: 'Business Performance Dashboards' },
-    { name: 'decision_analytics', displayName: 'Decision-Support Analytics' },
-  ]},
+const MODULES = [
+  {
+    id: 'dashboard', name: 'Dashboard', features: [
+      { name: 'dashboard', displayName: 'Dashboard' },
+      { name: 'dashboard.analytics', displayName: 'Analytics Widgets' },
+    ]
+  },
+  {
+    id: 'sales', name: 'Sales Management', features: [
+      { name: 'sales', displayName: 'Sales / POS' },
+      { name: 'sales.pos', displayName: 'POS' },
+      { name: 'sales.quotes', displayName: 'Quotes' },
+      { name: 'sales.returns', displayName: 'Returns & Refunds' },
+      { name: 'sales.discounts', displayName: 'Discounts' },
+      { name: 'sales.suspended', displayName: 'Suspended Sales' },
+    ]
+  },
+  {
+    id: 'inventory', name: 'Inventory Management', features: [
+      { name: 'inventory', displayName: 'Inventory Management' },
+      { name: 'inventory.products', displayName: 'Products' },
+      { name: 'inventory.services', displayName: 'Services' },
+      { name: 'inventory.rentals', displayName: 'Rental Items' },
+      { name: 'inventory.categories', displayName: 'Categories' },
+      { name: 'inventory.brands', displayName: 'Brands' },
+      { name: 'inventory.adjustments', displayName: 'Stock Adjustments' },
+      { name: 'inventory.transfers', displayName: 'Stock Transfers' },
+      { name: 'inventory.counts', displayName: 'Stock Counts' },
+      { name: 'inventory.multi_unit', displayName: 'Multi Units of Measure' },
+      { name: 'inventory.batch_numbers', displayName: 'Batch Numbers' },
+      { name: 'inventory.expiry_tracking', displayName: 'Expiry Tracking' },
+      { name: 'inventory.barcode_printing', displayName: 'Barcode Printing' },
+    ]
+  },
+  {
+    id: 'customers', name: 'Customer Management', features: [
+      { name: 'customers', displayName: 'Customer Management' },
+      { name: 'customers.groups', displayName: 'Customer Groups' },
+      { name: 'customers.loyalty', displayName: 'Loyalty Program' },
+      { name: 'customers.wallet', displayName: 'Customer Wallet' },
+      { name: 'customers.statements', displayName: 'Customer Statements' },
+    ]
+  },
+  {
+    id: 'suppliers', name: 'Supplier Management', features: [
+      { name: 'suppliers', displayName: 'Supplier Management' },
+      { name: 'suppliers.purchase_orders', displayName: 'Purchase Orders' },
+      { name: 'suppliers.grn', displayName: 'Goods Received Notes' },
+      { name: 'suppliers.statements', displayName: 'Supplier Statements' },
+    ]
+  },
+  {
+    id: 'financial', name: 'Financial Management', features: [
+      { name: 'expenses', displayName: 'Expense Tracking' },
+      { name: 'financial.income', displayName: 'Income Tracking' },
+      { name: 'financial.cashbook', displayName: 'Cashbook' },
+      { name: 'financial.bank_accounts', displayName: 'Bank Accounts' },
+      { name: 'financial.petty_cash', displayName: 'Petty Cash' },
+    ]
+  },
+  {
+    id: 'receivables', name: 'Receivables', features: [
+      { name: 'receivables', displayName: 'Receivables' },
+      { name: 'receivables.payments', displayName: 'Customer Payments' },
+      { name: 'receivables.aging', displayName: 'Aging Report' },
+    ]
+  },
+  {
+    id: 'payables', name: 'Payables', features: [
+      { name: 'payables', displayName: 'Payables' },
+      { name: 'payables.payments', displayName: 'Supplier Payments' },
+      { name: 'payables.aging', displayName: 'Payables Aging' },
+    ]
+  },
+  {
+    id: 'accounting', name: 'Accounting', features: [
+      { name: 'accounting', displayName: 'Accounting' },
+      { name: 'accounting.chart_of_accounts', displayName: 'Chart of Accounts' },
+      { name: 'accounting.journal_entries', displayName: 'Journal Entries' },
+      { name: 'accounting.general_ledger', displayName: 'General Ledger' },
+      { name: 'accounting.trial_balance', displayName: 'Trial Balance' },
+      { name: 'accounting.profit_loss', displayName: 'Profit & Loss' },
+      { name: 'accounting.balance_sheet', displayName: 'Balance Sheet' },
+    ]
+  },
+  {
+    id: 'reports', name: 'Reports & Insights', features: [
+      { name: 'reports', displayName: 'Reports' },
+      { name: 'reports.sales', displayName: 'Sales Reports' },
+      { name: 'reports.inventory', displayName: 'Inventory Reports' },
+      { name: 'reports.customers', displayName: 'Customer Reports' },
+      { name: 'reports.suppliers', displayName: 'Supplier Reports' },
+      { name: 'reports.financial', displayName: 'Financial Reports' },
+      { name: 'reports.audit', displayName: 'Audit Reports' },
+      { name: 'reports.services', displayName: 'Service Reports' },
+      { name: 'reports.rentals', displayName: 'Rental Reports' },
+      { name: 'reports.performance', displayName: 'Performance Reports' },
+    ]
+  },
+  {
+    id: 'hr', name: 'HR Management', features: [
+      { name: 'hr', displayName: 'HR Management' },
+      { name: 'hr.employees', displayName: 'Employees' },
+      { name: 'hr.attendance', displayName: 'Attendance' },
+      { name: 'hr.payroll', displayName: 'Payroll' },
+      { name: 'hr.leave', displayName: 'Leave Management' },
+    ]
+  },
+  {
+    id: 'service', name: 'Service Business', features: [
+      { name: 'service', displayName: 'Service Business' },
+      { name: 'service.appointments', displayName: 'Appointments' },
+      { name: 'service.work_orders', displayName: 'Work Orders' },
+      { name: 'service.job_cards', displayName: 'Job Cards' },
+      { name: 'service.technicians', displayName: 'Technician Assignment' },
+      { name: 'service.contracts', displayName: 'Service Contracts' },
+    ]
+  },
+  {
+    id: 'multi_branch', name: 'Multi-Branch', features: [
+      { name: 'multi_branch', displayName: 'Multi-Branch' },
+      { name: 'multi_branch.transfers', displayName: 'Branch Transfers' },
+      { name: 'multi_branch.reports', displayName: 'Branch Reports' },
+    ]
+  },
+  {
+    id: 'rentals', name: 'Rental Bookings', features: [
+      { name: 'rentals', displayName: 'Rental Bookings' },
+    ]
+  },
+  {
+    id: 'restaurant', name: 'Restaurant & Bar', features: [
+      { name: 'restaurant', displayName: 'Restaurant Module' },
+      { name: 'restaurant.tables', displayName: 'Table Management' },
+      { name: 'restaurant.orders', displayName: 'Orders' },
+      { name: 'restaurant.kitchen', displayName: 'Kitchen Display' },
+      { name: 'restaurant.bar', displayName: 'Bar Display' },
+      { name: 'restaurant.waiters', displayName: 'Waiters' },
+      { name: 'restaurant.reservations', displayName: 'Reservations' },
+      { name: 'restaurant.recipes', displayName: 'Recipes / Bill of Materials' },
+      { name: 'restaurant.happy_hour', displayName: 'Happy Hour Pricing' },
+      { name: 'restaurant.combos', displayName: 'Combo Meals' },
+      { name: 'restaurant.split_bills', displayName: 'Split Bills' },
+      { name: 'restaurant.merge_tables', displayName: 'Merge Tables' },
+      { name: 'restaurant.delivery', displayName: 'Delivery' },
+      { name: 'restaurant.tips', displayName: 'Tips' },
+      { name: 'restaurant.reports', displayName: 'Restaurant Reports' },
+    ]
+  },
+  {
+    id: 'communication', name: 'Communication', features: [
+      { name: 'communication', displayName: 'Communication' },
+      { name: 'communication.sms', displayName: 'SMS Notifications' },
+      { name: 'communication.email', displayName: 'Email Notifications' },
+      { name: 'communication.whatsapp', displayName: 'WhatsApp Integration' },
+      { name: 'communication.notifications', displayName: 'In-App Notifications' },
+    ]
+  },
+  {
+    id: 'integrations', name: 'Integrations', features: [
+      { name: 'integrations', displayName: 'Integrations' },
+      { name: 'integrations.mobile_money', displayName: 'Mobile Money' },
+      { name: 'integrations.stripe', displayName: 'Stripe' },
+      { name: 'integrations.flutterwave', displayName: 'Flutterwave' },
+      { name: 'integrations.qr_payments', displayName: 'QR Payments' },
+      { name: 'integrations.api_access', displayName: 'API Access' },
+    ]
+  },
+  {
+    id: 'settings', name: 'Settings', features: [
+      { name: 'settings', displayName: 'Business Settings' },
+      { name: 'settings.taxes', displayName: 'Taxes' },
+      { name: 'settings.currencies', displayName: 'Currencies' },
+      { name: 'settings.units', displayName: 'Units' },
+      { name: 'settings.roles', displayName: 'Roles & Permissions' },
+      { name: 'settings.users', displayName: 'Users' },
+    ]
+  },
+  {
+    id: 'audit', name: 'Audit & Security', features: [
+      { name: 'audit', displayName: 'Audit Log' },
+    ]
+  },
 ]
 
 const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, isDefault: false }
@@ -77,7 +241,11 @@ export const PlansPage: React.FC = () => {
   const openCreate = () => { setEditingId(null); setForm(emptyForm); setShowForm(true) }
   const openEdit = (p: Plan) => {
     setEditingId(p.id)
-    setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, features: Array.isArray(p.features) ? p.features.join(', ') : '', maxUsers: p.maxUsers, maxProducts: p.maxProducts, isDefault: p.isDefault })
+    // Load checked features from planFeatures relation (enabled ones), fall back to JSON features field
+    const enabledFeatureNames = p.planFeatures
+      ? p.planFeatures.filter(pf => pf.enabled).map(pf => pf.feature?.name).filter(Boolean)
+      : (Array.isArray(p.features) ? p.features : [])
+    setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, features: enabledFeatureNames.join(', '), maxUsers: p.maxUsers, maxProducts: p.maxProducts, isDefault: p.isDefault })
     setShowForm(true)
   }
 
@@ -103,11 +271,12 @@ export const PlansPage: React.FC = () => {
   }
 
   const fmt = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
-  const catalogFeatures: Feature[] = FEATURE_MODULES.flatMap(mod => mod.features.map(feature => ({
+  const catalogFeatures: Feature[] = MODULES.flatMap(mod => mod.features.map(feature => ({
     id: feature.name,
     name: feature.name,
     displayName: feature.displayName,
     category: mod.id,
+    module: mod.id,
     isActive: true,
   })))
   const featureOptions = [
@@ -161,9 +330,14 @@ export const PlansPage: React.FC = () => {
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxUsers} users</span>
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxProducts} products</span>
               </div>
-              {Array.isArray(p.features) && p.features.length > 0 && (
-                <div className="flex flex-wrap gap-1">{p.features.map((f, i) => <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{featureLabel(f)}</span>)}</div>
-              )}
+              {(() => {
+                const enabledNames = p.planFeatures
+                  ? p.planFeatures.filter(pf => pf.enabled).map(pf => pf.feature?.name).filter(Boolean)
+                  : (Array.isArray(p.features) ? p.features : [])
+                return enabledNames.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">{enabledNames.slice(0, 8).map((f: string, i: number) => <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{featureLabel(f)}</span>)}{enabledNames.length > 8 && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">+{enabledNames.length - 8} more</span>}</div>
+                ) : null
+              })()}
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500">{p._count?.tenants || 0} tenants</span>
                 <span className={`px-2 py-1 rounded text-xs ${p.isDefault ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{p.isDefault ? 'Default' : 'Custom'}</span>
