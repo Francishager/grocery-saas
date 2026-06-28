@@ -64,9 +64,10 @@ class FeatureAccessService {
   // Load features for current tenant
   async loadFeatures(tenantId?: string) {
     if (!tenantId) return
+    // Prevent concurrent loads — if already loading, skip
+    if (this.loading) return
 
     this.loading = true
-    this.features = {} // Clear stale features immediately so they don't show during reload
     this.error = null
     this.notifyListeners()
 
@@ -253,6 +254,13 @@ class FeatureAccessService {
     this.error = null
     this.notifyListeners()
   }
+
+  // Force reload — clears cache and reloads (use after plan changes)
+  async forceReload(tenantId?: string) {
+    this.features = {}
+    this.loading = false // reset so loadFeatures doesn't skip
+    return this.loadFeatures(tenantId)
+  }
 }
 
 // Export singleton instance
@@ -279,9 +287,11 @@ export function useFeatureAccess() {
     // Sync immediately in case the service already has data
     syncState()
 
-    // Initial load if we have a tenant — always reload to get fresh data
+    // Load features if we have a tenant and haven't loaded yet
     if (user?.tenantId) {
-      featureAccessService.loadFeatures(user.tenantId)
+      if (!featureAccessService.isLoading() && Object.keys(featureAccessService.getFeatureAccess()).length === 0) {
+        featureAccessService.loadFeatures(user.tenantId)
+      }
     } else {
       // No tenantId — not loading
       setLoading(false)

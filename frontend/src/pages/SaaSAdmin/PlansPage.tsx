@@ -271,6 +271,26 @@ export const PlansPage: React.FC = () => {
   }
 
   const fmt = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
+
+  // Build display name lookup from MODULES (for nicer labels)
+  const moduleDisplayNames: Record<string, string> = {}
+  const moduleGroupLabels: Record<string, string> = {}
+  for (const mod of MODULES) {
+    moduleGroupLabels[mod.id] = mod.name
+    for (const f of mod.features) {
+      moduleDisplayNames[f.name] = f.displayName
+    }
+  }
+
+  // Use API features as primary source; fall back to catalog if API hasn't loaded
+  const apiFeatures: Feature[] = features.map(f => ({
+    id: f.id,
+    name: f.name,
+    displayName: moduleDisplayNames[f.name] || f.displayName || f.name,
+    category: f.module || f.category || f.name.split('.')[0] || 'other',
+    module: f.module || f.category || f.name.split('.')[0] || 'other',
+    isActive: f.isActive !== false,
+  }))
   const catalogFeatures: Feature[] = MODULES.flatMap(mod => mod.features.map(feature => ({
     id: feature.name,
     name: feature.name,
@@ -279,14 +299,15 @@ export const PlansPage: React.FC = () => {
     module: mod.id,
     isActive: true,
   })))
+  // Merge: API features first, then catalog features not in API
   const featureOptions = [
-    ...catalogFeatures,
-    ...features.filter(feature => !catalogFeatures.some(catalogFeature => catalogFeature.name === feature.name)),
+    ...apiFeatures,
+    ...catalogFeatures.filter(cf => !apiFeatures.some(af => af.name === cf.name)),
   ]
   const selectedFeatureNames = form.features.split(',').map((f: string) => f.trim()).filter(Boolean)
   const featureLabel = (name: string) => featureOptions.find(f => f.name === name)?.displayName || name
   const featureGroups = featureOptions.reduce<Record<string, Feature[]>>((groups, feature) => {
-    const category = feature.category || 'other'
+    const category = feature.module || feature.category || 'other'
     groups[category] = groups[category] || []
     groups[category].push(feature)
     return groups
@@ -368,7 +389,7 @@ export const PlansPage: React.FC = () => {
                     )}
                     {Object.entries(featureGroups).map(([category, group]) => (
                       <div key={category} className="space-y-2">
-                        <p className="text-xs font-semibold uppercase text-gray-500">{category.replace(/_/g, ' ')}</p>
+                        <p className="text-xs font-semibold uppercase text-gray-500">{(moduleGroupLabels[category] || category).replace(/_/g, ' ')}</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {group.map(feature => (
                             <label key={feature.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">

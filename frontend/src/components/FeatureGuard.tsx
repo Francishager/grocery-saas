@@ -16,9 +16,10 @@ interface FeatureGuardProps {
  * Otherwise shows an UpgradePlan UI.
  */
 export function FeatureGuard({ feature, children, fallback }: FeatureGuardProps) {
-  const { hasFeature, loading } = useFeatureAccess()
+  const { hasFeature, loading, features } = useFeatureAccess()
 
-  if (loading) {
+  // Only show loading on first load when we have no cached features yet
+  if (loading && Object.keys(features).length === 0) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <div className="text-muted-foreground">Loading plan features…</div>
