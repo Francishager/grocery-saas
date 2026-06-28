@@ -36,6 +36,7 @@ import HRPage from '@/pages/HRPage'
 import TransfersPage from '@/pages/TransfersPage'
 import CommunicationPage from '@/pages/CommunicationPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
+import RestaurantPage from '@/pages/RestaurantPage'
 import UserProfilePage from '@/pages/UserProfilePage'
  
 // SaaS Admin Pages
@@ -132,6 +133,7 @@ function App() {
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
+          <Route path="restaurant" element={<FeatureGuard feature="restaurant"><RestaurantPage /></FeatureGuard>} />
           <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />

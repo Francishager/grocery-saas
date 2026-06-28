@@ -37,6 +37,9 @@ model Branch {
   employees        Employee[]
   stockTransfersFrom StockTransfer[] @relation("TransferFrom")
   stockTransfersTo   StockTransfer[] @relation("TransferTo")
+  restaurantTables   RestaurantTable[]
+  restaurantOrders   RestaurantOrder[]
+  reservations       Reservation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -72,7 +75,7 @@ model Tenant {
   address     String?
   logo        String?
   status      TenantStatus @default(active)
-  businessType String?     // retail, pharmacy, hardware, supermarket, wholesale, restaurant, service, salon_spa, repair_shop, manufacturing, other
+  businessType String?     // retail, pharmacy, hardware, supermarket, wholesale, restaurant, bar, restaurant_bar, cafe, coffee_shop, fast_food, hotel_restaurant, bakery, service, salon_spa, repair_shop, manufacturing, other
 
   // =====================
   // PLAN RELATION
@@ -121,6 +124,14 @@ model Tenant {
   stockTransfers   StockTransfer[]
   notifications    Notification[]
   integrations     IntegrationConfig[]
+  restaurantTables     RestaurantTable[]
+  restaurantOrders     RestaurantOrder[]
+  reservations         Reservation[]
+  recipes              Recipe[]
+  waiters              Waiter[]
+  happyHourRules       HappyHourRule[]
+  comboMeals           ComboMeal[]
+  deliveries           Delivery[]
 
   // =====================
   // USAGE LIMIT
@@ -271,6 +282,8 @@ model User {
   journalEntries    JournalEntry[]
   stockTransfers    StockTransfer[]
   notifications     Notification[]
+  restaurantOrders  RestaurantOrder[]
+  tips              Tip[]
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -479,6 +492,10 @@ model Product {
   rentalItems           RentalItem[]
   saleReturnItems       SaleReturnItem[]
   stockTransferItems    StockTransferItem[]
+  recipeIngredients     RecipeIngredient[]
+  comboMealItems        ComboMealItem[]
+  orderItems            RestaurantOrderItem[]
+  recipes               Recipe[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
@@ -655,6 +672,9 @@ model Customer {
   invoices Invoice[]
   rentals  Rental[]
   saleReturns SaleReturn[]
+  reservations Reservation[]
+  deliveries   Delivery[]
+  restaurantOrders RestaurantOrder[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, branchId, phone])
@@ -1387,4 +1407,308 @@ model IntegrationConfig {
   @@unique([tenantId, provider])
   @@index([tenantId])
   @@map("integration_configs")
+}
+
+// =====================================================
+// RESTAURANT MODULE
+// =====================================================
+
+// Restaurant Tables
+model RestaurantTable {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String   // "Table 1", "VIP 1", "Garden 3"
+  capacity    Int      @default(4)
+  status      TableStatus @default(available)
+  area        String?  // "Main Hall", "Terrace", "Garden", "Bar"
+  mergedWith  String?  // ID of table this is merged into
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders      RestaurantOrder[]
+  reservations Reservation[]
+
+  @@index([tenantId, branchId])
+  @@map("restaurant_tables")
+}
+
+enum TableStatus {
+  available
+  occupied
+  reserved
+  cleaning
+}
+
+// Restaurant Orders (Dine-in, Takeaway, Delivery)
+model RestaurantOrder {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orderNo       String   // "ORD-001"
+  tableId       String?
+  table         RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  waiterId      String?
+  waiter        Waiter?  @relation(fields: [waiterId], references: [id], onDelete: SetNull)
+  userId        String   // who created the order (cashier/waiter)
+  user          User     @relation(fields: [userId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderType     OrderType @default(dine_in)
+  status        OrderStatus @default(pending)
+  subtotal      Float    @default(0)
+  tax           Float    @default(0)
+  discount      Float    @default(0)
+  tipAmount     Float    @default(0)
+  total         Float    @default(0)
+  specialInstructions String?
+  paymentStatus PaymentStatus @default(unpaid)
+  paymentMethod String?
+  saleId        String?  // linked Sale when completed
+  deliveryId    String?  @unique // linked Delivery if delivery order
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items         RestaurantOrderItem[]
+  tips          Tip[]
+  delivery      Delivery?
+
+  @@unique([tenantId, orderNo])
+  @@index([tenantId, branchId, status])
+  @@map("restaurant_orders")
+}
+
+enum OrderType {
+  dine_in
+  takeaway
+  delivery
+}
+
+enum OrderStatus {
+  pending
+  preparing
+  ready
+  served
+  completed
+  cancelled
+}
+
+// Order Items
+model RestaurantOrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int      @default(1)
+  price         Float    @default(0)
+  discount      Float    @default(0)
+  total         Float    @default(0)
+  station       String?  // "kitchen" or "bar" — determines KOT vs BOT
+  status        ItemStatus @default(pending)
+  specialInstructions String?
+  createdAt     DateTime @default(now())
+
+  @@index([orderId])
+  @@map("restaurant_order_items")
+}
+
+enum ItemStatus {
+  pending
+  preparing
+  ready
+  served
+  cancelled
+}
+
+// Waiters
+model Waiter {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  name        String
+  phone       String?
+  code        String?  // short code for quick assignment
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders      RestaurantOrder[]
+  tips        Tip[]
+
+  @@index([tenantId])
+  @@map("waiters")
+}
+
+// Tips
+model Tip {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  order       RestaurantOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  waiterId    String?
+  waiter      Waiter?  @relation(fields: [waiterId], references: [id], onDelete: SetNull)
+  userId      String   // who recorded the tip
+  user        User     @relation(fields: [userId], references: [id])
+  amount      Float    @default(0)
+  tipType     String   @default("amount") // "amount" or "percentage"
+  tipValue    Float?   // percentage value if tipType is percentage
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, orderId])
+  @@map("tips")
+}
+
+// Reservations
+model Reservation {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  tableId       String?
+  table         RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName  String
+  customerPhone String?
+  date          DateTime
+  time          String   // "19:30"
+  guests        Int      @default(1)
+  specialRequests String?
+  status        ReservationStatus @default(reserved)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, date])
+  @@map("reservations")
+}
+
+enum ReservationStatus {
+  reserved
+  checked_in
+  cancelled
+  completed
+}
+
+// Recipes (Bill of Materials)
+model Recipe {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productId   String   // the menu item this recipe is for
+  product     Product   @relation(fields: [productId], references: [id])
+  name        String
+  yield       String?  // "1 plate", "2 servings"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ingredients RecipeIngredient[]
+
+  @@unique([tenantId, productId])
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id          String   @id @default(cuid())
+  recipeId    String
+  recipe      Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  productId   String   // the ingredient (inventory item)
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Float    @default(0)
+  unit        String   @default("Piece") // KG, ML, G, Piece, etc.
+  notes       String?
+
+  @@index([recipeId])
+  @@map("recipe_ingredients")
+}
+
+// Happy Hour Pricing
+model HappyHourRule {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  name        String   // "Happy Hour", "Early Bird"
+  productId   String?  // null = applies to all, specific product = single item
+  startTime   String   // "16:00"
+  endTime     String   // "19:00"
+  daysOfWeek  String?  // "1,2,3,4,5" (Mon-Fri), null = every day
+  discountType String  @default("percentage") // "percentage" or "fixed"
+  discountValue Float  @default(0) // 25 = 25% off, or 1500 = UGX 1500 off
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("happy_hour_rules")
+}
+
+// Combo Meals
+model ComboMeal {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  name        String   // "Lunch Combo"
+  description String?
+  price       Float    @default(0) // combo selling price
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       ComboMealItem[]
+
+  @@index([tenantId])
+  @@map("combo_meals")
+}
+
+model ComboMealItem {
+  id          String   @id @default(cuid())
+  comboMealId String
+  comboMeal   ComboMeal @relation(fields: [comboMealId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Int      @default(1)
+
+  @@index([comboMealId])
+  @@map("combo_meal_items")
+}
+
+// Delivery
+model Delivery {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderId       String?  @unique // linked restaurant order
+  order         RestaurantOrder? @relation(fields: [orderId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName  String
+  customerPhone String
+  address       String
+  riderName     String?
+  riderPhone    String?
+  deliveryFee   Float    @default(0)
+  status        DeliveryStatus @default(pending)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@map("deliveries")
+}
+
+enum DeliveryStatus {
+  pending
+  on_delivery
+  delivered
+  cancelled
 }

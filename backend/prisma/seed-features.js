@@ -135,6 +135,23 @@ async function seedFeatures() {
 
     // ===== Rentals =====
     { name: 'rentals', displayName: 'Rental Bookings', module: 'rentals', category: 'advanced', description: 'Rental booking management' },
+
+    // ===== Restaurant =====
+    { name: 'restaurant', displayName: 'Restaurant Module', module: 'restaurant', category: 'advanced', description: 'Restaurant and bar management' },
+    { name: 'restaurant.tables', displayName: 'Table Management', module: 'restaurant', category: 'advanced', description: 'Manage restaurant tables' },
+    { name: 'restaurant.orders', displayName: 'Orders', module: 'restaurant', category: 'advanced', description: 'Create and manage restaurant orders' },
+    { name: 'restaurant.kitchen', displayName: 'Kitchen Display', module: 'restaurant', category: 'advanced', description: 'Kitchen order tickets and display' },
+    { name: 'restaurant.bar', displayName: 'Bar Display', module: 'restaurant', category: 'advanced', description: 'Bar order tickets and display' },
+    { name: 'restaurant.waiters', displayName: 'Waiters', module: 'restaurant', category: 'advanced', description: 'Manage waiters and assignments' },
+    { name: 'restaurant.reservations', displayName: 'Reservations', module: 'restaurant', category: 'advanced', description: 'Table reservations' },
+    { name: 'restaurant.recipes', displayName: 'Recipes / Bill of Materials', module: 'restaurant', category: 'advanced', description: 'Recipe-based inventory deduction' },
+    { name: 'restaurant.happy_hour', displayName: 'Happy Hour Pricing', module: 'restaurant', category: 'advanced', description: 'Time-based promotional pricing' },
+    { name: 'restaurant.combos', displayName: 'Combo Meals', module: 'restaurant', category: 'advanced', description: 'Combo meal bundles' },
+    { name: 'restaurant.split_bills', displayName: 'Split Bills', module: 'restaurant', category: 'advanced', description: 'Split bills across customers' },
+    { name: 'restaurant.merge_tables', displayName: 'Merge Tables', module: 'restaurant', category: 'advanced', description: 'Merge multiple tables' },
+    { name: 'restaurant.delivery', displayName: 'Delivery', module: 'restaurant', category: 'advanced', description: 'Delivery orders and tracking' },
+    { name: 'restaurant.tips', displayName: 'Tips', module: 'restaurant', category: 'advanced', description: 'Tips management for waiters' },
+    { name: 'restaurant.reports', displayName: 'Restaurant Reports', module: 'restaurant', category: 'advanced', description: 'Restaurant-specific reports' },
   ]
 
   for (const feature of allFeatures) {
