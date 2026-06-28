@@ -403,6 +403,10 @@ model UserPermission {
   canDeleteRental     Boolean @default(false)
   canProcessRentalReturn Boolean @default(false)
   canViewRentalReport Boolean @default(true)
+  // Restaurant & Bar
+  canViewRestaurant   Boolean @default(false)
+  // Communication
+  canViewCommunication Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

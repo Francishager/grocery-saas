@@ -29,35 +29,24 @@ export const authenticateToken = async (req, res, next) => {
   }
 
   try {
-    // Always attach current permissions from the database so permission changes are immediate
-    // and old tokens (issued before permissions were embedded) still work.
+    // Resolve permissions from the single source of truth.
+    // - saas_admin: wildcard "*" (bypasses all checks)
+    // - owner: ALL permissions (business owner has full access)
+    // - all other roles: permissions come EXCLUSIVELY from UserPermission table
+    //   (set by business owner via Roles & Permissions page). No hardcoded defaults.
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
-    let permissions;
-    if (userPerm && decoded.role !== 'saas_admin' && decoded.role !== 'owner') {
-      // If UserPermission record exists, use it to override role defaults:
-      // Start with role defaults, then apply explicit true/false from UserPermission
-      permissions = permissionsForUser(decoded);
+    let permissions = permissionsForUser(decoded);
+
+    // For non-owner, non-saas_admin: merge UserPermission overrides
+    if (decoded.role !== 'saas_admin' && decoded.role !== 'owner' && userPerm) {
+      permissions = [];
       for (const [key, val] of Object.entries(userPerm)) {
-        if (key.startsWith('can') && typeof val === 'boolean') {
-          if (val === true) {
-            if (!permissions.includes(key)) permissions.push(key);
-          } else {
-            const idx = permissions.indexOf(key);
-            if (idx !== -1) permissions.splice(idx, 1);
-          }
-        }
-      }
-    } else {
-      permissions = permissionsForUser(decoded);
-      if (userPerm && decoded.role !== 'saas_admin') {
-        for (const [key, val] of Object.entries(userPerm)) {
-          if (key.startsWith('can') && val === true && !permissions.includes(key)) {
-            permissions.push(key);
-          }
+        if (key.startsWith('can') && val === true) {
+          permissions.push(key);
         }
       }
     }
-    console.log('[auth] User:', decoded.id, 'Role:', decoded.role, 'Final permissions:', permissions.length);
+
     req.user = { ...decoded, permissions };
   } catch (fetchErr) {
     console.error('Permission lookup error:', fetchErr);

@@ -684,7 +684,7 @@ export const staffApi = {
   },
 
   create: (data: StaffPayload) =>
-    api.post<{ message: string; staff: StaffMember }>('/api/staff', { body: data }),
+    api.post<{ message: string; staff: StaffMember; password?: string }>('/api/staff', { body: data }),
 
   update: (id: string, data: Partial<StaffPayload> & { isActive?: boolean }) =>
     api.patch<{ message: string; staff: StaffMember }>(`/api/staff/${id}`, { body: data }),

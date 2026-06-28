@@ -6,8 +6,8 @@ import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils
 
 const router = express.Router()
 
-// Apply auth to all routes
-router.use(authenticateToken)
+// Apply auth and restaurant permission to all routes
+router.use(authenticateToken, requirePermission('canViewRestaurant'))
 
 // =====================================================
 // TABLES

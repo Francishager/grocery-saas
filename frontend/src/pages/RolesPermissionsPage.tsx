@@ -24,6 +24,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewTax:'View Tax', canManageTax:'Manage Tax',
   canViewService:'View Service', canCreateService:'Create Service', canEditService:'Edit Service', canDeleteService:'Delete Service', canManageServiceCategory:'Manage Service Categories', canViewServiceReport:'View Service Report',
   canViewRental:'View Rentals', canCreateRental:'Create Rental', canEditRental:'Edit Rental', canDeleteRental:'Cancel Rental', canProcessRentalReturn:'Process Return', canViewRentalReport:'View Rental Report',
+  canViewRestaurant:'View Restaurant', canViewCommunication:'View Communication',
 }
 
 const PERM_GROUPS = [
@@ -45,6 +46,8 @@ const PERM_GROUPS = [
   { label: 'Tax', prefix: 'Tax' },
   { label: 'Services', prefix: 'Service' },
   { label: 'Rentals', prefix: 'Rental' },
+  { label: 'Restaurant', prefix: 'Restaurant' },
+  { label: 'Communication', prefix: 'Communication' },
 ]
 
 export default function RolesPermissionsPage() {
@@ -60,6 +63,7 @@ export default function RolesPermissionsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '' })
   const [dropdownId, setDropdownId] = useState<string | null>(null)
+  const [createdPassword, setCreatedPassword] = useState<{ name: string; email: string; password: string } | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
@@ -101,12 +105,15 @@ export default function RolesPermissionsPage() {
       return
     }
     try {
-      await staffApi.create({ ...form, name: form.name || form.email.split('@')[0], permissions: formPerms })
-      toast({ title: 'Staff created' })
+      const result = await staffApi.create({ ...form, name: form.name || form.email.split('@')[0], permissions: formPerms })
+      toast({ title: 'Staff created successfully' })
       setShowAddForm(false)
       setForm({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '' })
       setFormPerms({})
       loadStaff()
+      if (result?.password) {
+        setCreatedPassword({ name: result.staff?.name || form.name || form.email, email: form.email, password: result.password })
+      }
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Failed to create staff', description: err?.message })
     }
@@ -185,6 +192,37 @@ export default function RolesPermissionsPage() {
 
   return (
     <div className="space-y-6 p-6">
+      {createdPassword && (
+        <Card className="border-green-500 bg-green-50 dark:bg-green-950/30">
+          <CardHeader>
+            <CardTitle className="text-green-700 dark:text-green-400">Staff Created — Save These Credentials</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Share these login credentials with <strong>{createdPassword.name}</strong>. They will need them to log in.</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Email</p>
+                  <p className="font-mono text-sm font-medium">{createdPassword.email}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Password</p>
+                  <p className="font-mono text-sm font-medium">{createdPassword.password}</p>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button size="sm" variant="outline" onClick={() => {
+                  navigator.clipboard?.writeText(`Email: ${createdPassword.email}\nPassword: ${createdPassword.password}`)
+                  toast({ title: 'Credentials copied to clipboard' })
+                }}>
+                  Copy Credentials
+                </Button>
+                <Button size="sm" onClick={() => setCreatedPassword(null)}>Done</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Roles & Permissions</h1>
@@ -206,7 +244,7 @@ export default function RolesPermissionsPage() {
               <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+256..." /></div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as 'attendant' | 'manager' | 'accountant' }))}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   <option value="manager">Manager</option>
                   <option value="accountant">Accountant</option>
@@ -281,7 +319,7 @@ export default function RolesPermissionsPage() {
                         <div><Label className="text-xs">Email</Label><Input value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} className="h-8 text-sm" /></div>
                         <div><Label className="text-xs">Phone</Label><Input value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} className="h-8 text-sm" /></div>
                         <div><Label className="text-xs">Role</Label>
-                          <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm">
+                          <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value as 'attendant' | 'manager' | 'accountant' }))} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm">
                             <option value="manager">Manager</option>
                             <option value="accountant">Accountant</option>
                             <option value="attendant">Attendant</option>

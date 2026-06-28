@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 
 const router = Router();
@@ -91,7 +91,7 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
 });
 
 // Send broadcast (SMS/Email template — actual sending would need provider integration)
-router.post("/broadcast", authenticateToken, requireFeature("communication"), async (req, res) => {
+router.post("/broadcast", authenticateToken, requirePermission("canViewCommunication"), requireFeature("communication"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { channel = "in_app", title, message, type = "info", targetAll = true } = req.body;

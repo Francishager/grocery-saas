@@ -170,14 +170,16 @@ async function seedPlanFeatures() {
 
   const plans = await prisma.plan.findMany()
   const features = await prisma.feature.findMany()
+  const featureIdsByName = new Map(features.map(f => [f.name, f.id]))
+  const allFeatureIds = new Set(features.map(f => f.id))
 
   for (const plan of plans) {
-    // Determine features based on plan name
-    let planFeatures = []
+    // Determine features based on plan slug
+    let planFeatureNames = []
 
     switch (plan.slug) {
       case 'starter':
-        planFeatures = [
+        planFeatureNames = [
           'dashboard', 'sales', 'sales.pos',
           'customers',
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
@@ -186,7 +188,7 @@ async function seedPlanFeatures() {
         ]
         break
       case 'growth':
-        planFeatures = [
+        planFeatureNames = [
           'dashboard', 'dashboard.analytics',
           'sales', 'sales.pos', 'sales.returns', 'sales.discounts', 'sales.suspended',
           'customers', 'customers.statements',
@@ -202,33 +204,82 @@ async function seedPlanFeatures() {
         ]
         break
       case 'professional':
-        planFeatures = features.filter(f => !f.name.startsWith('hr.') && !f.name.startsWith('accounting') && !f.name.startsWith('integrations.api') && !f.name.startsWith('service.')).map(f => f.name)
+        planFeatureNames = [
+          'dashboard', 'dashboard.analytics',
+          'sales', 'sales.pos', 'sales.returns', 'sales.discounts', 'sales.suspended',
+          'customers', 'customers.statements',
+          'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
+          'inventory.adjustments', 'inventory.multi_unit', 'inventory.expiry_tracking',
+          'inventory.transfers',
+          'suppliers', 'suppliers.purchase_orders', 'suppliers.grn',
+          'expenses', 'financial.income',
+          'receivables', 'receivables.payments', 'receivables.aging',
+          'payables', 'payables.payments', 'payables.aging',
+          'reports', 'reports.sales', 'reports.inventory', 'reports.customers',
+          'reports.suppliers', 'reports.financial', 'reports.performance',
+          'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+          'multi_branch',
+          'audit',
+          'rentals',
+          'communication', 'communication.sms', 'communication.email', 'communication.whatsapp', 'communication.notifications',
+          'integrations',
+          'restaurant', 'restaurant.tables', 'restaurant.orders', 'restaurant.kitchen',
+          'restaurant.reservations', 'restaurant.recipes', 'restaurant.happy_hour',
+          'restaurant.combos', 'restaurant.delivery', 'restaurant.tips',
+          'restaurant.waiters', 'restaurant.reports',
+        ]
         break
       case 'enterprise':
-        planFeatures = features.map(f => f.name) // All features
+        planFeatureNames = features.map(f => f.name)
         break
+      default:
+        planFeatureNames = [
+          'dashboard', 'sales', 'sales.pos',
+          'customers',
+          'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
+          'reports', 'reports.sales', 'reports.inventory',
+          'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+        ]
     }
 
-    // Create plan features
-    for (const featureName of planFeatures) {
-      const feature = features.find(f => f.name === featureName)
-      if (feature) {
-        await prisma.planFeature.upsert({
-          where: {
-            planId_featureId: {
-              planId: plan.id,
-              featureId: feature.id,
-            },
-          },
-          update: { enabled: true },
-          create: {
+    // Resolve feature names to IDs
+    const planFeatureIds = new Set(
+      planFeatureNames
+        .map(name => featureIdsByName.get(name))
+        .filter(Boolean)
+    )
+
+    // 1. Disable all PlanFeature rows for this plan that are NOT in the plan's list
+    await prisma.planFeature.updateMany({
+      where: {
+        planId: plan.id,
+        featureId: { notIn: [...planFeatureIds] },
+        enabled: true,
+      },
+      data: { enabled: false },
+    })
+
+    // 2. Upsert enabled features for this plan
+    for (const featureId of planFeatureIds) {
+      await prisma.planFeature.upsert({
+        where: {
+          planId_featureId: {
             planId: plan.id,
-            featureId: feature.id,
-            enabled: true,
+            featureId,
           },
-        })
-      }
+        },
+        update: { enabled: true },
+        create: {
+          planId: plan.id,
+          featureId,
+          enabled: true,
+        },
+      })
     }
+
+    const enabledCount = planFeatureIds.size
+    const disabledCount = allFeatureIds.size - enabledCount
+    console.log(`  📋 ${plan.name}: ${enabledCount} enabled, ${disabledCount} disabled`)
   }
 
   console.log(`✅ Seeded features for ${plans.length} plans`)

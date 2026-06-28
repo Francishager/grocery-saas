@@ -26,25 +26,16 @@ function primaryBranchId(user) {
 
 function userPayload(user, userPerm) {
   const isPlatformUser = user.role === "saas_admin";
-  const permissions = permissionsForUser(user);
+  let permissions = permissionsForUser(user);
 
-  // Merge granular UserPermission keys into permissions array
-  // For non-owner/non-saas_admin, UserPermission overrides role defaults (both add and remove)
-  if (userPerm && !isPlatformUser && user.role !== "owner") {
-    for (const [key, val] of Object.entries(userPerm)) {
-      if (key.startsWith("can") && typeof val === "boolean") {
-        if (val === true) {
-          if (!permissions.includes(key)) permissions.push(key);
-        } else {
-          const idx = permissions.indexOf(key);
-          if (idx !== -1) permissions.splice(idx, 1);
+  // For non-owner, non-saas_admin: permissions come EXCLUSIVELY from UserPermission table
+  if (!isPlatformUser && user.role !== "owner") {
+    permissions = [];
+    if (userPerm) {
+      for (const [key, val] of Object.entries(userPerm)) {
+        if (key.startsWith("can") && val === true) {
+          permissions.push(key);
         }
-      }
-    }
-  } else if (userPerm && !isPlatformUser) {
-    for (const [key, val] of Object.entries(userPerm)) {
-      if (key.startsWith("can") && val === true && !permissions.includes(key)) {
-        permissions.push(key);
       }
     }
   }

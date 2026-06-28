@@ -20,12 +20,12 @@ const navItems = [
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
   { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'canViewExpense' },
   { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
-  { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant' },
+  { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant' },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport' },
   { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewStaff' },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
-  { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication' },
+  { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication', permission: 'canViewCommunication' },
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
@@ -158,11 +158,11 @@ const reportCategories: ReportCategoryDef[] = [
 ]
 
 const settingsSubItems = [
-  { to: '/tenant/settings', label: 'Business Profile', icon: Building2, feature: 'settings' },
-  { to: '/tenant/branches', label: 'Branches', icon: GitBranch, feature: 'multi_branch' },
-  { to: '/tenant/tax', label: 'Tax Management', icon: DollarSign, feature: 'settings.taxes' },
-  { to: '/tenant/receipt-settings', label: 'Receipt Settings', icon: FileText, feature: 'settings' },
-  { to: '/tenant/roles', label: 'Roles & Permissions', icon: Shield, feature: 'settings.roles' },
+  { to: '/tenant/settings', label: 'Business Profile', icon: Building2, feature: 'settings', permission: 'canViewSettings' },
+  { to: '/tenant/branches', label: 'Branches', icon: GitBranch, feature: 'multi_branch', permission: 'canViewBranch' },
+  { to: '/tenant/tax', label: 'Tax Management', icon: DollarSign, feature: 'settings.taxes', permission: 'canViewTax' },
+  { to: '/tenant/receipt-settings', label: 'Receipt Settings', icon: FileText, feature: 'settings', permission: 'canViewReceipt' },
+  { to: '/tenant/roles', label: 'Roles & Permissions', icon: Shield, feature: 'settings.roles', permission: 'canViewStaff' },
 ]
 
 export function TenantLayout() {
@@ -315,7 +315,7 @@ export function TenantLayout() {
                   </button>
                   {settingsExpanded && (
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
-                      {settingsSubItems.filter(sub => !sub.feature || canAccessFeature(sub.feature)).map(sub => (
+                      {settingsSubItems.filter(sub => (!sub.permission || hasPermission(sub.permission)) && (!sub.feature || canAccessFeature(sub.feature))).map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
                           className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
                           <sub.icon className="h-4 w-4" />{sub.label}

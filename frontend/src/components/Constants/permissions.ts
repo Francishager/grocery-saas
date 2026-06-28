@@ -40,6 +40,8 @@ export const permissionCategories = [
   { id: 'tax', name: 'Tax' },
   { id: 'services', name: 'Services' },
   { id: 'rentals', name: 'Rentals' },
+  { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'communication', name: 'Communication' },
   { id: 'billing', name: 'Billing & Subscription' },
 ]
 
@@ -167,6 +169,12 @@ export const permissions: Permission[] = [
   { id: 'canProcessRentalReturn', name: 'Process Returns', description: 'Process return of hired items', category: 'rentals', accessesBusinessData: true },
   { id: 'canViewRentalReport', name: 'View Rental Reports', description: 'View rental-related reports', category: 'rentals', accessesBusinessData: true },
   
+  // Restaurant & Bar
+  { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },
+  
+  // Communication
+  { id: 'canViewCommunication', name: 'View Communication', description: 'Access communication module', category: 'communication', accessesBusinessData: true },
+  
   // Billing (Tenant-level - for business owners)
   { id: 'view_own_billing', name: 'View Own Billing', description: 'View own subscription and billing', category: 'billing' },
   { id: 'manage_own_billing', name: 'Manage Own Billing', description: 'Manage own subscription and payments', category: 'billing' },
@@ -229,79 +237,32 @@ export const roles: Role[] = [
       'canViewService', 'canCreateService', 'canEditService', 'canDeleteService', 'canManageServiceCategory', 'canViewServiceReport',
       // Rentals
       'canViewRental', 'canCreateRental', 'canEditRental', 'canDeleteRental', 'canProcessRentalReturn', 'canViewRentalReport',
+      // Restaurant & Bar
+      'canViewRestaurant',
+      // Communication
+      'canViewCommunication',
     ],
   },
   {
     id: 'accountant',
     name: 'Accountant',
-    description: 'Financial management access',
+    description: 'Financial management access — permissions must be assigned by business owner',
     isSystem: true,
-    permissions: [
-      'canViewDashboard',
-      'canViewSale',
-      'canViewProduct',
-      'canCreatePurchase', 'canViewPurchase', 'canEditPurchase',
-      'canCreatePayable', 'canViewPayable', 'canEditPayable',
-      'canCreateReceivable', 'canViewReceivable', 'canEditReceivable',
-      'canCreateExpense', 'canViewExpense', 'canEditExpense',
-      'canCreateCustomer', 'canViewCustomer', 'canEditCustomer',
-      'canCreateSupplier', 'canViewSupplier', 'canEditSupplier',
-      'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport', 'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport', 'canViewAuditReport', 'canExportReport',
-      'canViewStaff',
-      'canViewBranch',
-      'canViewSettings',
-      'canViewReceipt',
-      'canViewTax', 'canManageTax',
-      // Services
-      'canViewService', 'canCreateService', 'canEditService', 'canViewServiceReport',
-      // Rentals
-      'canViewRental', 'canViewRentalReport',
-    ],
+    permissions: [],
   },
   {
     id: 'attendant',
     name: 'Attendant',
-    description: 'Sales and basic inventory access',
+    description: 'Sales and basic inventory access — permissions must be assigned by business owner',
     isSystem: true,
-    permissions: [
-      'canViewDashboard',
-      'canViewSale', 'canCreateSale',
-      'canViewProduct',
-      'canViewCustomer',
-      'canViewReceipt',
-      // Services
-      'canViewService',
-      // Rentals
-      'canViewRental', 'canCreateRental', 'canProcessRentalReturn',
-    ],
+    permissions: [],
   },
   {
     id: 'manager',
     name: 'Manager',
-    description: 'Branch manager access',
+    description: 'Branch manager access — permissions must be assigned by business owner',
     isSystem: false,
-    permissions: [
-      'canViewDashboard',
-      'canViewSale', 'canCreateSale', 'canEditSale', 'canRefundSale',
-      'canViewPurchase', 'canCreatePurchase', 'canEditPurchase',
-      'canCreatePayable', 'canViewPayable', 'canEditPayable',
-      'canCreateReceivable', 'canViewReceivable', 'canEditReceivable',
-      'canViewProduct', 'canCreateProduct', 'canEditProduct', 'canAdjustStock', 'canTransferStock',
-      'canCreateExpense', 'canViewExpense', 'canEditExpense',
-      'canCreateCustomer', 'canViewCustomer', 'canEditCustomer',
-      'canCreateSupplier', 'canViewSupplier', 'canEditSupplier',
-      'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport', 'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport', 'canViewAuditReport', 'canExportReport',
-      'canViewStaff',
-      'canViewBranch',
-      'canViewSettings',
-      'canViewReceipt', 'canCreateReceipt',
-      'canGiveDiscount',
-      'canViewTax',
-      // Services
-      'canViewService', 'canCreateService', 'canEditService', 'canManageServiceCategory', 'canViewServiceReport',
-      // Rentals
-      'canViewRental', 'canCreateRental', 'canEditRental', 'canProcessRentalReturn', 'canViewRentalReport',
-    ],
+    permissions: [],
   },
 ]
 

@@ -3,116 +3,11 @@ import bcrypt from "bcryptjs";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
+import { ALL_PERMISSION_KEYS as PERM_KEYS, ROLE_DEFAULTS } from "../utils/permissions.js";
 
 const router = Router();
 
 const staffRoles = new Set(["manager", "accountant", "attendant"]);
-
-const PERM_KEYS = [
-  // Dashboard
-  "canViewDashboard",
-  // Sales
-  "canCreateSale","canViewSale","canEditSale","canDeleteSale","canRefundSale",
-  // Inventory
-  "canCreateProduct","canViewProduct","canEditProduct","canDeleteProduct","canAdjustStock","canTransferStock",
-  // Purchases / Payables
-  "canCreatePurchase","canViewPurchase","canEditPurchase","canDeletePurchase",
-  "canCreatePayable","canViewPayable","canEditPayable","canDeletePayable",
-  // Expenses
-  "canCreateExpense","canViewExpense","canEditExpense","canDeleteExpense",
-  // Customers / Receivables
-  "canCreateCustomer","canViewCustomer","canEditCustomer","canDeleteCustomer",
-  "canCreateReceivable","canViewReceivable","canEditReceivable","canDeleteReceivable",
-  // Suppliers
-  "canCreateSupplier","canViewSupplier","canEditSupplier","canDeleteSupplier",
-  // Staff
-  "canCreateStaff","canViewStaff","canEditStaff","canDeleteStaff",
-  // Branches
-  "canCreateBranch","canViewBranch","canEditBranch","canDeleteBranch",
-  // Reports (granular)
-  "canViewSalesReport","canViewInventoryReport","canViewFinancialReport","canViewCustomerReport","canViewSupplierReport","canViewReceivablesReport","canViewPayablesReport","canViewPerformanceReport","canViewAuditReport","canExportReport",
-  // Settings
-  "canViewSettings","canEditSettings",
-  // Receipts
-  "canViewReceipt","canCreateReceipt",
-  // Discounts
-  "canGiveDiscount",
-  // Tax
-  "canViewTax","canManageTax",
-  // Services
-  "canViewService","canCreateService","canEditService","canDeleteService","canManageServiceCategory","canViewServiceReport",
-  // Rentals / Hire
-  "canViewRental","canCreateRental","canEditRental","canDeleteRental","canProcessRentalReturn","canViewRentalReport",
-];
-
-const ROLE_DEFAULTS = {
-  manager: {
-    canViewDashboard:true,
-    canCreateSale:true,canViewSale:true,canEditSale:true,canDeleteSale:false,canRefundSale:true,
-    canCreateProduct:true,canViewProduct:true,canEditProduct:true,canDeleteProduct:false,canAdjustStock:true,canTransferStock:true,
-    canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
-    canCreatePayable:true,canViewPayable:true,canEditPayable:true,canDeletePayable:false,
-    canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
-    canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
-    canCreateReceivable:true,canViewReceivable:true,canEditReceivable:true,canDeleteReceivable:false,
-    canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
-    canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
-    canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
-    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canViewAuditReport:true,canExportReport:true,
-    canViewSettings:true,canEditSettings:false,
-    canViewReceipt:true,canCreateReceipt:true,
-    canGiveDiscount:true,
-    canViewTax:true,canManageTax:false,
-    // Services
-    canViewService:true,canCreateService:true,canEditService:true,canDeleteService:false,canManageServiceCategory:true,canViewServiceReport:true,
-    // Rentals
-    canViewRental:true,canCreateRental:true,canEditRental:true,canDeleteRental:false,canProcessRentalReturn:true,canViewRentalReport:true,
-  },
-  accountant: {
-    canViewDashboard:true,
-    canCreateSale:false,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
-    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,canAdjustStock:false,canTransferStock:false,
-    canCreatePurchase:true,canViewPurchase:true,canEditPurchase:true,canDeletePurchase:false,
-    canCreatePayable:true,canViewPayable:true,canEditPayable:true,canDeletePayable:false,
-    canCreateReceivable:true,canViewReceivable:true,canEditReceivable:true,canDeleteReceivable:false,
-    canCreateExpense:true,canViewExpense:true,canEditExpense:true,canDeleteExpense:false,
-    canCreateCustomer:true,canViewCustomer:true,canEditCustomer:true,canDeleteCustomer:false,
-    canCreateSupplier:true,canViewSupplier:true,canEditSupplier:true,canDeleteSupplier:false,
-    canCreateStaff:false,canViewStaff:true,canEditStaff:false,canDeleteStaff:false,
-    canCreateBranch:false,canViewBranch:true,canEditBranch:false,canDeleteBranch:false,
-    canViewSalesReport:true,canViewInventoryReport:true,canViewFinancialReport:true,canViewCustomerReport:true,canViewSupplierReport:true,canViewReceivablesReport:true,canViewPayablesReport:true,canViewPerformanceReport:true,canViewAuditReport:true,canExportReport:true,
-    canViewSettings:true,canEditSettings:false,
-    canViewReceipt:true,canCreateReceipt:false,
-    canGiveDiscount:false,
-    canViewTax:true,canManageTax:true,
-    // Services
-    canViewService:true,canCreateService:true,canEditService:true,canDeleteService:false,canManageServiceCategory:false,canViewServiceReport:true,
-    // Rentals
-    canViewRental:true,canCreateRental:false,canEditRental:false,canDeleteRental:false,canProcessRentalReturn:false,canViewRentalReport:true,
-  },
-  attendant: {
-    canViewDashboard:true,
-    canCreateSale:true,canViewSale:true,canEditSale:false,canDeleteSale:false,canRefundSale:false,
-    canCreateProduct:false,canViewProduct:true,canEditProduct:false,canDeleteProduct:false,canAdjustStock:false,canTransferStock:false,
-    canCreatePurchase:false,canViewPurchase:false,canEditPurchase:false,canDeletePurchase:false,
-    canCreatePayable:false,canViewPayable:false,canEditPayable:false,canDeletePayable:false,
-    canCreateExpense:false,canViewExpense:false,canEditExpense:false,canDeleteExpense:false,
-    canCreateCustomer:false,canViewCustomer:true,canEditCustomer:false,canDeleteCustomer:false,
-    canCreateReceivable:false,canViewReceivable:false,canEditReceivable:false,canDeleteReceivable:false,
-    canCreateSupplier:false,canViewSupplier:false,canEditSupplier:false,canDeleteSupplier:false,
-    canCreateStaff:false,canViewStaff:false,canEditStaff:false,canDeleteStaff:false,
-    canCreateBranch:false,canViewBranch:false,canEditBranch:false,canDeleteBranch:false,
-    canViewSalesReport:false,canViewInventoryReport:false,canViewFinancialReport:false,canViewCustomerReport:false,canViewSupplierReport:false,canViewReceivablesReport:false,canViewPayablesReport:false,canViewPerformanceReport:false,canViewAuditReport:false,canExportReport:false,
-    canViewSettings:false,canEditSettings:false,
-    canViewReceipt:true,canCreateReceipt:false,
-    canGiveDiscount:false,
-    canViewTax:false,canManageTax:false,
-    // Services
-    canViewService:true,canCreateService:false,canEditService:false,canDeleteService:false,canManageServiceCategory:false,canViewServiceReport:false,
-    // Rentals
-    canViewRental:true,canCreateRental:true,canEditRental:false,canDeleteRental:false,canProcessRentalReturn:true,canViewRentalReport:false,
-  },
-};
 
 // Get permission keys and role defaults
 router.get("/permissions/schema", authenticateToken, requirePermission("canViewStaff"), (req, res) => {
@@ -255,7 +150,7 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
       });
     });
 
-    res.status(201).json({ message: "Staff created", staff: staffResponse(user) });
+    res.status(201).json({ message: "Staff created", staff: staffResponse(user), password: String(password) });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     if (err?.code === "P2002") return res.status(409).json({ error: "User already exists" });
