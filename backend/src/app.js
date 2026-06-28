@@ -13,7 +13,6 @@ import reportRoutes from "./routes/reports.js";
 import adminRoutes from "./routes/admin.js";
 import invitationRoutes from "./routes/invitations.js";
 import tenantRoutes from "./routes/tenants.js";
-import platformRoutes from "./routes/platform.js";
 import crudRoutes from "./routes/crud.js";
 import auditRoutes from "./routes/audit.js";
 import receiptRoutes from "./routes/receipts.js";
@@ -127,7 +126,6 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invitations", invitationRoutes);
 app.use("/api/tenants", tenantRoutes);
-app.use("/api/platform", platformRoutes);
 app.use("/api/admin/crud", crudRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/receipts", receiptRoutes);
@@ -135,11 +133,11 @@ app.use("/api/branches", branchRoutes);
 app.use("/api/staff", staffRoutes);
 app.use("/api/settings", settingsRoutes);
 
-// Legacy feature routes
+// Platform routes (single router — handles plans, features, tenants, analytics)
+app.use("/api/platform", platformNewRouter);
 app.use("/api/receivables", receivablesRouter);
 app.use("/api/payables", payablesRouter);
 app.use("/api/expenses", expensesRouter);
-app.use("/api/platform", platformNewRouter);
 app.use("/api/rentals", rentalsRouter);
 app.use("/api/returns", returnsRouter);
 app.use("/api/accounting", accountingRouter);
