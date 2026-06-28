@@ -513,6 +513,36 @@ router.get("/me/features", authenticateToken, async (req, res) => {
         include: { plan: true },
       });
 
+      // Backfill: if plan has JSON features without PlanFeature rows, create them
+      if (tenant?.planId && tenant.plan) {
+        const existingPFs = await prisma.planFeature.findMany({
+          where: { planId: tenant.planId },
+          include: { feature: true },
+        });
+        const existingNames = new Set(existingPFs.map(pf => pf.feature?.name).filter(Boolean));
+        const jsonFeatures = Array.isArray(tenant.plan.features) ? tenant.plan.features : [];
+        const missing = jsonFeatures.filter(name => !existingNames.has(name));
+        if (missing.length > 0) {
+          for (const featureName of missing) {
+            let feature = await prisma.feature.findUnique({ where: { name: featureName } });
+            if (!feature) {
+              feature = await prisma.feature.create({
+                data: {
+                  name: featureName,
+                  displayName: featureName.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' '),
+                  category: featureName.split('.')[0] || 'core',
+                  module: featureName.split('.')[0] || 'core',
+                  isActive: true,
+                },
+              });
+            }
+            await prisma.planFeature.create({
+              data: { planId: tenant.planId, featureId: feature.id, enabled: true },
+            });
+          }
+        }
+      }
+
       const planFeatureRows = tenant?.planId
         ? await prisma.planFeature.findMany({
             where: { planId: tenant.planId, enabled: true },
@@ -539,6 +569,7 @@ router.get("/me/features", authenticateToken, async (req, res) => {
 
     res.json({ features: planCodes });
   } catch (err) {
+    console.error("Me/features error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

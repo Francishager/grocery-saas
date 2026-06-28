@@ -204,7 +204,47 @@ router.get('/plans', authenticateToken, requirePlatformAdmin, async (req, res) =
       orderBy: { price: 'asc' }
     })
 
-    res.json(plans)
+    // Backfill: for any plan whose JSON features array has entries without PlanFeature rows, create them
+    for (const plan of plans) {
+      const existingNames = new Set(plan.planFeatures.map(pf => pf.feature?.name).filter(Boolean))
+      const jsonFeatures = Array.isArray(plan.features) ? plan.features : []
+      const missing = jsonFeatures.filter(name => !existingNames.has(name))
+      if (missing.length > 0) {
+        for (const featureName of missing) {
+          let feature = await prisma.feature.findUnique({ where: { name: featureName } })
+          if (!feature) {
+            feature = await prisma.feature.create({
+              data: {
+                name: featureName,
+                displayName: featureName.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' '),
+                category: featureName.split('.')[0] || 'core',
+                module: featureName.split('.')[0] || 'core',
+                isActive: true,
+              }
+            })
+          }
+          await prisma.planFeature.create({
+            data: { planId: plan.id, featureId: feature.id, enabled: true }
+          })
+        }
+        // Invalidate cache for tenants on this plan
+        for (const t of plan.tenants) {
+          invalidateFeatureCache(t.id)
+        }
+      }
+    }
+
+    // Re-fetch with updated planFeatures if any were backfilled
+    const finalPlans = await prisma.plan.findMany({
+      include: {
+        planFeatures: { include: { feature: true } },
+        tenants: { select: { id: true } },
+        _count: { select: { tenants: true } }
+      },
+      orderBy: { price: 'asc' }
+    })
+
+    res.json(finalPlans)
   } catch (error) {
     console.error('Get plans error:', error)
     res.status(500).json({ error: 'Failed to fetch plans' })
@@ -238,22 +278,32 @@ router.post('/plans', authenticateToken, requirePlatformAdmin, async (req, res) 
       }
     })
 
-    // Add features to plan
+    // Add features to plan — auto-create Feature rows if they don't exist
     if (features && features.length > 0) {
       for (const featureName of features) {
-        const feature = await prisma.feature.findUnique({
+        let feature = await prisma.feature.findUnique({
           where: { name: featureName }
         })
 
-        if (feature) {
-          await prisma.planFeature.create({
+        if (!feature) {
+          feature = await prisma.feature.create({
             data: {
-              planId: plan.id,
-              featureId: feature.id,
-              enabled: true
+              name: featureName,
+              displayName: featureName.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' '),
+              category: featureName.split('.')[0] || 'core',
+              module: featureName.split('.')[0] || 'core',
+              isActive: true,
             }
           })
         }
+
+        await prisma.planFeature.create({
+          data: {
+            planId: plan.id,
+            featureId: feature.id,
+            enabled: true
+          }
+        })
       }
     }
 
@@ -289,19 +339,29 @@ router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, re
     })
 
     for (const featureName of features) {
-      const feature = await prisma.feature.findUnique({
+      let feature = await prisma.feature.findUnique({
         where: { name: featureName }
       })
 
-      if (feature) {
-        await prisma.planFeature.create({
+      if (!feature) {
+        feature = await prisma.feature.create({
           data: {
-            planId: id,
-            featureId: feature.id,
-            enabled: true
+            name: featureName,
+            displayName: featureName.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' '),
+            category: featureName.split('.')[0] || 'core',
+            module: featureName.split('.')[0] || 'core',
+            isActive: true,
           }
         })
       }
+
+      await prisma.planFeature.create({
+        data: {
+          planId: id,
+          featureId: feature.id,
+          enabled: true
+        }
+      })
     }
 
     // Invalidate feature cache for all tenants on this plan
