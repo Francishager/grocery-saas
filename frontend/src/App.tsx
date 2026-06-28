@@ -122,13 +122,13 @@ function App() {
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
           <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
-          <Route path="branches" element={<BranchesPage />} />
-          <Route path="staff" element={<StaffPage />} />
+          <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />
+          <Route path="staff" element={<FeatureGuard feature="settings.users"><StaffPage /></FeatureGuard>} />
           <Route path="profile" element={<UserProfilePage />} />
           <Route path="settings" element={<FeatureGuard feature="settings"><BusinessSettingsPage /></FeatureGuard>} />
-          <Route path="tax" element={<TaxManagementPage />} />
-          <Route path="receipt-settings" element={<ReceiptSettingsPage />} />
-          <Route path="roles" element={<RolesPermissionsPage />} />
+          <Route path="tax" element={<FeatureGuard feature="settings.taxes"><TaxManagementPage /></FeatureGuard>} />
+          <Route path="receipt-settings" element={<FeatureGuard feature="settings"><ReceiptSettingsPage /></FeatureGuard>} />
+          <Route path="roles" element={<FeatureGuard feature="settings.roles"><RolesPermissionsPage /></FeatureGuard>} />
           <Route path="admin" element={<Navigate to="/tenant/roles" replace />} />
         </Route>
 

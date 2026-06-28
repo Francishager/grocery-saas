@@ -27,47 +27,7 @@ export interface UsageLimits {
   maxSuppliers: number
 }
 
-const FEATURE_ALIASES: Record<string, string[]> = {
-  credit: ['receivables', 'receivables.payments', 'receivables.aging'],
-  receivables: ['receivables.payments', 'receivables.aging'],
-  suppliers: ['suppliers', 'suppliers.purchase_orders', 'suppliers.grn', 'payables', 'payables.payments', 'payables.aging'],
-  payables: ['payables.payments', 'payables.aging'],
-  pos: ['sales', 'sales.pos'],
-  pos_sales: ['sales', 'sales.pos'],
-  sales_tracking: ['sales'],
-  invoice_generation: ['sales'],
-  customer_transactions: ['sales', 'customers'],
-  payment_management: ['sales'],
-  product_tracking: ['inventory', 'inventory.products'],
-  stock_movement: ['inventory', 'inventory.products'],
-  low_stock_alerts: ['inventory', 'inventory.products'],
-  purchase_management: ['suppliers', 'suppliers.purchase_orders'],
-  supplier_management: ['suppliers'],
-  inventory_valuation: ['inventory', 'inventory.products'],
-  bookkeeping: ['reports'],
-  income_tracking: ['financial.income'],
-  expense_management: ['expenses'],
-  payables_management: ['payables', 'payables.payments'],
-  receivables_management: ['receivables', 'receivables.payments'],
-  cash_flow_monitoring: ['expenses', 'financial.cashbook'],
-  profitability_analysis: ['reports', 'reports.financial'],
-  staff_management: ['settings', 'settings.roles', 'settings.users'],
-  role_access_control: ['settings', 'settings.roles'],
-  activity_logs: ['audit'],
-  branch_management: ['multi_branch'],
-  workflow_organization: ['settings'],
-  financial_reports: ['reports', 'reports.financial'],
-  sales_reports: ['reports', 'reports.sales'],
-  inventory_reports: ['reports', 'reports.inventory'],
-  performance_dashboards: ['reports', 'reports.performance'],
-  decision_analytics: ['reports'],
-  multi_branch: ['multi_branch', 'multi_branch.transfers', 'multi_branch.reports'],
-  advanced_reports: ['reports', 'reports.performance'],
-  cash_flow: ['financial.cashbook'],
-  sms: ['communication.sms'],
-  whatsapp: ['communication.whatsapp'],
-  offline_mode: ['integrations.api_access'],
-}
+// Legacy aliases removed — features are now controlled granularly via PlanFeature and TenantFeature tables.
 
 class FeatureAccessService {
   private static instance: FeatureAccessService
@@ -137,9 +97,6 @@ class FeatureAccessService {
     const setFeature = (name: string, enabled: boolean = true, source: 'plan' | 'override' | 'default' = 'plan') => {
       if (!name) return
       normalized[name] = { enabled, source }
-      ;(FEATURE_ALIASES[name] || []).forEach((alias) => {
-        if (!normalized[alias] || enabled) normalized[alias] = { enabled, source }
-      })
     }
 
     if (Array.isArray(rawFeatures)) {
@@ -170,14 +127,7 @@ class FeatureAccessService {
 
   // Check if feature is enabled (primary API)
   isFeatureEnabled(featureName: string): boolean {
-    if (this.features[featureName]?.enabled) return true
-    // Check if a parent module is enabled (e.g., 'inventory' covers 'inventory.products')
-    const parts = featureName.split('.')
-    if (parts.length > 1) {
-      const parent = parts[0]
-      if (this.features[parent]?.enabled) return true
-    }
-    return false
+    return this.features[featureName]?.enabled === true
   }
 
   // Alias for isFeatureEnabled — matches spec naming convention hasFeature('inventory.products')
@@ -312,7 +262,7 @@ export function useFeatureAccess() {
   const { user } = useJWTAuth()
   const [features, setFeatures] = useState<FeatureAccess>({})
   const [usageLimits, setUsageLimits] = useState<UsageLimits | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {

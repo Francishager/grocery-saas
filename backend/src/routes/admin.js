@@ -505,11 +505,6 @@ router.get("/me/features", authenticateToken, async (req, res) => {
     const role = req.user?.role;
     if (role === "saas_admin") return res.json({ features: [] });
 
-    let roleBaseline = [];
-    if (role === "owner") roleBaseline = ["inventory", "sales", "reports"];
-    else if (role === "accountant") roleBaseline = ["reports"];
-    else if (role === "attendant") roleBaseline = ["sales"];
-
     const tenantId = req.user?.tenantId;
     let planCodes = [];
     if (tenantId) {
@@ -542,8 +537,7 @@ router.get("/me/features", authenticateToken, async (req, res) => {
       planCodes = Array.from(effective);
     }
 
-    const effective = planCodes.length ? planCodes : roleBaseline;
-    res.json({ features: effective });
+    res.json({ features: planCodes });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }

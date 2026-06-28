@@ -151,11 +151,11 @@ const reportCategories: ReportCategoryDef[] = [
 ]
 
 const settingsSubItems = [
-  { to: '/tenant/settings', label: 'Business Profile', icon: Building2 },
-  { to: '/tenant/branches', label: 'Branches', icon: GitBranch },
-  { to: '/tenant/tax', label: 'Tax Management', icon: DollarSign },
-  { to: '/tenant/receipt-settings', label: 'Receipt Settings', icon: FileText },
-  { to: '/tenant/roles', label: 'Roles & Permissions', icon: Shield },
+  { to: '/tenant/settings', label: 'Business Profile', icon: Building2, feature: 'settings' },
+  { to: '/tenant/branches', label: 'Branches', icon: GitBranch, feature: 'multi_branch' },
+  { to: '/tenant/tax', label: 'Tax Management', icon: DollarSign, feature: 'settings.taxes' },
+  { to: '/tenant/receipt-settings', label: 'Receipt Settings', icon: FileText, feature: 'settings' },
+  { to: '/tenant/roles', label: 'Roles & Permissions', icon: Shield, feature: 'settings.roles' },
 ]
 
 export function TenantLayout() {
@@ -308,7 +308,7 @@ export function TenantLayout() {
                   </button>
                   {settingsExpanded && (
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
-                      {settingsSubItems.map(sub => (
+                      {settingsSubItems.filter(sub => !sub.feature || canAccessFeature(sub.feature)).map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
                           className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
                           <sub.icon className="h-4 w-4" />{sub.label}

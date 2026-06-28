@@ -26,10 +26,7 @@ async function getTenantFeatures(tenantId) {
     return empty;
   }
 
-  // 1. JSON features array on Plan (legacy support)
-  const jsonFeatures = Array.isArray(tenant.plan?.features) ? tenant.plan.features : [];
-
-  // 2. PlanFeature rows
+  // 1. PlanFeature rows
   const planFeatureRows = tenant.planId
     ? await prisma.planFeature.findMany({
         where: { planId: tenant.planId, enabled: true },
@@ -37,16 +34,15 @@ async function getTenantFeatures(tenantId) {
       })
     : [];
 
-  // 3. TenantFeature overrides
+  // 2. TenantFeature overrides
   const tenantOverrides = await prisma.tenantFeature.findMany({
     where: { tenantId },
     include: { feature: true },
   });
 
-  const effective = new Set([
-    ...jsonFeatures.filter(Boolean),
-    ...planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean),
-  ]);
+  const effective = new Set(
+    planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean)
+  );
 
   tenantOverrides.forEach((tf) => {
     if (!tf.feature?.name) return;
@@ -99,10 +95,8 @@ export function requireFeature(featureName) {
     try {
       const features = await getTenantFeatures(tenantId);
 
-      // Check exact feature or parent module
-      const hasFeature =
-        features.has(featureName) ||
-        (featureName.includes('.') && features.has(featureName.split('.')[0]));
+      // Check exact feature only — no parent module auto-enabling
+      const hasFeature = features.has(featureName);
 
       if (!hasFeature) {
         return res.status(403).json({
@@ -146,11 +140,7 @@ export function requireAllFeatures(...featureNames) {
     try {
       const features = await getTenantFeatures(tenantId);
 
-      const missing = featureNames.find(
-        (fn) =>
-          !features.has(fn) &&
-          !(fn.includes('.') && features.has(fn.split('.')[0]))
-      );
+      const missing = featureNames.find((fn) => !features.has(fn));
 
       if (missing) {
         return res.status(403).json({
