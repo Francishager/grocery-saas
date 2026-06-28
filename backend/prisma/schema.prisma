@@ -943,10 +943,11 @@ model CashTransaction {
 // System Features
 model Feature {
   id          String   @id @default(cuid())
-  name        String   @unique // "pos", "inventory", "credit", "reports", etc.
+  name        String   @unique // "inventory.products", "sales.returns", "reports.sales", etc.
   displayName String
   description String?
-  category    String // "core", "advanced", "integration"
+  module      String   // "sales", "inventory", "customers", "suppliers", etc.
+  category    String // "core", "advanced", "integration", "module"
   icon        String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())

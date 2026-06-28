@@ -4,6 +4,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { SaaSAdminLayout } from '@/components/layout/SaaSAdminLayout'
 import { TenantLayout } from '@/components/layout/TenantLayout'
 import { RoleRoute } from '@/guard/RoleRoute'
+import { FeatureGuard } from '@/components/FeatureGuard'
  
 // Auth Pages
 import LoginPage from '@/pages/auth/LoginPage'
@@ -111,20 +112,20 @@ function App() {
           }
         >
           <Route index element={<Navigate to="/tenant/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="sales" element={<SalesPage />} />
-          <Route path="inventory" element={<InventoryPage />} />
+          <Route path="dashboard" element={<FeatureGuard feature="dashboard"><DashboardPage /></FeatureGuard>} />
+          <Route path="sales" element={<FeatureGuard feature="sales"><SalesPage /></FeatureGuard>} />
+          <Route path="inventory" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />
           <Route path="purchases" element={<Navigate to="/tenant/payables" replace />} />
-          <Route path="receivables" element={<ReceivablesPage />} />
-          <Route path="payables" element={<PayablesPage />} />
-          <Route path="expenses" element={<ExpensesPage />} />
-          <Route path="rentals" element={<RentalsPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="audit" element={<AuditLogPage />} />
+          <Route path="receivables" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
+          <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
+          <Route path="expenses" element={<FeatureGuard feature="expenses"><ExpensesPage /></FeatureGuard>} />
+          <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
+          <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
+          <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<BranchesPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="profile" element={<UserProfilePage />} />
-          <Route path="settings" element={<BusinessSettingsPage />} />
+          <Route path="settings" element={<FeatureGuard feature="settings"><BusinessSettingsPage /></FeatureGuard>} />
           <Route path="tax" element={<TaxManagementPage />} />
           <Route path="receipt-settings" element={<ReceiptSettingsPage />} />
           <Route path="roles" element={<RolesPermissionsPage />} />

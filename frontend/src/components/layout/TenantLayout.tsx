@@ -7,30 +7,30 @@ import { Button } from '@/components/ui/button'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
 const inventorySubItems = [
-  { to: '/tenant/inventory', label: 'Products', icon: Package, permission: 'canViewProduct' },
-  { to: '/tenant/inventory?type=service', label: 'Services', icon: Wrench, permission: 'canViewService' },
-  { to: '/tenant/inventory?type=rental', label: 'Rental Items', icon: Clock, permission: 'canViewRental' },
+  { to: '/tenant/inventory', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
+  { to: '/tenant/inventory?type=service', label: 'Services', icon: Wrench, permission: 'canViewService', feature: 'inventory.services' },
+  { to: '/tenant/inventory?type=rental', label: 'Rental Items', icon: Clock, permission: 'canViewRental', feature: 'inventory.rentals' },
 ]
 
 const navItems = [
-  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard' },
+  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard', feature: 'dashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
   { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
-  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'credit', permission: 'canViewReceivable' },
-  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'suppliers', permission: 'canViewPayable' },
+  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable' },
+  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
   { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'canViewExpense' },
-  { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental' },
+  { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
-  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', isSettings: true },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', feature: 'settings', isSettings: true },
 ]
 
 interface ReportSubItem { id: string; label: string }
-interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string; items: ReportSubItem[] }
+interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string; feature?: string; items: ReportSubItem[] }
 
 const reportCategories: ReportCategoryDef[] = [
   {
-    id: 'sales', label: 'Sales Reports', icon: ShoppingCart, permission: 'canViewSalesReport',
+    id: 'sales', label: 'Sales Reports', icon: ShoppingCart, permission: 'canViewSalesReport', feature: 'reports.sales',
     items: [
       { id: 'salesSummary', label: 'Sales Summary' },
       { id: 'salesDaily', label: 'Daily Sales Report' },
@@ -46,7 +46,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport',
+    id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport', feature: 'reports.inventory',
     items: [
       { id: 'inventoryStock', label: 'Current Stock Report' },
       { id: 'inventoryValuation', label: 'Stock Valuation Report' },
@@ -61,7 +61,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'financial', label: 'Financial Reports', icon: DollarSign, permission: 'canViewFinancialReport',
+    id: 'financial', label: 'Financial Reports', icon: DollarSign, permission: 'canViewFinancialReport', feature: 'reports.financial',
     items: [
       { id: 'financialProfitLoss', label: 'Profit & Loss Report' },
       { id: 'financialIncome', label: 'Income Report' },
@@ -75,7 +75,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'customers', label: 'Customer Reports', icon: Users, permission: 'canViewCustomerReport',
+    id: 'customers', label: 'Customer Reports', icon: Users, permission: 'canViewCustomerReport', feature: 'reports.customers',
     items: [
       { id: 'customersList', label: 'Customer List Report' },
       { id: 'customersSales', label: 'Customer Sales Report' },
@@ -85,7 +85,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'suppliers', label: 'Supplier Reports', icon: Building2, permission: 'canViewSupplierReport',
+    id: 'suppliers', label: 'Supplier Reports', icon: Building2, permission: 'canViewSupplierReport', feature: 'reports.suppliers',
     items: [
       { id: 'suppliersList', label: 'Supplier List Report' },
       { id: 'suppliersPurchases', label: 'Supplier Purchases Report' },
@@ -94,7 +94,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'receivables', label: 'Receivables Reports', icon: CreditCard, permission: 'canViewReceivablesReport',
+    id: 'receivables', label: 'Receivables Reports', icon: CreditCard, permission: 'canViewReceivablesReport', feature: 'reports.financial',
     items: [
       { id: 'receivablesOutstanding', label: 'Outstanding Invoices' },
       { id: 'receivablesAging', label: 'Customer Aging Report' },
@@ -103,7 +103,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'payables', label: 'Payables Reports', icon: FileText, permission: 'canViewPayablesReport',
+    id: 'payables', label: 'Payables Reports', icon: FileText, permission: 'canViewPayablesReport', feature: 'reports.financial',
     items: [
       { id: 'payablesOutstanding', label: 'Outstanding Bills Report' },
       { id: 'payablesAging', label: 'Supplier Aging Report' },
@@ -112,7 +112,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'performance', label: 'Business Performance Reports', icon: BarChart3, permission: 'canViewPerformanceReport',
+    id: 'performance', label: 'Business Performance Reports', icon: BarChart3, permission: 'canViewPerformanceReport', feature: 'reports.performance',
     items: [
       { id: 'performanceBranch', label: 'Branch Performance Report' },
       { id: 'performanceProduct', label: 'Product Performance Report' },
@@ -123,7 +123,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'services', label: 'Service Reports', icon: Wrench, permission: 'canViewServiceReport',
+    id: 'services', label: 'Service Reports', icon: Wrench, permission: 'canViewServiceReport', feature: 'reports.services',
     items: [
       { id: 'servicesSummary', label: 'Service Summary' },
       { id: 'servicesList', label: 'Service List' },
@@ -134,7 +134,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport',
+    id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport', feature: 'reports.rentals',
     items: [
       { id: 'rentalsSummary', label: 'Rental Summary' },
       { id: 'rentalsList', label: 'Rental List Report' },
@@ -191,10 +191,12 @@ export function TenantLayout() {
   }, [location.pathname, location.search])
   const visibleNavItems = navItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false
+    if (item.feature && !canAccessFeature(item.feature)) return false
     return true
   })
   const visibleInventorySubItems = inventorySubItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false
+    if (item.feature && !canAccessFeature(item.feature)) return false
     return true
   })
 
@@ -263,7 +265,7 @@ export function TenantLayout() {
                   </button>
                   {reportsExpanded && (
                     <div className="mt-1 space-y-1">
-                      {reportCategories.filter(cat => hasPermission(cat.permission)).map(cat => {
+                      {reportCategories.filter(cat => hasPermission(cat.permission) && (!cat.feature || canAccessFeature(cat.feature))).map(cat => {
                         const catExpanded = expandedCats.has(cat.id)
                         return (
                           <div key={cat.id}>

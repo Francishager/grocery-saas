@@ -430,32 +430,6 @@ export default function InventoryPage() {
             <Package className="h-3.5 w-3.5" />
             Products
           </button>
-          <button
-            type="button"
-            onClick={() => setItemTypeFilter('service')}
-            className={cn(
-              "flex items-center gap-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-              itemTypeFilter === 'service'
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-input bg-background text-muted-foreground hover:bg-muted"
-            )}
-          >
-            <Wrench className="h-3.5 w-3.5" />
-            Services
-          </button>
-          <button
-            type="button"
-            onClick={() => setItemTypeFilter('rental')}
-            className={cn(
-              "flex items-center gap-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-              itemTypeFilter === 'rental'
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-input bg-background text-muted-foreground hover:bg-muted"
-            )}
-          >
-            <Clock className="h-3.5 w-3.5" />
-            Rentals
-          </button>
         </div>
         )}
         {canManageInventory && branches.length > 1 && (

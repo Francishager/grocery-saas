@@ -28,38 +28,45 @@ export interface UsageLimits {
 }
 
 const FEATURE_ALIASES: Record<string, string[]> = {
-  credit: ['customers', 'receivables'],
-  receivables: ['credit', 'customers'],
-  suppliers: ['payables'],
-  payables: ['suppliers'],
-  pos_sales: ['pos', 'sales'],
+  credit: ['receivables', 'receivables.payments', 'receivables.aging'],
+  receivables: ['receivables.payments', 'receivables.aging'],
+  suppliers: ['suppliers', 'suppliers.purchase_orders', 'suppliers.grn', 'payables', 'payables.payments', 'payables.aging'],
+  payables: ['payables.payments', 'payables.aging'],
+  pos: ['sales', 'sales.pos'],
+  pos_sales: ['sales', 'sales.pos'],
   sales_tracking: ['sales'],
   invoice_generation: ['sales'],
-  customer_transactions: ['sales', 'customers', 'credit'],
+  customer_transactions: ['sales', 'customers'],
   payment_management: ['sales'],
-  product_tracking: ['inventory'],
-  stock_movement: ['inventory'],
-  low_stock_alerts: ['inventory'],
-  purchase_management: ['inventory', 'purchases'],
-  supplier_management: ['suppliers', 'payables'],
-  inventory_valuation: ['inventory'],
+  product_tracking: ['inventory', 'inventory.products'],
+  stock_movement: ['inventory', 'inventory.products'],
+  low_stock_alerts: ['inventory', 'inventory.products'],
+  purchase_management: ['suppliers', 'suppliers.purchase_orders'],
+  supplier_management: ['suppliers'],
+  inventory_valuation: ['inventory', 'inventory.products'],
   bookkeeping: ['reports'],
-  income_tracking: ['reports'],
+  income_tracking: ['financial.income'],
   expense_management: ['expenses'],
-  payables_management: ['payables', 'suppliers'],
-  receivables_management: ['credit', 'customers', 'receivables'],
-  cash_flow_monitoring: ['expenses', 'reports'],
-  profitability_analysis: ['reports'],
-  staff_management: ['staff'],
-  role_access_control: ['staff'],
+  payables_management: ['payables', 'payables.payments'],
+  receivables_management: ['receivables', 'receivables.payments'],
+  cash_flow_monitoring: ['expenses', 'financial.cashbook'],
+  profitability_analysis: ['reports', 'reports.financial'],
+  staff_management: ['settings', 'settings.roles', 'settings.users'],
+  role_access_control: ['settings', 'settings.roles'],
   activity_logs: ['audit'],
-  branch_management: ['staff'],
-  workflow_organization: ['staff'],
-  financial_reports: ['reports'],
-  sales_reports: ['reports'],
-  inventory_reports: ['reports'],
-  performance_dashboards: ['reports'],
+  branch_management: ['multi_branch'],
+  workflow_organization: ['settings'],
+  financial_reports: ['reports', 'reports.financial'],
+  sales_reports: ['reports', 'reports.sales'],
+  inventory_reports: ['reports', 'reports.inventory'],
+  performance_dashboards: ['reports', 'reports.performance'],
   decision_analytics: ['reports'],
+  multi_branch: ['multi_branch', 'multi_branch.transfers', 'multi_branch.reports'],
+  advanced_reports: ['reports', 'reports.performance'],
+  cash_flow: ['financial.cashbook'],
+  sms: ['communication.sms'],
+  whatsapp: ['communication.whatsapp'],
+  offline_mode: ['integrations.api_access'],
 }
 
 class FeatureAccessService {
@@ -161,9 +168,21 @@ class FeatureAccessService {
     }
   }
 
-  // Check if feature is enabled
+  // Check if feature is enabled (primary API)
   isFeatureEnabled(featureName: string): boolean {
-    return this.features[featureName]?.enabled || false
+    if (this.features[featureName]?.enabled) return true
+    // Check if a parent module is enabled (e.g., 'inventory' covers 'inventory.products')
+    const parts = featureName.split('.')
+    if (parts.length > 1) {
+      const parent = parts[0]
+      if (this.features[parent]?.enabled) return true
+    }
+    return false
+  }
+
+  // Alias for isFeatureEnabled — matches spec naming convention hasFeature('inventory.products')
+  hasFeature(featureName: string): boolean {
+    return this.isFeatureEnabled(featureName)
   }
 
   // Get feature info
@@ -180,15 +199,15 @@ class FeatureAccessService {
     }
   }
 
-  // Get feature category
+  // Get feature category — derived from module name
   private getFeatureCategory(featureName: string): string {
-    const coreFeatures = ['pos', 'inventory', 'customers', 'reports']
-    const advancedFeatures = ['credit', 'suppliers', 'expenses', 'advanced_reports', 'cash_flow']
-    const integrationFeatures = ['sms', 'whatsapp', 'offline_mode', 'multi_branch']
-
-    if (coreFeatures.includes(featureName)) return 'core'
-    if (advancedFeatures.includes(featureName)) return 'advanced'
-    if (integrationFeatures.includes(featureName)) return 'integration'
+    const module = featureName.split('.')[0]
+    const coreModules = ['dashboard', 'sales', 'inventory', 'customers', 'reports', 'settings']
+    const advancedModules = ['suppliers', 'receivables', 'payables', 'expenses', 'multi_branch', 'audit', 'rentals', 'hr', 'service', 'accounting']
+    const integrationModules = ['communication', 'integrations']
+    if (coreModules.includes(module)) return 'core'
+    if (advancedModules.includes(module)) return 'advanced'
+    if (integrationModules.includes(module)) return 'integration'
     return 'other'
   }
 
@@ -317,6 +336,10 @@ export function useFeatureAccess() {
     return featureAccessService.isFeatureEnabled(featureName)
   }
 
+  const hasFeature = (featureName: string) => {
+    return featureAccessService.hasFeature(featureName)
+  }
+
   const canAccessFeature = (featureName: string) => {
     return featureAccessService.canAccessFeature(featureName, user?.role)
   }
@@ -347,6 +370,7 @@ export function useFeatureAccess() {
     loading,
     error,
     isFeatureEnabled,
+    hasFeature,
     canAccessFeature,
     getFeature,
     getFeaturesByCategory,
