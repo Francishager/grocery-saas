@@ -226,6 +226,7 @@ model Plan {
   maxProducts  Int      @default(100)
   isDefault    Boolean  @default(false)
   tenants      Tenant[]
+  planFeatures PlanFeature[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -1009,6 +1010,7 @@ model Feature {
 model PlanFeature {
   id        String   @id @default(cuid())
   planId    String
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
   featureId String
   feature   Feature  @relation(fields: [featureId], references: [id])
   enabled   Boolean  @default(true)
