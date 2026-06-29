@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Edit3, Loader2, RefreshCw, RotateCcw, ShieldCheck, UserPlus, UserX } from 'lucide-react'
+import { Edit3, Loader2, RefreshCw, RotateCcw, ShieldCheck, UserPlus, UserX, CheckCircle, Copy, Eye, EyeOff, X } from 'lucide-react'
 import { branchesApi, staffApi, type BranchOption, type StaffMember, type StaffPayload } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +32,9 @@ export default function StaffPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null)
+  const [showCreatedPassword, setShowCreatedPassword] = useState(false)
+  const [copied, setCopied] = useState(false)
   const { toast } = useToast()
   const online = useOnlineStatus()
 
@@ -131,8 +134,13 @@ export default function StaffPage() {
         await staffApi.update(editingId, payload)
         toast({ title: 'Staff updated' })
       } else {
-        await staffApi.create(payload as StaffPayload)
+        const result = await staffApi.create(payload as StaffPayload)
         toast({ title: 'Staff created' })
+        if (result?.password) {
+          setCreatedCredentials({ email: form.email.trim().toLowerCase(), password: result.password })
+          setShowCreatedPassword(false)
+          setCopied(false)
+        }
       }
 
       resetForm()
@@ -387,6 +395,53 @@ export default function StaffPage() {
           </div>
         )}
       </div>
+
+      {createdCredentials && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCreatedCredentials(null)}>
+          <div className="max-w-md w-full rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-6 w-6 text-green-600" />
+                <h2 className="text-lg font-semibold">Staff Created Successfully</h2>
+              </div>
+              <button onClick={() => setCreatedCredentials(null)} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">Save these credentials and share them with the staff member securely.</p>
+            <div className="space-y-3 rounded-md border bg-slate-50 p-4">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Email</p>
+                <p className="text-sm font-semibold text-slate-900 break-all">{createdCredentials.email}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500">Password</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-900 break-all font-mono">{showCreatedPassword ? createdCredentials.password : '••••••••••••'}</p>
+                  <button type="button" onClick={() => setShowCreatedPassword((p) => !p)} className="text-gray-400 hover:text-gray-600">
+                    {showCreatedPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  navigator.clipboard.writeText(`Email: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+              >
+                <Copy className="mr-2 h-4 w-4" />
+                {copied ? 'Copied!' : 'Copy Credentials'}
+              </Button>
+              <Button className="flex-1" onClick={() => setCreatedCredentials(null)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
