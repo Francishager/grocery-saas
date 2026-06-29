@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/saas/owners', label: 'Owners', icon: Users },
   { to: '/saas/invitations', label: 'Invitations', icon: Mail },
   { to: '/saas/audit', label: 'Audit Logs', icon: Activity },
+  { to: '/saas/referrals', label: 'Referrals', icon: Gift },
 ]
 
 export function SaaSAdminLayout() {

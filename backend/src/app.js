@@ -32,6 +32,7 @@ import transfersRouter from "../routes/transfers.js";
 import notificationsRouter from "../routes/notifications.js";
 import integrationsRouter from "../routes/integrations.js";
 import restaurantRouter from "../routes/restaurant.js";
+import referralRoutes from "./routes/referrals.js";
 
 import { auditMiddleware } from "./utils/audit.js";
 
@@ -146,6 +147,7 @@ app.use("/api/transfers", transfersRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/integrations", integrationsRouter);
 app.use("/api/restaurant", restaurantRouter);
+app.use("/api/referrals", referralRoutes);
 
 // 404
 app.use("/{*path}", (req, res) => {

@@ -40,6 +40,7 @@ import CommunicationPage from '@/pages/CommunicationPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
 import RestaurantPage from '@/pages/RestaurantPage'
 import UserProfilePage from '@/pages/UserProfilePage'
+import ReferralPage from '@/pages/ReferralPage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -52,6 +53,7 @@ import SubscriptionsPage from '@/pages/SaaSAdmin/SubscriptionsPage'
 import InvitationsList from '@/pages/SaaSAdmin/InvitationsList'
 import TenantDetailPage from '@/pages/SaaSAdmin/TenantDetailPage'
 import PlatformAuditPage from '@/pages/SaaSAdmin/PlatformAuditPage'
+import ReferralDashboard from '@/pages/SaaSAdmin/ReferralDashboard'
  
 // Public Route — redirects logged-in users to their dashboard
 function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children: React.ReactNode; redirectTo?: string }) {
@@ -115,6 +117,7 @@ function App() {
           <Route path="subscriptions" element={<SubscriptionsPage />} />
           <Route path="businesses/:tenantId" element={<TenantDetailPage />} />
           <Route path="audit" element={<PlatformAuditPage />} />
+          <Route path="referrals" element={<ReferralDashboard />} />
         </Route>
  
         {/* ========== Tenant (Business) Routes — /tenant/* ========== */}
@@ -147,6 +150,7 @@ function App() {
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />
           <Route path="staff" element={<FeatureGuard feature="settings.users"><StaffPage /></FeatureGuard>} />
           <Route path="profile" element={<UserProfilePage />} />
+          <Route path="referrals" element={<ReferralPage />} />
           <Route path="settings" element={<FeatureGuard feature="settings"><BusinessSettingsPage /></FeatureGuard>} />
           <Route path="tax" element={<FeatureGuard feature="settings.taxes"><TaxManagementPage /></FeatureGuard>} />
           <Route path="receipt-settings" element={<FeatureGuard feature="settings"><ReceiptSettingsPage /></FeatureGuard>} />

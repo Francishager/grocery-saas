@@ -141,6 +141,14 @@ model Tenant {
   deliveries           Delivery[]
 
   // =====================
+  // REFERRAL SYSTEM
+  // =====================
+  referralCode         ReferralCode?     @relation("ReferralCodeTenant")
+  referralsMade        Referral[]        @relation("ReferrerTenant")
+  referredBy           Referral?         @relation("ReferredTenant")
+  referralRewards      ReferralReward[]  @relation("ReferralRewardTenant")
+
+  // =====================
   // USAGE LIMIT
   // =====================
   usageLimitId String?
@@ -1727,4 +1735,81 @@ enum DeliveryStatus {
   on_delivery
   delivered
   cancelled
+}
+
+// =====================
+// REFERRAL SYSTEM
+// =====================
+
+model ReferralCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  tenantId  String   @unique
+  tenant    Tenant   @relation("ReferralCodeTenant", fields: [tenantId], references: [id], onDelete: Cascade)
+  referrals Referral[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("referral_codes")
+}
+
+model Referral {
+  id              String           @id @default(cuid())
+  referralCodeId  String
+  referralCode    ReferralCode     @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  referrerTenantId String
+  referrerTenant  Tenant           @relation("ReferrerTenant", fields: [referrerTenantId], references: [id], onDelete: Cascade)
+  referredTenantId String?  @unique
+  referredTenant  Tenant?          @relation("ReferredTenant", fields: [referredTenantId], references: [id], onDelete: SetNull)
+  referredEmail   String
+  status          ReferralStatus   @default(pending)
+  rewardType      ReferralRewardType @default(subscription_discount)
+  rewardValue     Float            @default(10) // percentage or months
+  rewardStatus    ReferralRewardStatus @default(unclaimed)
+  appliedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  reward          ReferralReward?
+
+  @@index([referrerTenantId])
+  @@index([status])
+  @@map("referrals")
+}
+
+model ReferralReward {
+  id          String   @id @default(cuid())
+  referralId  String   @unique
+  referral    Referral @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  tenantId    String
+  tenant      Tenant   @relation("ReferralRewardTenant", fields: [tenantId], references: [id], onDelete: Cascade)
+  type        ReferralRewardType @default(subscription_discount)
+  value       Float
+  description String?
+  claimedAt   DateTime @default(now())
+
+  @@map("referral_rewards")
+}
+
+enum ReferralStatus {
+  pending
+  invited
+  signed_up
+  subscribed
+  completed
+  expired
+  cancelled
+}
+
+enum ReferralRewardType {
+  subscription_discount
+  free_months
+  credit
+  feature_unlock
+}
+
+enum ReferralRewardStatus {
+  unclaimed
+  claimed
+  expired
 }

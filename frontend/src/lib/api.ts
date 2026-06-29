@@ -1089,3 +1089,98 @@ export interface AuditSummary {
   byDay: Record<string, number>
   total: number
 }
+
+// =====================
+// Referral System
+// =====================
+
+export interface ReferralStats {
+  totalReferrals: number
+  pending: number
+  signedUp: number
+  subscribed: number
+  completed: number
+  rewardsClaimed: number
+  rewardsPending: number
+}
+
+export interface Referral {
+  id: string
+  referralCodeId: string
+  referrerTenantId: string
+  referredTenantId: string | null
+  referredEmail: string
+  status: 'pending' | 'invited' | 'signed_up' | 'subscribed' | 'completed' | 'expired' | 'cancelled'
+  rewardType: 'subscription_discount' | 'free_months' | 'credit' | 'feature_unlock'
+  rewardValue: number
+  rewardStatus: 'unclaimed' | 'claimed' | 'expired'
+  appliedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+  referredTenant?: { id: string; name: string; slug: string; status: string } | null
+}
+
+export interface ReferralReward {
+  id: string
+  referralId: string
+  tenantId: string
+  type: string
+  value: number
+  description: string | null
+  claimedAt: string
+  referral?: { referredEmail: string; status: string }
+}
+
+export interface MyReferralData {
+  code: string
+  referrals: Referral[]
+  stats: ReferralStats
+}
+
+export interface AdminReferralStats {
+  totalCodes: number
+  totalReferrals: number
+  pendingReferrals: number
+  signedUpReferrals: number
+  completedReferrals: number
+  conversionRate: string
+  claimedRewards: number
+  totalRewards: number
+}
+
+export interface TopReferrer {
+  tenant: { id: string; name: string; slug: string; email: string }
+  code: string
+  totalReferrals: number
+  completed: number
+  rewardsClaimed: number
+}
+
+export const referralApi = {
+  getMyCode: () =>
+    api.get<MyReferralData>('/api/referrals/my-code'),
+
+  regenerateCode: () =>
+    api.post<{ code: string }>('/api/referrals/regenerate-code', { body: {} }),
+
+  refer: (email: string, rewardType?: string, rewardValue?: number) =>
+    api.post<{ message: string; referral: Partial<Referral> }>('/api/referrals/refer', {
+      body: { email, rewardType, rewardValue },
+    }),
+
+  claimReward: (referralId: string) =>
+    api.post<{ message: string; reward: Partial<ReferralReward> }>(`/api/referrals/claim-reward/${referralId}`, { body: {} }),
+
+  getRewards: () =>
+    api.get<{ rewards: ReferralReward[] }>('/api/referrals/rewards'),
+
+  trackSignup: (code: string, email: string, tenantId: string) =>
+    api.post<{ message: string }>('/api/referrals/track-signup', { body: { code, email, tenantId } }),
+
+  adminStats: () =>
+    api.get<{ stats: AdminReferralStats; topReferrers: TopReferrer[]; recentReferrals: Referral[] }>('/api/referrals/admin/stats'),
+
+  adminAll: (page = 1, limit = 20) =>
+    api.get<{ referrals: Referral[]; pagination: { page: number; limit: number; total: number; pages: number } }>('/api/referrals/admin/all', { params: { page, limit } }),
+}
