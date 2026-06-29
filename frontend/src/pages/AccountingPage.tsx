@@ -12,6 +12,8 @@ import { apiFetch } from '@/lib/api'
 import { Calculator, Plus, BookOpen, FileText, TrendingUp, Scale } from 'lucide-react'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries } from '@/db/hybrid'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 
 interface Account {
   id: string
@@ -40,6 +42,7 @@ export default function AccountingPage() {
   const online = useOnlineStatus()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
+  const { paginatedItems: paginatedEntries, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(entries, 10)
   const [loading, setLoading] = useState(true)
   const [showAccountModal, setShowAccountModal] = useState(false)
   const [showJournalModal, setShowJournalModal] = useState(false)
@@ -207,11 +210,11 @@ export default function AccountingPage() {
               <DialogContent>
                 <DialogHeader><DialogTitle>Create Account</DialogTitle></DialogHeader>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Code</Label><Input value={accCode} onChange={(e) => setAccCode(e.target.value)} placeholder="e.g. 1000" /></div>
                     <div><Label>Name</Label><Input value={accName} onChange={(e) => setAccName(e.target.value)} placeholder="e.g. Cash" /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label>Type</Label>
                       <Select value={accType} onValueChange={setAccType}>
@@ -264,7 +267,7 @@ export default function AccountingPage() {
               <DialogContent className="max-w-2xl">
                 <DialogHeader><DialogTitle>Create Journal Entry</DialogTitle></DialogHeader>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Description</Label><Input value={jeDescription} onChange={(e) => setJeDescription(e.target.value)} /></div>
                     <div><Label>Reference</Label><Input value={jeReference} onChange={(e) => setJeReference(e.target.value)} placeholder="Optional" /></div>
                   </div>
@@ -304,7 +307,7 @@ export default function AccountingPage() {
           </div>
 
           <div className="space-y-3">
-            {entries.map((entry) => (
+            {paginatedEntries.map((entry) => (
               <div key={entry.id} className="rounded-lg border p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -331,6 +334,13 @@ export default function AccountingPage() {
               <div className="text-center py-8 text-muted-foreground">No journal entries yet</div>
             )}
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={goToPage}
+          />
         </TabsContent>
 
         {/* Trial Balance */}

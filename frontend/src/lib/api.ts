@@ -1119,6 +1119,8 @@ export interface Referral {
   createdAt: string
   updatedAt: string
   referredTenant?: { id: string; name: string; slug: string; status: string } | null
+  referrerTenant?: { id: string; name: string; slug: string } | null
+  referralCode?: { code: string } | null
 }
 
 export interface ReferralReward {

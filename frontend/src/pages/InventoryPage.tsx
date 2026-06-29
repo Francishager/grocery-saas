@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, Wrench, Clock, WifiOff } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,8 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import { Pagination } from '@/components/Pagination'
+import { usePagination } from '@/hooks/usePagination'
 import { db } from '@/db/index'
 
 interface SellingUnit {
@@ -36,15 +38,8 @@ interface FormData {
   categoryId: string
   branchId: string
   baseUnit: string
-  itemType: 'product' | 'service' | 'rental'
-  serviceCategory: string
-  estimatedHours: number
-  duration: string
+  itemType: 'product'
   description: string
-  rentalPrice: number
-  rentalPeriod: string
-  depositAmount: number
-  replacementValue: number
 }
 
 const initialFormData: FormData = {
@@ -60,14 +55,7 @@ const initialFormData: FormData = {
   branchId: '',
   baseUnit: 'Piece',
   itemType: 'product',
-  serviceCategory: '',
-  estimatedHours: 0,
-  duration: '',
   description: '',
-  rentalPrice: 0,
-  rentalPeriod: 'daily',
-  depositAmount: 0,
-  replacementValue: 0,
 }
 
 export default function InventoryPage() {
@@ -86,45 +74,29 @@ export default function InventoryPage() {
   const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
-  const [itemTypeFilter, setItemTypeFilter] = useState<'all' | 'product' | 'service' | 'rental'>('all')
+  const [itemTypeFilter, setItemTypeFilter] = useState<'all' | 'product'>('all')
   const [searchParams] = useSearchParams()
-  const lockedType = searchParams.get('type') as 'product' | 'service' | 'rental' | null
+  const lockedType = searchParams.get('type') === 'product' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
   const online = useOnlineStatus()
   const canCreateProduct = hasPermission('canCreateProduct')
   const canEditProduct = hasPermission('canEditProduct')
-  const canCreateService = hasPermission('canCreateService')
-  const canEditService = hasPermission('canEditService')
-  const canCreateRental = hasPermission('canCreateRental')
-  const canEditRental = hasPermission('canEditRental')
   const canDeleteProduct = hasPermission('canDeleteProduct')
-  const canDeleteService = hasPermission('canDeleteService')
-  const canDeleteRental = hasPermission('canDeleteRental')
   const canAdjustStock = hasPermission('canAdjustStock')
 
   // Determine create/edit/delete permission based on the active item type
   const activeType = lockedType || itemTypeFilter
-  const canCreateCurrent =
-    activeType === 'service' ? canCreateService :
-    activeType === 'rental' ? canCreateRental :
-    activeType === 'product' ? canCreateProduct :
-    canCreateProduct || canCreateService || canCreateRental
-  const canEditCurrent =
-    activeType === 'service' ? canEditService :
-    activeType === 'rental' ? canEditRental :
-    activeType === 'product' ? canEditProduct :
-    canEditProduct || canEditService || canEditRental
-  const canDeleteCurrent =
-    activeType === 'service' ? canDeleteService :
-    activeType === 'rental' ? canDeleteRental :
-    activeType === 'product' ? canDeleteProduct :
-    canDeleteProduct || canDeleteService || canDeleteRental
+  const canCreateCurrent = canCreateProduct
+  const canEditCurrent = canEditProduct
+  const canDeleteCurrent = canDeleteProduct
   const canManageInventory = canCreateCurrent || canEditCurrent
 
+  const { paginatedItems, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(items, 10)
+
   useEffect(() => {
-    if (lockedType) setItemTypeFilter(lockedType)
+    if (lockedType) setItemTypeFilter(lockedType as 'all' | 'product')
   }, [lockedType])
 
   useEffect(() => {
@@ -358,15 +330,8 @@ export default function InventoryPage() {
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
       branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
       baseUnit: (item as any).baseUnit || 'Piece',
-      itemType: (item as any).itemType || 'product',
-      serviceCategory: (item as any).serviceCategory || '',
-      estimatedHours: (item as any).estimatedHours || 0,
-      duration: (item as any).duration || '',
+      itemType: 'product',
       description: (item as any).description || '',
-      rentalPrice: (item as any).rentalPrice || 0,
-      rentalPeriod: (item as any).rentalPeriod || 'daily',
-      depositAmount: (item as any).depositAmount || 0,
-      replacementValue: (item as any).replacementValue || 0,
     })
     // Load selling units for this product
     const units = (item as any).units || []
@@ -436,16 +401,16 @@ export default function InventoryPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            {lockedType === 'service' ? 'Services' : lockedType === 'rental' ? 'Rental Items' : lockedType === 'product' ? 'Products' : 'Items'}
+            {lockedType === 'product' ? 'Products' : 'Items'}
           </h1>
           <p className="text-muted-foreground">
-            {lockedType === 'service' ? 'Manage your service offerings' : lockedType === 'rental' ? 'Manage your rental/hire inventory' : lockedType === 'product' ? 'Manage your product inventory' : 'Manage your products, services and rentals'}
+            {lockedType === 'product' ? 'Manage your product inventory' : 'Manage your products'}
           </p>
         </div>
         {canManageInventory && (
           <Button onClick={openNewForm}>
             <Plus className="mr-2 h-4 w-4" />
-            {lockedType === 'service' ? 'Add Service' : lockedType === 'rental' ? 'Add Rental Item' : 'Add Item'}
+            {lockedType === 'product' ? 'Add Product' : 'Add Item'}
           </Button>
         )}
       </div>
@@ -518,7 +483,7 @@ export default function InventoryPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
-              {/* Item Type Toggle */}
+              {/* Item Type Toggle - removed service/rental, only product */}
               {!lockedType && (
               <div className="sm:col-span-2 space-y-2">
                 <Label>Item Type</Label>
@@ -536,39 +501,13 @@ export default function InventoryPage() {
                     <Package className="h-4 w-4" />
                     Product
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData((prev) => ({ ...prev, itemType: 'service' }))}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
-                      formData.itemType === 'service'
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-input bg-background text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    <Wrench className="h-4 w-4" />
-                    Service
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData((prev) => ({ ...prev, itemType: 'rental' }))}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
-                      formData.itemType === 'rental'
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-input bg-background text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    <Clock className="h-4 w-4" />
-                    Rental
-                  </button>
                 </div>
               </div>
               )}
 
               {/* Common: Name */}
               <div className="space-y-2">
-                <Label htmlFor="product_name">{formData.itemType === 'service' ? 'Service Name' : formData.itemType === 'rental' ? 'Rental Item Name' : 'Product Name'}</Label>
+                <Label htmlFor="product_name">Product Name</Label>
                 <Input
                   id="product_name"
                   value={formData.product_name}
@@ -581,7 +520,7 @@ export default function InventoryPage() {
 
               {/* Common: Selling Price */}
               <div className="space-y-2">
-                <Label htmlFor="unit_price">{formData.itemType === 'service' ? 'Service Price' : formData.itemType === 'rental' ? 'Default Price' : 'Selling Price'}</Label>
+                <Label htmlFor="unit_price">Selling Price</Label>
                 <Input
                   id="unit_price"
                   type="number"
@@ -598,8 +537,8 @@ export default function InventoryPage() {
                 />
               </div>
 
-              {/* Product & Rental fields */}
-              {(formData.itemType === 'product' || formData.itemType === 'rental') && (
+              {/* Product fields */}
+              {formData.itemType === 'product' && (
                 <>
               <div className="space-y-2">
                 <Label htmlFor="product_id">SKU / Product ID</Label>
@@ -752,8 +691,8 @@ export default function InventoryPage() {
                 </div>
               )}
 
-              {/* Product & Rental: Quantity, Low Stock, Cost Price, Base Unit */}
-              {(formData.itemType === 'product' || formData.itemType === 'rental') && (
+              {/* Product: Quantity, Low Stock, Cost Price, Base Unit */}
+              {formData.itemType === 'product' && (
                 <>
               <div className="space-y-2">
                 <Label htmlFor="quantity">Quantity</Label>
@@ -811,127 +750,6 @@ export default function InventoryPage() {
                     setFormData((prev) => ({ ...prev, baseUnit: e.target.value }))
                   }
                   placeholder="e.g. KG, Bottle, Piece, Tablet"
-                />
-              </div>
-                </>
-              )}
-
-              {/* Service-only fields */}
-              {formData.itemType === 'service' && (
-                <>
-              <div className="space-y-2">
-                <Label htmlFor="estimatedHours">Estimated Hours</Label>
-                <Input
-                  id="estimatedHours"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formData.estimatedHours}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      estimatedHours: parseFloat(e.target.value) || 0,
-                    }))
-                  }
-                  placeholder="e.g. 40"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="duration">Duration</Label>
-                <Input
-                  id="duration"
-                  value={formData.duration}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, duration: e.target.value }))
-                  }
-                  placeholder="e.g. 2 hours, 1 week, 3 days"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, description: e.target.value }))
-                  }
-                  placeholder="Brief description of the service"
-                />
-              </div>
-                </>
-              )}
-
-              {/* Rental-only fields */}
-              {formData.itemType === 'rental' && (
-                <>
-              <div className="space-y-2">
-                <Label htmlFor="rentalPrice">Rental Price (per period)</Label>
-                <Input
-                  id="rentalPrice"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formData.rentalPrice}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, rentalPrice: parseFloat(e.target.value) || 0 }))
-                  }
-                  placeholder="e.g. 50000 per day"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="rentalPeriod">Rental Period</Label>
-                <select
-                  id="rentalPeriod"
-                  value={formData.rentalPeriod}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, rentalPeriod: e.target.value }))}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="hourly">Hourly</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="weekend">Weekend</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="depositAmount">Security Deposit</Label>
-                <Input
-                  id="depositAmount"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formData.depositAmount}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, depositAmount: parseFloat(e.target.value) || 0 }))
-                  }
-                  placeholder="Deposit required from customer"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="replacementValue">Replacement Value</Label>
-                <Input
-                  id="replacementValue"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formData.replacementValue}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, replacementValue: parseFloat(e.target.value) || 0 }))
-                  }
-                  placeholder="Cost if item is lost/damaged"
-                />
-              </div>
-              <div className="sm:col-span-2 space-y-2">
-                <Label htmlFor="description">Item Description</Label>
-                <textarea
-                  id="description"
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, description: e.target.value }))
-                  }
-                  placeholder="Describe the rental item, condition, terms, etc."
                 />
               </div>
                 </>
@@ -1009,7 +827,7 @@ export default function InventoryPage() {
               <p className="text-muted-foreground mb-4">No items found</p>
               <Button onClick={openNewForm}>
                 <Plus className="mr-2 h-4 w-4" />
-                {lockedType === 'service' ? 'Add First Service' : lockedType === 'rental' ? 'Add First Rental Item' : 'Add First Item'}
+                {lockedType === 'product' ? 'Add First Product' : 'Add First Item'}
               </Button>
             </div>
           ) : (
@@ -1028,24 +846,18 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => {
-                    const isService = (item as any).itemType === 'service'
-                    const isRental = (item as any).itemType === 'rental'
+                  {paginatedItems.map((item) => {
                     return (
                     <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                       {!lockedType && (
                       <td className="py-3">
                         <span className={cn(
                           "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                          isService
-                            ? "bg-blue-100 text-blue-700"
-                            : isRental
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-green-100 text-green-700"
+                          "bg-green-100 text-green-700"
                         )}
                         >
-                          {isService ? <Wrench className="h-3 w-3" /> : isRental ? <Clock className="h-3 w-3" /> : <Package className="h-3 w-3" />}
-                          {isService ? 'Service' : isRental ? 'Rental' : 'Product'}
+                          <Package className="h-3 w-3" />
+                          Product
                         </span>
                       </td>
                       )}
@@ -1057,29 +869,21 @@ export default function InventoryPage() {
                         </td>
                       )}
                       <td className="py-3 text-right">
-                        {isService ? (
-                          <span className="text-muted-foreground">—</span>
-                        ) : (
-                          <span
-                            className={
-                              item.quantity <= item.low_stock_alert
-                                ? 'text-orange-600 font-bold'
-                                : ''
-                            }
-                          >
-                            {item.quantity}
-                          </span>
-                        )}
+                        <span
+                          className={
+                            item.quantity <= item.low_stock_alert
+                              ? 'text-orange-600 font-bold'
+                              : ''
+                          }
+                        >
+                          {item.quantity}
+                        </span>
                       </td>
                       <td className="py-3 text-right">
-                        {isService ? (
-                          <span className="text-muted-foreground">—</span>
-                        ) : (
-                          formatCurrency(item.cost_price)
-                        )}
+                        {formatCurrency(item.cost_price)}
                       </td>
                       <td className="py-3 text-right">
-                        {formatCurrency(isRental ? (item as any).rentalPrice || item.unit_price : item.unit_price)}
+                        {formatCurrency(item.unit_price)}
                       </td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">
@@ -1110,6 +914,13 @@ export default function InventoryPage() {
               </table>
             </div>
           )}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={goToPage}
+          />
         </CardContent>
       </Card>
     </div>

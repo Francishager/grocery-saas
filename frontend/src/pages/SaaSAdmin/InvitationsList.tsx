@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 import { 
   Mail, Clock, CheckCircle, XCircle, RefreshCw, 
   Search, Filter, Loader2
@@ -7,6 +9,7 @@ import InviteService, { Invitation, InvitationStats } from '@/services/InviteSer
 
 export const InvitationsList: React.FC = () => {
   const [invitations, setInvitations] = useState<Invitation[]>([])
+  const { paginatedItems: paginatedInvitations, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(invitations, 10)
   const [stats, setStats] = useState<InvitationStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -192,7 +195,7 @@ export const InvitationsList: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {invitations.map((invitation) => (
+              {paginatedInvitations.map((invitation) => (
                 <tr key={invitation.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="text-sm font-medium text-gray-900">{invitation.email}</div>
@@ -243,6 +246,13 @@ export const InvitationsList: React.FC = () => {
             </tbody>
           </table>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
     </div>
   )

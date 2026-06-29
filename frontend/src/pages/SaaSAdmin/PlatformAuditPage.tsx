@@ -13,7 +13,7 @@ interface Pagination { page: number; limit: number; total: number; pages: number
 export const PlatformAuditPage: React.FC = () => {
   const navigate = useNavigate()
   const [logs, setLogs] = useState<AuditLog[]>([])
-  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 50, total: 0, pages: 0 })
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 10, total: 0, pages: 0 })
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
@@ -24,7 +24,7 @@ export const PlatformAuditPage: React.FC = () => {
     try {
       const params = new URLSearchParams()
       params.set('page', String(page))
-      params.set('limit', '50')
+      params.set('limit', '10')
       if (appliedFilters.search) params.set('search', appliedFilters.search)
       if (appliedFilters.tenantId) params.set('tenantId', appliedFilters.tenantId)
       if (appliedFilters.action) params.set('action', appliedFilters.action)

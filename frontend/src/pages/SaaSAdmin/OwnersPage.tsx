@@ -1,5 +1,7 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 import { Users, Search, Mail, Key, Loader2, RefreshCw, X } from 'lucide-react'
 
 interface Owner {
@@ -9,6 +11,7 @@ interface Owner {
 
 export const OwnersPage: React.FC = () => {
   const [owners, setOwners] = useState<Owner[]>([])
+  const { paginatedItems: paginatedOwners, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(owners, 10)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Owner | null>(null)
@@ -72,7 +75,7 @@ export const OwnersPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {owners.map(o => (
+              {paginatedOwners.map(o => (
                 <tr key={o.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -100,6 +103,13 @@ export const OwnersPage: React.FC = () => {
             </tbody>
           </table>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
 
       {selected && (

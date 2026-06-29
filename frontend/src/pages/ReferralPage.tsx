@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Gift, Copy, Share2, RefreshCw, Users, CheckCircle, Clock, TrendingUp, Award, Mail, Loader2, Send } from 'lucide-react'
-import { referralApi, type MyReferralData, type ReferralReward } from '@/lib/api'
+import { referralApi, type MyReferralData, type ReferralReward, type Referral } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 
 const statusConfig: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   pending: { label: 'Pending', color: 'text-slate-500 bg-slate-100', icon: Clock },
@@ -119,6 +121,9 @@ export default function ReferralPage() {
       setClaimingId(null)
     }
   }
+
+  const referrals = data?.referrals || []
+  const { paginatedItems: paginatedReferrals, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(referrals, 10)
 
   if (loading) {
     return (
@@ -267,7 +272,7 @@ export default function ReferralPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {data?.referrals.map((ref) => {
+                {paginatedReferrals.map((ref) => {
                   const status = statusConfig[ref.status] || statusConfig.pending
                   const StatusIcon = status.icon
                   return (
@@ -307,6 +312,13 @@ export default function ReferralPage() {
             </table>
           </div>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
     </div>
   )

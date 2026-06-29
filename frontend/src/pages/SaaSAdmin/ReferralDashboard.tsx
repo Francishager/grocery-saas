@@ -38,7 +38,7 @@ export default function ReferralDashboard() {
 
   const loadAll = useCallback(async (p: number) => {
     try {
-      const data = await referralApi.adminAll(p, 20)
+      const data = await referralApi.adminAll(p, 10)
       setAllReferrals(data.referrals)
       setTotalPages(data.pagination.pages)
       setTotal(data.pagination.total)

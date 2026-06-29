@@ -1,6 +1,8 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft, ExternalLink } from 'lucide-react'
 
 interface Tenant {
@@ -23,6 +25,7 @@ interface Plan {
 
 export const BusinessesPage: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>([])
+  const { paginatedItems: paginatedTenants, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(tenants, 10)
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -155,7 +158,7 @@ export const BusinessesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {tenants.map(t => (
+              {paginatedTenants.map(t => (
                 <tr key={t.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><Building size={20} className="text-blue-600" /></div><div><div className="text-sm font-medium">{t.name}</div><div className="text-xs text-gray-500">{t.slug}</div></div></div></td>
                   <td className="px-4 py-3"><div className="text-sm font-medium">{t.ownerName || '-'}</div><div className="text-xs text-gray-500">{t.ownerEmail || '-'}</div></td>
@@ -179,6 +182,13 @@ export const BusinessesPage: React.FC = () => {
             </tbody>
           </table>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
 
       {selected && (
@@ -245,7 +255,7 @@ export const BusinessesPage: React.FC = () => {
             </div>
             <div className="space-y-3 border-t pt-4">
               <div className="text-sm font-medium text-gray-700">Subscription Period</div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
                   <input type="date" value={subStart} onChange={e => setSubStart(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />

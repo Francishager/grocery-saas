@@ -1,5 +1,7 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 import { CreditCard, Plus, Edit, Trash2, Loader2, RefreshCw, Save, X, LayoutDashboard, ShoppingCart, Package, Users, Building2, DollarSign, FileText, Briefcase, BarChart3, Clock, Wrench, GitBranch, MessageSquare, Settings, ClipboardList, UtensilsCrossed } from 'lucide-react'
 
 interface PlanFeatureRow {
@@ -209,6 +211,7 @@ const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle:
 
 export const PlansPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
+  const { paginatedItems: paginatedPlans, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(plans, 10)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -336,8 +339,9 @@ export const PlansPage: React.FC = () => {
       ) : plans.length === 0 ? (
         <div className="text-center py-12"><CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-4" /><p className="text-gray-500">No plans yet. Create your first plan.</p></div>
       ) : (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {plans.map(p => (
+          {paginatedPlans.map(p => (
             <div key={p.id} className="bg-white rounded-lg border p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <div><h3 className="text-lg font-semibold">{p.name}</h3><p className="text-sm text-gray-500">{p.slug}</p></div>
@@ -369,6 +373,14 @@ export const PlansPage: React.FC = () => {
             </div>
           ))}
         </div>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
+        </>
       )}
 
       {showForm && (
@@ -376,7 +388,7 @@ export const PlansPage: React.FC = () => {
           <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">{editingId ? 'Edit Plan' : 'New Plan'}</h2><button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium mb-1">Name *</label><input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Slug *</label><input required value={form.slug} onChange={e => setForm(p => ({ ...p, slug: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Price *</label><input required type="number" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>

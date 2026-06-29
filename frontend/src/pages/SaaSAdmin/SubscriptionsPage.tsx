@@ -1,5 +1,7 @@
 ﻿import { apiFetch } from '../../lib/api'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar } from 'lucide-react'
 
 interface Subscription {
@@ -12,9 +14,11 @@ interface Plan { id: string; name: string; price: number; currency: string; bill
 
 export const SubscriptionsPage: React.FC = () => {
   const [subs, setSubs] = useState<Subscription[]>([])
+  const [search, setSearch] = useState('')
+  const filteredSubs = useMemo(() => subs.filter(s => !search || (s.tenant?.name || '').toLowerCase().includes(search.toLowerCase())), [subs, search])
+  const { paginatedItems: paginatedSubs, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(filteredSubs, 10)
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Subscription | null>(null)
   const [changing, setChanging] = useState<string | null>(null)
   const [editDates, setEditDates] = useState(false)
@@ -123,7 +127,7 @@ export const SubscriptionsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {subs.filter(s => !search || (s.tenant?.name || '').toLowerCase().includes(search.toLowerCase())).map(s => {
+              {paginatedSubs.map(s => {
                 const effStatus = effectiveStatus(s)
                 return (
                   <tr key={s.id} className="hover:bg-gray-50">
@@ -145,6 +149,13 @@ export const SubscriptionsPage: React.FC = () => {
             </tbody>
           </table>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
 
       {selected && (
@@ -166,7 +177,7 @@ export const SubscriptionsPage: React.FC = () => {
               </button>
               {editDates && (
                 <div className="mt-3 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
                       <input type="date" value={subStart} onChange={e => setSubStart(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />

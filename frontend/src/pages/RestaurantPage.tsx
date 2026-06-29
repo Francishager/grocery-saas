@@ -407,7 +407,7 @@ export default function RestaurantPage() {
       <Dialog open={showOrderModal} onOpenChange={setShowOrderModal}>
         <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>New Order</DialogTitle></DialogHeader>
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Waiter</Label><Select value={orderForm.waiterId} onValueChange={v => setOrderForm({ ...orderForm, waiterId: v })}><SelectTrigger><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{waiters.filter(w => w.isActive).map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
               <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
@@ -435,11 +435,11 @@ export default function RestaurantPage() {
           <div className="space-y-3">
             <div><Label>Customer Name</Label><Input value={reservationForm.customerName} onChange={e => setReservationForm({ ...reservationForm, customerName: e.target.value })} /></div>
             <div><Label>Phone</Label><Input value={reservationForm.customerPhone} onChange={e => setReservationForm({ ...reservationForm, customerPhone: e.target.value })} /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Date</Label><Input type="date" value={reservationForm.date} onChange={e => setReservationForm({ ...reservationForm, date: e.target.value })} /></div>
               <div><Label>Time</Label><Input type="time" value={reservationForm.time} onChange={e => setReservationForm({ ...reservationForm, time: e.target.value })} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Guests</Label><Input type="number" min={1} value={reservationForm.guests} onChange={e => setReservationForm({ ...reservationForm, guests: Number(e.target.value) })} /></div>
               <div><Label>Table</Label><Select value={reservationForm.tableId} onValueChange={v => setReservationForm({ ...reservationForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Any table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
             </div>
@@ -479,7 +479,7 @@ export default function RestaurantPage() {
             <div><Label>Customer Name</Label><Input value={deliveryForm.customerName} onChange={e => setDeliveryForm({ ...deliveryForm, customerName: e.target.value })} /></div>
             <div><Label>Phone</Label><Input value={deliveryForm.customerPhone} onChange={e => setDeliveryForm({ ...deliveryForm, customerPhone: e.target.value })} /></div>
             <div><Label>Address</Label><Input value={deliveryForm.address} onChange={e => setDeliveryForm({ ...deliveryForm, address: e.target.value })} /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Rider Name</Label><Input value={deliveryForm.riderName} onChange={e => setDeliveryForm({ ...deliveryForm, riderName: e.target.value })} /></div>
               <div><Label>Rider Phone</Label><Input value={deliveryForm.riderPhone} onChange={e => setDeliveryForm({ ...deliveryForm, riderPhone: e.target.value })} /></div>
             </div>

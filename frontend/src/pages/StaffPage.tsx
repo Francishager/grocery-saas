@@ -8,6 +8,8 @@ import { useToast } from '@/hooks/use-toast'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 
 const staffRoles: Array<{ value: StaffPayload['role']; label: string }> = [
   { value: 'attendant', label: 'Attendant' },
@@ -26,6 +28,7 @@ const emptyForm = {
 
 export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([])
+  const { paginatedItems: paginatedStaff, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(staff, 10)
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -342,7 +345,7 @@ export default function StaffPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {staff.map((member) => (
+                {paginatedStaff.map((member) => (
                   <tr key={member.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3">
                       <div className="font-medium">{member.name || member.email}</div>
@@ -394,6 +397,13 @@ export default function StaffPage() {
             </table>
           </div>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
 
       {createdCredentials && (

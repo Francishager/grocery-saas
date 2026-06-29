@@ -1,5 +1,7 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 import { 
   Building, Search, Filter, MoreVertical, 
   Eye, Edit, Trash2, Ban, CheckCircle, 
@@ -67,6 +69,7 @@ export const TenantsList: React.FC<TenantsListProps> = ({
   onSuspendTenant,
 }) => {
   const [tenants, setTenants] = useState<Tenant[]>([])
+  const { paginatedItems: paginatedTenants, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(tenants, 10)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -219,7 +222,7 @@ export const TenantsList: React.FC<TenantsListProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {tenants.map((tenant) => (
+              {paginatedTenants.map((tenant) => (
                 <tr key={tenant.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -289,6 +292,13 @@ export const TenantsList: React.FC<TenantsListProps> = ({
             </tbody>
           </table>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
     </div>
   )

@@ -234,19 +234,19 @@ export default function HRPage() {
               <DialogContent>
                 <DialogHeader><DialogTitle>Add Employee</DialogTitle></DialogHeader>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>First Name</Label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
                     <div><Label>Last Name</Label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
                     <div><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Position</Label><Input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="e.g. Cashier" /></div>
                     <div><Label>Department</Label><Input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Sales" /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Salary</Label><Input type="number" value={salary} onChange={(e) => setSalary(Number(e.target.value))} /></div>
                     <div>
                       <Label>Pay Frequency</Label>
@@ -325,7 +325,7 @@ export default function HRPage() {
                 <DialogHeader><DialogTitle>Run Payroll</DialogTitle></DialogHeader>
                 <div className="space-y-4">
                   <div><Label>Period</Label><Input value={payrollPeriod} onChange={(e) => setPayrollPeriod(e.target.value)} placeholder="e.g. 2025-01" /></div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Deductions</Label><Input type="number" value={payrollDeductions} onChange={(e) => setPayrollDeductions(Number(e.target.value))} /></div>
                     <div><Label>Bonus</Label><Input type="number" value={payrollBonus} onChange={(e) => setPayrollBonus(Number(e.target.value))} /></div>
                   </div>

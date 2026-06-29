@@ -183,7 +183,7 @@ export default function TransfersPage() {
           <DialogContent className="max-w-2xl">
             <DialogHeader><DialogTitle>Create Stock Transfer</DialogTitle></DialogHeader>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label>From Branch</Label>
                   <Select value={fromBranchId} onValueChange={setFromBranchId}>

@@ -746,7 +746,7 @@ export default function SalesPage() {
             <p className="text-center text-muted-foreground py-6">No sales recorded yet</p>
           ) : (
             <div className="space-y-2">
-              {recentSales.slice(0, 20).map((sale) => {
+              {recentSales.slice(0, 10).map((sale) => {
                 const payLabel = (sale.paymentMethod || "cash").split("_").join(" ")
                 const staff = sale.user ? [sale.user.fname, sale.user.lname].filter(Boolean).join(" ") || "—" : "—"
                 const dateStr = new Date(sale.createdAt).toLocaleString("en-US", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"})

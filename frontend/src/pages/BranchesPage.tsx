@@ -9,6 +9,8 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalBranches } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 
 interface Branch {
   id: string
@@ -29,6 +31,7 @@ const emptyForm = {
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([])
+  const { paginatedItems: paginatedBranches, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(branches, 10)
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -336,7 +339,7 @@ export default function BranchesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {branches.map((branch) => (
+                {paginatedBranches.map((branch) => (
                   <tr key={branch.id} className="hover:bg-muted/30 group">
                     <td className="px-4 py-3">
                       <div className="font-medium">{branch.name}</div>
@@ -380,6 +383,13 @@ export default function BranchesPage() {
             </table>
           </div>
         )}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={goToPage}
+        />
       </div>
     </div>
   )

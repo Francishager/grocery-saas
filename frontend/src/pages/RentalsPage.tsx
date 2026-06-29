@@ -10,6 +10,8 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalRentals, getLocalBranches, getLocalProducts, getLocalSettings } from '@/db/hybrid'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 
 interface RentalItem {
   id: string
@@ -49,6 +51,7 @@ interface Rental {
 
 export default function RentalsPage() {
   const [rentals, setRentals] = useState<Rental[]>([])
+  const { paginatedItems: paginatedRentals, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(rentals, 10)
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -349,7 +352,7 @@ export default function RentalsPage() {
             <CardTitle>Rental Details — {selectedRental.rentalNo}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
               <div><span className="font-medium">Customer:</span> {selectedRental.customer?.name || 'Walk-in'}</div>
               <div><span className="font-medium">Phone:</span> {selectedRental.customer?.phone || '-'}</div>
               <div><span className="font-medium">Hire Date:</span> {new Date(selectedRental.hireDate).toLocaleDateString()}</div>
@@ -535,7 +538,7 @@ export default function RentalsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rentals.map((rental) => (
+                  {paginatedRentals.map((rental) => (
                     <tr key={rental.id} className="border-b last:border-0 hover:bg-muted/50">
                       <td className="py-3 font-medium cursor-pointer" onClick={() => setSelectedRental(rental)}>
                         {rental.rentalNo}
@@ -589,6 +592,13 @@ export default function RentalsPage() {
               </table>
             </div>
           )}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={goToPage}
+          />
         </CardContent>
       </Card>
 

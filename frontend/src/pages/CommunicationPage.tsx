@@ -131,7 +131,7 @@ export default function CommunicationPage() {
               <div className="space-y-4">
                 <div><Label>Title</Label><Input value={title} onChange={(e) => setTitle(e.target.value)} /></div>
                 <div><Label>Message</Label><Input value={message} onChange={(e) => setMessage(e.target.value)} /></div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Channel</Label>
                     <Select value={channel} onValueChange={setChannel}>

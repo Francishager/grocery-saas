@@ -167,7 +167,7 @@ export default function ReturnsPage() {
               <DialogTitle>Process New Return</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label>Sale Receipt No (optional)</Label>
                   <Input value={saleId} onChange={(e) => setSaleId(e.target.value)} placeholder="Link to original sale" />

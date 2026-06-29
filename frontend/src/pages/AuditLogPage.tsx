@@ -45,21 +45,21 @@ export default function AuditLogPage() {
           model: filterModel || undefined,
           action: filterAction || undefined,
           page: p,
-          limit: 50,
+          limit: 10,
         })
         const list = data as AuditLogList
         setLogs(Array.isArray(list?.logs) ? list.logs : [])
         setTotal(list?.total || 0)
         setPage(p)
       } else {
-        const local = await getLocalAuditLogs(50)
+        const local = await getLocalAuditLogs(10)
         setLogs(local as any)
         setTotal(local.length)
         setPage(p)
       }
     } catch (error: any) {
       try {
-        const local = await getLocalAuditLogs(50)
+        const local = await getLocalAuditLogs(10)
         setLogs(local as any)
         setTotal(local.length)
       } catch {
@@ -129,7 +129,7 @@ export default function AuditLogPage() {
             <Button onClick={() => loadLogs(1)} size="sm">
               Apply
             </Button>
-            <Button variant="ghost" size="sm" onClick={loadLogs}>
+            <Button variant="ghost" size="sm" onClick={() => loadLogs()}>
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
