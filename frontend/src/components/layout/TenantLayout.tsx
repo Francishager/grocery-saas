@@ -4,6 +4,8 @@ import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
+import { SyncIndicator } from '@/components/SyncIndicator'
+import { NotificationBell } from '@/components/NotificationBell'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
 const inventorySubItems = [
@@ -228,6 +230,8 @@ export function TenantLayout() {
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
         </div>
         <div className="flex-1" />
+        <SyncIndicator />
+        <NotificationBell />
         <div className="group relative">
           <button
             type="button"

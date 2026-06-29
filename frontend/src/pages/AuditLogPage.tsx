@@ -4,6 +4,8 @@ import { auditApi, type AuditLogEntry, type AuditLogList } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalAuditLogs } from '@/db/hybrid'
 
 const ACTION_COLORS: Record<string, string> = {
   create: 'bg-green-100 text-green-800',
@@ -33,26 +35,36 @@ export default function AuditLogPage() {
   const [filterModel, setFilterModel] = useState('')
   const [filterAction, setFilterAction] = useState('')
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   const loadLogs = async (p = page) => {
     setLoading(true)
     try {
-      const data = await auditApi.list({
-        model: filterModel || undefined,
-        action: filterAction || undefined,
-        page: p,
-        limit: 50,
-      })
-      const list = data as AuditLogList
-      setLogs(Array.isArray(list?.logs) ? list.logs : [])
-      setTotal(list?.total || 0)
-      setPage(p)
+      if (online) {
+        const data = await auditApi.list({
+          model: filterModel || undefined,
+          action: filterAction || undefined,
+          page: p,
+          limit: 50,
+        })
+        const list = data as AuditLogList
+        setLogs(Array.isArray(list?.logs) ? list.logs : [])
+        setTotal(list?.total || 0)
+        setPage(p)
+      } else {
+        const local = await getLocalAuditLogs(50)
+        setLogs(local as any)
+        setTotal(local.length)
+        setPage(p)
+      }
     } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: 'Failed to load audit logs',
-        description: error.message,
-      })
+      try {
+        const local = await getLocalAuditLogs(50)
+        setLogs(local as any)
+        setTotal(local.length)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load audit logs', description: error.message })
+      }
     } finally {
       setLoading(false)
     }

@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 
 const PERM_LABELS: Record<string, string> = {
   canViewDashboard:'View Dashboard',
@@ -66,6 +68,7 @@ export default function RolesPermissionsPage() {
   const [createdPassword, setCreatedPassword] = useState<{ name: string; email: string; password: string } | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   useEffect(() => { loadStaff(); loadBranches(); loadPermSchema() }, [])
   useEffect(() => {
@@ -78,18 +81,30 @@ export default function RolesPermissionsPage() {
 
   const loadStaff = async () => {
     try {
-      const data = await staffApi.list()
-      setStaff(data)
+      if (online) {
+        const data = await staffApi.list()
+        setStaff(data)
+      } else {
+        setStaff(await getLocalStaff() as any)
+      }
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Failed to load staff', description: err?.message })
+      try { setStaff(await getLocalStaff() as any) } catch {
+        toast({ variant: 'destructive', title: 'Failed to load staff', description: err?.message })
+      }
     } finally { setLoading(false) }
   }
 
   const loadBranches = async () => {
     try {
-      const data = await branchesApi.active()
-      setBranches(data)
-    } catch {}
+      if (online) {
+        const data = await branchesApi.active()
+        setBranches(data)
+      } else {
+        setBranches(await getLocalBranches() as any)
+      }
+    } catch {
+      try { setBranches(await getLocalBranches() as any) } catch {}
+    }
   }
 
   const loadPermSchema = async () => {

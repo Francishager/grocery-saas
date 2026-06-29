@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, AlertTriangle, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Package, AlertTriangle, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff } from 'lucide-react'
 import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalDashboardKpis, getLocalDashboardCharts } from '@/db/hybrid'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
@@ -17,7 +19,9 @@ export default function DashboardPage() {
   const [topProducts, setTopProducts] = useState<TopProduct[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodData[]>([])
   const [loading, setLoading] = useState(true)
+  const [isOfflineData, setIsOfflineData] = useState(false)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   useEffect(() => {
     if (hasPermission('canViewDashboard')) {
@@ -28,6 +32,27 @@ export default function DashboardPage() {
   }, [hasPermission])
 
   const loadDashboard = async () => {
+    if (!online) {
+      // Offline — load from IndexedDB
+      setIsOfflineData(true)
+      try {
+        const [localKpis, localCharts] = await Promise.all([
+          getLocalDashboardKpis(),
+          getLocalDashboardCharts(),
+        ])
+        setKpis(localKpis)
+        setSalesChart(localCharts.salesChart)
+        setProfitLoss(localCharts.profitLoss)
+        setTopProducts(localCharts.topProducts)
+        setPaymentMethods(localCharts.paymentMethods)
+      } catch (e) {
+        toast({ variant: 'destructive', title: 'Failed to load offline data' })
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     try {
       const [k, sc, pl, tp, pm] = await Promise.all([
         dashboardApi.getKpis(),
@@ -41,12 +66,23 @@ export default function DashboardPage() {
       setProfitLoss(pl)
       setTopProducts(tp as any || [])
       setPaymentMethods(pm as any || [])
+      setIsOfflineData(false)
     } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: 'Failed to load dashboard',
-        description: error.message,
-      })
+      // API failed — fall back to local data
+      setIsOfflineData(true)
+      try {
+        const [localKpis, localCharts] = await Promise.all([
+          getLocalDashboardKpis(),
+          getLocalDashboardCharts(),
+        ])
+        setKpis(localKpis)
+        setSalesChart(localCharts.salesChart)
+        setProfitLoss(localCharts.profitLoss)
+        setTopProducts(localCharts.topProducts)
+        setPaymentMethods(localCharts.paymentMethods)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load dashboard', description: error.message })
+      }
     } finally {
       setLoading(false)
     }
@@ -121,6 +157,9 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground">Business performance overview</p>
+          {isOfflineData && (
+            <p className="text-xs text-orange-600 flex items-center gap-1 mt-1"><WifiOff className="h-3 w-3" /> Showing offline data</p>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">
           {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}

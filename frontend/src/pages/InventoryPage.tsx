@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, Wrench, Clock } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, Wrench, Clock, WifiOff } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalProducts } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { db } from '@/db/index'
 
 interface SellingUnit {
   id?: string
@@ -87,6 +91,7 @@ export default function InventoryPage() {
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
+  const online = useOnlineStatus()
   const canCreateProduct = hasPermission('canCreateProduct')
   const canEditProduct = hasPermission('canEditProduct')
   const canCreateService = hasPermission('canCreateService')
@@ -186,15 +191,23 @@ export default function InventoryPage() {
   const loadInventory = async () => {
     setLoading(true)
     try {
-      const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
-      const data = await inventoryApi.list(searchQuery, canManageInventory ? branchFilter : undefined, typeFilter)
-      setItems(Array.isArray(data) ? data : [])
+      if (online) {
+        const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
+        const data = await inventoryApi.list(searchQuery, canManageInventory ? branchFilter : undefined, typeFilter)
+        setItems(Array.isArray(data) ? data : [])
+      } else {
+        const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
+        const local = await getLocalProducts(searchQuery, canManageInventory ? branchFilter : undefined, typeFilter)
+        setItems(local)
+      }
     } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: 'Failed to load inventory',
-        description: error?.message || 'Unknown error',
-      })
+      // API failed — fall back to local
+      try {
+        const local = await getLocalProducts(searchQuery, canManageInventory ? branchFilter : undefined, itemTypeFilter === 'all' ? undefined : itemTypeFilter)
+        setItems(local)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load inventory', description: error?.message || 'Unknown error' })
+      }
     } finally {
       setLoading(false)
     }
@@ -246,16 +259,55 @@ export default function InventoryPage() {
 
     try {
       if (editingItem) {
-        await inventoryApi.update(String(editingItem.id), formData)
-        // Save selling units only for products
-        if (formData.itemType === 'product') await saveSellingUnits(String(editingItem.id))
+        if (online) {
+          await inventoryApi.update(String(editingItem.id), formData)
+          if (formData.itemType === 'product') await saveSellingUnits(String(editingItem.id))
+        } else {
+          await db.products.put({
+            id: String(editingItem.id),
+            name: formData.product_name,
+            sku: formData.sku,
+            barcode: formData.barcode,
+            price: formData.unit_price,
+            cost: formData.cost_price,
+            quantity: formData.quantity,
+            minStock: formData.low_stock_alert,
+            baseUnit: formData.baseUnit,
+            categoryId: formData.categoryId || undefined,
+            branchId: formData.branchId || undefined,
+            itemType: formData.itemType,
+            description: formData.description,
+            updatedAt: new Date().toISOString(),
+          })
+          await queueMutation('products', 'update', String(editingItem.id), formData)
+        }
         toast({ title: 'Item updated successfully' })
       } else {
-        const result = await inventoryApi.create(formData)
-        // Save selling units only for new products
-        if (formData.itemType === 'product') {
-          const newId = result?.id || (result as any)?.product?.id
-          if (newId) await saveSellingUnits(String(newId))
+        if (online) {
+          const result = await inventoryApi.create(formData)
+          if (formData.itemType === 'product') {
+            const newId = result?.id || (result as any)?.product?.id
+            if (newId) await saveSellingUnits(String(newId))
+          }
+        } else {
+          const newId = `offline-${Date.now()}`
+          await db.products.put({
+            id: newId,
+            name: formData.product_name,
+            sku: formData.sku,
+            barcode: formData.barcode,
+            price: formData.unit_price,
+            cost: formData.cost_price,
+            quantity: formData.quantity,
+            minStock: formData.low_stock_alert,
+            baseUnit: formData.baseUnit,
+            categoryId: formData.categoryId || undefined,
+            branchId: formData.branchId || undefined,
+            itemType: formData.itemType,
+            description: formData.description,
+            updatedAt: new Date().toISOString(),
+          })
+          await queueMutation('products', 'create', newId, formData)
         }
         toast({ title: 'Item created successfully' })
       }
@@ -274,7 +326,12 @@ export default function InventoryPage() {
     if (!confirm('Are you sure you want to delete this item?')) return
 
     try {
-      await inventoryApi.delete(String(id))
+      if (online) {
+        await inventoryApi.delete(String(id))
+      } else {
+        await db.products.delete(String(id))
+        await queueMutation('products', 'delete', String(id))
+      }
       toast({ title: 'Item deleted successfully' })
       loadInventory()
     } catch (error: any) {

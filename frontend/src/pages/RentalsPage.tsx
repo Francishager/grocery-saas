@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalRentals, getLocalBranches, getLocalProducts, getLocalSettings } from '@/db/hybrid'
 
 interface RentalItem {
   id: string
@@ -87,6 +89,7 @@ export default function RentalsPage() {
 
   const { toast } = useToast()
   const { hasPermission } = useJWTAuth()
+  const online = useOnlineStatus()
   const canCreateRental = hasPermission('canCreateRental')
   const canProcessReturn = hasPermission('canProcessRentalReturn')
   const canDeleteRental = hasPermission('canDeleteRental')
@@ -101,18 +104,33 @@ export default function RentalsPage() {
 
   const loadTaxConfig = async () => {
     try {
-      const data = await settingsApi.get()
-      setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
+      if (online) {
+        const data = await settingsApi.get()
+        setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
+      } else {
+        const local = await getLocalSettings()
+        if (local) setTaxConfig({ taxEnabled: local.taxEnabled, taxRate: local.taxRate || 0, taxId: local.taxId || '' })
+      }
     } catch {}
   }
 
   const loadRentals = async () => {
     setLoading(true)
     try {
-      const data = await rentalsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined })
-      setRentals(data?.rentals || [])
+      if (online) {
+        const data = await rentalsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined })
+        setRentals(data?.rentals || [])
+      } else {
+        const local = await getLocalRentals(statusFilter)
+        setRentals(local as any)
+      }
     } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'Failed to load rentals', variant: 'destructive' })
+      try {
+        const local = await getLocalRentals(statusFilter)
+        setRentals(local as any)
+      } catch {
+        toast({ title: 'Error', description: err.message || 'Failed to load rentals', variant: 'destructive' })
+      }
     } finally {
       setLoading(false)
     }
@@ -120,11 +138,20 @@ export default function RentalsPage() {
 
   const loadBranches = async () => {
     try {
-      const data = await branchesApi.active()
-      setBranches(data || [])
-      if (data.length === 1) setBranchId(data[0].id)
+      if (online) {
+        const data = await branchesApi.active()
+        setBranches(data || [])
+        if (data.length === 1) setBranchId(data[0].id)
+      } else {
+        const local = await getLocalBranches()
+        setBranches(local as any)
+        if (local.length === 1) setBranchId(local[0].id)
+      }
     } catch (err: any) {
-      console.error('Failed to load branches:', err)
+      try {
+        const local = await getLocalBranches()
+        setBranches(local as any)
+      } catch {}
     }
   }
 

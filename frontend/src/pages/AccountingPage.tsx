@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { Calculator, Plus, BookOpen, FileText, TrendingUp, Scale } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalAccounts, getLocalJournalEntries } from '@/db/hybrid'
 
 interface Account {
   id: string
@@ -35,6 +37,7 @@ interface JournalEntry {
 
 export default function AccountingPage() {
   const { toast } = useToast()
+  const online = useOnlineStatus()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -60,16 +63,28 @@ export default function AccountingPage() {
 
   const fetchAccounts = async () => {
     try {
-      const res = await apiFetch('/api/accounting/accounts')
-      if (res.ok) setAccounts(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/accounting/accounts')
+        if (res.ok) setAccounts(await res.json())
+      } else {
+        setAccounts(await getLocalAccounts())
+      }
+    } catch (err) {
+      try { setAccounts(await getLocalAccounts()) } catch {}
+    }
   }
 
   const fetchEntries = async () => {
     try {
-      const res = await apiFetch('/api/accounting/journal')
-      if (res.ok) setEntries(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/accounting/journal')
+        if (res.ok) setEntries(await res.json())
+      } else {
+        setEntries(await getLocalJournalEntries() as any)
+      }
+    } catch (err) {
+      try { setEntries(await getLocalJournalEntries() as any) } catch {}
+    }
     finally { setLoading(false) }
   }
 

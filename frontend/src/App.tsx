@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { initSync } from '@/db/sync'
 import { SaaSAdminLayout } from '@/components/layout/SaaSAdminLayout'
 import { TenantLayout } from '@/components/layout/TenantLayout'
 import { RoleRoute } from '@/guard/RoleRoute'
@@ -48,6 +50,8 @@ import FeaturesPage from '@/pages/SaaSAdmin/FeaturesPage'
 import OwnersPage from '@/pages/SaaSAdmin/OwnersPage'
 import SubscriptionsPage from '@/pages/SaaSAdmin/SubscriptionsPage'
 import InvitationsList from '@/pages/SaaSAdmin/InvitationsList'
+import TenantDetailPage from '@/pages/SaaSAdmin/TenantDetailPage'
+import PlatformAuditPage from '@/pages/SaaSAdmin/PlatformAuditPage'
  
 // Public Route — redirects logged-in users to their dashboard
 function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children: React.ReactNode; redirectTo?: string }) {
@@ -62,6 +66,8 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
 }
  
 function App() {
+  useEffect(() => { initSync() }, [])
+
   return (
     <BrowserRouter>
       <Routes>
@@ -107,6 +113,8 @@ function App() {
           <Route path="invitations" element={<InvitationsList />} />
           <Route path="owners" element={<OwnersPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="businesses/:tenantId" element={<TenantDetailPage />} />
+          <Route path="audit" element={<PlatformAuditPage />} />
         </Route>
  
         {/* ========== Tenant (Business) Routes — /tenant/* ========== */}

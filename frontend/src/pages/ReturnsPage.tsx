@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { RotateCcw, Plus, Search, DollarSign } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalReturns, getLocalProducts } from '@/db/hybrid'
 
 interface SaleReturn {
   id: string
@@ -34,6 +36,7 @@ interface Product {
 
 export default function ReturnsPage() {
   const { toast } = useToast()
+  const online = useOnlineStatus()
   const [returns, setReturns] = useState<SaleReturn[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -48,13 +51,20 @@ export default function ReturnsPage() {
 
   const fetchReturns = async () => {
     try {
-      const res = await apiFetch('/api/returns')
-      if (res.ok) {
-        const data = await res.json()
-        setReturns(data)
+      if (online) {
+        const res = await apiFetch('/api/returns')
+        if (res.ok) {
+          const data = await res.json()
+          setReturns(data)
+        }
+      } else {
+        const local = await getLocalReturns()
+        setReturns(local as any)
       }
     } catch (err) {
-      toast({ variant: 'destructive', title: 'Failed to load returns' })
+      try { setReturns(await getLocalReturns() as any) } catch {
+        toast({ variant: 'destructive', title: 'Failed to load returns' })
+      }
     } finally {
       setLoading(false)
     }
@@ -62,14 +72,19 @@ export default function ReturnsPage() {
 
   const fetchProducts = async () => {
     try {
-      const res = await apiFetch('/api/inventory?limit=100')
-      if (res.ok) {
-        const data = await res.json()
-        const prods = Array.isArray(data) ? data : data.products || data.items || []
-        setProducts(prods)
+      if (online) {
+        const res = await apiFetch('/api/inventory?limit=100')
+        if (res.ok) {
+          const data = await res.json()
+          const prods = Array.isArray(data) ? data : data.products || data.items || []
+          setProducts(prods)
+        }
+      } else {
+        const local = await getLocalProducts()
+        setProducts(local as any)
       }
     } catch (err) {
-      // ignore
+      try { setProducts(await getLocalProducts() as any) } catch {}
     }
   }
 

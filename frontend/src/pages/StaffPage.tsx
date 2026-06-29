@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 
 const staffRoles: Array<{ value: StaffPayload['role']; label: string }> = [
   { value: 'attendant', label: 'Attendant' },
@@ -30,6 +32,7 @@ export default function StaffPage() {
   const [saving, setSaving] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   const stats = useMemo(() => {
     const active = staff.filter((member) => member.isActive).length
@@ -43,22 +46,34 @@ export default function StaffPage() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [staffData, branchData] = await Promise.all([
-        staffApi.list(),
-        branchesApi.active(),
-      ])
-      setStaff(staffData)
-      setBranches(branchData)
-      setForm((prev) => ({
-        ...prev,
-        branchId: prev.branchId || branchData[0]?.id || '',
-      }))
+      if (online) {
+        const [staffData, branchData] = await Promise.all([
+          staffApi.list(),
+          branchesApi.active(),
+        ])
+        setStaff(staffData)
+        setBranches(branchData)
+        setForm((prev) => ({ ...prev, branchId: prev.branchId || branchData[0]?.id || '' }))
+      } else {
+        const [localStaff, localBranches] = await Promise.all([
+          getLocalStaff(),
+          getLocalBranches(),
+        ])
+        setStaff(localStaff as any)
+        setBranches(localBranches as any)
+        setForm((prev) => ({ ...prev, branchId: prev.branchId || localBranches[0]?.id || '' }))
+      }
     } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Staff unavailable',
-        description: error instanceof Error ? error.message : 'Failed to load staff',
-      })
+      try {
+        const [localStaff, localBranches] = await Promise.all([
+          getLocalStaff(),
+          getLocalBranches(),
+        ])
+        setStaff(localStaff as any)
+        setBranches(localBranches as any)
+      } catch {
+        toast({ variant: 'destructive', title: 'Staff unavailable', description: error instanceof Error ? error.message : 'Failed to load staff' })
+      }
     } finally {
       setLoading(false)
     }

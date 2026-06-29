@@ -9,6 +9,10 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import CreateExpenseModal from '@/components/modals/CreateExpenseModal'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalExpenses, getLocalCashAccounts, getLocalCashTransactions } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { db } from '@/db/index'
 import { 
   Wallet, 
   TrendingUp, 
@@ -85,6 +89,7 @@ export default function ExpensesPage() {
   const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   const expensesEnabled = hasPermission('canViewExpense')
+  const online = useOnlineStatus()
 
   useEffect(() => {
     if (!expensesEnabled) {
@@ -101,26 +106,28 @@ export default function ExpensesPage() {
   const loadExpenses = async () => {
     try {
       setLoading(true)
-      const params = new URLSearchParams({
-        ...(searchTerm && { search: searchTerm }),
-        ...(categoryFilter && { category: categoryFilter }),
-        ...(startDate && endDate && { 
-          startDate,
-          endDate
+      if (online) {
+        const params = new URLSearchParams({
+          ...(searchTerm && { search: searchTerm }),
+          ...(categoryFilter && { category: categoryFilter }),
+          ...(startDate && endDate && { startDate, endDate })
         })
-      })
-      
-      const response = await apiFetch(`/api/expenses/expenses?${params}`)
-      if (response.ok) {
-        const data = await response.json()
-        setExpenses(data.expenses)
+        const response = await apiFetch(`/api/expenses/expenses?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setExpenses(data.expenses)
+        }
+      } else {
+        const local = await getLocalExpenses(searchTerm, categoryFilter)
+        setExpenses(local)
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load expenses',
-        variant: 'destructive'
-      })
+      try {
+        const local = await getLocalExpenses(searchTerm, categoryFilter)
+        setExpenses(local)
+      } catch {
+        toast({ title: 'Error', description: 'Failed to load expenses', variant: 'destructive' })
+      }
     } finally {
       setLoading(false)
     }
@@ -128,33 +135,39 @@ export default function ExpensesPage() {
 
   const loadCashAccounts = async () => {
     try {
-      const response = await apiFetch('/api/expenses/cash-accounts')
-      if (response.ok) {
-        const data = await response.json()
-        setCashAccounts(data)
+      if (online) {
+        const response = await apiFetch('/api/expenses/cash-accounts')
+        if (response.ok) {
+          const data = await response.json()
+          setCashAccounts(data)
+        }
+      } else {
+        const local = await getLocalCashAccounts()
+        setCashAccounts(local)
       }
     } catch (error) {
-      console.error('Failed to load cash accounts:', error)
+      try { setCashAccounts(await getLocalCashAccounts()) } catch {}
     }
   }
 
   const loadTransactions = async () => {
     try {
-      const params = new URLSearchParams({
-        ...(searchTerm && { search: searchTerm }),
-        ...(startDate && endDate && { 
-          startDate,
-          endDate
+      if (online) {
+        const params = new URLSearchParams({
+          ...(searchTerm && { search: searchTerm }),
+          ...(startDate && endDate && { startDate, endDate })
         })
-      })
-      
-      const response = await apiFetch(`/api/expenses/cash-transactions?${params}`)
-      if (response.ok) {
-        const data = await response.json()
-        setTransactions(data.transactions)
+        const response = await apiFetch(`/api/expenses/cash-transactions?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setTransactions(data.transactions)
+        }
+      } else {
+        const local = await getLocalCashTransactions()
+        setTransactions(local)
       }
     } catch (error) {
-      console.error('Failed to load transactions:', error)
+      try { setTransactions(await getLocalCashTransactions()) } catch {}
     }
   }
 

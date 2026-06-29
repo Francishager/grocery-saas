@@ -1,18 +1,20 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
+import { SyncIndicator } from '@/components/SyncIndicator'
 
 const navItems = [
   { to: '/saas/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/saas/businesses', label: 'Businesses', icon: Building2 },
   { to: '/saas/plans', label: 'Plans & Pricing', icon: CreditCard },
   { to: '/saas/features', label: 'Features', icon: Settings },
-  { to: '/saas/invitations', label: 'Invitations', icon: Mail },
-  { to: '/saas/owners', label: 'Owners', icon: Users },
   { to: '/saas/subscriptions', label: 'Subscriptions', icon: Wallet },
+  { to: '/saas/owners', label: 'Owners', icon: Users },
+  { to: '/saas/invitations', label: 'Invitations', icon: Mail },
+  { to: '/saas/audit', label: 'Audit Logs', icon: Activity },
 ]
 
 export function SaaSAdminLayout() {
@@ -30,6 +32,7 @@ export function SaaSAdminLayout() {
           <Button variant="ghost" size="icon" className="lg:hidden text-white hover:bg-slate-800" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
         </div>
         <div className="flex-1" />
+        <SyncIndicator />
       </header>
       <aside className={cn(
         'fixed left-0 top-16 z-50 h-[calc(100vh-4rem)] w-64 transform bg-slate-900 shadow-lg transition-transform duration-200 ease-in-out lg:translate-x-0',

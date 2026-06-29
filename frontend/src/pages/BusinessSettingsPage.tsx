@@ -6,21 +6,35 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalSettings } from '@/db/hybrid'
+import { db } from '@/db/index'
 
 export default function BusinessSettingsPage() {
   const [settings, setSettings] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   useEffect(() => { loadSettings() }, [])
 
   const loadSettings = async () => {
     try {
-      const data = await settingsApi.get()
-      setSettings(data)
+      if (online) {
+        const data = await settingsApi.get()
+        setSettings(data)
+      } else {
+        const local = await getLocalSettings()
+        setSettings(local)
+      }
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Failed to load settings', description: err?.message })
+      try {
+        const local = await getLocalSettings()
+        setSettings(local)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load settings', description: err?.message })
+      }
     } finally { setLoading(false) }
   }
 

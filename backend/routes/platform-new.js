@@ -680,4 +680,461 @@ router.get('/analytics/usage', authenticateToken, requirePlatformAdmin, async (r
   }
 })
 
+// === TENANT DETAIL (comprehensive) ===
+
+// Get tenant detail with usage, features, users (with IPs), audit logs
+router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: {
+        plan: true,
+        owner: { select: { id: true, email: true, fname: true, lname: true, role: true, isActive: true, lastLogin: true, phone: true, createdAt: true } },
+        usageLimit: true,
+        users: {
+          select: { id: true, email: true, fname: true, lname: true, role: true, isActive: true, lastLogin: true, phone: true, createdAt: true },
+          orderBy: { createdAt: 'desc' }
+        },
+        branches: {
+          select: { id: true, name: true, address: true, isActive: true, createdAt: true, updatedAt: true },
+          orderBy: { createdAt: 'asc' }
+        },
+        _count: {
+          select: {
+            users: true,
+            customers: true,
+            suppliers: true,
+            branches: true,
+          }
+        }
+      }
+    })
+
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
+
+    // Get product count separately (products relation is via Branch, not direct on Tenant in some schemas)
+    const productCount = await prisma.product.count({ where: { tenantId } })
+    const branchCount = await prisma.branch.count({ where: { tenantId } })
+
+    // Get product count per branch
+    const branchesWithCounts = await Promise.all(
+      tenant.branches.map(async (b) => {
+        const productCount = await prisma.product.count({ where: { branchId: b.id } })
+        const userCount = await prisma.userBranch.count({ where: { branchId: b.id } })
+        return { ...b, productCount, userCount }
+      })
+    )
+
+    // Get enabled features
+    const [allFeatures, planFeatures, tenantFeatureOverrides] = await Promise.all([
+      prisma.feature.findMany({ where: { isActive: true }, orderBy: { category: 'asc', name: 'asc' } }),
+      tenant.planId
+        ? prisma.planFeature.findMany({ where: { planId: tenant.planId, enabled: true }, include: { feature: true } })
+        : Promise.resolve([]),
+      prisma.tenantFeature.findMany({ where: { tenantId }, include: { feature: true } })
+    ])
+
+    const featureAccess = {}
+    for (const feature of allFeatures) {
+      featureAccess[feature.name] = { enabled: false, source: 'default', displayName: feature.displayName, category: feature.category }
+    }
+    planFeatures.forEach((pf) => {
+      if (pf.feature?.name) featureAccess[pf.feature.name] = { enabled: true, source: 'plan', displayName: pf.feature.displayName, category: pf.feature.category }
+    })
+    tenantFeatureOverrides.forEach((tf) => {
+      if (tf.feature?.name) featureAccess[tf.feature.name] = { enabled: tf.enabled, source: 'override', displayName: tf.feature.displayName, category: tf.feature.category }
+    })
+
+    const enabledFeatures = Object.entries(featureAccess)
+      .filter(([_, info]) => info.enabled)
+      .map(([name, info]) => ({ name, ...info }))
+
+    // Get recent audit logs with IPs (last 50)
+    const auditLogs = await prisma.auditLog.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: { id: true, userId: true, userEmail: true, action: true, model: true, recordId: true, ip: true, createdAt: true }
+    })
+
+    // Get unique IPs from audit logs
+    const uniqueIPs = [...new Set(auditLogs.map(log => log.ip).filter(Boolean))]
+
+    // Build usage stats
+    const usage = {
+      users: { count: tenant._count.users, limit: tenant.usageLimit?.maxUsers || tenant.plan?.maxUsers || 5 },
+      products: { count: productCount, limit: tenant.usageLimit?.maxProducts || tenant.plan?.maxProducts || 100 },
+      branches: { count: branchCount, limit: tenant.usageLimit?.maxBranches || 1 },
+      customers: { count: tenant._count.customers, limit: tenant.usageLimit?.maxCustomers || 100 },
+      suppliers: { count: tenant._count.suppliers, limit: tenant.usageLimit?.maxSuppliers || 50 },
+    }
+
+    // Calculate usage percentages
+    Object.keys(usage).forEach(key => {
+      const u = usage[key]
+      u.percentage = u.limit > 0 ? Math.min(100, Math.round((u.count / u.limit) * 100)) : 0
+    })
+
+    res.json({
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        email: tenant.email,
+        phone: tenant.phone,
+        address: tenant.address,
+        logo: tenant.logo,
+        status: tenant.status,
+        businessType: tenant.businessType,
+        currency: tenant.currency,
+        timezone: tenant.timezone,
+        taxRate: tenant.taxRate,
+        taxEnabled: tenant.taxEnabled,
+        taxId: tenant.taxId,
+        subscriptionStart: tenant.subscriptionStart,
+        subscriptionEnd: tenant.subscriptionEnd,
+        trialEndsAt: tenant.trialEndsAt,
+        createdAt: tenant.createdAt,
+        updatedAt: tenant.updatedAt,
+        plan: tenant.plan,
+        owner: tenant.owner,
+        usageLimit: tenant.usageLimit,
+        users: tenant.users,
+        branches: branchesWithCounts,
+        auditLogs,
+        uniqueIPs,
+        usage,
+        enabledFeatures,
+        allFeatures: featureAccess,
+      }
+    })
+  } catch (error) {
+    console.error('Get tenant detail error:', error)
+    res.status(500).json({ error: 'Failed to fetch tenant detail' })
+  }
+})
+
+// Get tenant usage limits
+router.get('/tenants/:tenantId/limits', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { usageLimit: true, plan: true }
+    })
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
+
+    res.json({
+      usageLimit: tenant.usageLimit,
+      planDefaults: {
+        maxUsers: tenant.plan?.maxUsers || 5,
+        maxProducts: tenant.plan?.maxProducts || 100,
+      }
+    })
+  } catch (error) {
+    console.error('Get usage limits error:', error)
+    res.status(500).json({ error: 'Failed to fetch usage limits' })
+  }
+})
+
+// Get tenant users with IPs from audit logs
+router.get('/tenants/:tenantId/users', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+
+    const users = await prisma.user.findMany({
+      where: { tenantId },
+      select: { id: true, email: true, fname: true, lname: true, role: true, isActive: true, lastLogin: true, phone: true, createdAt: true },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    // Get IPs for each user from audit logs
+    const userIds = users.map(u => u.id)
+    const auditLogs = await prisma.auditLog.findMany({
+      where: { userId: { in: userIds }, ip: { not: null } },
+      select: { userId: true, ip: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      distinct: ['userId', 'ip']
+    })
+
+    // Build IP map: userId -> [{ ip, lastSeen }]
+    const ipMap = {}
+    auditLogs.forEach(log => {
+      if (!ipMap[log.userId]) ipMap[log.userId] = []
+      ipMap[log.userId].push({ ip: log.ip, lastSeen: log.createdAt })
+    })
+
+    res.json({
+      users: users.map(u => ({
+        ...u,
+        name: `${u.fname || ''} ${u.lname || ''}`.trim() || u.email,
+        ips: ipMap[u.id] || [],
+      }))
+    })
+  } catch (error) {
+    console.error('Get tenant users error:', error)
+    res.status(500).json({ error: 'Failed to fetch tenant users' })
+  }
+})
+
+// Get tenant audit logs with IPs
+router.get('/tenants/:tenantId/audit', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+    const { page = 1, limit = 50, action, model, search } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = {
+      tenantId,
+      ...(action && { action }),
+      ...(model && { model }),
+      ...(search && {
+        OR: [
+          { userEmail: { contains: search, mode: 'insensitive' } },
+          { action: { contains: search, mode: 'insensitive' } },
+          { model: { contains: search, mode: 'insensitive' } },
+          { ip: { contains: search, mode: 'insensitive' } },
+        ]
+      })
+    }
+
+    const [logs, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.auditLog.count({ where })
+    ])
+
+    res.json({
+      logs,
+      pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
+    })
+  } catch (error) {
+    console.error('Get tenant audit error:', error)
+    res.status(500).json({ error: 'Failed to fetch audit logs' })
+  }
+})
+
+// Update tenant info (name, email, phone, address, businessType, status)
+router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+    const { name, email, phone, address, businessType, status, currency, timezone, taxRate, taxEnabled, taxId } = req.body
+
+    const data = {}
+    if (name !== undefined) data.name = name
+    if (email !== undefined) data.email = email
+    if (phone !== undefined) data.phone = phone
+    if (address !== undefined) data.address = address
+    if (businessType !== undefined) data.businessType = businessType
+    if (status !== undefined) data.status = status
+    if (currency !== undefined) data.currency = currency
+    if (timezone !== undefined) data.timezone = timezone
+    if (taxRate !== undefined) data.taxRate = taxRate
+    if (taxEnabled !== undefined) data.taxEnabled = taxEnabled
+    if (taxId !== undefined) data.taxId = taxId
+
+    const tenant = await prisma.tenant.update({ where: { id: tenantId }, data })
+    res.json({ message: 'Tenant updated', tenant })
+  } catch (error) {
+    console.error('Update tenant error:', error)
+    res.status(500).json({ error: 'Failed to update tenant' })
+  }
+})
+
+// Delete tenant
+router.delete('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+
+    // Check tenant exists
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } })
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
+
+    // Delete in transaction to cascade properly
+    await prisma.$transaction([
+      prisma.auditLog.deleteMany({ where: { tenantId } }),
+      prisma.usageLimit.deleteMany({ where: { tenantId } }),
+      prisma.tenantFeature.deleteMany({ where: { tenantId } }),
+      prisma.tenant.delete({ where: { id: tenantId } }),
+    ])
+
+    res.json({ message: 'Tenant deleted successfully' })
+  } catch (error) {
+    console.error('Delete tenant error:', error)
+    res.status(500).json({ error: 'Failed to delete tenant' })
+  }
+})
+
+// === PLATFORM AUDIT LOGS ===
+
+// Get all audit logs across all tenants (with filtering)
+router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 50, tenantId, action, model, search, startDate, endDate } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = {
+      ...(tenantId && { tenantId }),
+      ...(action && { action }),
+      ...(model && { model }),
+      ...(search && {
+        OR: [
+          { userEmail: { contains: search, mode: 'insensitive' } },
+          { action: { contains: search, mode: 'insensitive' } },
+          { model: { contains: search, mode: 'insensitive' } },
+          { ip: { contains: search, mode: 'insensitive' } },
+        ]
+      }),
+      ...(startDate && endDate && {
+        createdAt: { gte: new Date(startDate), lte: new Date(endDate) }
+      })
+    }
+
+    const [logs, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.auditLog.count({ where })
+    ])
+
+    // Get tenant names for the logs
+    const tenantIds = [...new Set(logs.map(log => log.tenantId))]
+    const tenants = await prisma.tenant.findMany({
+      where: { id: { in: tenantIds } },
+      select: { id: true, name: true }
+    })
+    const tenantMap = tenants.reduce((map, t) => { map[t.id] = t.name; return map }, {})
+
+    res.json({
+      logs: logs.map(log => ({ ...log, tenantName: tenantMap[log.tenantId] || 'Unknown' })),
+      pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
+    })
+  } catch (error) {
+    console.error('Get platform audit logs error:', error)
+    res.status(500).json({ error: 'Failed to fetch audit logs' })
+  }
+})
+
+// === ENHANCED PLATFORM STATS ===
+
+router.get('/stats/detailed', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const [
+      totalTenants,
+      activeTenants,
+      suspendedTenants,
+      trialTenants,
+      totalUsers,
+      activeUsers,
+      totalPlans,
+      totalFeatures,
+      totalSales,
+      totalRevenue,
+      pendingInvitations,
+    ] = await Promise.all([
+      prisma.tenant.count(),
+      prisma.tenant.count({ where: { status: 'active' } }),
+      prisma.tenant.count({ where: { status: 'suspended' } }),
+      prisma.tenant.count({ where: { status: 'trial' } }),
+      prisma.user.count(),
+      prisma.user.count({ where: { isActive: true } }),
+      prisma.plan.count(),
+      prisma.feature.count(),
+      prisma.saleRecord.count(),
+      prisma.saleRecord.aggregate({ _sum: { total: true } }),
+      prisma.invitation.count({ where: { status: 'pending' } }),
+    ])
+
+    // Plan distribution
+    const planDistribution = await prisma.tenant.groupBy({
+      by: ['planId'],
+      _count: true,
+      where: { status: 'active' }
+    })
+    const planIds = planDistribution.map(p => p.planId).filter(Boolean)
+    const plans = await prisma.plan.findMany({ where: { id: { in: planIds } }, select: { id: true, name: true, price: true, currency: true } })
+    const planMap = plans.reduce((map, p) => { map[p.id] = p; return map }, {})
+    const distribution = planDistribution.map(p => ({
+      planId: p.planId,
+      planName: planMap[p.planId]?.name || 'No Plan',
+      count: p._count,
+      price: planMap[p.planId]?.price || 0,
+      currency: planMap[p.planId]?.currency || 'UGX',
+    }))
+
+    // Monthly revenue (sum of plan prices for active tenants)
+    const monthlyRevenue = distribution.reduce((sum, p) => {
+      const price = p.price || 0
+      const cycle = planMap[p.planId]?.billingCycle || 'monthly'
+      const monthly = cycle === 'yearly' ? price / 12 : price
+      return sum + (monthly * p.count)
+    }, 0)
+
+    // Expiring subscriptions (within 7 days)
+    const sevenDaysFromNow = new Date()
+    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7)
+    const expiringSubscriptions = await prisma.tenant.count({
+      where: {
+        status: 'active',
+        subscriptionEnd: { gte: new Date(), lte: sevenDaysFromNow }
+      }
+    })
+
+    // Recent tenants
+    const recentTenants = await prisma.tenant.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: { plan: { select: { name: true } }, _count: { select: { users: true } } }
+    })
+
+    // Recent audit activity
+    const recentActivity = await prisma.auditLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { id: true, tenantId: true, userEmail: true, action: true, model: true, ip: true, createdAt: true }
+    })
+
+    res.json({
+      overview: {
+        totalTenants,
+        activeTenants,
+        suspendedTenants,
+        trialTenants,
+        totalUsers,
+        activeUsers,
+        totalPlans,
+        totalFeatures,
+        totalSales,
+        totalRevenue: totalRevenue._sum.total || 0,
+        pendingInvitations,
+        monthlyRevenue: Math.round(monthlyRevenue),
+        expiringSubscriptions,
+      },
+      planDistribution: distribution,
+      recentTenants: recentTenants.map(t => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        status: t.status,
+        planName: t.plan?.name || 'No Plan',
+        userCount: t._count.users,
+        createdAt: t.createdAt,
+      })),
+      recentActivity,
+    })
+  } catch (error) {
+    console.error('Get detailed stats error:', error)
+    res.status(500).json({ error: 'Failed to fetch detailed stats' })
+  }
+})
+
 export default router

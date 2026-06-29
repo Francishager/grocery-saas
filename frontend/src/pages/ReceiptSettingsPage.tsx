@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalSettings } from '@/db/hybrid'
 
 export default function ReceiptSettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -14,15 +16,23 @@ export default function ReceiptSettingsPage() {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   useEffect(() => { loadSettings() }, [])
 
   const loadSettings = async () => {
     try {
-      const data = await settingsApi.get()
-      setSettings(data)
+      if (online) {
+        const data = await settingsApi.get()
+        setSettings(data)
+      } else {
+        const local = await getLocalSettings()
+        setSettings(local)
+      }
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Failed to load settings', description: err?.message })
+      try { setSettings(await getLocalSettings()) } catch {
+        toast({ variant: 'destructive', title: 'Failed to load settings', description: err?.message })
+      }
     } finally { setLoading(false) }
   }
 

@@ -1,5 +1,5 @@
  import { useEffect, useState } from 'react'
-import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode } from 'lucide-react'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff } from 'lucide-react'
 import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,10 @@ import { useToast } from '@/hooks/use-toast'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
 import { BluetoothThermalPrinter, ThermalPrinter, isBluetoothSupported, isSerialSupported } from '@/lib/thermalPrinter'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalProducts, getLocalSales } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { db } from '@/db/index'
 
 interface RecentSale {
   id: string
@@ -38,6 +42,7 @@ export default function SalesPage() {
   const [barcodeInput, setBarcodeInput] = useState('')
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   useEffect(() => {
     loadInventory()
@@ -48,14 +53,21 @@ export default function SalesPage() {
   const loadInventory = async () => {
     setLoading(true)
     try {
-      const data = await inventoryApi.list(searchQuery)
-      setInventory(data)
+      if (online) {
+        const data = await inventoryApi.list(searchQuery)
+        setInventory(data)
+      } else {
+        const local = await getLocalProducts(searchQuery)
+        setInventory(local)
+      }
     } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: 'Failed to load inventory',
-        description: error.message,
-      })
+      // API failed — fall back to local
+      try {
+        const local = await getLocalProducts(searchQuery)
+        setInventory(local)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load inventory', description: error.message })
+      }
     } finally {
       setLoading(false)
     }
@@ -169,6 +181,81 @@ export default function SalesPage() {
     if (cart.length === 0) return
 
     setProcessing(true)
+
+    if (!online) {
+      // Offline checkout — save locally, queue for sync
+      try {
+        const saleId = `offline-${Date.now()}`
+        const receiptNo = `OFF-${String(Date.now()).slice(-5)}`
+        const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
+        const total = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
+
+        const saleData = {
+          id: saleId,
+          receiptNo,
+          subtotal,
+          discount: invoiceCashDiscount,
+          tax: cartTax,
+          total,
+          paymentMethod: paymentMode,
+          status: 'completed',
+          items: cart.map(c => ({
+            productId: c.productId,
+            quantity: c.qty,
+            price: c.selling_price,
+            discount: c.cashDiscount || 0,
+            total: c.selling_price * c.qty - (c.cashDiscount || 0),
+          })),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+
+        await db.sales.put(saleData)
+
+        // Deduct stock locally
+        for (const item of cart) {
+          const product = await db.products.get(item.productId)
+          if (product) {
+            await db.products.update(item.productId, {
+              quantity: Math.max(0, product.quantity - item.qty),
+            })
+          }
+        }
+
+        // Queue for sync
+        await queueMutation('sales', 'create', saleId, {
+          cart: cart.map(c => ({
+            productId: c.productId,
+            qty: c.qty,
+            price: c.selling_price,
+            discount: c.discount || 0,
+            cashDiscount: c.cashDiscount || 0,
+            unitName: c.unitName || null,
+            conversionFactor: c.conversionFactor ?? null,
+          })),
+          paymentMethod: paymentMode,
+          cashDiscount: invoiceCashDiscount,
+        })
+
+        toast({
+          title: 'Sale recorded offline',
+          description: `${cart.length} items — will sync when online`,
+        })
+        setCart([])
+        setInvoiceCashDiscount(0)
+        setMobileProvider('')
+        setPhoneNumber('')
+        setTransactionId('')
+        loadRecentSales()
+        loadInventory()
+      } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Offline checkout failed', description: error.message })
+      } finally {
+        setProcessing(false)
+      }
+      return
+    }
+
     try {
       const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount, {
         mobileProvider: paymentMode === 'mobile_money' ? mobileProvider : undefined,
@@ -201,10 +288,21 @@ export default function SalesPage() {
   const loadRecentSales = async () => {
     setSalesLoading(true)
     try {
-      const data = await salesApi.list()
-      setRecentSales(Array.isArray(data) ? data : [])
+      if (online) {
+        const data = await salesApi.list()
+        setRecentSales(Array.isArray(data) ? data : [])
+      } else {
+        const local = await getLocalSales(50)
+        setRecentSales(local)
+      }
     } catch {
-      // silently fail — sales history is secondary
+      // API failed — try local
+      try {
+        const local = await getLocalSales(50)
+        setRecentSales(local)
+      } catch {
+        // silently fail — sales history is secondary
+      }
     } finally {
       setSalesLoading(false)
     }

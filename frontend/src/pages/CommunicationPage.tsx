@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { Bell, Send, CheckCheck, Mail, MessageSquare, Smartphone } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalNotifications } from '@/db/hybrid'
 
 interface Notification {
   id: string
@@ -22,6 +24,7 @@ interface Notification {
 
 export default function CommunicationPage() {
   const { toast } = useToast()
+  const online = useOnlineStatus()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -34,9 +37,15 @@ export default function CommunicationPage() {
 
   const fetchNotifications = async () => {
     try {
-      const res = await apiFetch('/api/notifications')
-      if (res.ok) setNotifications(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/notifications')
+        if (res.ok) setNotifications(await res.json())
+      } else {
+        setNotifications(await getLocalNotifications() as any)
+      }
+    } catch (err) {
+      try { setNotifications(await getLocalNotifications() as any) } catch {}
+    }
     finally { setLoading(false) }
   }
 

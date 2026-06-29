@@ -11,6 +11,8 @@ import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency } from '@/lib/utils'
 import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalSuppliers, getLocalPurchases, getLocalPayablePayments, getLocalProducts } from '@/db/hybrid'
 import { 
   Building2, 
   FileText, 
@@ -122,6 +124,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 export default function PayablesPage() {
   const { hasPermission } = useJWTAuth()
   const { toast } = useToast()
+  const online = useOnlineStatus()
   
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [supplierOptions, setSupplierOptions] = useState<Supplier[]>([])
@@ -174,24 +177,29 @@ export default function PayablesPage() {
   ) => {
     try {
       if (showPageLoading) setLoading(true)
-      const params = new URLSearchParams({
-        ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
-        ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
-      })
-      
-      const response = await apiFetch(`/api/payables/suppliers?${params}`)
-      if (response.ok) {
-        const data = await response.json()
-        setSuppliers(data.suppliers)
+      if (online) {
+        const params = new URLSearchParams({
+          ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
+          ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
+        })
+        const response = await apiFetch(`/api/payables/suppliers?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setSuppliers(data.suppliers)
+        } else {
+          throw new Error(await readResponseError(response, 'Failed to load suppliers'))
+        }
       } else {
-        throw new Error(await readResponseError(response, 'Failed to load suppliers'))
+        const local = await getLocalSuppliers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
+        setSuppliers(local)
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load suppliers',
-        variant: 'destructive'
-      })
+      try {
+        const local = await getLocalSuppliers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
+        setSuppliers(local)
+      } catch {
+        toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to load suppliers', variant: 'destructive' })
+      }
     } finally {
       if (showPageLoading) setLoading(false)
     }
@@ -199,33 +207,35 @@ export default function PayablesPage() {
 
   const loadPurchases = async () => {
     try {
-      const response = await apiFetch('/api/payables/purchases')
-      if (response.ok) {
-        const data = await response.json()
-        setPurchases(data.purchases)
+      if (online) {
+        const response = await apiFetch('/api/payables/purchases')
+        if (response.ok) {
+          const data = await response.json()
+          setPurchases(data.purchases)
+        }
+      } else {
+        const local = await getLocalPurchases()
+        setPurchases(local)
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load purchases',
-        variant: 'destructive'
-      })
+      try { setPurchases(await getLocalPurchases()) } catch {}
     }
   }
 
   const loadPayments = async () => {
     try {
-      const response = await apiFetch('/api/payables/payments')
-      if (response.ok) {
-        const data = await response.json()
-        setPayments(data.payments)
+      if (online) {
+        const response = await apiFetch('/api/payables/payments')
+        if (response.ok) {
+          const data = await response.json()
+          setPayments(data.payments)
+        }
+      } else {
+        const local = await getLocalPayablePayments()
+        setPayments(local)
       }
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load payments',
-        variant: 'destructive'
-      })
+      try { setPayments(await getLocalPayablePayments()) } catch {}
     }
   }
 
@@ -243,14 +253,20 @@ export default function PayablesPage() {
 
   const loadProducts = async () => {
     try {
-      const data = await inventoryApi.list()
-      setProducts(data)
+      if (online) {
+        const data = await inventoryApi.list()
+        setProducts(data)
+      } else {
+        const local = await getLocalProducts()
+        setProducts(local)
+      }
     } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load products',
-        variant: 'destructive'
-      })
+      try {
+        const local = await getLocalProducts()
+        setProducts(local)
+      } catch {
+        toast({ title: 'Error', description: error.message || 'Failed to load products', variant: 'destructive' })
+      }
     }
   }
 

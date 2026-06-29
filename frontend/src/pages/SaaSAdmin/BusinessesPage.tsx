@@ -1,7 +1,7 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft } from 'lucide-react'
+import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft, ExternalLink } from 'lucide-react'
 
 interface Tenant {
   id: string; name: string; slug: string; status: string; planId?: string | null
@@ -149,6 +149,7 @@ export const BusinessesPage: React.FC = () => {
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Plan</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Status</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Users</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Customers</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Created</th>
                 <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">Actions</th>
               </tr>
@@ -161,10 +162,12 @@ export const BusinessesPage: React.FC = () => {
                   <td className="px-4 py-3 text-sm text-gray-500">{t.plan?.name || '-'}</td>
                   <td className="px-4 py-3">{statusBadge(t.status)}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{t._count?.users || 0}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{t._count?.customers || 0}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(t.createdAt)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => setSelected(t)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="View"><Eye size={16} /></button>
+                      <button onClick={() => navigate(`/saas/businesses/${t.id}`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="View Details"><ExternalLink size={16} /></button>
+                      <button onClick={() => setSelected(t)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="Quick View"><Eye size={16} /></button>
                       <button onClick={() => openPlanModal(t)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
                       <button onClick={() => handleAction(t.id, t.status === 'suspended' ? 'activate' : 'suspend')} disabled={actionLoading === t.id} className={`p-1 rounded ${t.status === 'suspended' ? 'text-green-600 hover:bg-green-50' : 'text-red-600 hover:bg-red-50'}`} title={t.status === 'suspended' ? 'Activate' : 'Suspend'}>
                         {actionLoading === t.id ? <Loader2 size={16} className="animate-spin" /> : t.status === 'suspended' ? <CheckCircle size={16} /> : <Ban size={16} />}
@@ -195,7 +198,10 @@ export const BusinessesPage: React.FC = () => {
               <div className="flex justify-between"><span className="text-gray-500">Sub. End</span><span>{selected.subscriptionEnd ? fmtDate(selected.subscriptionEnd) : '-'}</span></div>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={() => openPlanModal(selected)} className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+              <button onClick={() => navigate(`/saas/businesses/${selected.id}`)} className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                View Full Details
+              </button>
+              <button onClick={() => openPlanModal(selected)} className="flex-1 px-4 py-2 rounded-lg border hover:bg-gray-50">
                 Change Plan
               </button>
               <button onClick={() => handleAction(selected.id, selected.status === 'suspended' ? 'activate' : 'suspend')} className={`flex-1 px-4 py-2 rounded-lg text-white ${selected.status === 'suspended' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>

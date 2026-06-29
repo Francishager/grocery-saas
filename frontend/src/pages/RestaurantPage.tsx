@@ -9,6 +9,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalProducts } from '@/db/hybrid'
+import { db } from '@/db/index'
 
 interface Table { id: string; name: string; capacity: number; status: string; area: string | null; isActive: boolean; _count?: { orders: number } }
 interface Waiter { id: string; name: string; phone: string | null; code: string | null; isActive: boolean; _count?: { orders: number; tips: number } }
@@ -46,6 +49,7 @@ export default function RestaurantPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(false)
+  const online = useOnlineStatus()
   const [showTableModal, setShowTableModal] = useState(false)
   const [showWaiterModal, setShowWaiterModal] = useState(false)
   const [showOrderModal, setShowOrderModal] = useState(false)
@@ -72,6 +76,7 @@ export default function RestaurantPage() {
       if (tablesRes.ok) setTables(await tablesRes.json())
       if (waitersRes.ok) setWaiters(await waitersRes.json())
       if (productsRes.ok) { const p = await productsRes.json(); setProducts(p?.products || p?.records || []) }
+      else if (!online) { const local = await getLocalProducts(); setProducts(local.map((p: any) => ({ id: p.id, name: p.product_name, price: p.unit_price, quantity: p.quantity }))) }
       if (statsRes.ok) setStats(await statsRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)

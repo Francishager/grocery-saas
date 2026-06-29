@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { Users, Plus, Calendar, Clock, DollarSign, Check, X } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalEmployees, getLocalLeaveRequests, getLocalPayroll } from '@/db/hybrid'
 
 interface Employee {
   id: string
@@ -51,6 +53,7 @@ interface PayrollRecord {
 
 export default function HRPage() {
   const { toast } = useToast()
+  const online = useOnlineStatus()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
   const [payroll, setPayroll] = useState<PayrollRecord[]>([])
@@ -75,24 +78,42 @@ export default function HRPage() {
 
   const fetchEmployees = async () => {
     try {
-      const res = await apiFetch('/api/hr')
-      if (res.ok) setEmployees(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/hr')
+        if (res.ok) setEmployees(await res.json())
+      } else {
+        setEmployees(await getLocalEmployees() as any)
+      }
+    } catch (err) {
+      try { setEmployees(await getLocalEmployees() as any) } catch {}
+    }
     finally { setLoading(false) }
   }
 
   const fetchLeaves = async () => {
     try {
-      const res = await apiFetch('/api/hr/leave-requests')
-      if (res.ok) setLeaveRequests(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/hr/leave-requests')
+        if (res.ok) setLeaveRequests(await res.json())
+      } else {
+        setLeaveRequests(await getLocalLeaveRequests() as any)
+      }
+    } catch (err) {
+      try { setLeaveRequests(await getLocalLeaveRequests() as any) } catch {}
+    }
   }
 
   const fetchPayroll = async () => {
     try {
-      const res = await apiFetch('/api/hr/payroll')
-      if (res.ok) setPayroll(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/hr/payroll')
+        if (res.ok) setPayroll(await res.json())
+      } else {
+        setPayroll(await getLocalPayroll() as any)
+      }
+    } catch (err) {
+      try { setPayroll(await getLocalPayroll() as any) } catch {}
+    }
   }
 
   useEffect(() => {

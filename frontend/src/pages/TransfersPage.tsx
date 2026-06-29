@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { ArrowRightLeft, Plus, Package, Check, X, Truck } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalTransfers, getLocalBranches, getLocalProducts } from '@/db/hybrid'
 
 interface StockTransfer {
   id: string
@@ -27,6 +29,7 @@ interface Product { id: string; name: string; sku?: string; quantity: number; br
 
 export default function TransfersPage() {
   const { toast } = useToast()
+  const online = useOnlineStatus()
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -40,32 +43,56 @@ export default function TransfersPage() {
 
   const fetchTransfers = async () => {
     try {
-      const res = await apiFetch('/api/transfers')
-      if (res.ok) setTransfers(await res.json())
-    } catch (err) { /* ignore */ }
+      if (online) {
+        const res = await apiFetch('/api/transfers')
+        if (res.ok) setTransfers(await res.json())
+      } else {
+        const local = await getLocalTransfers()
+        setTransfers(local)
+      }
+    } catch (err) {
+      try { setTransfers(await getLocalTransfers()) } catch {}
+    }
     finally { setLoading(false) }
   }
 
   const fetchBranches = async () => {
     try {
-      const res = await apiFetch('/api/branches')
-      if (res.ok) {
-        const data = await res.json()
-        setBranches(Array.isArray(data) ? data : data.branches || [])
+      if (online) {
+        const res = await apiFetch('/api/branches')
+        if (res.ok) {
+          const data = await res.json()
+          setBranches(Array.isArray(data) ? data : data.branches || [])
+        }
+      } else {
+        const local = await getLocalBranches()
+        setBranches(local)
       }
-    } catch (err) { /* ignore */ }
+    } catch (err) {
+      try { setBranches(await getLocalBranches()) } catch {}
+    }
   }
 
   const fetchProducts = async (branchId?: string) => {
     try {
-      const url = branchId ? `/api/inventory?branchId=${branchId}&limit=200` : '/api/inventory?limit=200'
-      const res = await apiFetch(url)
-      if (res.ok) {
-        const data = await res.json()
-        const prods = Array.isArray(data) ? data : data.products || data.items || []
-        setProducts(prods)
+      if (online) {
+        const url = branchId ? `/api/inventory?branchId=${branchId}&limit=200` : '/api/inventory?limit=200'
+        const res = await apiFetch(url)
+        if (res.ok) {
+          const data = await res.json()
+          const prods = Array.isArray(data) ? data : data.products || data.items || []
+          setProducts(prods)
+        }
+      } else {
+        const local = await getLocalProducts(undefined, branchId)
+        setProducts(local as any)
       }
-    } catch (err) { /* ignore */ }
+    } catch (err) {
+      try {
+        const local = await getLocalProducts(undefined, branchId)
+        setProducts(local as any)
+      } catch {}
+    }
   }
 
   useEffect(() => {

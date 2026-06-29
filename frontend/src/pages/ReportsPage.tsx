@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff
 } from 'lucide-react'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +15,8 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { exportToExcel, exportToPDF, printReport } from '@/lib/exportUtils'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalReportData } from '@/db/hybrid'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -533,6 +535,7 @@ export default function ReportsPage() {
   const [to, setTo] = useState('')
   const { toast } = useToast()
   const { hasPermission } = useJWTAuth()
+  const online = useOnlineStatus()
 
   const visibleCategories = useMemo(() => CATEGORIES.filter(c => hasPermission(c.permission)), [hasPermission])
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
@@ -544,17 +547,32 @@ export default function ReportsPage() {
     setLoading(true)
     setReportData(null)
     try {
-      const params: ReportParams = {}
-      if (from) params.from = from
-      if (to) params.to = to
-      const result = await currentReport.apiFn(params)
-      setReportData(result)
+      if (online) {
+        const params: ReportParams = {}
+        if (from) params.from = from
+        if (to) params.to = to
+        const result = await currentReport.apiFn(params)
+        setReportData(result)
+      } else {
+        // Offline — generate from local IndexedDB data
+        const params: any = {}
+        if (from) params.from = from
+        if (to) params.to = to
+        const result = await getLocalReportData(currentReport.id, params)
+        setReportData(result)
+      }
     } catch (error: any) {
-      toast({ variant: 'destructive', title: 'Failed to load report', description: error.message })
+      // API failed — try offline
+      try {
+        const result = await getLocalReportData(currentReport.id, { from, to })
+        setReportData(result)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load report', description: error.message })
+      }
     } finally {
       setLoading(false)
     }
-  }, [currentReport, from, to, toast])
+  }, [currentReport, from, to, toast, online])
 
   useEffect(() => {
     if (currentReport) {

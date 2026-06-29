@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { Plug, Plus, Check, X, Zap, CreditCard, Smartphone, QrCode } from 'lucide-react'
+import { useOnlineStatus } from '@/db/hooks'
 
 interface IntegrationConfig {
   id: string
@@ -30,6 +31,7 @@ const PROVIDERS = [
 
 export default function IntegrationsPage() {
   const { toast } = useToast()
+  const online = useOnlineStatus()
   const [integrations, setIntegrations] = useState<IntegrationConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -41,8 +43,10 @@ export default function IntegrationsPage() {
 
   const fetchIntegrations = async () => {
     try {
-      const res = await apiFetch('/api/integrations')
-      if (res.ok) setIntegrations(await res.json())
+      if (online) {
+        const res = await apiFetch('/api/integrations')
+        if (res.ok) setIntegrations(await res.json())
+      }
     } catch (err) { /* ignore */ }
     finally { setLoading(false) }
   }

@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalBranches } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { db } from '@/db/index'
 
 interface Branch {
   id: string
@@ -33,6 +37,7 @@ export default function BranchesPage() {
   const [dropdownId, setDropdownId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+  const online = useOnlineStatus()
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -54,16 +59,22 @@ export default function BranchesPage() {
   const loadBranches = async () => {
     setLoading(true)
     try {
-      const res = await apiFetch('/api/branches')
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || data.message || 'Failed to load branches')
-      setBranches(Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : [])
+      if (online) {
+        const res = await apiFetch('/api/branches')
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || data.message || 'Failed to load branches')
+        setBranches(Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : [])
+      } else {
+        const local = await getLocalBranches()
+        setBranches(local)
+      }
     } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Branches unavailable',
-        description: error instanceof Error ? error.message : 'Failed to load branches',
-      })
+      try {
+        const local = await getLocalBranches()
+        setBranches(local)
+      } catch {
+        toast({ variant: 'destructive', title: 'Branches unavailable', description: error instanceof Error ? error.message : 'Failed to load branches' })
+      }
     } finally {
       setLoading(false)
     }
