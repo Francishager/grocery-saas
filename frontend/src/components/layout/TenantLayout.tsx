@@ -1,8 +1,9 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
 import { NotificationBell } from '@/components/NotificationBell'
@@ -176,6 +177,7 @@ export function TenantLayout() {
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
   const { user, logout, hasPermission } = useJWTAuth()
+  const { theme, toggleTheme } = useTheme()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const location = useLocation()
@@ -357,6 +359,14 @@ export function TenantLayout() {
           </div>
           <div className="flex-1" />
           <SyncIndicator />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label="Toggle theme"
+          >
+            {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+          </button>
           <NotificationBell />
           <div className="group relative">
             <button

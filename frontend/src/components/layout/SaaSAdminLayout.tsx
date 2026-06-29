@@ -1,8 +1,9 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
 
@@ -20,11 +21,12 @@ const navItems = [
 export function SaaSAdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { user, logout } = useJWTAuth()
+  const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const handleLogout = () => { logout(); navigate('/saas/login') }
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-background text-foreground">
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
       {/* Full-height vertical sidebar */}
       <aside className={cn(
@@ -59,12 +61,20 @@ export function SaaSAdminLayout() {
       </aside>
       {/* Content area: navbar starts after sidebar, then main content */}
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 lg:px-6">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background px-4 lg:px-6">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden text-white hover:bg-slate-800" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
+            <Button variant="ghost" size="icon" className="lg:hidden text-foreground hover:bg-muted" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
           </div>
           <div className="flex-1" />
           <SyncIndicator />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label="Toggle theme"
+          >
+            {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+          </button>
           <div className="group relative">
             <button
               type="button"
