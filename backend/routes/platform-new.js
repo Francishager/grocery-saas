@@ -254,7 +254,7 @@ router.get('/plans', authenticateToken, requirePlatformAdmin, async (req, res) =
 // Create new plan
 router.post('/plans', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { name, slug, price, currency = 'USD', billingCycle = 'monthly', maxUsers = 5, maxProducts = 100, features = [] } = req.body
+    const { name, slug, price, currency = 'USD', billingCycle = 'monthly', maxUsers = 5, maxProducts = 100, maxBranches = 3, maxCustomers = 100, maxSuppliers = 50, features = [] } = req.body
 
     // Check if slug already exists
     const existingPlan = await prisma.plan.findUnique({
@@ -274,6 +274,9 @@ router.post('/plans', authenticateToken, requirePlatformAdmin, async (req, res) 
         billingCycle,
         maxUsers,
         maxProducts,
+        maxBranches,
+        maxCustomers,
+        maxSuppliers,
         features
       }
     })
@@ -318,7 +321,7 @@ router.post('/plans', authenticateToken, requirePlatformAdmin, async (req, res) 
 router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { id } = req.params
-    const { name, price, currency, billingCycle, maxUsers, maxProducts, features = [] } = req.body
+    const { name, price, currency, billingCycle, maxUsers, maxProducts, maxBranches, maxCustomers, maxSuppliers, features = [] } = req.body
 
     const plan = await prisma.plan.update({
       where: { id },
@@ -329,6 +332,9 @@ router.put('/plans/:id', authenticateToken, requirePlatformAdmin, async (req, re
         billingCycle,
         maxUsers,
         maxProducts,
+        maxBranches,
+        maxCustomers,
+        maxSuppliers,
         features
       }
     })

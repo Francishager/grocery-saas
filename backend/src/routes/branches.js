@@ -1,6 +1,7 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
+import { checkUsageLimit } from "../utils/usageLimits.js";
 
 const router = Router();
 
@@ -137,6 +138,8 @@ router.post(
       const data = cleanBranchPayload(req.body);
       if (!data.name) return res.status(400).json({ error: "Branch name required" });
 
+      await checkUsageLimit(req.tenantId, 'branches');
+
       const branch = await prisma.branch.create({
         data: {
           name: data.name,
@@ -149,6 +152,7 @@ router.post(
 
       res.status(201).json({ message: "Branch created", branch: branchResponse(branch) });
     } catch (err) {
+      if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
       if (err?.code === "P2002") {
         return res.status(409).json({ error: "A branch with this name already exists" });
       }

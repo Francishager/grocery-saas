@@ -13,6 +13,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
 import { db } from '@/db/index'
 
 interface SellingUnit {
@@ -448,6 +449,8 @@ export default function InventoryPage() {
           </Button>
         )}
       </div>
+
+      <UsageLimitBanner resource="products" label="Products" currentCount={items.length} />
 
       {/* Search + Filters */}
       <form onSubmit={handleSearch} className="flex flex-wrap gap-2">

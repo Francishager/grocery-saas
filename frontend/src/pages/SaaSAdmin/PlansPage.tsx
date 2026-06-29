@@ -11,7 +11,7 @@ interface PlanFeatureRow {
 
 interface Plan {
   id: string; name: string; slug: string; price: number; currency: string; billingCycle: string
-  features: string[]; maxUsers: number; maxProducts: number
+  features: string[]; maxUsers: number; maxProducts: number; maxBranches: number; maxCustomers: number; maxSuppliers: number
   isDefault: boolean; _count?: { tenants: number }
   planFeatures?: PlanFeatureRow[]
 }
@@ -205,7 +205,7 @@ const MODULES = [
   },
 ]
 
-const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, isDefault: false }
+const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, maxBranches: 3, maxCustomers: 100, maxSuppliers: 50, isDefault: false }
 
 export const PlansPage: React.FC = () => {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -245,7 +245,7 @@ export const PlansPage: React.FC = () => {
     const enabledFeatureNames = p.planFeatures
       ? p.planFeatures.filter(pf => pf.enabled).map(pf => pf.feature?.name).filter(Boolean)
       : (Array.isArray(p.features) ? p.features : [])
-    setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, features: enabledFeatureNames.join(', '), maxUsers: p.maxUsers, maxProducts: p.maxProducts, isDefault: p.isDefault })
+    setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, features: enabledFeatureNames.join(', '), maxUsers: p.maxUsers, maxProducts: p.maxProducts, maxBranches: p.maxBranches || 3, maxCustomers: p.maxCustomers || 100, maxSuppliers: p.maxSuppliers || 50, isDefault: p.isDefault })
     setShowForm(true)
   }
 
@@ -350,6 +350,9 @@ export const PlansPage: React.FC = () => {
               <div className="flex flex-wrap gap-2">
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxUsers} users</span>
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxProducts} products</span>
+                <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxBranches || 3} branches</span>
+                <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxCustomers || 100} customers</span>
+                <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxSuppliers || 50} suppliers</span>
               </div>
               {(() => {
                 const enabledNames = p.planFeatures
@@ -381,6 +384,9 @@ export const PlansPage: React.FC = () => {
                 <div><label className="block text-sm font-medium mb-1">Billing Cycle</label><select value={form.billingCycle} onChange={e => setForm(p => ({ ...p, billingCycle: e.target.value }))} className="w-full px-3 py-2 border rounded-lg"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
                 <div><label className="block text-sm font-medium mb-1">Max Users</label><input type="number" value={form.maxUsers} onChange={e => setForm(p => ({ ...p, maxUsers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div><label className="block text-sm font-medium mb-1">Max Products</label><input type="number" value={form.maxProducts} onChange={e => setForm(p => ({ ...p, maxProducts: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+                <div><label className="block text-sm font-medium mb-1">Max Branches</label><input type="number" value={form.maxBranches} onChange={e => setForm(p => ({ ...p, maxBranches: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+                <div><label className="block text-sm font-medium mb-1">Max Customers</label><input type="number" value={form.maxCustomers} onChange={e => setForm(p => ({ ...p, maxCustomers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
+                <div><label className="block text-sm font-medium mb-1">Max Suppliers</label><input type="number" value={form.maxSuppliers} onChange={e => setForm(p => ({ ...p, maxSuppliers: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" /></div>
                 <div className="col-span-2">
                   <label className="block text-sm font-medium mb-1">Features</label>
                   <div className="max-h-60 space-y-3 overflow-y-auto rounded-lg border p-3">

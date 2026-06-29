@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { checkUsageLimit } from '../src/utils/usageLimits.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -85,6 +86,8 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
       return res.status(400).json({ error: 'Customer name is required' })
     }
 
+    await checkUsageLimit(scope.tenantId, 'customers')
+
     // Check if customer already exists
     if (phone?.trim()) {
       const existingCustomer = await prisma.customer.findFirst({
@@ -115,6 +118,7 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
 
     res.status(201).json(customer)
   } catch (error) {
+    if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
     console.error('Create customer error:', error)
     handleBranchError(res, error, 'Failed to create customer')
   }

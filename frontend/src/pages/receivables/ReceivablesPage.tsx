@@ -13,6 +13,7 @@ import { formatCurrency } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
 import { 
   Users, 
   Building2, 
@@ -507,6 +508,8 @@ export default function ReceivablesPage() {
           </Button>
         </div>
       </div>
+
+      <UsageLimitBanner resource="customers" label="Customers" currentCount={customers.length} />
 
       {/* Summary Cards */}
       {summary && (

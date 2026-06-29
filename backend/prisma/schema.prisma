@@ -231,6 +231,9 @@ model Plan {
   features     Json // Array of feature strings
   maxUsers     Int      @default(5)
   maxProducts  Int      @default(100)
+  maxBranches  Int      @default(3)
+  maxCustomers Int      @default(100)
+  maxSuppliers Int      @default(50)
   isDefault    Boolean  @default(false)
   tenants      Tenant[]
   planFeatures PlanFeature[]

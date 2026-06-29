@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
 
 const staffRoles: Array<{ value: StaffPayload['role']; label: string }> = [
   { value: 'attendant', label: 'Attendant' },
@@ -195,6 +196,8 @@ export default function StaffPage() {
           Refresh
         </Button>
       </div>
+
+      <UsageLimitBanner resource="users" label="Staff" currentCount={staff.length} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg border bg-card p-4">

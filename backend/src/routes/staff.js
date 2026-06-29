@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
+import { checkUsageLimit } from "../utils/usageLimits.js";
 import { ALL_PERMISSION_KEYS as PERM_KEYS, ROLE_DEFAULTS } from "../utils/permissions.js";
 
 const router = Router();
@@ -101,6 +102,8 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
     if (!branchId) return res.status(400).json({ error: "Branch is required" });
 
     await requireTenantBranch(tenantId, branchId);
+
+    await checkUsageLimit(tenantId, 'users');
 
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) return res.status(409).json({ error: "User already exists" });

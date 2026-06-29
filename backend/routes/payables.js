@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { checkUsageLimit } from '../src/utils/usageLimits.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -85,6 +86,8 @@ router.post('/suppliers', authenticateToken, requirePermission('canCreatePayable
       return res.status(400).json({ error: 'Supplier name is required' })
     }
 
+    await checkUsageLimit(scope.tenantId, 'suppliers')
+
     // Check if supplier already exists
     if (phone?.trim()) {
       const existingSupplier = await prisma.supplier.findFirst({
@@ -114,6 +117,7 @@ router.post('/suppliers', authenticateToken, requirePermission('canCreatePayable
 
     res.status(201).json(supplier)
   } catch (error) {
+    if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
     console.error('Create supplier error:', error)
     handleBranchError(res, error, 'Failed to create supplier')
   }

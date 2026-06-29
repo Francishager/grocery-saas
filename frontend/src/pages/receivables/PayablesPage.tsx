@@ -13,6 +13,7 @@ import { formatCurrency } from '@/lib/utils'
 import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalSuppliers, getLocalPurchases, getLocalPayablePayments, getLocalProducts } from '@/db/hybrid'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
 import { 
   Building2, 
   FileText, 
@@ -495,6 +496,8 @@ export default function PayablesPage() {
           </Button>
         </div>
       </div>
+
+      <UsageLimitBanner resource="suppliers" label="Suppliers" currentCount={suppliers.length} />
 
       {/* Summary Cards */}
       {summary && (

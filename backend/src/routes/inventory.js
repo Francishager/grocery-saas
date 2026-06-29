@@ -7,6 +7,7 @@ import {
   scopedWhere,
   tenantIdFromUser,
 } from "../utils/branchAccess.js";
+import { checkUsageLimit } from "../utils/usageLimits.js";
 
 const router = Router();
 
@@ -433,12 +434,15 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
       if (!category) return res.status(400).json({ error: "Category not found" });
     }
 
+    await checkUsageLimit(scope.tenantId, 'products');
+
     const product = await prisma.product.create({
       data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
       include: { category: true, branch: true, units: true },
     });
     res.status(201).json({ message: "Product created", product });
   } catch (err) {
+    if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
     console.error("Create product error:", err);
     if (err?.code === "P2002") return res.status(409).json({ error: "SKU or barcode already exists in this branch" });
     handleBranchError(res, err);
