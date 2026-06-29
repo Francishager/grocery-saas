@@ -171,18 +171,36 @@ router.get("/:id/limits", authenticateToken, async (req, res) => {
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      include: { plan: true },
+      include: { plan: true, usageLimit: true },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
-    // Return limits based on plan or default values
-    const limits = tenant.plan?.limits || {
-      maxUsers: 5,
-      maxProducts: 1000,
-      maxBranches: 3,
-      maxSalesPerMonth: 1000,
+    // Get actual counts
+    const [branchCount, userCount, productCount, customerCount, supplierCount] = await Promise.all([
+      prisma.branch.count({ where: { tenantId } }),
+      prisma.user.count({ where: { tenantId, isActive: true } }),
+      prisma.product.count({ where: { tenantId } }),
+      prisma.customer.count({ where: { tenantId } }),
+      prisma.supplier.count({ where: { tenantId } }),
+    ]);
+
+    const limits = {
+      maxUsers: tenant.usageLimit?.maxUsers || tenant.plan?.maxUsers || 5,
+      maxProducts: tenant.usageLimit?.maxProducts || tenant.plan?.maxProducts || 1000,
+      maxBranches: tenant.usageLimit?.maxBranches || 3,
+      maxCustomers: tenant.usageLimit?.maxCustomers || 100,
+      maxSuppliers: tenant.usageLimit?.maxSuppliers || 50,
     };
-    res.json({ limits });
+
+    const usage = {
+      users: { count: userCount, limit: limits.maxUsers, percentage: Math.round((userCount / limits.maxUsers) * 100) },
+      products: { count: productCount, limit: limits.maxProducts, percentage: Math.round((productCount / limits.maxProducts) * 100) },
+      branches: { count: branchCount, limit: limits.maxBranches, percentage: Math.round((branchCount / limits.maxBranches) * 100) },
+      customers: { count: customerCount, limit: limits.maxCustomers, percentage: Math.round((customerCount / limits.maxCustomers) * 100) },
+      suppliers: { count: supplierCount, limit: limits.maxSuppliers, percentage: Math.round((supplierCount / limits.maxSuppliers) * 100) },
+    };
+
+    res.json({ limits, usage });
   } catch (err) {
     console.error("Get tenant limits error:", err);
     res.status(500).json({ error: "Internal server error" });

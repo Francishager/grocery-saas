@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { Building2, Edit3, Loader2, Plus, RefreshCw, Trash2, X, MoreVertical, Ban } from 'lucide-react'
+import { Building2, Edit3, Loader2, Plus, RefreshCw, Trash2, X, MoreVertical, Ban, AlertTriangle } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,6 +35,8 @@ export default function BranchesPage() {
   const [saving, setSaving] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [dropdownId, setDropdownId] = useState<string | null>(null)
+  const [branchLimit, setBranchLimit] = useState<number | null>(null)
+  const [branchUsagePct, setBranchUsagePct] = useState(0)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -64,6 +66,19 @@ export default function BranchesPage() {
         const data = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(data.error || data.message || 'Failed to load branches')
         setBranches(Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : [])
+        // Fetch usage limits
+        const limitsRes = await apiFetch('/api/tenants/me/limits')
+        if (limitsRes.ok) {
+          const limitsData = await limitsRes.json().catch(() => ({}))
+          if (limitsData.usage?.branches) {
+            setBranchLimit(limitsData.usage.branches.limit)
+            setBranchUsagePct(limitsData.usage.branches.percentage)
+          } else if (limitsData.limits?.maxBranches) {
+            setBranchLimit(limitsData.limits.maxBranches)
+            const count = Array.isArray(data?.branches) ? data.branches.length : Array.isArray(data) ? data.length : 0
+            setBranchUsagePct(Math.round((count / limitsData.limits.maxBranches) * 100))
+          }
+        }
       } else {
         const local = await getLocalBranches()
         setBranches(local)
@@ -92,6 +107,16 @@ export default function BranchesPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!form.name.trim()) return
+
+    // Check branch limit before creating
+    if (!editingId && branchLimit !== null && branches.length >= branchLimit) {
+      toast({
+        variant: 'destructive',
+        title: 'Branch limit reached',
+        description: `You have reached the maximum of ${branchLimit} branches. Contact your SaaS admin to increase the limit.`,
+      })
+      return
+    }
 
     setSaving(true)
     try {
@@ -203,6 +228,34 @@ export default function BranchesPage() {
           <p className="mt-1 text-2xl font-semibold text-slate-600">{stats.inactive}</p>
         </div>
       </div>
+
+      {branchLimit !== null && (
+        <div className={`rounded-lg border p-4 ${branchUsagePct >= 100 ? 'border-red-200 bg-red-50' : branchUsagePct >= 80 ? 'border-yellow-200 bg-yellow-50' : 'border-blue-200 bg-blue-50'}`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              {branchUsagePct >= 80 && <AlertTriangle className="h-4 w-4 text-yellow-600" />}
+              <span className="text-sm font-medium">
+                Branch Usage: {stats.total} / {branchLimit}
+              </span>
+            </div>
+            <span className={`text-sm font-semibold ${branchUsagePct >= 100 ? 'text-red-700' : branchUsagePct >= 80 ? 'text-yellow-700' : 'text-blue-700'}`}>
+              {branchUsagePct}%
+            </span>
+          </div>
+          <div className="h-2 bg-white rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all ${branchUsagePct >= 100 ? 'bg-red-500' : branchUsagePct >= 80 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+              style={{ width: `${Math.min(branchUsagePct, 100)}%` }}
+            />
+          </div>
+          {branchUsagePct >= 100 && (
+            <p className="mt-2 text-xs text-red-700">Branch limit reached. Contact your SaaS admin to increase the limit.</p>
+          )}
+          {branchUsagePct >= 80 && branchUsagePct < 100 && (
+            <p className="mt-2 text-xs text-yellow-700">Approaching branch limit. You can create {branchLimit - stats.total} more branch(es).</p>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-4">
         <div className="mb-4 flex items-center justify-between">
