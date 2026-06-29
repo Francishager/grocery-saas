@@ -55,16 +55,6 @@ export function SaaSAdminLayout() {
               </NavLink>
             ))}
           </nav>
-          <div className="border-t border-slate-800 p-4">
-            <div className="mb-3 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600/20 text-blue-400">{user?.name?.[0]?.toUpperCase() || 'A'}</div>
-              <div className="flex-1 overflow-hidden">
-                <p className="truncate text-sm font-medium text-white">{user?.name || 'Admin'}</p>
-                <p className="truncate text-xs text-slate-400">Platform Admin</p>
-              </div>
-            </div>
-            <Button variant="ghost" size="sm" className="w-full justify-start text-slate-400 hover:text-white hover:bg-slate-800" onClick={handleLogout}><LogOut className="mr-2 h-4 w-4" />Logout</Button>
-          </div>
         </div>
       </aside>
       {/* Content area: navbar starts after sidebar, then main content */}
@@ -75,6 +65,33 @@ export function SaaSAdminLayout() {
           </div>
           <div className="flex-1" />
           <SyncIndicator />
+          <div className="group relative">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white shadow-sm ring-offset-background transition hover:ring-2 hover:ring-blue-400 hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 overflow-hidden"
+              aria-label="Admin profile"
+            >
+              {user?.name?.[0]?.toUpperCase() || 'A'}
+            </button>
+            <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+              <div className="mb-3 border-b border-slate-700 pb-3 flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 font-bold">
+                  {user?.name?.[0]?.toUpperCase() || 'A'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-sm font-semibold">{user?.name || 'Admin'}</p>
+                  <p className="truncate text-xs text-slate-400">{user?.email || ''}</p>
+                  <p className="text-xs text-slate-400">Platform Admin</p>
+                </div>
+              </div>
+              <div className="border-t border-slate-700 pt-2">
+                <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800" onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Logout
+                </Button>
+              </div>
+            </div>
+          </div>
         </header>
         <main className="p-4 lg:p-6"><Outlet /></main>
       </div>
