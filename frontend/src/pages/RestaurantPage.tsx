@@ -71,7 +71,7 @@ export default function RestaurantPage() {
       ])
       if (tablesRes.ok) setTables(await tablesRes.json())
       if (waitersRes.ok) setWaiters(await waitersRes.json())
-      if (productsRes.ok) { const p = await productsRes.json(); setProducts(p?.records || p || []) }
+      if (productsRes.ok) { const p = await productsRes.json(); setProducts(p?.products || p?.records || []) }
       if (statsRes.ok) setStats(await statsRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)
