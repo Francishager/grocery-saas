@@ -66,7 +66,7 @@ export default function RestaurantPage() {
       const [tablesRes, waitersRes, productsRes, statsRes] = await Promise.all([
         apiFetch('/api/restaurant/tables'),
         apiFetch('/api/restaurant/waiters'),
-        apiFetch('/api/products?limit=100'),
+        apiFetch('/api/inventory?limit=100'),
         apiFetch('/api/restaurant/dashboard'),
       ])
       if (tablesRes.ok) setTables(await tablesRes.json())
