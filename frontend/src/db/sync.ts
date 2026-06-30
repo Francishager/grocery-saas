@@ -73,7 +73,9 @@ export async function pullAll(): Promise<void> {
 
   total += await pullTable('/api/receivables/customers?limit=500', 'customers', (c: any) => ({
     id: c.id, name: c.name, phone: c.phone, email: c.email,
-    balance: c.balance, branchId: c.branchId,
+    balance: c.balance ?? 0, branchId: c.branchId,
+    status: c.status || 'active', creditLimit: c.creditLimit ?? 0,
+    trustScore: c.trustScore ?? 0, address: c.address, notes: c.notes,
     updatedAt: c.updatedAt || new Date().toISOString(),
   }))
 
@@ -106,6 +108,16 @@ export async function pullAll(): Promise<void> {
     total: p.total ?? 0, amountPaid: p.amountPaid ?? 0, balance: p.balance ?? 0,
     paymentStatus: p.paymentStatus, dueDate: p.dueDate, notes: p.notes,
     items: p.items,
+    createdAt: p.createdAt, updatedAt: p.updatedAt || p.createdAt,
+  }))
+
+  total += await pullTable('/api/payables/payments?limit=500', 'payments', (p: any) => ({
+    id: p.id, amount: p.amount ?? 0, paymentMethod: p.paymentMethod,
+    reference: p.reference, notes: p.notes,
+    supplierId: p.supplier?.id || p.supplierId,
+    supplier: p.supplier,
+    customer: p.customer,
+    sale: p.sale,
     createdAt: p.createdAt, updatedAt: p.updatedAt || p.createdAt,
   }))
 

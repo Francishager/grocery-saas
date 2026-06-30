@@ -43,6 +43,11 @@ export interface LocalCustomer {
   email?: string
   balance?: number
   branchId?: string
+  status?: string
+  creditLimit?: number
+  trustScore?: number
+  address?: string
+  notes?: string
   updatedAt: string
 }
 
@@ -116,6 +121,10 @@ export interface LocalPayment {
   paymentMethod: string
   reference?: string
   notes?: string
+  supplierId?: string
+  supplier?: { id: string; name: string; phone?: string }
+  customer?: { id: string; name: string; phone?: string }
+  sale?: { id: string; receiptNo: string }
   createdAt: string
   updatedAt: string
 }

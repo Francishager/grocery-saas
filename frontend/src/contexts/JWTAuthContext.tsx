@@ -255,7 +255,12 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       })
 
       if (!response.ok) {
-        throw new Error('Token refresh failed')
+        // 401/403 means the refresh token is actually invalid/expired — logout
+        if (response.status === 401 || response.status === 403) {
+          logout()
+        }
+        // Other status codes (5xx, etc.) — server issue, keep cached session
+        return
       }
 
       const data = await response.json()
@@ -263,13 +268,9 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       persistAuth(user, data)
       onTokenRefresh?.(data)
     } catch {
-      // If refresh fails due to being offline, keep cached credentials for offline access
-      if (!navigator.onLine) {
-        console.log('[auth] Token refresh failed while offline — keeping cached session')
-        return
-      }
-      // If refresh fails while online, logout
-      logout()
+      // Network error (offline, DNS failure, timeout, etc.) — keep cached session
+      // The user can still use the app offline with their existing token
+      console.log('[auth] Token refresh failed (network error) — keeping cached session for offline access')
     }
   }, [apiEndpoint, tokens, user, logout, onTokenRefresh])
 

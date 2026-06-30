@@ -652,11 +652,11 @@ export default function ReceivablesPage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      {getStatusBadge(customer.status)}
+                      {getStatusBadge(customer.status || 'active')}
                       <div className="mt-2">
                         <p className="text-sm text-muted-foreground">Trust Score</p>
-                        <p className={`font-bold ${getTrustScoreColor(customer.trustScore)}`}>
-                          {customer.trustScore}/100
+                        <p className={`font-bold ${getTrustScoreColor(customer.trustScore || 0)}`}>
+                          {customer.trustScore || 0}/100
                         </p>
                       </div>
                     </div>
@@ -665,22 +665,22 @@ export default function ReceivablesPage() {
                   <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Credit Limit</p>
-                      <p className="font-semibold">{customer.creditLimit.toFixed(2)}</p>
+                      <p className="font-semibold">{Number(customer.creditLimit || 0).toFixed(2)}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Balance</p>
-                      <p className="font-semibold text-red-600">{customer.balance.toFixed(2)}</p>
+                      <p className="font-semibold text-red-600">{Number(customer.balance || 0).toFixed(2)}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Available</p>
                       <p className="font-semibold text-green-600">
-                        {(customer.creditLimit - customer.balance).toFixed(2)}
+                        {(Number(customer.creditLimit || 0) - Number(customer.balance || 0)).toFixed(2)}
                       </p>
                     </div>
                   </div>
                   
                   <div className="mt-4 flex gap-2">
-                    {customer.balance > 0 && (
+                    {Number(customer.balance || 0) > 0 && (
                       <Button 
                         size="sm"
                         onClick={() => {
@@ -1037,7 +1037,7 @@ export default function ReceivablesPage() {
                   <p className="text-sm text-muted-foreground">Sale: {selectedSale.receiptNo}</p>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  Balance: {Number(selectedSale?.balance ?? selectedCustomer.balance).toFixed(2)}
+                  Balance: {Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0).toFixed(2)}
                 </p>
               </div>
               
@@ -1050,7 +1050,7 @@ export default function ReceivablesPage() {
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
-                  max={Number(selectedSale?.balance ?? selectedCustomer.balance)}
+                  max={Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0)}
                 />
               </div>
               
@@ -1164,17 +1164,17 @@ export default function ReceivablesPage() {
 
             {selectedCustomerDetail && (
               <div>
-                <DetailRow label="Status" value={getStatusBadge(selectedCustomerDetail.status)} />
+                <DetailRow label="Status" value={getStatusBadge(selectedCustomerDetail.status || 'active')} />
                 <DetailRow label="Phone" value={selectedCustomerDetail.phone} />
                 <DetailRow label="Email" value={selectedCustomerDetail.email} />
                 <DetailRow label="Address" value={selectedCustomerDetail.address} />
-                <DetailRow label="Credit Limit" value={formatCurrency(selectedCustomerDetail.creditLimit)} />
-                <DetailRow label="Balance" value={formatCurrency(selectedCustomerDetail.balance)} />
+                <DetailRow label="Credit Limit" value={formatCurrency(selectedCustomerDetail.creditLimit || 0)} />
+                <DetailRow label="Balance" value={formatCurrency(selectedCustomerDetail.balance || 0)} />
                 <DetailRow
                   label="Available Credit"
-                  value={formatCurrency(selectedCustomerDetail.creditLimit - selectedCustomerDetail.balance)}
+                  value={formatCurrency(Number(selectedCustomerDetail.creditLimit || 0) - Number(selectedCustomerDetail.balance || 0))}
                 />
-                <DetailRow label="Trust Score" value={`${selectedCustomerDetail.trustScore}/100`} />
+                <DetailRow label="Trust Score" value={`${selectedCustomerDetail.trustScore || 0}/100`} />
                 <DetailRow label="Notes" value={selectedCustomerDetail.notes} />
               </div>
             )}
