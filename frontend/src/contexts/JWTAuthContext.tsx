@@ -136,14 +136,24 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
   const isAuthenticated = !!user && !!tokens
 
+  const offlineCacheKey = 'offline_auth_cache'
+
   const persistAuth = (newUser: User | null, newTokens: AuthTokens | null) => {
     if (typeof window !== 'undefined') {
       if (newUser && newTokens) {
         localStorage.setItem(userStorageKey, JSON.stringify(newUser))
         localStorage.setItem(tokenStorageKey, JSON.stringify(newTokens))
+        // Also persist to offline cache — survives logout so user can log in offline later
+        localStorage.setItem(offlineCacheKey, JSON.stringify({
+          email: newUser.email,
+          user: newUser,
+          tokens: newTokens,
+          savedAt: new Date().toISOString(),
+        }))
       } else {
         localStorage.removeItem(userStorageKey)
         localStorage.removeItem(tokenStorageKey)
+        // NOTE: do NOT remove offlineCacheKey here — it persists for offline login
       }
     }
   }
@@ -160,7 +170,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       })
 
       if (!response.ok) {
-        const data = await response.json()
+        const data = await response.json().catch(() => ({}))
         throw new Error(data.message || 'Login failed')
       }
 
@@ -182,18 +192,54 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       return { user: userData, tokens: tokenData }
     } catch (err) {
       // Network error — try offline login with cached credentials
-      if (err instanceof TypeError && err.message.includes('fetch')) {
+      // Covers: Chrome "Failed to fetch", Firefox "NetworkError", Safari "Load failed"
+      const isNetworkError =
+        err instanceof TypeError ||
+        (err instanceof Error && /fetch|network|load|connect|offline/i.test(err.message)) ||
+        !navigator.onLine
+
+      if (isNetworkError) {
+        // Check offline cache first (survives logout), then fall back to active session keys
+        const offlineCacheStr = localStorage.getItem(offlineCacheKey)
         const cachedUserStr = localStorage.getItem(userStorageKey)
         const cachedTokensStr = localStorage.getItem(tokenStorageKey)
-        if (cachedUserStr && cachedTokensStr) {
+        console.log('[auth] Network error during login. Checking cached credentials...', {
+          hasOfflineCache: !!offlineCacheStr,
+          hasCachedUser: !!cachedUserStr,
+          hasCachedTokens: !!cachedTokensStr,
+          inputEmail: email,
+        })
+
+        // Try offline cache (persists even after logout)
+        if (offlineCacheStr) {
           try {
-            const cachedUser = JSON.parse(cachedUserStr)
-            const cachedTokens = JSON.parse(cachedTokensStr)
-            if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+            const cache = JSON.parse(offlineCacheStr)
+            const cachedUser = cache.user
+            const cachedTokens = cache.tokens
+            console.log('[auth] Offline cache user:', { email: cachedUser?.email, name: cachedUser?.name })
+            if (cachedUser?.email?.toLowerCase() === email.toLowerCase()) {
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
               console.log('[auth] Offline login — restored cached session for', email)
+              return { user: cachedUser, tokens: cachedTokens }
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+
+        // Fall back to active session keys (in case logout didn't clear them)
+        if (cachedUserStr && cachedTokensStr) {
+          try {
+            const cachedUser = JSON.parse(cachedUserStr)
+            const cachedTokens = JSON.parse(cachedTokensStr)
+            console.log('[auth] Active session user:', { email: cachedUser.email, name: cachedUser.name })
+            if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+              setUser(cachedUser)
+              setTokens(cachedTokens)
+              persistAuth(cachedUser, cachedTokens)
+              console.log('[auth] Offline login — restored active session for', email)
               return { user: cachedUser, tokens: cachedTokens }
             }
           } catch {
