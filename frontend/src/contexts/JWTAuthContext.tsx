@@ -181,12 +181,33 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       onLogin?.(userData, tokenData)
       return { user: userData, tokens: tokenData }
     } catch (err) {
+      // Network error — try offline login with cached credentials
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        const cachedUserStr = localStorage.getItem(userStorageKey)
+        const cachedTokensStr = localStorage.getItem(tokenStorageKey)
+        if (cachedUserStr && cachedTokensStr) {
+          try {
+            const cachedUser = JSON.parse(cachedUserStr)
+            const cachedTokens = JSON.parse(cachedTokensStr)
+            if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+              setUser(cachedUser)
+              setTokens(cachedTokens)
+              persistAuth(cachedUser, cachedTokens)
+              console.log('[auth] Offline login — restored cached session for', email)
+              return { user: cachedUser, tokens: cachedTokens }
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+        throw new Error('You are offline. Login with a previously used account to continue.')
+      }
       setError(err instanceof Error ? err.message : 'Login failed')
       throw err
     } finally {
       setLoading(false)
     }
-  }, [apiEndpoint, onLogin])
+  }, [apiEndpoint, onLogin, tokenStorageKey, userStorageKey])
 
   const logout = useCallback(async () => {
     setLoading(true)
