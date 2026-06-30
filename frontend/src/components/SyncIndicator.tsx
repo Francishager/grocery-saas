@@ -14,10 +14,10 @@ export function SyncIndicator() {
     <div className="flex items-center gap-2 text-xs">
       {/* Online/Offline badge */}
       <div className={`flex items-center gap-1.5 rounded-full px-2 py-1 font-medium ${
-        isOffline ? 'bg-orange-500/10 text-orange-600' : 'bg-green-500/10 text-green-600'
+        isOffline ? 'bg-orange-500/15 text-orange-600' : 'bg-green-500/10 text-green-600'
       }`}>
-        {isOffline ? <WifiOff className="h-3.5 w-3.5" /> : <Wifi className="h-3.5 w-3.5" />}
-        <span className="hidden sm:inline">{isOffline ? 'Offline' : 'Online'}</span>
+        {isOffline ? <WifiOff className="h-4 w-4" /> : <Wifi className="h-4 w-4" />}
+        <span>{isOffline ? 'Offline' : 'Online'}</span>
       </div>
 
       {/* Sync status */}

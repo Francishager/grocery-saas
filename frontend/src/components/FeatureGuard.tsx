@@ -4,6 +4,7 @@ import { Lock, ArrowUpRight, MessageSquare, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { useOnlineStatus } from '@/db/hooks'
 
 interface FeatureGuardProps {
   feature: string
@@ -14,9 +15,16 @@ interface FeatureGuardProps {
 /**
  * Wraps a page or component and only renders children if the feature is enabled.
  * Otherwise shows an UpgradePlan UI.
+ * When offline and no feature data is cached, allows access (graceful degradation).
  */
 export function FeatureGuard({ feature, children, fallback }: FeatureGuardProps) {
   const { hasFeature, loading, features } = useFeatureAccess()
+  const online = useOnlineStatus()
+
+  // When offline with no cached features, allow access rather than blocking
+  if (!online && Object.keys(features).length === 0) {
+    return <>{children}</>
+  }
 
   // Only show loading on first load when we have no cached features yet
   if (loading && Object.keys(features).length === 0) {

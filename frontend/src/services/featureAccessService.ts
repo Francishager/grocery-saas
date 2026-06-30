@@ -67,6 +67,21 @@ class FeatureAccessService {
     // Prevent concurrent loads — if already loading, skip
     if (this.loading) return
 
+    // If offline, try to restore cached features from localStorage
+    if (!navigator.onLine) {
+      const cached = localStorage.getItem('cachedFeatures')
+      if (cached) {
+        try {
+          this.features = JSON.parse(cached)
+          const cachedLimits = localStorage.getItem('cachedUsageLimits')
+          if (cachedLimits) this.usageLimits = JSON.parse(cachedLimits)
+        } catch {}
+      }
+      this.loading = false
+      this.notifyListeners()
+      return
+    }
+
     this.loading = true
     this.error = null
     this.notifyListeners()
@@ -80,12 +95,20 @@ class FeatureAccessService {
 
       const data = await response.json()
       this.features = this.normalizeFeatures(data.features || {})
+
+      // Cache features in localStorage for offline access
+      localStorage.setItem('cachedFeatures', JSON.stringify(this.features))
       
       // Load usage limits
       await this.loadUsageLimits(tenantId)
       
     } catch (error) {
       console.error('Failed to load features:', error)
+      // On network failure, try cached features as fallback
+      const cached = localStorage.getItem('cachedFeatures')
+      if (cached) {
+        try { this.features = JSON.parse(cached) } catch {}
+      }
       this.error = error instanceof Error ? error.message : 'Failed to load features'
     } finally {
       this.loading = false
@@ -121,9 +144,18 @@ class FeatureAccessService {
       if (response.ok) {
         const data = await response.json()
         this.usageLimits = data.usageLimit
+        // Cache for offline use
+        if (this.usageLimits) {
+          localStorage.setItem('cachedUsageLimits', JSON.stringify(this.usageLimits))
+        }
       }
     } catch (error) {
       console.error('Failed to load usage limits:', error)
+      // Try cached limits
+      const cached = localStorage.getItem('cachedUsageLimits')
+      if (cached) {
+        try { this.usageLimits = JSON.parse(cached) } catch {}
+      }
     }
   }
 

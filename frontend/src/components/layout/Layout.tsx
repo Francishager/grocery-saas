@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
+import { SyncIndicator } from '@/components/SyncIndicator'
 
 const businessNavItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'manager', 'accountant', 'attendant'], feature: 'pos' },
@@ -114,6 +115,7 @@ export function Layout() {
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex-1" />
+          <SyncIndicator />
           <div className="flex items-center gap-4">
             {user?.business_name && (
               <span className="hidden text-sm text-muted-foreground sm:block">{user.business_name}</span>
