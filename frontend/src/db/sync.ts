@@ -29,7 +29,13 @@ async function pullTable<T extends { id: string; updatedAt?: string }>(
 ): Promise<number> {
   try {
     const res = await apiFetch(endpoint)
-    if (!res.ok) return 0
+    if (!res.ok) {
+      // 403/404 = no permission or not found — expected, skip silently
+      if (res.status !== 403 && res.status !== 404) {
+        console.warn(`[sync] ${String(table)}: HTTP ${res.status}`)
+      }
+      return 0
+    }
     const json = await res.json()
     const arr = Array.isArray(json) ? json
       : (json?.products || json?.sales || json?.customers || json?.categories ||
@@ -44,7 +50,10 @@ async function pullTable<T extends { id: string; updatedAt?: string }>(
     await (db[table] as any).bulkPut(records)
     return records.length
   } catch (e) {
-    // Silent fail — 403/404 just means no access to this table
+    // Network error (offline, DNS, timeout) — log table name only, no URL
+    if (navigator.onLine) {
+      console.warn(`[sync] ${String(table)}: network error`)
+    }
     return 0
   }
 }
@@ -217,10 +226,8 @@ export async function pullAll(): Promise<void> {
       }
     }
   } catch (e) {
-    // Silent fail
+    if (navigator.onLine) console.warn('[sync] staff: network error')
   }
-
-  // Settings
   try {
     const res = await apiFetch('/api/settings')
     if (res.ok) {
@@ -229,7 +236,7 @@ export async function pullAll(): Promise<void> {
       total += 1
     }
   } catch (e) {
-    // Silent fail
+    if (navigator.onLine) console.warn('[sync] settings: network error')
   }
 
   await db.syncMeta.put({ key: 'lastPull', value: new Date().toISOString() })
@@ -274,7 +281,9 @@ export async function pushQueue(): Promise<void> {
     }
   }
 
-  // Silent
+  if (success < items.length) {
+    console.warn(`[sync] push: ${success}/${items.length} succeeded`)
+  }
   setStatus(navigator.onLine ? 'idle' : 'offline')
 }
 
