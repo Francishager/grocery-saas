@@ -411,7 +411,7 @@ export function TenantLayout() {
             </div>
           </div>
         </header>
-        <main className="p-4 lg:p-6"><Outlet /></main>
+        <main className="overflow-x-hidden p-4 lg:p-6"><Outlet /></main>
       </div>
     </div>
   )

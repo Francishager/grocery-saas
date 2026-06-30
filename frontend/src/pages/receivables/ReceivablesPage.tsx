@@ -492,12 +492,12 @@ export default function ReceivablesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Receivables Management</h1>
           <p className="text-muted-foreground">Manage customer credit and outstanding payments</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => setShowCustomerModal(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Add Customer
@@ -582,8 +582,8 @@ export default function ReceivablesPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-4 py-4">
-        <div className="flex items-center gap-2 flex-1">
+      <div className="flex flex-wrap items-center gap-4 py-4">
+        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search customers..."
