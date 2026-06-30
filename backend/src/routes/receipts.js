@@ -51,6 +51,8 @@ function receiptJson(data) {
       taxEnabled: tenant?.taxEnabled || false,
       taxRate: tenant?.taxRate || 0,
       taxId: tenant?.taxId || null,
+      receiptHeader: tenant?.receiptHeader || null,
+      receiptFooter: tenant?.receiptFooter || null,
     },
     branch: sale.branch || null,
     cashier,

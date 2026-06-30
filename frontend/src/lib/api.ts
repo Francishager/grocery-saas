@@ -889,6 +889,8 @@ export interface ReceiptPreview {
     phone?: string | null
     address?: string | null
     logo?: string | null
+    receiptHeader?: string | null
+    receiptFooter?: string | null
   }
   branch?: BranchOption | null
   cashier?: string
