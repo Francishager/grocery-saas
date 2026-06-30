@@ -33,7 +33,9 @@ import PayablesPage from '@/pages/receivables/PayablesPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
 import RentalsPage from '@/pages/RentalsPage'
 import ReturnsPage from '@/pages/ReturnsPage'
-import AccountingPage from '@/pages/AccountingPage'
+import AccountingPage from '@/pages/accounting/AccountingPage'
+import TransactionAccountsPage from '@/pages/accounting/TransactionAccountsPage'
+import StaffTillSheetPage from '@/pages/accounting/StaffTillSheetPage'
 import HRPage from '@/pages/HRPage'
 import TransfersPage from '@/pages/TransfersPage'
 import CommunicationPage from '@/pages/CommunicationPage'
@@ -140,6 +142,8 @@ function App() {
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting"><AccountingPage /></FeatureGuard>} />
+          <Route path="accounting/transactions" element={<FeatureGuard feature="accounting"><TransactionAccountsPage /></FeatureGuard>} />
+          <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="hr" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />

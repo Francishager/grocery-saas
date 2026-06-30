@@ -25,9 +25,8 @@ const navItems = [
   { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant' },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
-  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport' },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport', isAccounting: true },
   { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
   { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication', permission: 'canViewCommunication' },
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
@@ -161,6 +160,13 @@ const reportCategories: ReportCategoryDef[] = [
   },
 ]
 
+const accountingSubItems = [
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport' },
+  { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: 'canViewFinancialReport' },
+  { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
+  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: 'canViewFinancialReport' },
+]
+
 const settingsSubItems = [
   { to: '/tenant/settings', label: 'Business Profile', icon: Building2, feature: 'settings', permission: 'canViewSettings' },
   { to: '/tenant/branches', label: 'Branches', icon: GitBranch, feature: 'multi_branch', permission: 'canViewBranch' },
@@ -174,6 +180,7 @@ export function TenantLayout() {
   const [reportsExpanded, setReportsExpanded] = useState(false)
   const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [inventoryExpanded, setInventoryExpanded] = useState(false)
+  const [accountingExpanded, setAccountingExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
@@ -186,20 +193,25 @@ export function TenantLayout() {
 
   const toggleReports = () => {
     setReportsExpanded(prev => !prev)
-    if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false) }
+    if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false) }
   }
   const toggleSettings = () => {
     setSettingsExpanded(prev => !prev)
-    if (!settingsExpanded) { setReportsExpanded(false); setInventoryExpanded(false) }
+    if (!settingsExpanded) { setReportsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false) }
   }
   const toggleInventory = () => {
     setInventoryExpanded(prev => !prev)
-    if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false) }
+    if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setAccountingExpanded(false) }
+  }
+  const toggleAccounting = () => {
+    setAccountingExpanded(prev => !prev)
+    if (!accountingExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false) }
   }
 
   // Auto-expand inventory when on an inventory page
   useEffect(() => {
     if (location.pathname === '/tenant/inventory') setInventoryExpanded(true)
+    if (location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers') setAccountingExpanded(true)
   }, [location.pathname, location.search])
   const visibleNavItems = navItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false
@@ -207,6 +219,11 @@ export function TenantLayout() {
     return true
   })
   const visibleInventorySubItems = inventorySubItems.filter((item) => {
+    if (item.permission && !hasPermission(item.permission)) return false
+    if (item.feature && !canAccessFeature(item.feature)) return false
+    return true
+  })
+  const visibleAccountingSubItems = accountingSubItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false
     if (item.feature && !canAccessFeature(item.feature)) return false
     return true
@@ -261,6 +278,31 @@ export function TenantLayout() {
                   {inventoryExpanded && (
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
                       {visibleInventorySubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => {
+                            const fullPath = location.pathname + location.search
+                            const isExact = fullPath === sub.to
+                            return cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isExact ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')
+                          }}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isAccounting ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleAccounting()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', accountingExpanded || location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {accountingExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {accountingExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleAccountingSubItems.map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
                           className={({ isActive }) => {
                             const fullPath = location.pathname + location.search
