@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { Calculator, Plus, BookOpen, FileText, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield } from 'lucide-react'
@@ -382,7 +382,7 @@ export default function AccountingPage() {
             <Dialog open={showAccountModal} onOpenChange={setShowAccountModal}>
               <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Add Account</Button></DialogTrigger>
               <DialogContent>
-                <DialogHeader><DialogTitle>Create Account</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>Create Account</DialogTitle><DialogDescription>Add a new account to your chart of accounts.</DialogDescription></DialogHeader>
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><Label>Code</Label><Input value={accCode} onChange={(e) => setAccCode(e.target.value)} placeholder="e.g. 1000" /></div>
@@ -783,7 +783,7 @@ export default function AccountingPage() {
             <Dialog open={showTaxModal} onOpenChange={setShowTaxModal}>
               <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Add New Tax Payment</Button></DialogTrigger>
               <DialogContent>
-                <DialogHeader><DialogTitle>Tax Payment</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>Tax Payment</DialogTitle><DialogDescription>Record a new tax payment for this branch.</DialogDescription></DialogHeader>
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>

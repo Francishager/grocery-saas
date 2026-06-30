@@ -44,7 +44,7 @@ async function pullTable<T extends { id: string; updatedAt?: string }>(
     await (db[table] as any).bulkPut(records)
     return records.length
   } catch (e) {
-    console.error(`[sync] pull ${String(table)} failed:`, e)
+    // Silent fail — 403/404 just means no access to this table
     return 0
   }
 }
@@ -217,7 +217,7 @@ export async function pullAll(): Promise<void> {
       }
     }
   } catch (e) {
-    console.error('[sync] pull staff failed:', e)
+    // Silent fail
   }
 
   // Settings
@@ -229,13 +229,13 @@ export async function pullAll(): Promise<void> {
       total += 1
     }
   } catch (e) {
-    console.error('[sync] pull settings failed:', e)
+    // Silent fail
   }
 
   await db.syncMeta.put({ key: 'lastPull', value: new Date().toISOString() })
   // If no records were pulled and we're supposedly online, the server is likely unreachable
   setStatus(total === 0 && navigator.onLine ? 'offline' : (navigator.onLine ? 'idle' : 'offline'))
-  console.log(`[sync] pull complete: ${total} records`)
+  // Silent
 }
 
 // ─── Push: send queued mutations to API ───
@@ -274,7 +274,7 @@ export async function pushQueue(): Promise<void> {
     }
   }
 
-  console.log(`[sync] push complete: ${success}/${items.length} synced`)
+  // Silent
   setStatus(navigator.onLine ? 'idle' : 'offline')
 }
 
@@ -341,7 +341,6 @@ export function initSync(): void {
   initialized = true
 
   window.addEventListener('online', () => {
-    console.log('[sync] back online, syncing...')
     syncAll()
   })
 

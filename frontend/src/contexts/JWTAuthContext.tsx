@@ -203,12 +203,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
         const offlineCacheStr = localStorage.getItem(offlineCacheKey)
         const cachedUserStr = localStorage.getItem(userStorageKey)
         const cachedTokensStr = localStorage.getItem(tokenStorageKey)
-        console.log('[auth] Network error during login. Checking cached credentials...', {
-          hasOfflineCache: !!offlineCacheStr,
-          hasCachedUser: !!cachedUserStr,
-          hasCachedTokens: !!cachedTokensStr,
-          inputEmail: email,
-        })
+        // Silent — checking cached credentials for offline login
 
         // Try offline cache (persists even after logout)
         if (offlineCacheStr) {
@@ -216,12 +211,12 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cache = JSON.parse(offlineCacheStr)
             const cachedUser = cache.user
             const cachedTokens = cache.tokens
-            console.log('[auth] Offline cache user:', { email: cachedUser?.email, name: cachedUser?.name })
+            // Silent
             if (cachedUser?.email?.toLowerCase() === email.toLowerCase()) {
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
-              console.log('[auth] Offline login — restored cached session for', email)
+              // Silent
               return { user: cachedUser, tokens: cachedTokens }
             }
           } catch {
@@ -234,12 +229,12 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           try {
             const cachedUser = JSON.parse(cachedUserStr)
             const cachedTokens = JSON.parse(cachedTokensStr)
-            console.log('[auth] Active session user:', { email: cachedUser.email, name: cachedUser.name })
+            // Silent
             if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
-              console.log('[auth] Offline login — restored active session for', email)
+              // Silent
               return { user: cachedUser, tokens: cachedTokens }
             }
           } catch {
@@ -337,7 +332,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     } catch {
       // Network error (offline, DNS failure, timeout, etc.) — keep cached session
       // The user can still use the app offline with their existing token
-      console.log('[auth] Token refresh failed (network error) — keeping cached session for offline access')
+      // Silent
     }
   }, [apiEndpoint, tokens, user, logout, onTokenRefresh])
 
