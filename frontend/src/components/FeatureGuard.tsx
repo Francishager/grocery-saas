@@ -21,8 +21,8 @@ export function FeatureGuard({ feature, children, fallback }: FeatureGuardProps)
   const { hasFeature, loading, features } = useFeatureAccess()
   const online = useOnlineStatus()
 
-  // When offline with no cached features, allow access rather than blocking
-  if (!online && Object.keys(features).length === 0) {
+  // When offline, allow access to all features — user can run their full business without interruption
+  if (!online) {
     return <>{children}</>
   }
 
@@ -94,7 +94,8 @@ export function UpgradePlan({ feature }: { feature: string }) {
  */
 export function FeatureGate({ feature, children, fallback = null }: { feature: string; children: ReactNode; fallback?: ReactNode }) {
   const { hasFeature } = useFeatureAccess()
-  if (hasFeature(feature)) return <>{children}</>
+  const online = useOnlineStatus()
+  if (!online || hasFeature(feature)) return <>{children}</>
   return <>{fallback}</>
 }
 

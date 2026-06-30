@@ -9,6 +9,8 @@ import {
   type SyncStatus,
 } from './sync'
 
+const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-backend.up.railway.app'
+
 // Live queries — automatically re-render when IndexedDB data changes
 export function useLocalProducts(search?: string) {
   return useLiveQuery(async () => {
@@ -96,18 +98,54 @@ export function useSyncNow() {
   return { syncing, syncNow: trigger }
 }
 
-// Online status
+// Online status — uses navigator.onLine + real ping check
+// navigator.onLine is unreliable on mobile (reports true on WiFi without internet)
 export function useOnlineStatus(): boolean {
   const [online, setOnline] = useState(navigator.onLine)
+
   useEffect(() => {
-    const on = () => setOnline(true)
-    const off = () => setOnline(false)
+    let active = true
+    let pingTimer: ReturnType<typeof setInterval>
+
+    const checkRealConnectivity = async () => {
+      if (!navigator.onLine) {
+        if (active) setOnline(false)
+        return
+      }
+      try {
+        // Quick HEAD request to our own API — if it fails, we're effectively offline
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        const res = await fetch(`${API_URL}/api/health`, {
+          method: 'GET',
+          signal: controller.signal,
+          cache: 'no-store',
+        })
+        clearTimeout(timeout)
+        if (active) setOnline(res.ok)
+      } catch {
+        // If the ping fails (timeout, network error, abort), we're offline
+        if (active) setOnline(false)
+      }
+    }
+
+    const on = () => { if (active) setOnline(true); checkRealConnectivity() }
+    const off = () => { if (active) setOnline(false) }
+
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
+
+    // Initial check + periodic re-check every 30s
+    checkRealConnectivity()
+    pingTimer = setInterval(checkRealConnectivity, 30000)
+
     return () => {
+      active = false
       window.removeEventListener('online', on)
       window.removeEventListener('offline', off)
+      clearInterval(pingTimer)
     }
   }, [])
+
   return online
 }

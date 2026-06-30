@@ -117,6 +117,11 @@ app.get("/", (req, res) => {
   });
 });
 
+// Lightweight health check for connectivity ping (used by frontend offline detection)
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/purchases", purchaseRoutes);

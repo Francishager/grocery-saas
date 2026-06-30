@@ -200,6 +200,9 @@ class FeatureAccessService {
     // SaaS Admin can access everything
     if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
 
+    // When offline, allow access to all features
+    if (!navigator.onLine) return true
+
     // Check if feature is enabled
     if (!this.isFeatureEnabled(featureName)) return false
 

@@ -213,7 +213,8 @@ export async function pullAll(): Promise<void> {
   }
 
   await db.syncMeta.put({ key: 'lastPull', value: new Date().toISOString() })
-  setStatus(navigator.onLine ? 'idle' : 'offline')
+  // If no records were pulled and we're supposedly online, the server is likely unreachable
+  setStatus(total === 0 && navigator.onLine ? 'offline' : (navigator.onLine ? 'idle' : 'offline'))
   console.log(`[sync] pull complete: ${total} records`)
 }
 
