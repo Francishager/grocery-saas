@@ -78,6 +78,7 @@ export interface LocalExpense {
   notes?: string
   date: string
   userId?: string
+  user?: { id: string; fname: string; lname: string }
   updatedAt: string
 }
 
@@ -277,6 +278,8 @@ export interface LocalCashTransaction {
   reference?: string
   description?: string
   accountId?: string
+  account?: { id: string; name: string; type: string }
+  user?: { id: string; fname: string; lname: string }
   createdAt: string
   updatedAt: string
 }

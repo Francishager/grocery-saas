@@ -91,7 +91,7 @@ export async function pullAll(): Promise<void> {
     id: e.id, category: e.category, description: e.description,
     amount: e.amount, paymentMethod: e.paymentMethod, reference: e.reference,
     notes: e.notes, date: e.date, userId: e.userId,
-    updatedAt: e.updatedAt || new Date().toISOString(),
+    user: e.user, updatedAt: e.updatedAt || new Date().toISOString(),
   }))
 
   total += await pullTable('/api/payables/suppliers?limit=500', 'suppliers', (s: any) => ({
@@ -178,6 +178,14 @@ export async function pullAll(): Promise<void> {
     id: a.id, name: a.name, type: a.type, balance: a.balance ?? 0,
     currency: a.currency, isActive: a.isActive,
     updatedAt: a.updatedAt || new Date().toISOString(),
+  }))
+
+  total += await pullTable('/api/expenses/cash-transactions?limit=500', 'cashTransactions', (t: any) => ({
+    id: t.id, amount: t.amount, type: t.type, balanceAfter: t.balanceAfter ?? 0,
+    reference: t.reference, description: t.description,
+    accountId: t.account?.id || t.accountId,
+    account: t.account, user: t.user,
+    createdAt: t.createdAt, updatedAt: t.updatedAt || t.createdAt,
   }))
 
   // Staff — uses staffApi internally, but we pull via the API endpoint

@@ -374,7 +374,7 @@ export default function ExpensesPage() {
                           {expense.category} • {expense.paymentMethod}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          By {expense.user.fname} {expense.user.lname} • {new Date(expense.date).toLocaleDateString()}
+                          By {expense.user?.fname || ''} {expense.user?.lname || ''} • {new Date(expense.date).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
@@ -441,10 +441,10 @@ export default function ExpensesPage() {
                     <div>
                       <h3 className="font-semibold">{transaction.description || 'Cash Transaction'}</h3>
                       <p className="text-sm text-muted-foreground">
-                        {transaction.account?.name} • {transaction.type}
+                        {transaction.account?.name || '—'} • {transaction.type}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        By {transaction.user.fname} {transaction.user.lname} • {new Date(transaction.createdAt).toLocaleDateString()}
+                        By {transaction.user?.fname || ''} {transaction.user?.lname || ''} • {new Date(transaction.createdAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>

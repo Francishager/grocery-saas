@@ -263,7 +263,12 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       persistAuth(user, data)
       onTokenRefresh?.(data)
     } catch {
-      // If refresh fails, logout
+      // If refresh fails due to being offline, keep cached credentials for offline access
+      if (!navigator.onLine) {
+        console.log('[auth] Token refresh failed while offline — keeping cached session')
+        return
+      }
+      // If refresh fails while online, logout
       logout()
     }
   }, [apiEndpoint, tokens, user, logout, onTokenRefresh])

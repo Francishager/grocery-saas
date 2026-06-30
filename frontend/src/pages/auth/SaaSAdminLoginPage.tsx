@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Shield, Loader2, Building } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -12,9 +12,20 @@ export default function SaaSAdminLoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const { login } = useJWTAuth()
+  const { login, isAuthenticated, user } = useJWTAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
+
+  // Redirect already-authenticated users (works offline since tokens are cached)
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (user?.isPlatformUser || user?.role === 'saas_admin') {
+        navigate('/saas/dashboard', { replace: true })
+      } else {
+        navigate('/tenant/dashboard', { replace: true })
+      }
+    }
+  }, [isAuthenticated, user, navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

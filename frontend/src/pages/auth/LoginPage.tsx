@@ -20,9 +20,20 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [currentSlide, setCurrentSlide] = useState(0)
-  const { login } = useJWTAuth()
+  const { login, isAuthenticated, user } = useJWTAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
+
+  // Redirect already-authenticated users (works offline since tokens are cached in localStorage)
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (user?.isPlatformUser || user?.role === 'saas_admin') {
+        navigate('/saas/dashboard', { replace: true })
+      } else {
+        navigate('/tenant/dashboard', { replace: true })
+      }
+    }
+  }, [isAuthenticated, user, navigate])
 
   // Auto-rotate carousel
   useEffect(() => {
