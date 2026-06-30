@@ -22,6 +22,23 @@ function setStatus(s: SyncStatus) {
 
 // ─── Pull: fetch latest from API and bulk-upsert into IndexedDB ───
 
+function getUserRole(): string | null {
+  try {
+    const raw = localStorage.getItem('auth_user')
+    if (!raw) return null
+    const user = JSON.parse(raw)
+    return user?.role || null
+  } catch {
+    return null
+  }
+}
+
+/** Roles that have access to HR endpoints */
+function canSyncHR(): boolean {
+  const role = getUserRole()
+  return role === 'owner' || role === 'admin' || role === 'manager'
+}
+
 async function pullTable<T extends { id: string; updatedAt?: string }>(
   endpoint: string,
   table: keyof typeof db,
@@ -167,28 +184,34 @@ export async function pullAll(): Promise<void> {
     updatedAt: j.updatedAt || new Date().toISOString(),
   }))
 
-  total += await pullTable('/api/hr?limit=500', 'employees', (e: any) => ({
-    id: e.id, firstName: e.firstName, lastName: e.lastName, email: e.email,
-    phone: e.phone, position: e.position, department: e.department,
-    salary: e.salary ?? 0, payFrequency: e.payFrequency, hireDate: e.hireDate,
-    status: e.status, branchId: e.branch?.id,
-    updatedAt: e.updatedAt || new Date().toISOString(),
-  }))
+  if (canSyncHR()) {
+    total += await pullTable('/api/hr?limit=500', 'employees', (e: any) => ({
+      id: e.id, firstName: e.firstName, lastName: e.lastName, email: e.email,
+      phone: e.phone, position: e.position, department: e.department,
+      salary: e.salary ?? 0, payFrequency: e.payFrequency, hireDate: e.hireDate,
+      status: e.status, branchId: e.branch?.id,
+      updatedAt: e.updatedAt || new Date().toISOString(),
+    }))
+  }
 
-  total += await pullTable('/api/hr/leave-requests', 'leaveRequests', (l: any) => ({
-    id: l.id, leaveType: l.leaveType, startDate: l.startDate, endDate: l.endDate,
-    days: l.days, reason: l.reason, status: l.status,
-    employeeId: l.employee?.id,
-    updatedAt: l.updatedAt || new Date().toISOString(),
-  }))
+  if (canSyncHR()) {
+    total += await pullTable('/api/hr/leave-requests', 'leaveRequests', (l: any) => ({
+      id: l.id, leaveType: l.leaveType, startDate: l.startDate, endDate: l.endDate,
+      days: l.days, reason: l.reason, status: l.status,
+      employeeId: l.employee?.id,
+      updatedAt: l.updatedAt || new Date().toISOString(),
+    }))
+  }
 
-  total += await pullTable('/api/hr/payroll', 'payroll', (p: any) => ({
-    id: p.id, period: p.period, grossSalary: p.grossSalary ?? 0,
-    deductions: p.deductions ?? 0, netSalary: p.netSalary ?? 0,
-    bonus: p.bonus ?? 0, status: p.status, paidAt: p.paidAt,
-    employeeId: p.employee?.id,
-    updatedAt: p.updatedAt || new Date().toISOString(),
-  }))
+  if (canSyncHR()) {
+    total += await pullTable('/api/hr/payroll', 'payroll', (p: any) => ({
+      id: p.id, period: p.period, grossSalary: p.grossSalary ?? 0,
+      deductions: p.deductions ?? 0, netSalary: p.netSalary ?? 0,
+      bonus: p.bonus ?? 0, status: p.status, paidAt: p.paidAt,
+      employeeId: p.employee?.id,
+      updatedAt: p.updatedAt || new Date().toISOString(),
+    }))
+  }
 
   total += await pullTable('/api/notifications', 'notifications', (n: any) => ({
     id: n.id, channel: n.channel, title: n.title, message: n.message,
@@ -210,6 +233,7 @@ export async function pullAll(): Promise<void> {
   }))
 
   // Staff — uses staffApi internally, but we pull via the API endpoint
+  if (canSyncHR()) {
   try {
     const res = await apiFetch('/api/staff')
     if (res.ok) {
@@ -228,6 +252,8 @@ export async function pullAll(): Promise<void> {
   } catch (e) {
     if (navigator.onLine) console.warn('[sync] staff: network error')
   }
+  }
+
   try {
     const res = await apiFetch('/api/settings')
     if (res.ok) {
