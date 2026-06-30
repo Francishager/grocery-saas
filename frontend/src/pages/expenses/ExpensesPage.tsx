@@ -173,17 +173,32 @@ export default function ExpensesPage() {
 
   const loadCashFlowSummary = async () => {
     try {
-      const params = new URLSearchParams({
-        ...(startDate && endDate && { 
-          startDate,
-          endDate
+      if (online) {
+        const params = new URLSearchParams({
+          ...(startDate && endDate && { 
+            startDate,
+            endDate
+          })
         })
-      })
-      
-      const response = await apiFetch(`/api/expenses/cash-flow/summary?${params}`)
-      if (response.ok) {
-        const data = await response.json()
-        setSummary(data)
+        
+        const response = await apiFetch(`/api/expenses/cash-flow/summary?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setSummary(data)
+        }
+      } else {
+        // Compute summary from local data
+        const localExpenses = await getLocalExpenses()
+        const localAccounts = await getLocalCashAccounts()
+        const totalExpenses = localExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
+        const totalBalance = localAccounts.reduce((sum, a) => sum + (a.balance || 0), 0)
+        setSummary({
+          totalExpenses,
+          totalIncome: 0,
+          netCashFlow: -totalExpenses,
+          accountBalance: totalBalance,
+          expenseCount: localExpenses.length,
+        })
       }
     } catch (error) {
       console.error('Failed to load summary:', error)

@@ -206,7 +206,7 @@ export default function RolesPermissionsPage() {
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 lg:p-6">
       {createdPassword && (
         <Card className="border-green-500 bg-green-50 dark:bg-green-950/30">
           <CardHeader>
@@ -238,12 +238,12 @@ export default function RolesPermissionsPage() {
           </CardContent>
         </Card>
       )}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Roles & Permissions</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Roles & Permissions</h1>
           <p className="text-muted-foreground">Manage staff, assign roles, and configure permissions</p>
         </div>
-        <Button onClick={() => setShowAddForm(!showAddForm)}>
+        <Button onClick={() => setShowAddForm(!showAddForm)} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />Add Staff
         </Button>
       </div>
@@ -285,7 +285,7 @@ export default function RolesPermissionsPage() {
                   return (
                     <div key={g.prefix}>
                       <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{g.label}</p>
-                      <div className="grid gap-1 grid-cols-4">
+                      <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
                         {groupKeys.map(key => (
                           <label key={key} className="flex items-center gap-1.5 text-xs">
                             <input type="checkbox" checked={!!formPerms[key]} onChange={e => setFormPerms(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
@@ -298,7 +298,7 @@ export default function RolesPermissionsPage() {
                 })}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Other</p>
-                  <div className="grid gap-1 grid-cols-4">
+                  <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
                     {['canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
                       <label key={key} className="flex items-center gap-1.5 text-xs">
                         <input type="checkbox" checked={!!formPerms[key]} onChange={e => setFormPerms(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
@@ -353,7 +353,7 @@ export default function RolesPermissionsPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
                           {(s.name || s.email).charAt(0).toUpperCase()}
@@ -363,13 +363,13 @@ export default function RolesPermissionsPage() {
                           <p className="text-sm text-muted-foreground">{s.email} {s.branch?.name && `· ${s.branch.name}`}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className={`text-xs px-2 py-1 rounded-full ${roleBadgeColor[s.role] || 'bg-gray-100 text-gray-700'}`}>{s.role}</span>
                         <span className={`text-xs px-2 py-1 rounded-full ${s.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{s.isActive ? 'Active' : 'Inactive'}</span>
                         <div className="relative" ref={dropdownId === s.id ? dropdownRef : undefined}>
                           <button
                             onClick={() => setDropdownId(dropdownId === s.id ? null : s.id)}
-                            className="p-1.5 rounded-md hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="p-1.5 rounded-md hover:bg-muted opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                           >
                             <MoreVertical className="h-4 w-4 text-muted-foreground" />
                           </button>
@@ -404,7 +404,7 @@ export default function RolesPermissionsPage() {
                           return (
                             <div key={g.prefix}>
                               <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{g.label}</p>
-                              <div className="grid gap-1 grid-cols-4">
+                              <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
                                 {groupKeys.map(key => (
                                   <label key={key} className="flex items-center gap-1.5 text-xs">
                                     <input type="checkbox" checked={!!permissions[key]} onChange={e => setPermissions(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
@@ -417,7 +417,7 @@ export default function RolesPermissionsPage() {
                         })}
                         <div>
                           <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Other</p>
-                          <div className="grid gap-1 grid-cols-4">
+                          <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
                             {['canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
                               <label key={key} className="flex items-center gap-1.5 text-xs">
                                 <input type="checkbox" checked={!!permissions[key]} onChange={e => setPermissions(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />

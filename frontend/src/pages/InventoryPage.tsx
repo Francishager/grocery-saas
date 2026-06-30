@@ -11,7 +11,7 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
-import { getLocalProducts } from '@/db/hybrid'
+import { getLocalProducts, getLocalBranches } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
 import { Pagination } from '@/components/Pagination'
@@ -149,15 +149,25 @@ export default function InventoryPage() {
 
   const loadBranches = async () => {
     try {
-      const data = await branchesApi.active()
-      setBranches(data)
+      if (online) {
+        const data = await branchesApi.active()
+        setBranches(data)
+      } else {
+        const local = await getLocalBranches()
+        setBranches(local as any)
+      }
     } catch (error) {
-      console.error('Failed to load branches:', error)
-      toast({
-        variant: 'destructive',
-        title: 'Failed to load branches',
-        description: 'Branch selection is unavailable. Please refresh and try again.',
-      })
+      try {
+        const local = await getLocalBranches()
+        setBranches(local as any)
+      } catch {
+        console.error('Failed to load branches:', error)
+        toast({
+          variant: 'destructive',
+          title: 'Failed to load branches',
+          description: 'Branch selection is unavailable. Please refresh and try again.',
+        })
+      }
     }
   }
 

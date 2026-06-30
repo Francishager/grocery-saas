@@ -231,10 +231,24 @@ export default function ReceivablesPage() {
 
   const loadReceivablesSummary = async () => {
     try {
-      const response = await apiFetch('/api/receivables/receivables/summary')
-      if (response.ok) {
-        const data = await response.json()
-        setSummary(data)
+      if (online) {
+        const response = await apiFetch('/api/receivables/receivables/summary')
+        if (response.ok) {
+          const data = await response.json()
+          setSummary(data)
+        }
+      } else {
+        // Compute summary from local data
+        const localCustomers = await getLocalReceivableCustomers()
+        const localSales = await getLocalReceivableSales()
+        const totalReceivable = localCustomers.reduce((sum, c) => sum + (c.balance || 0), 0)
+        const totalSales = localSales.reduce((sum, s) => sum + (s.total || 0), 0)
+        setSummary({
+          totalReceivable,
+          totalSales,
+          customerCount: localCustomers.length,
+          outstandingBalance: totalReceivable,
+        })
       }
     } catch (error) {
       console.error('Failed to load summary:', error)
@@ -266,18 +280,28 @@ export default function ReceivablesPage() {
 
   const loadCustomerOptions = async () => {
     try {
-      const response = await apiFetch('/api/receivables/customers?status=active&limit=100')
-      if (!response.ok) {
-        throw new Error(await readResponseError(response, 'Failed to load customer options'))
+      if (online) {
+        const response = await apiFetch('/api/receivables/customers?status=active&limit=100')
+        if (!response.ok) {
+          throw new Error(await readResponseError(response, 'Failed to load customer options'))
+        }
+        const data = await response.json()
+        setCustomerOptions(data.customers || [])
+      } else {
+        const local = await getLocalReceivableCustomers('', 'active')
+        setCustomerOptions(local)
       }
-      const data = await response.json()
-      setCustomerOptions(data.customers || [])
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load customer options',
-        variant: 'destructive'
-      })
+      try {
+        const local = await getLocalReceivableCustomers('', 'active')
+        setCustomerOptions(local)
+      } catch {
+        toast({
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to load customer options',
+          variant: 'destructive'
+        })
+      }
     }
   }
 
