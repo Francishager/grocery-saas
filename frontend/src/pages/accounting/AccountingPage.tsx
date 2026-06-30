@@ -175,7 +175,10 @@ export default function AccountingPage() {
     try {
       if (online) {
         const res = await apiFetch('/api/branches')
-        if (res.ok) setBranches(await res.json())
+        if (res.ok) {
+          const data = await res.json()
+          setBranches(data.branches || data || [])
+        }
       } else {
         setBranches(await getLocalBranches())
       }

@@ -59,7 +59,10 @@ export default function StaffTillSheetPage() {
     try {
       if (online) {
         const res = await apiFetch('/api/branches')
-        if (res.ok) setBranches(await res.json())
+        if (res.ok) {
+          const data = await res.json()
+          setBranches(data.branches || data || [])
+        }
       } else {
         setBranches(await getLocalBranches())
       }
@@ -71,7 +74,10 @@ export default function StaffTillSheetPage() {
   const fetchStaff = async () => {
     try {
       const res = await apiFetch('/api/staff')
-      if (res.ok) setStaff(await res.json())
+      if (res.ok) {
+        const data = await res.json()
+        setStaff(data.staff || data || [])
+      }
     } catch {
       setStaff([])
     }
