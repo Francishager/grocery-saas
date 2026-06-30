@@ -888,6 +888,7 @@ export interface ReceiptPreview {
     email?: string | null
     phone?: string | null
     address?: string | null
+    logo?: string | null
   }
   branch?: BranchOption | null
   cashier?: string

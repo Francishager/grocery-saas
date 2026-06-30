@@ -185,6 +185,9 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
               {!loadingReceipt && receipt && (
                 <div className="mx-auto w-full max-w-[340px] rounded-sm bg-white p-5 font-mono text-[13px] leading-relaxed text-slate-950 shadow">
                   <div className="text-center">
+                    {receipt.business.logo && (
+                      <img src={receipt.business.logo} alt="Logo" className="mx-auto mb-2 h-16 w-16 rounded object-contain" />
+                    )}
                     <h2 className="font-sans text-lg font-bold">{receipt.business.name}</h2>
                     {receipt.business.address && <p>{receipt.business.address}</p>}
                     {receipt.business.phone && <p>Tel: {receipt.business.phone}</p>}
