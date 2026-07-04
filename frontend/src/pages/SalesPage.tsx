@@ -33,6 +33,7 @@ export default function SalesPage() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [transactionId, setTransactionId] = useState('')
   const [invoiceCashDiscount, setInvoiceCashDiscount] = useState(0)
+  const [amountPaid, setAmountPaid] = useState<number | ''>('')
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
@@ -137,6 +138,7 @@ export default function SalesPage() {
   const taxableAmount = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount)
   const cartTax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
+  const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
 
   const autoPrintReceipt = async (saleId: string) => {
     if (!isSerialSupported() && !isBluetoothSupported()) return
@@ -235,6 +237,8 @@ export default function SalesPage() {
           })),
           paymentMethod: paymentMode,
           cashDiscount: invoiceCashDiscount,
+          amountPaid: amountPaid !== '' ? amountPaid : undefined,
+          changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
         })
 
         toast({
@@ -243,6 +247,7 @@ export default function SalesPage() {
         })
         setCart([])
         setInvoiceCashDiscount(0)
+        setAmountPaid('')
         setMobileProvider('')
         setPhoneNumber('')
         setTransactionId('')
@@ -261,6 +266,8 @@ export default function SalesPage() {
         mobileProvider: paymentMode === 'mobile_money' ? mobileProvider : undefined,
         phoneNumber: paymentMode === 'mobile_money' ? phoneNumber : undefined,
         transactionId: ['mobile_money', 'card'].includes(paymentMode) ? transactionId : undefined,
+        amountPaid: amountPaid !== '' ? amountPaid : undefined,
+        changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
       })
       toast({
         title: 'Sale completed!',
@@ -268,6 +275,7 @@ export default function SalesPage() {
       })
       setCart([])
       setInvoiceCashDiscount(0)
+      setAmountPaid('')
       setMobileProvider('')
       setPhoneNumber('')
       setTransactionId('')
@@ -635,6 +643,32 @@ export default function SalesPage() {
                       <span className="font-bold text-lg">
                         {formatCurrency(cartTotal)}
                       </span>
+                    </div>
+
+                    {/* Amount Paid + Change */}
+                    <div className="space-y-2 mb-4 p-3 rounded-lg border bg-muted/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-sm font-medium">Amount Paid</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={amountPaid}
+                          onChange={(e) => setAmountPaid(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                          className="w-32 h-8 text-sm text-right"
+                          placeholder="0"
+                        />
+                      </div>
+                      {amountPaid !== '' && amountPaid > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className={changeDue > 0 ? 'font-medium text-green-600' : 'font-medium text-muted-foreground'}>
+                            {changeDue > 0 ? 'Change Due' : amountPaid < cartTotal ? 'Shortfall' : 'Change Due'}
+                          </span>
+                          <span className={changeDue > 0 ? 'font-bold text-green-600' : 'font-bold text-red-600'}>
+                            {changeDue > 0 ? formatCurrency(changeDue) : formatCurrency(amountPaid - cartTotal)}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="mb-4">

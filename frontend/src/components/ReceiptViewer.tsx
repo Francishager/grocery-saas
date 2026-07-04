@@ -253,6 +253,18 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                       <span>Total</span>
                       <span>{formatCurrency(receipt.total)}</span>
                     </div>
+                    {receipt.amountPaid != null && (
+                      <>
+                        <div className="flex justify-between gap-3 pt-1">
+                          <span>Amount Paid</span>
+                          <span>{formatCurrency(receipt.amountPaid)}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span>Change</span>
+                          <span>{formatCurrency(receipt.changeGiven || 0)}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="my-3 border-t border-dashed border-slate-400" />

@@ -62,6 +62,8 @@ function receiptJson(data) {
     discount: sale.discount || 0,
     tax: sale.tax || 0,
     total: sale.total || 0,
+    amountPaid: sale.amountPaid != null ? Number(sale.amountPaid) : null,
+    changeGiven: sale.changeGiven != null ? Number(sale.changeGiven) : null,
     items: sale.items.map((item) => ({
       id: item.id,
       name: item.product?.name || "Item",
@@ -197,6 +199,10 @@ router.get("/:saleId/pdf", authenticateReceipt, async (req, res) => {
     if (tenant?.taxEnabled && sale.tax > 0) doc.text(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(28)}`);
     else if (!tenant?.taxEnabled) doc.text(`Tax: 0.00`);
     doc.fontSize(10).font("Helvetica-Bold").text(`TOTAL:${formatNum(sale.total).padStart(33)}`);
+    if (sale.amountPaid != null) {
+      doc.fontSize(8).font("Helvetica").text(`Amount Paid:${formatNum(sale.amountPaid).padStart(26)}`);
+      doc.text(`Change:${formatNum(sale.changeGiven || 0).padStart(31)}`);
+    }
     doc.moveDown(0.5);
 
     // Footer
@@ -294,6 +300,10 @@ router.get("/:saleId/escpos", authenticateReceipt, async (req, res) => {
     if (tenant?.taxEnabled && sale.tax > 0) cmds.push(escText(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(24)}`));
     else if (!tenant?.taxEnabled) cmds.push(escText(`Tax: 0.00`));
     cmds.push(escDoubleText(`TOTAL:${formatNum(sale.total).padStart(28)}`));
+    if (sale.amountPaid != null) {
+      cmds.push(escText(`Amount Paid:${formatNum(sale.amountPaid).padStart(22)}`));
+      cmds.push(escText(`Change:${formatNum(sale.changeGiven || 0).padStart(27)}`));
+    }
 
     cmds.push(escText(""));
     cmds.push("1B6101"); // Center

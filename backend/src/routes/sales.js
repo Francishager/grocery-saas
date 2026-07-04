@@ -168,7 +168,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId } = req.body;
+    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, amountPaid, changeGiven } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
 
     // Check discount permission
@@ -213,6 +213,8 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
+          amountPaid: amountPaid != null ? Number(amountPaid) : null,
+          changeGiven: changeGiven != null ? Number(changeGiven) : null,
           items: { create: saleItems.map(({ baseQty, itemType, ...rest }) => rest) },
         },
         include: { items: true, branch: true },

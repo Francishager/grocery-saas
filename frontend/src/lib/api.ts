@@ -330,7 +330,7 @@ export const salesApi = {
   create: (data: Partial<Sale>) =>
     api.post<Sale>('/api/sales', { body: data }),
 
-  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number, paymentDetails?: { mobileProvider?: string; phoneNumber?: string; transactionId?: string }) =>
+  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number, paymentDetails?: { mobileProvider?: string; phoneNumber?: string; transactionId?: string; amountPaid?: number; changeGiven?: number }) =>
     api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
       body: {
         cart: cart.map(c => ({
@@ -347,6 +347,8 @@ export const salesApi = {
         mobileProvider: paymentDetails?.mobileProvider,
         phoneNumber: paymentDetails?.phoneNumber,
         transactionId: paymentDetails?.transactionId,
+        amountPaid: paymentDetails?.amountPaid,
+        changeGiven: paymentDetails?.changeGiven,
       },
     }),
 }
@@ -900,6 +902,8 @@ export interface ReceiptPreview {
   discount: number
   tax: number
   total: number
+  amountPaid?: number | null
+  changeGiven?: number | null
   items: Array<{
     id: string
     name: string
