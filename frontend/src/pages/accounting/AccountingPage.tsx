@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
-import { Calculator, Plus, BookOpen, FileText, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield } from 'lucide-react'
+import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown } from 'lucide-react'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
@@ -25,6 +27,8 @@ interface Account {
   isActive: boolean
   parentId?: string
   description?: string
+  branchId?: string
+  branch?: { id: string; name: string } | null
 }
 
 interface JournalLine {
@@ -67,9 +71,47 @@ const ACCOUNT_TYPES = [
   { value: 'expenses', label: 'Expenses' },
 ]
 
-const PAYMENT_METHODS = ['cash', 'bank', 'mobile_money', 'cheque', 'card']
+const PAYMENT_METHODS = ['cash', 'mobile_money', 'cheque']
 const CURRENCIES = ['USD', 'KES', 'UGX', 'TZS', 'RWF', 'NGN', 'GHS', 'ZAR']
-const ACTIONS = ['create', 'update', 'reverse', 'adjust', 'transfer']
+const JOURNAL_ACTIONS = [
+  { value: 'register_income', label: 'Register Income' },
+  { value: 'register_expense', label: 'Register Expense' },
+  { value: 'register_capital', label: 'Register Capital' },
+  { value: 'register_liability', label: 'Register Liability' },
+  { value: 'register_asset', label: 'Register Asset' },
+  { value: 'clear_payable', label: 'Clear Payable' },
+  { value: 'collect_receivable', label: 'Collect Receivable' },
+]
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: 'Cash Account',
+  mobile_money: 'Mobile Money Account',
+  cheque: 'Bank Account (Cheque)',
+}
+
+const ACCOUNT_CATEGORIES: Record<string, { code: string; name: string }[]> = {
+  asset: [
+    { code: '1100', name: 'Current Assets' },
+    { code: '1200', name: 'Fixed Assets' },
+    { code: '1300', name: 'Other Assets' },
+  ],
+  liability: [
+    { code: '2100', name: 'Current Liabilities' },
+    { code: '2200', name: 'Long-term Liabilities' },
+  ],
+  equity: [
+    { code: '3100', name: "Owner's Equity" },
+    { code: '3200', name: 'Retained Earnings' },
+  ],
+  income: [
+    { code: '4100', name: 'Sales Revenue' },
+    { code: '4200', name: 'Other Income' },
+  ],
+  expenses: [
+    { code: '5100', name: 'Cost of Goods Sold' },
+    { code: '5200', name: 'Operating Expenses' },
+    { code: '5300', name: 'Administrative Expenses' },
+  ],
+}
 
 const accountTypeColor: Record<string, string> = {
   asset: 'bg-blue-100 text-blue-800',
@@ -84,6 +126,7 @@ const accountTypeColor: Record<string, string> = {
 export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
+  const { user, hasPermission } = useJWTAuth()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -92,11 +135,17 @@ export default function AccountingPage() {
 
   // Account modal
   const [showAccountModal, setShowAccountModal] = useState(false)
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false)
+  const dropdownBtnRef = useRef<HTMLButtonElement>(null)
   const [accCode, setAccCode] = useState('')
   const [accName, setAccName] = useState('')
   const [accType, setAccType] = useState('asset')
   const [accSubType, setAccSubType] = useState('')
   const [accDescription, setAccDescription] = useState('')
+  const [accParentId, setAccParentId] = useState('')
+  const [accBranch, setAccBranch] = useState('')
+  const [accCurrency, setAccCurrency] = useState('USD')
+  const [branchSearch, setBranchSearch] = useState('')
 
   // Journal entry form
   const [jeBranch, setJeBranch] = useState('')
@@ -108,7 +157,9 @@ export default function AccountingPage() {
   const [jeCurrency, setJeCurrency] = useState('USD')
   const [jeVoucher, setJeVoucher] = useState('')
   const [jePaymentMethod, setJePaymentMethod] = useState('cash')
+  const [jePaymentAccount, setJePaymentAccount] = useState('')
   const [jeComment, setJeComment] = useState('')
+  const [jeSubForm, setJeSubForm] = useState<'single' | 'multiple'>('single')
 
   // Multiple General Journal form
   const [mjLines, setMjLines] = useState<{ debitAccount: string; creditAccount: string; amount: string; date: string; description: string }[]>([
@@ -197,6 +248,18 @@ export default function AccountingPage() {
   }
 
   useEffect(() => {
+    if (user?.branchId && !hasPermission('canViewBranch')) {
+      setAccBranch(user.branchId)
+    }
+    apiFetch('/api/settings').then(async (res) => {
+      if (res.ok) {
+        const data = await res.json()
+        if (data.currency) setAccCurrency(data.currency)
+      }
+    }).catch(() => {})
+  }, [user, hasPermission])
+
+  useEffect(() => {
     fetchAccounts()
     fetchEntries()
     fetchBranches()
@@ -207,17 +270,27 @@ export default function AccountingPage() {
   }, [activeTab])
 
   const handleCreateAccount = async () => {
-    if (!accCode || !accName) return toast({ variant: 'destructive', title: 'Code and name required' })
+    if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
+    if (!accParentId) return toast({ variant: 'destructive', title: 'Account category required' })
+    const categories = ACCOUNT_CATEGORIES[accType] || []
+    const selectedCategory = categories.find(c => c.code === accParentId)
+    const baseCode = selectedCategory ? parseInt(selectedCategory.code) : 1100
+    const typeAccounts = accounts.filter(a => a.type === accType || (accType === 'income' && a.type === 'revenue') || (accType === 'expenses' && a.type === 'expense'))
+    const maxCode = typeAccounts.reduce((max, a) => {
+      const codeNum = parseInt(a.code) || 0
+      return codeNum > max && codeNum < baseCode + 100 ? codeNum : max
+    }, baseCode)
+    const generatedCode = String(maxCode + 1)
     try {
       const res = await apiFetch('/api/accounting/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: accCode, name: accName, type: accType, subType: accSubType || undefined, description: accDescription || undefined }),
+        body: JSON.stringify({ code: generatedCode, name: accName, type: accType, subType: accSubType || undefined, description: accDescription || undefined, parentCode: accParentId || undefined, branchId: accBranch || undefined, currency: accCurrency }),
       })
       if (res.ok) {
-        toast({ title: 'Account created' })
+        toast({ title: 'SubAccount created' })
         setShowAccountModal(false)
-        setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription('')
+        setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription(''); setAccParentId('')
         fetchAccounts()
       } else {
         const data = await res.json()
@@ -284,6 +357,7 @@ export default function AccountingPage() {
           reference: jeVoucher,
           branchId: jeBranch || undefined,
           paymentMethod: jePaymentMethod,
+          paymentAccountId: jePaymentAccount || undefined,
           currency: jeCurrency,
           action: jeAction,
           voucherNo: jeVoucher,
@@ -295,7 +369,7 @@ export default function AccountingPage() {
       })
       if (res.ok) {
         toast({ title: 'Journal entry posted' })
-        setJeDescription(''); setJeAmount(''); setJeVoucher(''); setJeComment('')
+        setJeDescription(''); setJeAmount(''); setJeVoucher(''); setJeComment(''); setJePaymentAccount('')
         fetchEntries(); fetchAccounts()
       } else {
         const data = await res.json()
@@ -368,81 +442,176 @@ export default function AccountingPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="chart-of-accounts"><Calculator className="h-4 w-4 mr-1" /> Chart of Accounts</TabsTrigger>
-          <TabsTrigger value="account-categories"><FileText className="h-4 w-4 mr-1" /> Account Categories</TabsTrigger>
-          <TabsTrigger value="journal-entry"><BookOpen className="h-4 w-4 mr-1" /> Register Entries</TabsTrigger>
-          <TabsTrigger value="journal-ledger"><Scale className="h-4 w-4 mr-1" /> Journal Ledger</TabsTrigger>
-          <TabsTrigger value="tax-management"><DollarSign className="h-4 w-4 mr-1" /> Tax Management</TabsTrigger>
+        <TabsList className="grid grid-cols-5 h-auto w-full">
+          <TabsTrigger value="chart-of-accounts" className="text-base font-medium"><Calculator className="h-5 w-5 mr-2" /> Chart of Accounts</TabsTrigger>
+          <TabsTrigger value="account-categories" className="text-base font-medium"><BookOpen className="h-5 w-5 mr-2" /> Account Categories</TabsTrigger>
+          <TabsTrigger value="journal-entry" className="text-base font-medium"><BookOpen className="h-5 w-5 mr-2" /> Register Entries</TabsTrigger>
+          <TabsTrigger value="journal-ledger" className="text-base font-medium"><Scale className="h-5 w-5 mr-2" /> Journal Ledger</TabsTrigger>
+          <TabsTrigger value="tax-management" className="text-base font-medium"><DollarSign className="h-5 w-5 mr-2" /> Tax Management</TabsTrigger>
         </TabsList>
 
         {/* ─── Chart of Accounts Tab ─── */}
         <TabsContent value="chart-of-accounts" className="space-y-4">
           <div className="flex justify-end">
-            <Dialog open={showAccountModal} onOpenChange={setShowAccountModal}>
-              <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Add Account</Button></DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Create Account</DialogTitle><DialogDescription>Add a new account to your chart of accounts.</DialogDescription></DialogHeader>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><Label>Code</Label><Input value={accCode} onChange={(e) => setAccCode(e.target.value)} placeholder="e.g. 1000" /></div>
-                    <div><Label>Name</Label><Input value={accName} onChange={(e) => setAccName(e.target.value)} placeholder="e.g. Cash" /></div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Type</Label>
-                      <Select value={accType} onValueChange={setAccType}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {ACCOUNT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div><Label>Sub-type (optional)</Label><Input value={accSubType} onChange={(e) => setAccSubType(e.target.value)} placeholder="e.g. current_asset" /></div>
-                  </div>
-                  <div><Label>Description (optional)</Label><Input value={accDescription} onChange={(e) => setAccDescription(e.target.value)} /></div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setShowAccountModal(false)}>Cancel</Button>
-                  <Button onClick={handleCreateAccount}>Create</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <span ref={dropdownBtnRef} className="inline-block">
+              <Button onClick={() => setShowAccountDropdown(!showAccountDropdown)}>
+                <Plus className="h-4 w-4 mr-2" /> Add New Account
+                <ChevronDown className={`h-4 w-4 ml-2 transition-transform ${showAccountDropdown ? 'rotate-180' : ''}`} />
+              </Button>
+            </span>
           </div>
 
-          {/* Account type groups */}
+          {showAccountDropdown && dropdownBtnRef.current && createPortal(
+            <>
+              <div className="fixed inset-0 z-[100]" onClick={() => setShowAccountDropdown(false)} />
+              <div
+                className="fixed z-[101] w-48 rounded-md border bg-popover p-1 shadow-lg"
+                style={{
+                  top: dropdownBtnRef.current.getBoundingClientRect().bottom + 8,
+                  right: window.innerWidth - dropdownBtnRef.current.getBoundingClientRect().right
+                }}
+              >
+                {ACCOUNT_TYPES.map(t => (
+                  <button
+                    key={t.value}
+                    onClick={() => {
+                      setAccType(t.value)
+                      setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription(''); setAccParentId(''); setBranchSearch('')
+                      setShowAccountDropdown(false)
+                      setShowAccountModal(true)
+                    }}
+                    className="flex items-center w-full px-3 py-2.5 text-sm rounded-md hover:bg-muted transition-colors text-left"
+                  >
+                    <Badge className={`${accountTypeColor[t.value] || 'bg-gray-100'} mr-2`}>{t.label}</Badge>
+                  </button>
+                ))}
+              </div>
+            </>,
+            document.body
+          )}
+
+          <Dialog open={showAccountModal} onOpenChange={setShowAccountModal}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>Create SubAccount {ACCOUNT_TYPES.find(t => t.value === accType)?.label || ''}</DialogTitle>
+                <DialogDescription>Create a new sub-account under {ACCOUNT_TYPES.find(t => t.value === accType)?.label.toLowerCase() || 'the selected type'}.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Account Name</Label>
+                    <Input value={accName} onChange={(e) => setAccName(e.target.value)} placeholder="e.g. Office Supplies" />
+                  </div>
+                  <div>
+                    <Label>Branch</Label>
+                    {hasPermission('canViewBranch') ? (
+                      <Select value={accBranch} onValueChange={setAccBranch}>
+                        <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                        <SelectContent>
+                          <div className="p-2">
+                            <Input
+                              value={branchSearch}
+                              onChange={(e) => setBranchSearch(e.target.value)}
+                              placeholder="Search branch..."
+                              className="h-8"
+                            />
+                          </div>
+                          {branches.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase())).map(b => (
+                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                        {branches.find(b => b.id === accBranch)?.name || 'Default branch'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Account Category</Label>
+                    <Select value={accParentId} onValueChange={setAccParentId}>
+                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                      <SelectContent>
+                        {(ACCOUNT_CATEGORIES[accType] || []).map(cat => (
+                          <SelectItem key={cat.code} value={cat.code}>{cat.code} - {cat.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Currency</Label>
+                    <Select value={accCurrency} onValueChange={setAccCurrency}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label>Description</Label>
+                  <textarea
+                    value={accDescription}
+                    onChange={(e) => setAccDescription(e.target.value)}
+                    placeholder="Optional description"
+                    rows={3}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowAccountModal(false)}>Close</Button>
+                <Button onClick={handleCreateAccount}>Save</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Account type groups with sub-accounts nested under parents */}
           {ACCOUNT_TYPES.map(typeDef => {
             const typeAccounts = accounts.filter(a => a.type === typeDef.value || (typeDef.value === 'income' && a.type === 'revenue') || (typeDef.value === 'expenses' && a.type === 'expense'))
             if (!typeAccounts.length) return null
             return (
-              <Card key={typeDef.value}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Badge className={accountTypeColor[typeDef.value] || 'bg-gray-100'}>{typeDef.label}</Badge>
-                    <span className="text-sm font-normal text-muted-foreground">{typeAccounts.length} accounts</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {typeAccounts.map(acc => (
-                      <div key={acc.id} className="flex items-center justify-between rounded-lg border p-3">
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-sm">{acc.code}</span>
-                          <span className="font-medium">{acc.name}</span>
-                          {acc.subType && <Badge variant="outline">{acc.subType}</Badge>}
-                          {!acc.isActive && <Badge variant="secondary">Inactive</Badge>}
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="font-bold">{formatCurrency(acc.balance)}</span>
-                          <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(acc.id)}>
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+              <div key={typeDef.value} className="space-y-2">
+                <div className="flex items-center gap-2 py-2">
+                  <Badge className={accountTypeColor[typeDef.value] || 'bg-gray-100'}>{typeDef.label}</Badge>
+                  <span className="text-sm font-normal text-muted-foreground">{typeAccounts.length} accounts</span>
+                </div>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left py-2 px-3 font-semibold">Name</th>
+                        <th className="text-left py-2 px-3 font-semibold">Code</th>
+                        <th className="text-left py-2 px-3 font-semibold">Branch</th>
+                        <th className="text-right py-2 px-3 font-semibold">Balance</th>
+                        <th className="text-left py-2 px-3 font-semibold">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {typeAccounts.map(acc => (
+                        <tr key={acc.id} className={`border-b hover:bg-muted/50 ${acc.parentId ? 'bg-muted/20' : ''}`}>
+                          <td className="py-2 px-3 font-medium">
+                            {acc.parentId && <span className="text-muted-foreground mr-1">└</span>}
+                            {acc.name}
+                            {acc.subType && <Badge variant="outline" className="ml-2">{acc.subType}</Badge>}
+                            {!acc.isActive && <Badge variant="secondary" className="ml-2">Inactive</Badge>}
+                          </td>
+                          <td className="py-2 px-3 font-mono font-bold">{acc.code}</td>
+                          <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
+                          <td className="py-2 px-3 text-right font-mono">{formatCurrency(acc.balance)}</td>
+                          <td className="py-2 px-3">
+                            <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(acc.id)}>
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )
           })}
           {accounts.length === 0 && !loading && (
@@ -452,44 +621,60 @@ export default function AccountingPage() {
 
         {/* ─── Account Categories Tab ─── */}
         <TabsContent value="account-categories" className="space-y-4">
-          <Card>
-            <CardHeader><CardTitle>Account Categories</CardTitle></CardHeader>
-            <CardContent>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-2 font-medium">Name</th>
-                    <th className="text-left py-3 px-2 font-medium">Code</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accounts.map(acc => (
-                    <tr key={acc.id} className="border-b hover:bg-muted/50">
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-2">
-                          <Badge className={accountTypeColor[acc.type] || 'bg-gray-100'}>{acc.type}</Badge>
-                          <span className="font-medium">{acc.name}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 font-mono">{acc.code}</td>
-                    </tr>
-                  ))}
-                  {accounts.length === 0 && !loading && (
-                    <tr><td colSpan={2} className="text-center py-8 text-muted-foreground">No accounts found</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
+          {ACCOUNT_TYPES.map(typeDef => {
+            const categories = ACCOUNT_CATEGORIES[typeDef.value] || []
+            if (!categories.length) return null
+            return (
+              <div key={typeDef.value} className="space-y-2">
+                <div className="flex items-center gap-2 py-2">
+                  <Badge className={accountTypeColor[typeDef.value] || 'bg-gray-100'}>{typeDef.label}</Badge>
+                  <span className="text-sm font-normal text-muted-foreground">{categories.length} categories</span>
+                </div>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left py-2 px-3 font-semibold">Name</th>
+                        <th className="text-left py-2 px-3 font-semibold">Code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categories.map(cat => (
+                        <tr key={cat.code} className="border-b hover:bg-muted/50">
+                          <td className="py-2 px-3 font-medium">{cat.name}</td>
+                          <td className="py-2 px-3 font-mono font-bold">{cat.code}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
         </TabsContent>
 
         {/* ─── Register Journal Ledger Entries Tab ─── */}
-        <TabsContent value="journal-entry" className="space-y-6">
+        <TabsContent value="journal-entry" className="space-y-4">
+          {/* Sub-tabs to toggle between single and multiple journal */}
+          <div className="grid grid-cols-2 gap-2 border-b pb-2">
+            <button
+              onClick={() => setJeSubForm('single')}
+              className={`px-4 py-3 text-base font-medium rounded-md transition-colors ${jeSubForm === 'single' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+            >
+              Journal Ledger Entry
+            </button>
+            <button
+              onClick={() => setJeSubForm('multiple')}
+              className={`px-4 py-3 text-base font-medium rounded-md transition-colors ${jeSubForm === 'multiple' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+            >
+              Multiple General Journal
+            </button>
+          </div>
+
           {/* Single Journal Ledger Entry Form */}
-          <Card>
-            <CardHeader><CardTitle>Journal Ledger Entry</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {jeSubForm === 'single' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label>Branch</Label>
                   <Select value={jeBranch} onValueChange={setJeBranch}>
@@ -502,9 +687,9 @@ export default function AccountingPage() {
                 <div>
                   <Label>Action</Label>
                   <Select value={jeAction} onValueChange={setJeAction}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
                     <SelectContent>
-                      {ACTIONS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                      {JOURNAL_ACTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -513,21 +698,8 @@ export default function AccountingPage() {
                   <Input type="date" value={jeDate} onChange={(e) => setJeDate(e.target.value)} />
                 </div>
                 <div>
-                  <Label>Journal Account</Label>
-                  <Select value={jeAccount} onValueChange={setJeAccount}>
-                    <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
                   <Label>Entry Description</Label>
                   <Input value={jeDescription} onChange={(e) => setJeDescription(e.target.value)} placeholder="Description" />
-                </div>
-                <div>
-                  <Label>Entry Amount</Label>
-                  <Input type="number" value={jeAmount} onChange={(e) => setJeAmount(e.target.value)} placeholder="0.00" />
                 </div>
                 <div>
                   <Label>Currency</Label>
@@ -539,44 +711,75 @@ export default function AccountingPage() {
                   </Select>
                 </div>
                 <div>
+                  <Label>Entry Amount</Label>
+                  <Input type="number" value={jeAmount} onChange={(e) => setJeAmount(e.target.value)} placeholder="0.00" />
+                </div>
+                <div>
                   <Label>Voucher Number</Label>
                   <Input value={jeVoucher} onChange={(e) => setJeVoucher(e.target.value)} placeholder="Voucher #" />
                 </div>
                 <div>
                   <Label>Payment Method</Label>
-                  <Select value={jePaymentMethod} onValueChange={setJePaymentMethod}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select value={jePaymentMethod} onValueChange={(v) => { setJePaymentMethod(v); setJePaymentAccount('') }}>
+                    <SelectTrigger><SelectValue placeholder="Select payment method" /></SelectTrigger>
                     <SelectContent>
                       {PAYMENT_METHODS.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+              {jePaymentMethod && (
+                <div>
+                  <Label>{PAYMENT_METHOD_LABELS[jePaymentMethod] || 'Select Account'}</Label>
+                  <Select value={jePaymentAccount} onValueChange={setJePaymentAccount}>
+                    <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
+                    <SelectContent>
+                      {accounts.filter(a => {
+                        if (jePaymentMethod === 'cash') return a.type === 'asset' && (a.subType?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('cash'))
+                        if (jePaymentMethod === 'cheque') return a.type === 'asset' && (a.subType?.toLowerCase().includes('bank') || a.name?.toLowerCase().includes('bank'))
+                        if (jePaymentMethod === 'mobile_money') return a.type === 'asset' && (a.subType?.toLowerCase().includes('mobile') || a.name?.toLowerCase().includes('mobile'))
+                        return true
+                      }).map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div>
                 <Label>Comment</Label>
-                <Input value={jeComment} onChange={(e) => setJeComment(e.target.value)} placeholder="Additional comments" />
+                <textarea
+                  value={jeComment}
+                  onChange={(e) => setJeComment(e.target.value)}
+                  placeholder="Additional comments"
+                  rows={3}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                />
               </div>
               <div className="flex justify-end">
-                <Button onClick={handleSingleJournalSubmit}>Submit Entry</Button>
+                <Button onClick={handleSingleJournalSubmit}>Save</Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          )}
 
           {/* Multiple General Journal Form */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Multiple General Journal</CardTitle>
+          {jeSubForm === 'multiple' && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
                 <Button size="sm" variant="outline" onClick={() => setMjLines([...mjLines, { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' }])}>
                   <Plus className="h-3 w-3 mr-1" /> Add Line
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              {/* Heading row */}
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 px-3 pb-2 border-b font-semibold text-sm">
+                <div>Debit Account (DR)</div>
+                <div>Credit Account (CR)</div>
+                <div>Amount</div>
+                <div>Date</div>
+                <div>Description</div>
+              </div>
+              {/* Field rows */}
               {mjLines.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end rounded-lg border p-3">
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center rounded-lg border p-3">
                   <div>
-                    <Label>Debit Account (DR)</Label>
                     <Select value={line.debitAccount} onValueChange={(v) => {
                       const updated = [...mjLines]; updated[idx].debitAccount = v; setMjLines(updated)
                     }}>
@@ -587,7 +790,6 @@ export default function AccountingPage() {
                     </Select>
                   </div>
                   <div>
-                    <Label>Credit Account (CR)</Label>
                     <Select value={line.creditAccount} onValueChange={(v) => {
                       const updated = [...mjLines]; updated[idx].creditAccount = v; setMjLines(updated)
                     }}>
@@ -598,24 +800,19 @@ export default function AccountingPage() {
                     </Select>
                   </div>
                   <div>
-                    <Label>Amount</Label>
                     <Input type="number" value={line.amount} onChange={(e) => {
                       const updated = [...mjLines]; updated[idx].amount = e.target.value; setMjLines(updated)
                     }} placeholder="0.00" />
                   </div>
                   <div>
-                    <Label>Date</Label>
                     <Input type="date" value={line.date} onChange={(e) => {
                       const updated = [...mjLines]; updated[idx].date = e.target.value; setMjLines(updated)
                     }} />
                   </div>
-                  <div className="flex gap-2 items-end">
-                    <div className="flex-1">
-                      <Label>Description</Label>
-                      <Input value={line.description} onChange={(e) => {
-                        const updated = [...mjLines]; updated[idx].description = e.target.value; setMjLines(updated)
-                      }} placeholder="Description" />
-                    </div>
+                  <div className="flex gap-2 items-center">
+                    <Input className="flex-1" value={line.description} onChange={(e) => {
+                      const updated = [...mjLines]; updated[idx].description = e.target.value; setMjLines(updated)
+                    }} placeholder="Description" />
                     {mjLines.length > 1 && (
                       <Button size="sm" variant="ghost" onClick={() => setMjLines(mjLines.filter((_, i) => i !== idx))}>
                         <Trash2 className="h-4 w-4 text-red-500" />
@@ -624,11 +821,11 @@ export default function AccountingPage() {
                   </div>
                 </div>
               ))}
-              <div className="flex justify-end">
-                <Button onClick={handleMultipleJournalSubmit}>Submit All Entries</Button>
+              <div className="flex justify-end pt-2">
+                <Button onClick={handleMultipleJournalSubmit}>Submit</Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          )}
         </TabsContent>
 
         {/* ─── Journal Ledger Tab ─── */}

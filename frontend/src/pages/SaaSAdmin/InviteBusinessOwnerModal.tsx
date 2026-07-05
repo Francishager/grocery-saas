@@ -78,6 +78,10 @@ export const InviteBusinessOwnerModal: React.FC<InviteBusinessOwnerModalProps> =
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!formData.email.trim()) { setError('Email is required'); return }
+    if (!formData.name.trim()) { setError('Owner name is required'); return }
+    if (!formData.businessName.trim()) { setError('Business name is required'); return }
+    if (!formData.planId) { setError('Select a subscription plan'); return }
     setLoading(true)
     setError(null)
     resetDeliveryState()

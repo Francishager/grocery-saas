@@ -187,7 +187,7 @@ class FeatureAccessService {
   private getFeatureCategory(featureName: string): string {
     const module = featureName.split('.')[0]
     const coreModules = ['dashboard', 'sales', 'inventory', 'customers', 'reports', 'settings']
-    const advancedModules = ['suppliers', 'receivables', 'payables', 'expenses', 'multi_branch', 'audit', 'rentals', 'hr', 'service', 'accounting']
+    const advancedModules = ['suppliers', 'receivables', 'payables', 'expenses', 'multi_branch', 'audit', 'rentals', 'hr', 'service', 'accounting', 'restaurant', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets', 'developer']
     const integrationModules = ['communication', 'integrations']
     if (coreModules.includes(module)) return 'core'
     if (advancedModules.includes(module)) return 'advanced'
@@ -200,10 +200,7 @@ class FeatureAccessService {
     // SaaS Admin can access everything
     if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
 
-    // When offline, allow access to all features
-    if (!navigator.onLine) return true
-
-    // Check if feature is enabled
+    // Check if feature is enabled — no offline bypass
     if (!this.isFeatureEnabled(featureName)) return false
 
     // Role-based restrictions
@@ -220,7 +217,20 @@ class FeatureAccessService {
       audit: ['owner', 'manager', 'accountant'],
       sms: ['owner'],
       whatsapp: ['owner'],
-      offline_mode: ['owner', 'manager', 'accountant', 'attendant']
+      offline_mode: ['owner', 'manager', 'accountant', 'attendant'],
+      fuel_station: ['owner', 'manager', 'attendant'],
+      'fuel_station.pricing': ['owner', 'manager'],
+      'fuel_station.fuel_cards': ['owner', 'manager', 'accountant'],
+      'fuel_station.credit_accounts': ['owner', 'manager', 'accountant'],
+      'fuel_station.compliance': ['owner', 'manager'],
+      'fuel_station.tank_calibration': ['owner', 'manager'],
+      'fuel_station.attendants': ['owner', 'manager'],
+      'fuel_station.reports': ['owner', 'manager', 'accountant', 'attendant'],
+      manufacturing: ['owner', 'manager'],
+      agriculture: ['owner', 'manager'],
+      service: ['owner', 'manager', 'attendant'],
+      restaurant: ['owner', 'manager', 'attendant'],
+      accounting: ['owner', 'manager', 'accountant'],
     }
 
     const allowedRoles = featureRoleRestrictions[featureName]

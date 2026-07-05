@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,8 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalCashAccounts, getLocalBranches } from '@/db/hybrid'
-import { Wallet, Landmark, Shield, Smartphone, Plus, Edit, AlertCircle } from 'lucide-react'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { Wallet, Landmark, Shield, Smartphone, Plus, Edit } from 'lucide-react'
 
 interface CashAccount {
   id: string
@@ -25,13 +26,26 @@ interface CashAccount {
   bankName?: string
   phoneNumber?: string
   isActive: boolean
-  overdraftLimit?: number
-  interestRate?: number
+  assignedStaffId?: string | null
+  assignedStaff?: { id: string; name: string } | null
+  depletionAlertThreshold?: number | null
+  network?: string
+  mobileMoneyName?: string
 }
 
 interface Branch {
   id: string
   name: string
+}
+
+interface StaffMember {
+  id: string
+  name: string
+  fname?: string
+  lname?: string
+  role: string
+  isActive: boolean
+  branchId?: string | null
 }
 
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
@@ -43,11 +57,15 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
 
 const CURRENCIES = ['USD', 'KES', 'UGX', 'TZS', 'RWF', 'NGN', 'GHS', 'ZAR']
 
+const MOBILE_NETWORKS = ['MTN', 'Airtel', 'MPS', 'Halopesa', 'Tigo Pesa', 'Zamtel']
+
 export default function TransactionAccountsPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
+  const { user, hasPermission } = useJWTAuth()
   const [accounts, setAccounts] = useState<CashAccount[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
+  const [staff, setStaff] = useState<StaffMember[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('bank')
   const [showModal, setShowModal] = useState(false)
@@ -59,11 +77,13 @@ export default function TransactionAccountsPage() {
     accountNumber: '',
     bankName: '',
     phoneNumber: '',
+    mobileMoneyName: '',
+    network: '',
     balance: '0',
     currency: 'USD',
     branchId: '',
-    overdraftLimit: '0',
-    interestRate: '0',
+    assignedStaffId: '',
+    depletionAlertThreshold: '',
   })
 
   const fetchAccounts = async () => {
@@ -97,9 +117,29 @@ export default function TransactionAccountsPage() {
     }
   }
 
+  const fetchStaff = async () => {
+    try {
+      const res = await apiFetch('/api/staff')
+      if (res.ok) {
+        const data = await res.json()
+        setStaff(data.staff || data || [])
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     fetchAccounts()
     fetchBranches()
+    fetchStaff()
+    apiFetch('/api/settings').then(async (res) => {
+      if (res.ok) {
+        const data = await res.json()
+        if (data.currency) setForm(f => ({ ...f, currency: data.currency }))
+      }
+    }).catch(() => {})
+    if (user?.branchId && !hasPermission('canViewBranch')) {
+      setForm(f => ({ ...f, branchId: user.branchId! }))
+    }
   }, [])
 
   const bankAccounts = accounts.filter(a => a.type === 'bank')
@@ -115,8 +155,38 @@ export default function TransactionAccountsPage() {
 
   const fmt = (val: number) => Number(val || 0).toFixed(2)
 
+  const fmtCompact = (val: number, currency = 'UGX') => {
+    const num = Number(val || 0)
+    const abs = Math.abs(num)
+    let compact: string
+    if (abs >= 1e9) compact = (num / 1e9).toFixed(2) + 'B'
+    else if (abs >= 1e6) compact = (num / 1e6).toFixed(2) + 'M'
+    else if (abs >= 1e3) compact = (num / 1e3).toFixed(2) + 'K'
+    else compact = num.toFixed(2)
+    return `${currency} ${compact}`
+  }
+
+  const fmtFull = (val: number, currency = 'UGX') => {
+    return `${currency} ${Number(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
   const handleSave = async () => {
-    if (!form.name) return toast({ variant: 'destructive', title: 'Account name required' })
+    if (!form.currency) return toast({ variant: 'destructive', title: 'Currency required' })
+    if (!form.branchId) return toast({ variant: 'destructive', title: 'Branch required' })
+    if (form.type === 'bank') {
+      if (!form.bankName) return toast({ variant: 'destructive', title: 'Bank name required' })
+      if (!form.name) return toast({ variant: 'destructive', title: 'Account name required' })
+      if (!form.accountNumber) return toast({ variant: 'destructive', title: 'Account number required' })
+    }
+    if (form.type === 'safe' || form.type === 'cash') {
+      if (!form.name) return toast({ variant: 'destructive', title: 'Account name required' })
+    }
+    if (form.type === 'mobile_money') {
+      if (!form.name) return toast({ variant: 'destructive', title: 'Account name required' })
+      if (!form.mobileMoneyName) return toast({ variant: 'destructive', title: 'Mobile money name required' })
+      if (!form.phoneNumber) return toast({ variant: 'destructive', title: 'Mobile money number required' })
+      if (!form.network) return toast({ variant: 'destructive', title: 'Network required' })
+    }
     try {
       const payload: any = {
         name: form.name,
@@ -125,9 +195,19 @@ export default function TransactionAccountsPage() {
         currency: form.currency,
         branchId: form.branchId || undefined,
       }
-      if (form.type === 'bank') { payload.accountNumber = form.accountNumber; payload.bankName = form.bankName }
-      if (form.type === 'mobile_money') { payload.phoneNumber = form.phoneNumber }
-      if (form.type === 'bank') { payload.overdraftLimit = Number(form.overdraftLimit) || 0; payload.interestRate = Number(form.interestRate) || 0 }
+      if (form.type === 'bank') {
+        payload.bankName = form.bankName
+        payload.accountNumber = form.accountNumber
+      }
+      if (form.type === 'mobile_money') {
+        payload.mobileMoneyName = form.mobileMoneyName
+        payload.phoneNumber = form.phoneNumber
+        payload.network = form.network
+      }
+      if (form.type === 'cash') {
+        payload.assignedStaffId = form.assignedStaffId || undefined
+        payload.depletionAlertThreshold = form.depletionAlertThreshold ? Number(form.depletionAlertThreshold) : undefined
+      }
 
       const url = editingAccount ? `/api/cash-accounts/${editingAccount.id}` : '/api/cash-accounts'
       const method = editingAccount ? 'PUT' : 'POST'
@@ -141,7 +221,7 @@ export default function TransactionAccountsPage() {
         toast({ title: editingAccount ? 'Account updated' : 'Account created' })
         setShowModal(false)
         setEditingAccount(null)
-        setForm({ name: '', type: 'bank', accountNumber: '', bankName: '', phoneNumber: '', balance: '0', currency: 'USD', branchId: '', overdraftLimit: '0', interestRate: '0' })
+        setForm({ name: '', type: form.type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency, branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
         fetchAccounts()
       } else {
         const data = await res.json()
@@ -160,28 +240,22 @@ export default function TransactionAccountsPage() {
       accountNumber: account.accountNumber || '',
       bankName: account.bankName || '',
       phoneNumber: account.phoneNumber || '',
+      mobileMoneyName: account.mobileMoneyName || '',
+      network: account.network || '',
       balance: String(account.balance || 0),
       currency: account.currency || 'USD',
       branchId: account.branchId || '',
-      overdraftLimit: String(account.overdraftLimit || 0),
-      interestRate: String(account.interestRate || 0),
+      assignedStaffId: account.assignedStaffId || '',
+      depletionAlertThreshold: account.depletionAlertThreshold != null ? String(account.depletionAlertThreshold) : '',
     })
     setShowModal(true)
   }
 
   const openCreate = (type: string) => {
     setEditingAccount(null)
-    setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', balance: '0', currency: 'USD', branchId: '', overdraftLimit: '0', interestRate: '0' })
+    setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency, branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
     setShowModal(true)
   }
-
-  const summaryCards = [
-    { label: 'Total Balance', value: totalBalance, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Total Cash Accounts', value: totalCash, icon: Wallet, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: 'Total Bank Accounts', value: totalBank, icon: Landmark, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { label: 'Total Safe Accounts', value: totalSafe, icon: Shield, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { label: 'Total Mobile Money', value: totalMobileMoney, icon: Smartphone, color: 'text-pink-600', bg: 'bg-pink-50' },
-  ]
 
   const renderAccountTable = (list: CashAccount[], type: string) => (
     <div className="space-y-3">
@@ -194,8 +268,9 @@ export default function TransactionAccountsPage() {
             <tr className="border-b">
               <th className="text-left py-2 px-2 font-medium">Name</th>
               <th className="text-left py-2 px-2 font-medium">Branch</th>
+              <th className="text-left py-2 px-2 font-medium">Staff</th>
               {type === 'bank' && <th className="text-left py-2 px-2 font-medium">Bank / Account #</th>}
-              {type === 'mobile_money' && <th className="text-left py-2 px-2 font-medium">Phone Number</th>}
+              {type === 'mobile_money' && <th className="text-left py-2 px-2 font-medium">Network / Phone</th>}
               <th className="text-left py-2 px-2 font-medium">Currency</th>
               <th className="text-right py-2 px-2 font-medium">Balance</th>
               <th className="text-left py-2 px-2 font-medium">Status</th>
@@ -207,8 +282,9 @@ export default function TransactionAccountsPage() {
               <tr key={acc.id} className="border-b hover:bg-muted/50">
                 <td className="py-2 px-2 font-medium">{acc.name}</td>
                 <td className="py-2 px-2">{acc.branch?.name || '—'}</td>
+                <td className="py-2 px-2">{acc.assignedStaff?.name || '—'}</td>
                 {type === 'bank' && <td className="py-2 px-2">{acc.bankName ? `${acc.bankName} / ${acc.accountNumber || '—'}` : acc.accountNumber || '—'}</td>}
-                {type === 'mobile_money' && <td className="py-2 px-2">{acc.phoneNumber || '—'}</td>}
+                {type === 'mobile_money' && <td className="py-2 px-2">{acc.network ? `${acc.network} / ` : ''}{acc.phoneNumber || '—'}</td>}
                 <td className="py-2 px-2">{acc.currency || '—'}</td>
                 <td className="py-2 px-2 text-right font-mono">{fmt(acc.balance)}</td>
                 <td className="py-2 px-2"><Badge variant={acc.isActive ? 'default' : 'secondary'}>{acc.isActive ? 'Active' : 'Inactive'}</Badge></td>
@@ -218,13 +294,23 @@ export default function TransactionAccountsPage() {
               </tr>
             ))}
             {list.length === 0 && !loading && (
-              <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">No {ACCOUNT_TYPE_LABELS[type].toLowerCase()}s found</td></tr>
+              <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">No {ACCOUNT_TYPE_LABELS[type].toLowerCase()}s found</td></tr>
             )}
           </tbody>
         </table>
       </div>
     </div>
   )
+
+  const businessCurrency = form.currency || 'UGX'
+
+  const summaryItems = [
+    { label: 'Total Balance', value: totalBalance, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Total Cash Accounts Balance', value: totalCash, icon: Wallet, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: 'Total Bank Accounts Balance', value: totalBank, icon: Landmark, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { label: 'Total Safe Accounts Balance', value: totalSafe, icon: Shield, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { label: 'Total Mobile Money Accounts Balance', value: totalMobileMoney, icon: Smartphone, color: 'text-pink-600', bg: 'bg-pink-50' },
+  ]
 
   return (
     <div className="space-y-6">
@@ -233,35 +319,43 @@ export default function TransactionAccountsPage() {
         <p className="text-muted-foreground">Manage bank, cash, safe, and mobile money accounts</p>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {summaryCards.map(card => {
-          const Icon = card.icon
-          return (
-            <Card key={card.label}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground">{card.label}</p>
-                    <p className={`text-lg font-bold ${card.color}`}>{fmt(card.value)}</p>
-                  </div>
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${card.bg}`}>
-                    <Icon className={`h-5 w-5 ${card.color}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )
-        })}
+      {/* Summary section */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3">Summary</h2>
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b">
+                {summaryItems.map((item, idx) => (
+                  <td
+                    key={item.label}
+                    className={`py-4 px-4 ${idx < summaryItems.length - 1 ? 'border-r' : ''} ${item.bg}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <item.icon className={`h-4 w-4 ${item.color}`} />
+                      <span className="text-xs font-medium text-muted-foreground">{item.label}</span>
+                    </div>
+                    <div
+                      className={`text-lg font-bold ${item.color} cursor-help`}
+                      title={`${item.label} : ${fmtFull(item.value, businessCurrency)}`}
+                    >
+                      {fmtCompact(item.value, businessCurrency)}
+                    </div>
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
+      {/* Account type tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="bank"><Landmark className="h-4 w-4 mr-1" /> Bank Accounts</TabsTrigger>
-          <TabsTrigger value="cash"><Wallet className="h-4 w-4 mr-1" /> Cash Accounts</TabsTrigger>
-          <TabsTrigger value="safe"><Shield className="h-4 w-4 mr-1" /> Safe Accounts</TabsTrigger>
-          <TabsTrigger value="mobile_money"><Smartphone className="h-4 w-4 mr-1" /> Mobile Money</TabsTrigger>
-          <TabsTrigger value="overdraft"><AlertCircle className="h-4 w-4 mr-1" /> Overdraft Configuration</TabsTrigger>
+        <TabsList className="grid grid-cols-4 h-auto w-full">
+          <TabsTrigger value="bank" className="text-base font-medium"><Landmark className="h-5 w-5 mr-2" /> Bank Accounts</TabsTrigger>
+          <TabsTrigger value="cash" className="text-base font-medium"><Wallet className="h-5 w-5 mr-2" /> Cash Accounts</TabsTrigger>
+          <TabsTrigger value="safe" className="text-base font-medium"><Shield className="h-5 w-5 mr-2" /> Safe Accounts</TabsTrigger>
+          <TabsTrigger value="mobile_money" className="text-base font-medium"><Smartphone className="h-5 w-5 mr-2" /> Mobile Money</TabsTrigger>
         </TabsList>
 
         <TabsContent value="bank" className="space-y-4">
@@ -276,100 +370,195 @@ export default function TransactionAccountsPage() {
         <TabsContent value="mobile_money" className="space-y-4">
           <Card><CardContent className="p-4">{renderAccountTable(mobileMoneyAccounts, 'mobile_money')}</CardContent></Card>
         </TabsContent>
-        <TabsContent value="overdraft" className="space-y-4">
-          <Card>
-            <CardHeader><CardTitle>Overdraft Configuration</CardTitle></CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 px-2 font-medium">Account Name</th>
-                      <th className="text-left py-2 px-2 font-medium">Bank</th>
-                      <th className="text-right py-2 px-2 font-medium">Current Balance</th>
-                      <th className="text-right py-2 px-2 font-medium">Overdraft Limit</th>
-                      <th className="text-right py-2 px-2 font-medium">Interest Rate (%)</th>
-                      <th className="text-left py-2 px-2 font-medium">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bankAccounts.map(acc => (
-                      <tr key={acc.id} className="border-b hover:bg-muted/50">
-                        <td className="py-2 px-2 font-medium">{acc.name}</td>
-                        <td className="py-2 px-2">{acc.bankName || '—'}</td>
-                        <td className="py-2 px-2 text-right font-mono">{fmt(acc.balance)}</td>
-                        <td className="py-2 px-2 text-right font-mono">{fmt(acc.overdraftLimit || 0)}</td>
-                        <td className="py-2 px-2 text-right font-mono">{acc.interestRate || 0}%</td>
-                        <td className="py-2 px-2">
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(acc)}><Edit className="h-4 w-4" /></Button>
-                        </td>
-                      </tr>
-                    ))}
-                    {bankAccounts.length === 0 && !loading && (
-                      <tr><td colSpan={6} className="text-center py-8 text-muted-foreground">No bank accounts configured</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       {/* Account Modal */}
       <Dialog open={showModal} onOpenChange={setShowModal}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{editingAccount ? 'Edit Account' : 'New Account'}</DialogTitle><DialogDescription>{editingAccount ? 'Update account details.' : 'Create a new transaction account.'}</DialogDescription></DialogHeader>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingAccount ? `Edit ${ACCOUNT_TYPE_LABELS[form.type] || 'Account'}` : `Create ${ACCOUNT_TYPE_LABELS[form.type] || 'Account'}`}</DialogTitle>
+            <DialogDescription>{editingAccount ? 'Update account details.' : `Create a new ${ACCOUNT_TYPE_LABELS[form.type]?.toLowerCase() || 'transaction account'}.`}</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div><Label>Account Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-              <div>
-                <Label>Account Type</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bank">Bank Account</SelectItem>
-                    <SelectItem value="cash">Cash Account</SelectItem>
-                    <SelectItem value="safe">Safe Account</SelectItem>
-                    <SelectItem value="mobile_money">Mobile Money Account</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* Bank Account Form */}
+            {form.type === 'bank' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Bank Name <span className="text-red-500">*</span></Label>
+                  <Input value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })} placeholder="Bank name" />
+                </div>
+                <div>
+                  <Label>Account Name <span className="text-red-500">*</span></Label>
+                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Account name" />
+                </div>
+                <div>
+                  <Label>Account Number <span className="text-red-500">*</span></Label>
+                  <Input value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} placeholder="Account number" />
+                </div>
+                <div>
+                  <Label>Branch <span className="text-red-500">*</span></Label>
+                  {hasPermission('canViewBranch') ? (
+                    <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label>Currency <span className="text-red-500">*</span></Label>
+                  <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              {form.type === 'bank' && (
-                <>
-                  <div><Label>Bank Name</Label><Input value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })} /></div>
-                  <div><Label>Account Number</Label><Input value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} /></div>
-                  <div><Label>Overdraft Limit</Label><Input type="number" value={form.overdraftLimit} onChange={(e) => setForm({ ...form, overdraftLimit: e.target.value })} /></div>
-                  <div><Label>Interest Rate (%)</Label><Input type="number" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} /></div>
-                </>
-              )}
-              {form.type === 'mobile_money' && (
-                <div><Label>Phone Number</Label><Input value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} placeholder="+256..." /></div>
-              )}
-              <div><Label>Opening Balance</Label><Input type="number" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} /></div>
-              <div>
-                <Label>Currency</Label>
-                <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            )}
+
+            {/* Safe Account Form */}
+            {form.type === 'safe' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Name <span className="text-red-500">*</span></Label>
+                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Safe account name" />
+                </div>
+                <div>
+                  <Label>Branch <span className="text-red-500">*</span></Label>
+                  {hasPermission('canViewBranch') ? (
+                    <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label>Currency <span className="text-red-500">*</span></Label>
+                  <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div>
-                <Label>Branch</Label>
-                <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                  <SelectContent>
-                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            )}
+
+            {/* Cash Account Form */}
+            {form.type === 'cash' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Account Name <span className="text-red-500">*</span></Label>
+                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Cash account name" />
+                </div>
+                <div>
+                  <Label>Assign Account to Staff <span className="text-red-500">*</span></Label>
+                  <Select value={form.assignedStaffId} onValueChange={(v) => setForm({ ...form, assignedStaffId: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger>
+                    <SelectContent>
+                      {staff.filter(s => s.isActive).map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Set Depletion Alert Threshold (optional)</Label>
+                  <Input type="number" value={form.depletionAlertThreshold} onChange={(e) => setForm({ ...form, depletionAlertThreshold: e.target.value })} placeholder="e.g. 1000" />
+                </div>
+                <div>
+                  <Label>Branch <span className="text-red-500">*</span></Label>
+                  {hasPermission('canViewBranch') ? (
+                    <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label>Currency <span className="text-red-500">*</span></Label>
+                  <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Mobile Money Account Form */}
+            {form.type === 'mobile_money' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Account Name <span className="text-red-500">*</span></Label>
+                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Account name" />
+                </div>
+                <div>
+                  <Label>Mobile Money Name <span className="text-red-500">*</span></Label>
+                  <Input value={form.mobileMoneyName} onChange={(e) => setForm({ ...form, mobileMoneyName: e.target.value })} placeholder="Mobile money name" />
+                </div>
+                <div>
+                  <Label>Mobile Money Number <span className="text-red-500">*</span></Label>
+                  <Input value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} placeholder="+256..." />
+                </div>
+                <div>
+                  <Label>Network <span className="text-red-500">*</span></Label>
+                  <Select value={form.network} onValueChange={(v) => setForm({ ...form, network: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select network" /></SelectTrigger>
+                    <SelectContent>
+                      {MOBILE_NETWORKS.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Branch <span className="text-red-500">*</span></Label>
+                  {hasPermission('canViewBranch') ? (
+                    <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label>Currency <span className="text-red-500">*</span></Label>
+                  <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editingAccount ? 'Update' : 'Create'}</Button>
+            <Button variant="outline" onClick={() => setShowModal(false)}>Close</Button>
+            <Button onClick={handleSave}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -33,26 +33,46 @@ export const ALL_PERMISSION_KEYS = [
   "canGiveDiscount",
   // Tax
   "canViewTax", "canManageTax",
-  // Services
+  // Services (inventory service items)
   "canViewService", "canCreateService", "canEditService", "canDeleteService",
   "canManageServiceCategory", "canViewServiceReport",
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
   "canProcessRentalReturn", "canViewRentalReport",
   // Restaurant & Bar
-  "canViewRestaurant",
+  "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
+  "canViewRestaurantReport",
+  // Fuel Station
+  "canViewFuelStation", "canCreateFuelStation", "canEditFuelStation", "canDeleteFuelStation",
+  "canViewFuelStationReport",
+  // Manufacturing
+  "canViewManufacturing", "canCreateManufacturing", "canEditManufacturing", "canDeleteManufacturing",
+  "canViewManufacturingReport",
+  // Agriculture
+  "canViewAgriculture", "canCreateAgriculture", "canEditAgriculture", "canDeleteAgriculture",
+  "canViewAgricultureReport",
+  // Service Business (appointments, work orders, contracts)
+  "canViewServiceBusiness", "canCreateServiceBusiness", "canEditServiceBusiness", "canDeleteServiceBusiness",
+  "canViewServiceBusinessReport",
   // Communication
-  "canViewCommunication",
+  "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
+  // Accounting
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting",
+  // Payment Methods (for spending — expenses, payables)
+  "canUseCash", "canUseMobileMoney", "canUseBank", "canUseCard",
+  // Data Import
+  "canImportInventory",
 ];
 
 // =====================================================
-// Role defaults — ALL false except owner & saas_admin.
-// Business owner must explicitly assign permissions to
-// manager, accountant, and attendant via the Roles &
-// Permissions page. No implicit access.
+// Role defaults — ALL false for every role.
+// No role gets auto-permissions. The business owner must
+// explicitly assign permissions to every user including
+// themselves via the Roles & Permissions page.
+// Only saas_admin bypasses all checks (platform-level).
 // =====================================================
 export const ROLE_DEFAULTS = {
-  owner: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, true])),
+  owner: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
   manager: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
   accountant: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
   attendant: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
@@ -61,14 +81,11 @@ export const ROLE_DEFAULTS = {
 // =====================================================
 // Resolve permissions for a user.
 // - saas_admin: wildcard "*" (platform-level, bypasses all checks)
-// - owner: ALL permissions (business owner has full access)
-// - all other roles: start EMPTY — permissions come ONLY
-//   from the UserPermission table (set by business owner)
+// - ALL other roles (including owner): permissions come ONLY
+//   from the UserPermission table. No auto-permissions.
 // =====================================================
 export function permissionsForUser(user) {
   if (user.role === "saas_admin") return ["*"];
-  if (user.role === "owner") return [...ALL_PERMISSION_KEYS];
-  // Non-owner roles: no hardcoded defaults. Permissions are
-  // granted exclusively via UserPermission table by the owner.
+  // No role gets hardcoded permissions — must be explicitly assigned
   return [];
 }

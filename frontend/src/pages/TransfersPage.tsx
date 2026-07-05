@@ -229,12 +229,6 @@ export default function TransfersPage() {
         </Dialog>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" /> Total Transfers</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{transfers.length}</div></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Truck className="h-4 w-4" /> In Transit</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{transfers.filter(t => t.status === 'in_transit').length}</div></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Check className="h-4 w-4" /> Received</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{transfers.filter(t => t.status === 'received').length}</div></CardContent></Card>
-      </div>
-
       <div className="space-y-3">
         {transfers.map((tr) => (
           <div key={tr.id} className="rounded-lg border p-4">

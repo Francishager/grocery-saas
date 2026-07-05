@@ -180,7 +180,10 @@ export default function SalesPage() {
   }
 
   const handleCheckout = async () => {
-    if (cart.length === 0) return
+    if (cart.length === 0) {
+      toast({ variant: 'destructive', title: 'Cart is empty', description: 'Add at least one item to checkout.' })
+      return
+    }
 
     setProcessing(true)
 

@@ -54,6 +54,8 @@ const MODULES = [
       { name: 'inventory.batch_numbers', displayName: 'Batch Numbers' },
       { name: 'inventory.expiry_tracking', displayName: 'Expiry Tracking' },
       { name: 'inventory.barcode_printing', displayName: 'Barcode Printing' },
+      { name: 'fuel_station.lubricants', displayName: 'Lubricants & Dry Stock' },
+      { name: 'fuel_station.convenience', displayName: 'Convenience Shop' },
     ]
   },
   {
@@ -63,6 +65,8 @@ const MODULES = [
       { name: 'customers.loyalty', displayName: 'Loyalty Program' },
       { name: 'customers.wallet', displayName: 'Customer Wallet' },
       { name: 'customers.statements', displayName: 'Customer Statements' },
+      { name: 'fuel_station.fuel_cards', displayName: 'Fuel Cards' },
+      { name: 'fuel_station.credit_accounts', displayName: 'Credit Accounts' },
     ]
   },
   {
@@ -138,6 +142,8 @@ const MODULES = [
       { name: 'service.job_cards', displayName: 'Job Cards' },
       { name: 'service.technicians', displayName: 'Technician Assignment' },
       { name: 'service.contracts', displayName: 'Service Contracts' },
+      { name: 'fuel_station.car_wash', displayName: 'Car Wash Services' },
+      { name: 'fuel_station.garage', displayName: 'Garage Services' },
     ]
   },
   {
@@ -205,6 +211,78 @@ const MODULES = [
       { name: 'audit', displayName: 'Audit Log' },
     ]
   },
+  {
+    id: 'fuel_station', name: 'Fuel Station', features: [
+      { name: 'fuel_station', displayName: 'Fuel Station Module' },
+      { name: 'fuel_station.tanks', displayName: 'Tank Management' },
+      { name: 'fuel_station.pumps', displayName: 'Pump Management' },
+      { name: 'fuel_station.deliveries', displayName: 'Fuel Deliveries' },
+      { name: 'fuel_station.meter_readings', displayName: 'Meter Readings' },
+      { name: 'fuel_station.dipstick', displayName: 'Dipstick Readings' },
+      { name: 'fuel_station.tank_calibration', displayName: 'Tank Calibration' },
+      { name: 'fuel_station.shift_reports', displayName: 'Shift Reports' },
+      { name: 'fuel_station.pricing', displayName: 'Price Management' },
+      { name: 'fuel_station.compliance', displayName: 'Environmental Compliance' },
+      { name: 'fuel_station.reports', displayName: 'Fuel Station Reports' },
+    ]
+  },
+  {
+    id: 'manufacturing', name: 'Manufacturing', features: [
+      { name: 'manufacturing', displayName: 'Manufacturing Module' },
+      { name: 'manufacturing.bom', displayName: 'Bill of Materials' },
+      { name: 'manufacturing.production_orders', displayName: 'Production Orders' },
+      { name: 'manufacturing.finished_goods', displayName: 'Finished Goods' },
+      { name: 'manufacturing.costing', displayName: 'Production Costing' },
+      { name: 'manufacturing.waste', displayName: 'Waste Tracking' },
+      { name: 'manufacturing.reports', displayName: 'Production Reports' },
+    ]
+  },
+  {
+    id: 'agriculture', name: 'Agriculture', features: [
+      { name: 'agriculture', displayName: 'Agriculture Module' },
+      { name: 'agriculture.crop_farming', displayName: 'Crop Farming' },
+      { name: 'agriculture.livestock', displayName: 'Livestock' },
+      { name: 'agriculture.harvesting', displayName: 'Harvesting' },
+      { name: 'agriculture.farm_inventory', displayName: 'Farm Inventory' },
+      { name: 'agriculture.farm_expenses', displayName: 'Farm Expenses' },
+      { name: 'agriculture.fields', displayName: 'Field Management' },
+      { name: 'agriculture.harvest_reports', displayName: 'Harvest Reports' },
+      { name: 'agriculture.milk_reports', displayName: 'Milk Reports' },
+      { name: 'agriculture.egg_reports', displayName: 'Egg Reports' },
+      { name: 'agriculture.yield_reports', displayName: 'Yield Reports' },
+    ]
+  },
+  {
+    id: 'production', name: 'Production Engine', features: [
+      { name: 'production', displayName: 'Production Engine' },
+      { name: 'production.recipes', displayName: 'Recipes' },
+      { name: 'production.bom', displayName: 'Bill of Materials (BOM)' },
+      { name: 'production.orders', displayName: 'Production Orders' },
+      { name: 'production.finished_goods', displayName: 'Finished Goods' },
+      { name: 'production.waste_tracking', displayName: 'Waste Tracking' },
+      { name: 'production.costing', displayName: 'Production Costing' },
+    ]
+  },
+  {
+    id: 'assets', name: 'Asset & Resource Engine', features: [
+      { name: 'assets', displayName: 'Asset & Resource Management' },
+      { name: 'assets.restaurant_tables', displayName: 'Restaurant Tables' },
+      { name: 'assets.fuel_pumps', displayName: 'Fuel Pumps' },
+      { name: 'assets.fuel_tanks', displayName: 'Fuel Tanks' },
+      { name: 'assets.farm_fields', displayName: 'Farm Fields' },
+      { name: 'assets.machines', displayName: 'Machines' },
+      { name: 'assets.vehicles', displayName: 'Vehicles' },
+    ]
+  },
+  {
+    id: 'developer', name: 'Developer & Data', features: [
+      { name: 'developer', displayName: 'Developer Tools' },
+      { name: 'developer.data_importer', displayName: 'Data Importer' },
+      { name: 'developer.data_exporter', displayName: 'Data Exporter' },
+      { name: 'developer.api_keys', displayName: 'API Keys' },
+      { name: 'developer.webhooks', displayName: 'Webhooks' },
+    ]
+  },
 ]
 
 const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, maxBranches: 3, maxCustomers: 100, maxSuppliers: 50, isDefault: false }
@@ -253,7 +331,16 @@ export const PlansPage: React.FC = () => {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setSaving(true)
+    e.preventDefault()
+    if (!form.name.trim()) { alert('Plan name is required'); return }
+    if (!form.slug.trim()) { alert('Plan slug is required'); return }
+    if (form.price < 0) { alert('Price cannot be negative'); return }
+    if (!form.currency.trim()) { alert('Currency is required'); return }
+    if (!form.billingCycle.trim()) { alert('Billing cycle is required'); return }
+    if (form.maxUsers < 1) { alert('Max users must be at least 1'); return }
+    if (form.maxProducts < 1) { alert('Max products must be at least 1'); return }
+    if (form.maxBranches < 1) { alert('Max branches must be at least 1'); return }
+    setSaving(true)
     try {
       const payload = { ...form, features: form.features.split(',').map((f: string) => f.trim()).filter(Boolean) }
       const url = editingId ? `/api/platform/plans/${editingId}` : '/api/platform/plans'

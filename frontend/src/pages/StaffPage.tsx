@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Edit3, Loader2, RefreshCw, RotateCcw, ShieldCheck, UserPlus, UserX, CheckCircle, Copy, Eye, EyeOff, X } from 'lucide-react'
+import { Edit3, Loader2, RefreshCw, RotateCcw, ShieldCheck, UserPlus, UserX, CheckCircle, Copy, Eye, EyeOff, X, Wallet } from 'lucide-react'
 import { branchesApi, staffApi, type BranchOption, type StaffMember, type StaffPayload } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,12 +25,14 @@ const emptyForm = {
   phone: '',
   role: 'attendant' as StaffPayload['role'],
   branchId: '',
+  cashAccountId: '',
 }
 
 export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([])
   const { paginatedItems: paginatedStaff, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(staff, 10)
   const [branches, setBranches] = useState<BranchOption[]>([])
+  const [cashAccounts, setCashAccounts] = useState<any[]>([])
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -61,6 +64,10 @@ export default function StaffPage() {
         setStaff(staffData)
         setBranches(branchData)
         setForm((prev) => ({ ...prev, branchId: prev.branchId || branchData[0]?.id || '' }))
+        try {
+          const res = await apiFetch('/api/expenses/cash-accounts')
+          if (res.ok) setCashAccounts(await res.json())
+        } catch {}
       } else {
         const [localStaff, localBranches] = await Promise.all([
           getLocalStaff(),
@@ -107,12 +114,15 @@ export default function StaffPage() {
       phone: member.phone || '',
       role: member.role,
       branchId: member.branchId || member.branches?.[0]?.id || branches[0]?.id || '',
+      cashAccountId: member.cashAccountId || '',
     })
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!form.name.trim() || !form.email.trim() || !form.branchId) return
+    if (!form.name.trim()) { toast({ variant: 'destructive', title: 'Name is required' }); return }
+    if (!form.email.trim()) { toast({ variant: 'destructive', title: 'Email is required' }); return }
+    if (!form.branchId) { toast({ variant: 'destructive', title: 'Branch is required' }); return }
     if (!editingId && form.password.trim().length < 6) {
       toast({
         variant: 'destructive',
@@ -130,6 +140,7 @@ export default function StaffPage() {
         phone: form.phone.trim() || undefined,
         role: form.role,
         branchId: form.branchId,
+        cashAccountId: form.cashAccountId || null,
       }
       if (form.password.trim()) payload.password = form.password.trim()
 
@@ -314,6 +325,22 @@ export default function StaffPage() {
               minLength={editingId ? undefined : 6}
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="staff-cash-account">Cash Account</Label>
+            <select
+              id="staff-cash-account"
+              value={form.cashAccountId}
+              onChange={(event) => setForm((prev) => ({ ...prev, cashAccountId: event.target.value }))}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              disabled={saving}
+            >
+              <option value="">No cash account (cannot transact)</option>
+              {cashAccounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} ({a.type})</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">Required for staff who handle cash, record sales, or make payments</p>
+          </div>
         </div>
 
         <Button type="submit" className="mt-4" disabled={saving || branches.length === 0}>
@@ -340,6 +367,7 @@ export default function StaffPage() {
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Name</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Role</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Branch</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Cash Account</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Status</th>
                   <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">Actions</th>
                 </tr>
@@ -354,6 +382,17 @@ export default function StaffPage() {
                     <td className="px-4 py-3 text-sm capitalize">{member.role}</td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">
                       {member.branch?.name || member.branches?.[0]?.name || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {member.cashAccount ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+                          <Wallet className="h-3 w-3" /> {member.cashAccount.name}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700">
+                          <Wallet className="h-3 w-3" /> No account
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${member.isActive ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>

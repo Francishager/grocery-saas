@@ -1,13 +1,13 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 
 const router = Router();
 
 // List accounts (chart of accounts)
-router.get("/accounts", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const accounts = await prisma.account.findMany({
@@ -22,7 +22,7 @@ router.get("/accounts", authenticateToken, requireFeature("accounting"), async (
 });
 
 // Create account
-router.post("/accounts", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.post("/accounts", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { code, name, type, subType, parentId, description } = req.body;
@@ -39,7 +39,7 @@ router.post("/accounts", authenticateToken, requireFeature("accounting"), async 
 });
 
 // Update account
-router.put("/accounts/:id", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { name, type, subType, parentId, description, isActive } = req.body;
@@ -54,7 +54,7 @@ router.put("/accounts/:id", authenticateToken, requireFeature("accounting"), asy
 });
 
 // Delete account
-router.delete("/accounts/:id", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.delete("/accounts/:id", authenticateToken, requirePermission("canDeleteAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     await prisma.account.delete({ where: { id: req.params.id } });
     res.json({ message: "Account deleted" });
@@ -64,7 +64,7 @@ router.delete("/accounts/:id", authenticateToken, requireFeature("accounting"), 
 });
 
 // List journal entries
-router.get("/journal", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.get("/journal", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const entries = await prisma.journalEntry.findMany({
@@ -82,7 +82,7 @@ router.get("/journal", authenticateToken, requireFeature("accounting"), async (r
 });
 
 // Create journal entry
-router.post("/journal", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.post("/journal", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { date, description, reference, lines = [], branchId } = req.body;
@@ -145,7 +145,7 @@ router.post("/journal", authenticateToken, requireFeature("accounting"), async (
 });
 
 // Trial balance
-router.get("/reports/trial-balance", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.get("/reports/trial-balance", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const accounts = await prisma.account.findMany({
@@ -168,7 +168,7 @@ router.get("/reports/trial-balance", authenticateToken, requireFeature("accounti
 });
 
 // Profit & Loss
-router.get("/reports/profit-loss", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.get("/reports/profit-loss", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { from, to } = req.query;
@@ -210,7 +210,7 @@ router.get("/reports/profit-loss", authenticateToken, requireFeature("accounting
 });
 
 // Balance sheet
-router.get("/reports/balance-sheet", authenticateToken, requireFeature("accounting"), async (req, res) => {
+router.get("/reports/balance-sheet", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const accounts = await prisma.account.findMany({ where: { tenantId, isActive: true } });

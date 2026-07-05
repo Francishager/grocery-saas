@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalDashboardKpis, getLocalDashboardCharts } from '@/db/hybrid'
@@ -13,6 +14,7 @@ const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97
 
 export default function DashboardPage() {
   const { hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
   const [kpis, setKpis] = useState<DashboardKpis | null>(null)
   const [salesChart, setSalesChart] = useState<SalesChartData | null>(null)
   const [profitLoss, setProfitLoss] = useState<ProfitLossData | null>(null)
@@ -24,12 +26,12 @@ export default function DashboardPage() {
   const online = useOnlineStatus()
 
   useEffect(() => {
-    if (hasPermission('canViewDashboard')) {
+    if (hasPermission('canViewDashboard') && hasFeature('dashboard')) {
       loadDashboard()
     } else {
       setLoading(false)
     }
-  }, [hasPermission])
+  }, [hasPermission, hasFeature])
 
   const loadDashboard = async () => {
     if (!online) {
@@ -95,6 +97,19 @@ export default function DashboardPage() {
           <LayoutDashboard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h2 className="text-lg font-semibold">Access Denied</h2>
           <p className="text-muted-foreground">You don't have permission to access the dashboard.</p>
+        </div>
+      </div>
+    )
+  }
+
+  // If dashboard feature itself is not enabled, show upgrade
+  if (!hasFeature('dashboard')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <LayoutDashboard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-lg font-semibold">Feature Not Available</h2>
+          <p className="text-muted-foreground">The Dashboard feature is not enabled for your business.</p>
         </div>
       </div>
     )
@@ -166,8 +181,9 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* KPI Cards Row 1 */}
+      {/* KPI Cards Row 1 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {hasFeature('sales') && hasPermission('canViewSale') && (
         <Card className="border-l-4 border-l-blue-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Revenue</CardTitle>
@@ -183,7 +199,9 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
+        )}
 
+        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
         <Card className="border-l-4 border-l-green-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
@@ -194,7 +212,9 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">{profitMargin}% margin</p>
           </CardContent>
         </Card>
+        )}
 
+        {hasFeature('sales') && hasPermission('canViewSale') && (
         <Card className="border-l-4 border-l-purple-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sales</CardTitle>
@@ -205,7 +225,9 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">transactions this month</p>
           </CardContent>
         </Card>
+        )}
 
+        {hasFeature('settings.taxes') && hasPermission('canViewTax') && (
         <Card className="border-l-4 border-l-orange-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tax Collected</CardTitle>
@@ -216,10 +238,12 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">VAT/tax this period</p>
           </CardContent>
         </Card>
+        )}
       </div>
 
-      {/* KPI Cards Row 2 */}
+      {/* KPI Cards Row 2 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
@@ -230,7 +254,9 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">Revenue - COGS</p>
           </CardContent>
         </Card>
+        )}
 
+        {hasFeature('expenses') && hasPermission('canViewExpense') && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Expenses</CardTitle>
@@ -241,7 +267,9 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">Operating costs</p>
           </CardContent>
         </Card>
+        )}
 
+        {hasFeature('receivables') && hasPermission('canViewReceivable') && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Receivables</CardTitle>
@@ -252,7 +280,9 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">{k.receivablesCount} outstanding</p>
           </CardContent>
         </Card>
+        )}
 
+        {hasFeature('customers') && hasPermission('canViewCustomer') && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Customers</CardTitle>
@@ -260,14 +290,16 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold">{k.customerCount}</div>
-            <p className="text-xs text-muted-foreground">{k.productCount} products</p>
+            <p className="text-xs text-muted-foreground">{hasFeature('inventory') ? `${k.productCount} products` : ''}</p>
           </CardContent>
         </Card>
+        )}
       </div>
 
-      {/* Charts Row */}
+      {/* Charts Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Revenue vs Expenses Chart */}
+        {hasFeature('sales') && hasPermission('canViewSale') && (
         <Card>
           <CardHeader>
             <CardTitle>Revenue vs Expenses</CardTitle>
@@ -296,8 +328,10 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
+        )}
 
         {/* Profit & Loss Chart */}
+        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
         <Card>
           <CardHeader>
             <CardTitle>Profit & Loss</CardTitle>
@@ -316,11 +350,13 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
+        )}
       </div>
 
-      {/* Bottom Row */}
+      {/* Bottom Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Products */}
+        {hasFeature('inventory') && hasPermission('canViewProduct') && (
         <Card>
           <CardHeader>
             <CardTitle>Top Selling Products</CardTitle>
@@ -342,8 +378,10 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Payment Methods Pie */}
+        {hasFeature('sales') && hasPermission('canViewSale') && (
         <Card>
           <CardHeader>
             <CardTitle>Payment Methods</CardTitle>
@@ -367,9 +405,11 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
+        )}
       </div>
 
-      {/* Low Stock Alert */}
+      {/* Low Stock Alert — only for inventory feature */}
+      {hasFeature('inventory') && hasPermission('canViewProduct') && (
       <Card className="border-orange-200 bg-orange-50/50">
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -388,6 +428,7 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   )
 }

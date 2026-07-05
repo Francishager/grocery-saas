@@ -31,14 +31,13 @@ export const authenticateToken = async (req, res, next) => {
   try {
     // Resolve permissions from the single source of truth.
     // - saas_admin: wildcard "*" (bypasses all checks)
-    // - owner: ALL permissions (business owner has full access)
-    // - all other roles: permissions come EXCLUSIVELY from UserPermission table
-    //   (set by business owner via Roles & Permissions page). No hardcoded defaults.
+    // - ALL other roles (including owner): permissions come EXCLUSIVELY
+    //   from UserPermission table. No role gets auto-permissions.
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
     let permissions = permissionsForUser(decoded);
 
-    // For non-owner, non-saas_admin: merge UserPermission overrides
-    if (decoded.role !== 'saas_admin' && decoded.role !== 'owner' && userPerm) {
+    // For ALL non-saas_admin roles: merge UserPermission overrides
+    if (decoded.role !== 'saas_admin' && userPerm) {
       permissions = [];
       for (const [key, val] of Object.entries(userPerm)) {
         if (key.startsWith('can') && val === true) {
@@ -220,6 +219,182 @@ export const enforceTenantIsolation = (req, res, next) => {
   next();
 };
 
+/**
+ * Require a feature to be enabled for the tenant.
+ * Usage: router.get("/", authenticateToken, requireFeature("inventory"), handler)
+ * Platform admins bypass. When offline or no tenant, access is allowed (graceful degradation).
+ */
+export const requireFeature = (featureName) => {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    // Platform admins bypass feature checks
+    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
+      return next();
+    }
+
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    if (!tenantId) {
+      return next(); // No tenant — let other middleware handle it
+    }
+
+    try {
+      // Get tenant's plan
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { plan: true },
+      });
+
+      if (!tenant || !tenant.planId) {
+        return next(); // No plan — allow access (legacy/free tier)
+      }
+
+      // Check PlanFeature for this feature
+      const planFeature = await prisma.planFeature.findFirst({
+        where: {
+          planId: tenant.planId,
+          feature: { name: featureName },
+          enabled: true,
+        },
+        include: { feature: true },
+      });
+
+      let isEnabled = !!planFeature;
+
+      // Check TenantFeature overrides
+      const tenantFeature = await prisma.tenantFeature.findFirst({
+        where: {
+          tenantId,
+          feature: { name: featureName },
+        },
+        include: { feature: true },
+      });
+
+      if (tenantFeature) {
+        isEnabled = tenantFeature.enabled; // Override takes precedence
+      }
+
+      // Also check legacy JSON features array on plan
+      if (!isEnabled && tenant.plan?.features) {
+        const jsonFeatures = Array.isArray(tenant.plan.features) ? tenant.plan.features : [];
+        isEnabled = jsonFeatures.includes(featureName);
+      }
+
+      if (!isEnabled) {
+        return res.status(403).json({
+          message: 'Feature not available on your current plan',
+          feature: featureName,
+          code: 'FEATURE_DISABLED',
+        });
+      }
+
+      next();
+    } catch (err) {
+      console.error('requireFeature error:', err);
+      next(); // On error, allow access (graceful degradation)
+    }
+  };
+};
+
+/**
+ * Require the authenticated user to have a cash account assigned.
+ * Enforces cash-handling accountability — no user can record sales,
+ * receive payments, or make payments without being assigned to a
+ * cash account. Owners and platform admins bypass this check.
+ * Also loads the user's permissions for payment method gating.
+ */
+export const requireCashAccount = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  // Platform admins bypass
+  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
+    return next();
+  }
+
+  // Owners bypass — they own the business and can transact freely
+  if (req.user.role === 'owner') {
+    // Still load their cash account if assigned
+    const ownerUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        cashAccountId: true,
+        cashAccount: { select: { id: true, name: true, type: true, balance: true, accountNumber: true, bankName: true } },
+        permissions: true,
+      },
+    });
+    if (ownerUser?.cashAccountId) {
+      req.userCashAccountId = ownerUser.cashAccountId;
+      req.userCashAccount = ownerUser.cashAccount;
+    }
+    if (ownerUser?.permissions) {
+      req.userPermissions = ownerUser.permissions;
+    }
+    return next();
+  }
+
+  // Check if user has a cash account assigned
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      cashAccountId: true,
+      isActive: true,
+      cashAccount: { select: { id: true, name: true, type: true, balance: true, accountNumber: true, bankName: true } },
+      permissions: true,
+    },
+  });
+
+  if (!user) {
+    return res.status(403).json({
+      error: 'User account not found. Please contact your administrator.',
+      code: 'NO_CASH_ACCOUNT',
+    });
+  }
+
+  if (!user.cashAccountId) {
+    return res.status(403).json({
+      error: 'No cash account assigned. You cannot handle cash, record sales, or make payments until an administrator assigns you a cash account.',
+      code: 'NO_CASH_ACCOUNT',
+    });
+  }
+
+  // Attach the cash account and permissions for downstream use
+  req.userCashAccountId = user.cashAccountId;
+  req.userCashAccount = user.cashAccount;
+  req.userPermissions = user.permissions;
+  next();
+};
+
+/**
+ * Check if the user has permission to use a specific payment method.
+ * Must be called after requireCashAccount.
+ */
+export const checkPaymentMethodPermission = (req, paymentMethod) => {
+  // Owners and platform admins can use all payment methods
+  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser || req.user.role === 'owner') {
+    return true;
+  }
+
+  const perms = req.userPermissions;
+  if (!perms) return false;
+
+  const permMap = {
+    cash: 'canUseCash',
+    mobile_money: 'canUseMobileMoney',
+    bank_transfer: 'canUseBank',
+    bank: 'canUseBank',
+    card: 'canUseCard',
+  };
+
+  const permKey = permMap[paymentMethod];
+  if (!permKey) return false;
+
+  return Boolean(perms[permKey]);
+};
+
 export default {
   authenticateToken,
   requireRole,
@@ -228,5 +403,8 @@ export default {
   blockPlatformAdmin,
   optionalAuth,
   requirePermission,
+  requireFeature,
   enforceTenantIsolation,
+  requireCashAccount,
+  checkPaymentMethodPermission,
 };

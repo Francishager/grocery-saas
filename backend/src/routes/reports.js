@@ -23,12 +23,17 @@ const reportPermMap = {
   purchases: "canViewPayablesReport",
   services: "canViewServiceReport",
   rentals: "canViewRentalReport",
+  fuel: "canViewFuelStationReport",
+  manufacturing: "canViewManufacturingReport",
+  agriculture: "canViewAgricultureReport",
+  service_business: "canViewServiceBusinessReport",
+  restaurant: "canViewRestaurantReport",
 };
 
 // Middleware: check granular report permission based on route prefix
 function requireReportPermission(req, res, next) {
-  // Owner always has access
-  if (req.user?.role === "owner") return next();
+  // SaaS admin always has access
+  if (req.user?.role === "saas_admin" || req.user?.isPlatformUser) return next();
 
   // Check UserPermission table for the specific report permission
   const pathSeg = req.path.split("/").filter(Boolean)[0]; // e.g. "sales", "inventory"
@@ -1194,6 +1199,204 @@ router.get("/rentals/monthly", authenticateToken, async (req, res) => {
       map[m].deposit += r.depositAmount;
     });
     res.json({ data: Object.values(map) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// ==================== FUEL STATION REPORTS ====================
+
+// Fuel Sales Summary
+router.get("/fuel/sales-summary", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const shifts = await prisma.fuelShiftReport.findMany({
+      where: scopedWhere(s, df(req, "startDate")),
+    });
+    const totalLitres = shifts.reduce((a, x) => a + (x.litresSold || 0), 0);
+    const cashSales = shifts.reduce((a, x) => a + (x.cashSales || 0), 0);
+    const mobileSales = shifts.reduce((a, x) => a + (x.mobileSales || 0), 0);
+    const creditSales = shifts.reduce((a, x) => a + (x.creditSales || 0), 0);
+    const totalSales = shifts.reduce((a, x) => a + (x.totalSales || 0), 0);
+    const lubricantSales = shifts.reduce((a, x) => a + (x.lubricantSales || 0), 0);
+    const carWashIncome = shifts.reduce((a, x) => a + (x.carWashIncome || 0), 0);
+    const expenses = shifts.reduce((a, x) => a + (x.expenses || 0), 0);
+    const netAmount = shifts.reduce((a, x) => a + (x.netAmount || 0), 0);
+    res.json({
+      data: {
+        shiftCount: shifts.length,
+        totalLitres,
+        cashSales,
+        mobileSales,
+        creditSales,
+        totalSales,
+        lubricantSales,
+        carWashIncome,
+        expenses,
+        netAmount,
+      },
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Fuel Sales by Pump
+router.get("/fuel/sales-by-pump", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const readings = await prisma.fuelMeterReading.findMany({
+      where: scopedWhere(s, df(req, "readingDate")),
+      include: { pump: { select: { name: true } } },
+    });
+    const map = {};
+    readings.forEach((r) => {
+      const name = r.pump?.name || "Unknown";
+      if (!map[name]) map[name] = { pump: name, litresSold: 0, amount: 0, readings: 0 };
+      map[name].litresSold += r.litresSold || 0;
+      map[name].amount += r.amount || 0;
+      map[name].readings += 1;
+    });
+    res.json({ data: Object.values(map).sort((a, b) => b.amount - a.amount) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Tank Stock Report
+router.get("/fuel/tank-stock", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const tanks = await prisma.fuelTank.findMany({
+      where: scopedWhere(s),
+      orderBy: { name: "asc" },
+    });
+    const data = tanks.map((t) => ({
+      tank: t.name,
+      fuelType: t.fuelType,
+      capacity: t.capacity,
+      currentStock: t.currentStock,
+      unitCost: t.unitCost,
+      stockValue: (t.currentStock || 0) * (t.unitCost || 0),
+      fillPercent: t.capacity > 0 ? Math.round((t.currentStock / t.capacity) * 100) : 0,
+      isActive: t.isActive,
+    }));
+    res.json({ data });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Fuel Deliveries Report
+router.get("/fuel/deliveries", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const deliveries = await prisma.fuelDelivery.findMany({
+      where: scopedWhere(s, df(req, "deliveryDate")),
+      include: { tank: { select: { name: true, fuelType: true } } },
+      orderBy: { deliveryDate: "desc" },
+    });
+    const data = deliveries.map((d) => ({
+      tank: d.tank?.name || "—",
+      fuelType: d.tank?.fuelType || "—",
+      supplierName: d.supplierName || "—",
+      invoiceNo: d.invoiceNo || "—",
+      litres: d.litres,
+      unitCost: d.unitCost,
+      totalCost: d.totalCost,
+      deliveryDate: d.deliveryDate,
+    }));
+    res.json({ data });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Shift Summary Report
+router.get("/fuel/shift-summary", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const shifts = await prisma.fuelShiftReport.findMany({
+      where: scopedWhere(s, df(req, "startDate")),
+      include: {
+        pump: { select: { name: true } },
+        user: { select: { fname: true, lname: true } },
+      },
+      orderBy: { startDate: "desc" },
+    });
+    const data = shifts.map((sh) => ({
+      shiftNo: sh.shiftNo,
+      pump: sh.pump?.name || "—",
+      attendant: sh.user ? `${sh.user.fname} ${sh.user.lname}`.trim() : "—",
+      openingReading: sh.openingReading,
+      closingReading: sh.closingReading,
+      litresSold: sh.litresSold,
+      cashSales: sh.cashSales,
+      mobileSales: sh.mobileSales,
+      creditSales: sh.creditSales,
+      totalSales: sh.totalSales,
+      expenses: sh.expenses,
+      netAmount: sh.netAmount,
+      status: sh.status,
+      startDate: sh.startDate,
+      endDate: sh.endDate,
+    }));
+    res.json({ data });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Lubricant Sales Report
+router.get("/fuel/lubricant-sales", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const shifts = await prisma.fuelShiftReport.findMany({
+      where: scopedWhere(s, df(req, "startDate")),
+      include: { pump: { select: { name: true } }, user: { select: { fname: true, lname: true } } },
+      orderBy: { startDate: "desc" },
+    });
+    const data = shifts
+      .filter((sh) => (sh.lubricantSales || 0) > 0)
+      .map((sh) => ({
+        shiftNo: sh.shiftNo,
+        pump: sh.pump?.name || "—",
+        attendant: sh.user ? `${sh.user.fname} ${sh.user.lname}`.trim() : "—",
+        lubricantSales: sh.lubricantSales,
+        startDate: sh.startDate,
+      }));
+    res.json({ data });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Car Wash Income Report
+router.get("/fuel/car-wash-income", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const shifts = await prisma.fuelShiftReport.findMany({
+      where: scopedWhere(s, df(req, "startDate")),
+      include: { pump: { select: { name: true } }, user: { select: { fname: true, lname: true } } },
+      orderBy: { startDate: "desc" },
+    });
+    const data = shifts
+      .filter((sh) => (sh.carWashIncome || 0) > 0)
+      .map((sh) => ({
+        shiftNo: sh.shiftNo,
+        pump: sh.pump?.name || "—",
+        attendant: sh.user ? `${sh.user.fname} ${sh.user.lname}`.trim() : "—",
+        carWashIncome: sh.carWashIncome,
+        startDate: sh.startDate,
+      }));
+    res.json({ data });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Meter Readings Report
+router.get("/fuel/meter-readings", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const readings = await prisma.fuelMeterReading.findMany({
+      where: scopedWhere(s, df(req, "readingDate")),
+      include: { pump: { select: { name: true } } },
+      orderBy: { readingDate: "desc" },
+    });
+    const data = readings.map((r) => ({
+      pump: r.pump?.name || "—",
+      openingReading: r.openingReading,
+      closingReading: r.closingReading,
+      litresSold: r.litresSold,
+      amount: r.amount,
+      readingDate: r.readingDate,
+    }));
+    res.json({ data });
   } catch (err) { handleBranchError(res, err); }
 });
 

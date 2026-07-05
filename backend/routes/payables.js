@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 
@@ -385,7 +385,7 @@ router.get('/payments', authenticateToken, requirePermission('canViewPayable'), 
 })
 
 // Record supplier payment
-router.post('/payments', authenticateToken, requirePermission('canCreatePayable'), requireTenant, async (req, res) => {
+router.post('/payments', authenticateToken, requirePermission('canCreatePayable'), requireTenant, requireCashAccount, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -396,6 +396,24 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
     const paidAmount = toMoney(amount)
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
+
+    const resolvedPaymentMethod = paymentMethod || 'mobile_money'
+
+    // Cash is not allowed for spending — only for receiving customer payments
+    if (resolvedPaymentMethod === 'cash') {
+      return res.status(400).json({
+        error: 'Cash payment method is not available for spending. Please use mobile money, bank transfer, or card.',
+        code: 'INVALID_PAYMENT_METHOD'
+      })
+    }
+
+    // Gate payment method by permission
+    if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
 
     // Get supplier
     const supplier = await prisma.supplier.findFirst({
@@ -417,6 +435,20 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
       return res.status(400).json({ error: 'Payment exceeds supplier balance' })
     }
 
+    // Validate cash account balance if user has one assigned
+    let cashAccountUsed = null
+    if (req.userCashAccountId) {
+      cashAccountUsed = await prisma.cashAccount.findUnique({
+        where: { id: req.userCashAccountId }
+      })
+      if (cashAccountUsed && cashAccountUsed.balance < paidAmount) {
+        return res.status(400).json({
+          error: `Insufficient funds in ${cashAccountUsed.name}. Available: ${cashAccountUsed.balance.toFixed(2)} ${cashAccountUsed.currency}, Required: ${paidAmount.toFixed(2)}`,
+          code: 'INSUFFICIENT_FUNDS'
+        })
+      }
+    }
+
     // Create payment
     const payment = await prisma.supplierPayment.create({
       data: {
@@ -425,14 +457,35 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
         supplierId,
         purchaseId,
         amount: paidAmount,
-        paymentMethod,
-        mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : null,
-        phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : null,
-        transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : null,
+        paymentMethod: resolvedPaymentMethod,
+        mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+        phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+        transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
         reference,
         notes
       }
     })
+
+    // Deduct from cash account and record transaction
+    if (cashAccountUsed) {
+      const updatedAccount = await prisma.cashAccount.update({
+        where: { id: cashAccountUsed.id },
+        data: { balance: { decrement: paidAmount } }
+      })
+
+      await prisma.cashTransaction.create({
+        data: {
+          tenantId: req.tenant.id,
+          accountId: cashAccountUsed.id,
+          type: 'payment',
+          amount: paidAmount,
+          balanceAfter: updatedAccount.balance,
+          reference: reference || payment.id,
+          description: `Supplier payment: ${supplier.name}`,
+          userId: req.user.id
+        }
+      })
+    }
 
     // Update supplier balance
     const newBalance = Math.max(0, supplier.balance - paidAmount)

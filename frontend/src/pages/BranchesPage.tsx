@@ -109,7 +109,10 @@ export default function BranchesPage() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!form.name.trim()) return
+    if (!form.name.trim()) {
+      toast({ variant: 'destructive', title: 'Branch name is required' })
+      return
+    }
 
     // Check branch limit before creating
     if (!editingId && branchLimit !== null && branches.length >= branchLimit) {

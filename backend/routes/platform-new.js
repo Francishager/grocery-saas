@@ -256,6 +256,15 @@ router.post('/plans', authenticateToken, requirePlatformAdmin, async (req, res) 
   try {
     const { name, slug, price, currency = 'USD', billingCycle = 'monthly', maxUsers = 5, maxProducts = 100, maxBranches = 3, maxCustomers = 100, maxSuppliers = 50, features = [] } = req.body
 
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Plan name is required' })
+    if (!slug || !slug.trim()) return res.status(400).json({ error: 'Plan slug is required' })
+    if (price === undefined || price === null || price < 0) return res.status(400).json({ error: 'Price is required and cannot be negative' })
+    if (!currency || !currency.trim()) return res.status(400).json({ error: 'Currency is required' })
+    if (!billingCycle || !billingCycle.trim()) return res.status(400).json({ error: 'Billing cycle is required' })
+    if (maxUsers < 1) return res.status(400).json({ error: 'Max users must be at least 1' })
+    if (maxProducts < 1) return res.status(400).json({ error: 'Max products must be at least 1' })
+    if (maxBranches < 1) return res.status(400).json({ error: 'Max branches must be at least 1' })
+
     // Check if slug already exists
     const existingPlan = await prisma.plan.findUnique({
       where: { slug }
@@ -931,6 +940,12 @@ router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async 
   try {
     const { tenantId } = req.params
     const { name, email, phone, address, businessType, status, currency, timezone, taxRate, taxEnabled, taxId } = req.body
+
+    if (name !== undefined && !name.trim()) return res.status(400).json({ error: 'Business name cannot be empty' })
+    if (email !== undefined && !email.trim()) return res.status(400).json({ error: 'Business email cannot be empty' })
+    if (currency !== undefined && !currency.trim()) return res.status(400).json({ error: 'Currency cannot be empty' })
+    if (timezone !== undefined && !timezone.trim()) return res.status(400).json({ error: 'Timezone cannot be empty' })
+    if (status !== undefined && !['active', 'suspended', 'trial', 'inactive'].includes(status)) return res.status(400).json({ error: 'Invalid status value' })
 
     const data = {}
     if (name !== undefined) data.name = name

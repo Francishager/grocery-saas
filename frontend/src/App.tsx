@@ -30,17 +30,21 @@ import TaxManagementPage from '@/pages/TaxManagementPage'
 import ReceiptSettingsPage from '@/pages/ReceiptSettingsPage'
 import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
-import ExpensesPage from '@/pages/expenses/ExpensesPage'
 import RentalsPage from '@/pages/RentalsPage'
 import ReturnsPage from '@/pages/ReturnsPage'
 import AccountingPage from '@/pages/accounting/AccountingPage'
 import TransactionAccountsPage from '@/pages/accounting/TransactionAccountsPage'
 import StaffTillSheetPage from '@/pages/accounting/StaffTillSheetPage'
+import DataImporterPage from '@/pages/inventory/DataImporterPage'
 import HRPage from '@/pages/HRPage'
 import TransfersPage from '@/pages/TransfersPage'
 import CommunicationPage from '@/pages/CommunicationPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
 import RestaurantPage from '@/pages/RestaurantPage'
+import FuelStationPage from '@/pages/FuelStationPage'
+import ManufacturingPage from '@/pages/ManufacturingPage'
+import AgriculturePage from '@/pages/AgriculturePage'
+import ServiceBusinessPage from '@/pages/ServiceBusinessPage'
 import UserProfilePage from '@/pages/UserProfilePage'
 import ReferralPage from '@/pages/ReferralPage'
  
@@ -134,21 +138,29 @@ function App() {
           <Route index element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="dashboard" element={<FeatureGuard feature="dashboard"><DashboardPage /></FeatureGuard>} />
           <Route path="sales" element={<FeatureGuard feature="sales"><SalesPage /></FeatureGuard>} />
-          <Route path="inventory" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />
+          <Route path="inventory" element={<Navigate to="/tenant/inventory/products" replace />} />
+          <Route path="inventory/:tab" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />
           <Route path="purchases" element={<Navigate to="/tenant/payables" replace />} />
-          <Route path="receivables" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
+          <Route path="receivables" element={<Navigate to="/tenant/receivables/customers" replace />} />
+          <Route path="receivables/:tab" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
-          <Route path="expenses" element={<FeatureGuard feature="expenses"><ExpensesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting"><AccountingPage /></FeatureGuard>} />
           <Route path="accounting/transactions" element={<FeatureGuard feature="accounting"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting"><StaffTillSheetPage /></FeatureGuard>} />
+          <Route path="data-importer" element={<FeatureGuard feature="inventory"><DataImporterPage /></FeatureGuard>} />
           <Route path="hr" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
           <Route path="restaurant" element={<FeatureGuard feature="restaurant"><RestaurantPage /></FeatureGuard>} />
+          <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
+          <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station"><FuelStationPage /></FeatureGuard>} />
+          <Route path="manufacturing" element={<FeatureGuard feature="manufacturing"><ManufacturingPage /></FeatureGuard>} />
+          <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
+          <Route path="service" element={<Navigate to="/tenant/service/appointments" replace />} />
+          <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />

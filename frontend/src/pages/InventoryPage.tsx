@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
@@ -75,8 +75,8 @@ export default function InventoryPage() {
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
   const [itemTypeFilter, setItemTypeFilter] = useState<'all' | 'product'>('all')
-  const [searchParams] = useSearchParams()
-  const lockedType = searchParams.get('type') === 'product' ? 'product' as const : null
+  const { tab: urlTab } = useParams()
+  const lockedType = urlTab === 'products' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
@@ -222,6 +222,14 @@ export default function InventoryPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!formData.product_name.trim()) {
+      toast({ variant: 'destructive', title: 'Product name is required' })
+      return
+    }
+    if (formData.unit_price <= 0) {
+      toast({ variant: 'destructive', title: 'Selling price must be greater than 0' })
+      return
+    }
     if (canManageInventory && branches.length === 0) {
       toast({
         variant: 'destructive',
@@ -411,10 +419,20 @@ export default function InventoryPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            {lockedType === 'product' ? 'Products' : 'Items'}
+            {urlTab === 'products' ? 'Products' :
+             urlTab === 'services' ? 'Services' :
+             urlTab === 'rentals' ? 'Rental Items' :
+             urlTab === 'lubricants' ? 'Lubricants & Dry Stock' :
+             urlTab === 'convenience' ? 'Convenience Shop' :
+             'Items'}
           </h1>
           <p className="text-muted-foreground">
-            {lockedType === 'product' ? 'Manage your product inventory' : 'Manage your products'}
+            {urlTab === 'products' ? 'Manage your product inventory' :
+             urlTab === 'services' ? 'Manage service items' :
+             urlTab === 'rentals' ? 'Manage rental items' :
+             urlTab === 'lubricants' ? 'Manage lubricants and dry stock inventory' :
+             urlTab === 'convenience' ? 'Manage convenience shop inventory' :
+             'Manage your products'}
           </p>
         </div>
         {canManageInventory && (

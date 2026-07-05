@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
@@ -106,7 +106,8 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
         take: Number(limit),
         include: {
           branch: { select: { id: true, name: true } },
-          User: userSelect
+          User: userSelect,
+          cashAccount: { select: { id: true, name: true, type: true } }
         },
         orderBy: { date: 'desc' }
       }),
@@ -129,7 +130,7 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
+router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, requireCashAccount, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -141,6 +142,7 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       description, 
       amount, 
       paymentMethod, 
+      cashAccountId,
       reference, 
       notes,
       date,
@@ -150,11 +152,56 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
     } = req.body
 
     const amountValue = toMoney(amount)
-    const resolvedPaymentMethod = paymentMethod || 'cash'
+    const resolvedPaymentMethod = paymentMethod || 'mobile_money'
 
     if (!category?.trim()) return res.status(400).json({ error: 'Expense category is required' })
     if (!description?.trim()) return res.status(400).json({ error: 'Expense description is required' })
     if (amountValue <= 0) return res.status(400).json({ error: 'Expense amount must be greater than zero' })
+
+    // Cash is not allowed for spending — only for receiving customer payments
+    if (resolvedPaymentMethod === 'cash') {
+      return res.status(400).json({
+        error: 'Cash payment method is not available for spending. Please use mobile money, bank transfer, or card.',
+        code: 'INVALID_PAYMENT_METHOD'
+      })
+    }
+
+    // Gate payment method by permission
+    if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    // Use user's assigned cash account as default, or the explicitly selected one
+    let resolvedCashAccountId = req.userCashAccountId || null
+    if (cashAccountId) {
+      // Verify the selected account belongs to tenant and is active
+      const account = await prisma.cashAccount.findFirst({
+        where: { id: cashAccountId, tenantId: req.tenant.id, isActive: true }
+      })
+      if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
+      resolvedCashAccountId = account.id
+    }
+
+    if (!resolvedCashAccountId) {
+      return res.status(400).json({ error: 'No cash account available for this transaction' })
+    }
+
+    // Validate sufficient balance
+    const spendingAccount = await prisma.cashAccount.findUnique({
+      where: { id: resolvedCashAccountId }
+    })
+    if (!spendingAccount) {
+      return res.status(400).json({ error: 'Cash account not found' })
+    }
+    if (spendingAccount.balance < amountValue) {
+      return res.status(400).json({
+        error: `Insufficient funds in ${spendingAccount.name}. Available: ${spendingAccount.balance.toFixed(2)} ${spendingAccount.currency}, Required: ${amountValue.toFixed(2)}`,
+        code: 'INSUFFICIENT_FUNDS'
+      })
+    }
 
     const expense = await prisma.$transaction(async (tx) => {
       const createdExpense = await tx.expense.create({
@@ -165,6 +212,7 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
           description: description.trim(),
           amount: amountValue,
           paymentMethod: resolvedPaymentMethod,
+          cashAccountId: resolvedCashAccountId,
           mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
           phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
           transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
@@ -174,11 +222,14 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
           date: date ? new Date(date) : new Date()
         },
         include: {
-          User: userSelect
+          User: userSelect,
+          cashAccount: { select: { id: true, name: true, type: true } }
         }
       })
 
-      const account = await cashAccountForPaymentMethod(req.tenant.id, resolvedPaymentMethod, tx)
+      // Use the resolved cash account (user's assigned or explicitly selected)
+      const account = await tx.cashAccount.findUnique({ where: { id: resolvedCashAccountId } })
+
       const updatedAccount = await tx.cashAccount.update({
         where: { id: account.id },
         data: {
@@ -216,7 +267,7 @@ router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { category, description, amount, paymentMethod, reference, notes, date, branchId, mobileProvider, phoneNumber, transactionId } = req.body
+    const { category, description, amount, paymentMethod, cashAccountId, reference, notes, date, branchId, mobileProvider, phoneNumber, transactionId } = req.body
 
     // Check if expense belongs to tenant
     const existingExpense = await prisma.expense.findFirst({
@@ -227,11 +278,26 @@ router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense
       return res.status(404).json({ error: 'Expense not found' })
     }
 
+    // Validate cash account if provided
+    let resolvedCashAccountId = existingExpense.cashAccountId
+    if (cashAccountId !== undefined) {
+      if (cashAccountId) {
+        const account = await prisma.cashAccount.findFirst({
+          where: { id: cashAccountId, tenantId: req.tenant.id, isActive: true }
+        })
+        if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
+        resolvedCashAccountId = account.id
+      } else {
+        resolvedCashAccountId = null
+      }
+    }
+
     const data = {
       category,
       description,
       amount,
       paymentMethod,
+      cashAccountId: resolvedCashAccountId,
       mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : null,
       phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : null,
       transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : null,
@@ -260,6 +326,35 @@ router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense
 
 // === CASH ACCOUNTS ===
 
+// Get current user's assigned cash account and payment method permissions
+router.get('/my-cash-account', authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        cashAccountId: true,
+        cashAccount: {
+          select: { id: true, name: true, type: true, balance: true, currency: true, accountNumber: true, bankName: true, accountHolder: true, branchName: true }
+        },
+        permissions: {
+          select: { canUseCash: true, canUseMobileMoney: true, canUseBank: true, canUseCard: true }
+        }
+      }
+    })
+
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    res.json({
+      cashAccountId: user.cashAccountId,
+      cashAccount: user.cashAccount,
+      paymentMethodPermissions: user.permissions || { canUseCash: true, canUseMobileMoney: false, canUseBank: false, canUseCard: false }
+    })
+  } catch (error) {
+    console.error('Get my cash account error:', error)
+    res.status(500).json({ error: 'Failed to fetch cash account info' })
+  }
+})
+
 // Get all cash accounts
 router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
@@ -283,7 +378,29 @@ router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpens
 // Create cash account
 router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
-    const { name, type, currency = 'UGX' } = req.body
+    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName } = req.body
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Account name is required' })
+    }
+    if (!type || !['cash', 'mobile_money', 'bank', 'card'].includes(type)) {
+      return res.status(400).json({ error: 'Valid account type is required (cash, mobile_money, bank, card)' })
+    }
+    // Bank accounts require bank name and account number
+    if (type === 'bank') {
+      if (!bankName || !String(bankName).trim()) {
+        return res.status(400).json({ error: 'Bank name is required for bank accounts' })
+      }
+      if (!accountNumber || !String(accountNumber).trim()) {
+        return res.status(400).json({ error: 'Account number is required for bank accounts' })
+      }
+    }
+    // Mobile money requires phone number (accountNumber)
+    if (type === 'mobile_money') {
+      if (!accountNumber || !String(accountNumber).trim()) {
+        return res.status(400).json({ error: 'Phone number is required for mobile money accounts' })
+      }
+    }
 
     // Check if account already exists
     const existingAccount = await prisma.cashAccount.findFirst({
@@ -302,7 +419,11 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExp
         tenantId: req.tenant.id,
         name,
         type,
-        currency
+        currency,
+        accountNumber: accountNumber || null,
+        bankName: type === 'bank' ? bankName : null,
+        accountHolder: accountHolder || null,
+        branchName: type === 'bank' ? (branchName || null) : null,
       }
     })
 
@@ -453,21 +574,190 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
 
 // === EXPENSE CATEGORIES ===
 
+// === STAFF TILL SHEET ===
+
+// Get staff till sheet data — aggregates all cash transactions per staff member
+router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+  try {
+    const { startDate, endDate, staffId, branchId } = req.query
+
+    const dateFilter = startDate && endDate ? {
+      createdAt: {
+        gte: new Date(startDate),
+        lte: new Date(endDate)
+      }
+    } : {}
+
+    // Get all users with cash accounts assigned
+    const users = await prisma.user.findMany({
+      where: {
+        tenantId: req.tenant.id,
+        isActive: true,
+        cashAccountId: { not: null },
+        ...(staffId && { id: staffId })
+      },
+      select: {
+        id: true,
+        fname: true,
+        lname: true,
+        email: true,
+        role: true,
+        cashAccountId: true,
+        cashAccount: {
+          select: { id: true, name: true, type: true, balance: true, currency: true, accountNumber: true }
+        },
+        branches: {
+          include: { branch: { select: { id: true, name: true } } }
+        }
+      }
+    })
+
+    // Get all cash transactions for these users within the date range
+    const transactions = await prisma.cashTransaction.findMany({
+      where: {
+        tenantId: req.tenant.id,
+        userId: { in: users.map(u => u.id) },
+        ...dateFilter
+      },
+      include: {
+        account: { select: { id: true, name: true, type: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    // Group transactions by user
+    const tillSheets = users.map(user => {
+      const userTxns = transactions.filter(t => t.userId === user.id)
+      const primaryBranch = user.branches?.find(b => b.isPrimary)?.branch || user.branches?.[0]?.branch || null
+
+      // Credited (money in): sales, receipts
+      const credited = userTxns.filter(t => ['sale', 'receipt', 'income'].includes(t.type))
+      const totalCredited = credited.reduce((sum, t) => sum + t.amount, 0)
+
+      // Debited (money out): expenses, payments
+      const debited = userTxns.filter(t => ['expense', 'payment', 'transfer'].includes(t.type))
+      const totalDebited = debited.reduce((sum, t) => sum + t.amount, 0)
+
+      // Group by type for breakdown
+      const byType = userTxns.reduce((acc, t) => {
+        if (!acc[t.type]) acc[t.type] = { count: 0, total: 0 }
+        acc[t.type].count++
+        acc[t.type].total += t.amount
+        return acc
+      }, {})
+
+      return {
+        staffId: user.id,
+        staff: {
+          id: user.id,
+          fname: user.fname,
+          lname: user.lname,
+          email: user.email,
+          role: user.role
+        },
+        branch: primaryBranch,
+        cashAccount: user.cashAccount,
+        currentBalance: user.cashAccount?.balance || 0,
+        totalCredited,
+        totalDebited,
+        netMovement: totalCredited - totalDebited,
+        transactionCount: userTxns.length,
+        transactions: userTxns.map(t => ({
+          id: t.id,
+          type: t.type,
+          amount: t.amount,
+          balanceAfter: t.balanceAfter,
+          reference: t.reference,
+          description: t.description,
+          account: t.account,
+          createdAt: t.createdAt
+        })),
+        breakdown: byType
+      }
+    })
+
+    // Filter by branch if specified
+    const filtered = branchId
+      ? tillSheets.filter(ts => ts.branch?.id === branchId)
+      : tillSheets
+
+    res.json({
+      tillSheets: filtered,
+      summary: {
+        totalStaff: filtered.length,
+        totalCredited: filtered.reduce((s, t) => s + t.totalCredited, 0),
+        totalDebited: filtered.reduce((s, t) => s + t.totalDebited, 0),
+        totalBalance: filtered.reduce((s, t) => s + t.currentBalance, 0)
+      }
+    })
+  } catch (error) {
+    console.error('Staff till sheets error:', error)
+    res.status(500).json({ error: 'Failed to fetch staff till sheets' })
+  }
+})
+
 // Get expense categories
 router.get('/expense-categories', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
   try {
     const categories = [
-      { name: 'rent', displayName: 'Rent', icon: '🏢' },
-      { name: 'transport', displayName: 'Transport', icon: '🚗' },
-      { name: 'salaries', displayName: 'Salaries', icon: '💰' },
-      { name: 'utilities', displayName: 'Utilities', icon: '💡' },
-      { name: 'airtime', displayName: 'Airtime', icon: '📱' },
-      { name: 'marketing', displayName: 'Marketing', icon: '📢' },
-      { name: 'maintenance', displayName: 'Maintenance', icon: '🔧' },
-      { name: 'supplies', displayName: 'Office Supplies', icon: '📎' },
-      { name: 'insurance', displayName: 'Insurance', icon: '🛡️' },
-      { name: 'taxes', displayName: 'Taxes', icon: '📋' },
-      { name: 'other', displayName: 'Other', icon: '📝' }
+      // Operating Expenses
+      { name: 'rent', displayName: 'Rent', icon: '🏢', group: 'Operating' },
+      { name: 'utilities', displayName: 'Utilities (Electricity, Water, Gas)', icon: '💡', group: 'Operating' },
+      { name: 'maintenance', displayName: 'Maintenance & Repairs', icon: '🔧', group: 'Operating' },
+      { name: 'cleaning', displayName: 'Cleaning & Sanitation', icon: '🧹', group: 'Operating' },
+      { name: 'security', displayName: 'Security Services', icon: '👮', group: 'Operating' },
+      { name: 'waste_disposal', displayName: 'Waste Disposal', icon: '🗑️', group: 'Operating' },
+      { name: 'supplies', displayName: 'Office Supplies', icon: '📎', group: 'Operating' },
+      // Cost of Goods Sold
+      { name: 'purchases', displayName: 'Inventory Purchases', icon: '📦', group: 'COGS' },
+      { name: 'raw_materials', displayName: 'Raw Materials', icon: '🏭', group: 'COGS' },
+      { name: 'packaging', displayName: 'Packaging Materials', icon: '🎁', group: 'COGS' },
+      { name: 'freight_in', displayName: 'Freight & Inward Transport', icon: '�', group: 'COGS' },
+      // Staff & Personnel
+      { name: 'salaries', displayName: 'Salaries & Wages', icon: '💰', group: 'Personnel' },
+      { name: 'staff_meals', displayName: 'Staff Meals & Welfare', icon: '🍽️', group: 'Personnel' },
+      { name: 'staff_training', displayName: 'Staff Training', icon: '🎓', group: 'Personnel' },
+      { name: 'medical', displayName: 'Medical & Health', icon: '🏥', group: 'Personnel' },
+      { name: 'pensions', displayName: 'Pensions & NSSF', icon: '🏦', group: 'Personnel' },
+      // Transport & Travel
+      { name: 'transport', displayName: 'Transport (Local)', icon: '�', group: 'Travel' },
+      { name: 'travel', displayName: 'Travel (Upcountry/International)', icon: '✈️', group: 'Travel' },
+      { name: 'accommodation', displayName: 'Accommodation', icon: '🏨', group: 'Travel' },
+      { name: 'meals', displayName: 'Meals & Entertainment', icon: '🍴', group: 'Travel' },
+      { name: 'fuel', displayName: 'Fuel & Vehicle Expenses', icon: '⛽', group: 'Travel' },
+      // Marketing & Sales
+      { name: 'marketing', displayName: 'Marketing & Advertising', icon: '📢', group: 'Marketing' },
+      { name: 'promotions', displayName: 'Promotions & Discounts', icon: '🏷️', group: 'Marketing' },
+      { name: 'samples', displayName: 'Samples & Giveaways', icon: '🎁', group: 'Marketing' },
+      // Professional Services
+      { name: 'legal', displayName: 'Legal Fees', icon: '⚖️', group: 'Professional' },
+      { name: 'accounting', displayName: 'Accounting & Audit', icon: '📊', group: 'Professional' },
+      { name: 'consulting', displayName: 'Consulting Fees', icon: '🧠', group: 'Professional' },
+      // IT & Technology
+      { name: 'software_licenses', displayName: 'Software & Subscriptions', icon: '💻', group: 'IT' },
+      { name: 'internet', displayName: 'Internet & Data', icon: '🌐', group: 'IT' },
+      { name: 'airtime', displayName: 'Airtime & Communications', icon: '�', group: 'IT' },
+      { name: 'hosting', displayName: 'Hosting & Cloud Services', icon: '☁️', group: 'IT' },
+      // Banking & Finance
+      { name: 'bank_charges', displayName: 'Bank Charges & Fees', icon: '🏦', group: 'Finance' },
+      { name: 'loan_interest', displayName: 'Loan Interest', icon: '📉', group: 'Finance' },
+      { name: 'fx_losses', displayName: 'Foreign Exchange Losses', icon: '💱', group: 'Finance' },
+      { name: 'fines', displayName: 'Fines & Penalties', icon: '⚠️', group: 'Finance' },
+      // Compliance & Regulatory
+      { name: 'taxes', displayName: 'Taxes (VAT, PAYE, Income Tax)', icon: '📋', group: 'Compliance' },
+      { name: 'licenses', displayName: 'Business Licenses & Permits', icon: '📜', group: 'Compliance' },
+      { name: 'inspection_fees', displayName: 'Inspection & Certification Fees', icon: '�', group: 'Compliance' },
+      { name: 'insurance', displayName: 'Insurance Premiums', icon: '🛡️', group: 'Compliance' },
+      // Equipment & Assets
+      { name: 'equipment_purchase', displayName: 'Equipment Purchase', icon: '🛠️', group: 'Assets' },
+      { name: 'equipment_rental', displayName: 'Equipment Rental/Lease', icon: '🔁', group: 'Assets' },
+      { name: 'depreciation', displayName: 'Depreciation', icon: '📉', group: 'Assets' },
+      // Other
+      { name: 'donations', displayName: 'Donations & Sponsorships', icon: '🤝', group: 'Other' },
+      { name: 'refunds', displayName: 'Customer Refunds', icon: '↩️', group: 'Other' },
+      { name: 'write_offs', displayName: 'Bad Debts & Write-offs', icon: '❌', group: 'Other' },
+      { name: 'miscellaneous', displayName: 'Miscellaneous', icon: '�', group: 'Other' },
+      { name: 'other', displayName: 'Other (Specify in Description)', icon: '📝', group: 'Other' }
     ]
 
     res.json(categories)

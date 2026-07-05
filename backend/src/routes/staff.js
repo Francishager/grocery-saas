@@ -36,6 +36,8 @@ function staffResponse(user) {
       name: item.branch?.name || "",
       isPrimary: item.isPrimary,
     })) || [],
+    cashAccountId: user.cashAccountId || null,
+    cashAccount: user.cashAccount ? { id: user.cashAccount.id, name: user.cashAccount.name, type: user.cashAccount.type } : null,
   };
 }
 
@@ -76,6 +78,7 @@ router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req
           include: { branch: { select: { id: true, name: true, isActive: true } } },
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         },
+        cashAccount: { select: { id: true, name: true, type: true } },
       },
       orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
     });
@@ -92,8 +95,9 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    const { name, email, password, fname, lname, phone, role = "attendant", branchId, permissions } = req.body;
+    const { name, email, password, fname, lname, phone, role = "attendant", branchId, permissions, cashAccountId } = req.body;
     const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
     if (!normalizedEmail) return res.status(400).json({ error: "Email is required" });
     if (!password || String(password).length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
@@ -121,6 +125,16 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
       }
     }
 
+    // Validate cash account if provided
+    let resolvedCashAccountId = null;
+    if (cashAccountId) {
+      const account = await prisma.cashAccount.findFirst({
+        where: { id: cashAccountId, tenantId, isActive: true },
+      });
+      if (!account) return res.status(400).json({ error: "Invalid or inactive cash account" });
+      resolvedCashAccountId = account.id;
+    }
+
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
@@ -132,6 +146,7 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
           role,
           tenantId,
           isActive: true,
+          cashAccountId: resolvedCashAccountId,
         },
       });
 
@@ -149,6 +164,7 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
           branches: {
             include: { branch: { select: { id: true, name: true, isActive: true } } },
           },
+          cashAccount: { select: { id: true, name: true, type: true } },
         },
       });
     });
@@ -174,7 +190,7 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
     if (!existing) return res.status(404).json({ error: "Staff not found" });
 
     const data = {};
-    const { name, fname, lname, phone, role, isActive, branchId, password } = req.body;
+    const { name, fname, lname, phone, role, isActive, branchId, password, cashAccountId } = req.body;
 
     if (role !== undefined) {
       if (!staffRoles.has(role) && role !== "owner") return res.status(400).json({ error: "Invalid staff role" });
@@ -199,6 +215,19 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
 
     if (branchId) await requireTenantBranch(tenantId, branchId);
 
+    // Validate and set cash account if provided
+    if (cashAccountId !== undefined) {
+      if (cashAccountId) {
+        const account = await prisma.cashAccount.findFirst({
+          where: { id: cashAccountId, tenantId, isActive: true },
+        });
+        if (!account) return res.status(400).json({ error: "Invalid or inactive cash account" });
+        data.cashAccountId = account.id;
+      } else {
+        data.cashAccountId = null;
+      }
+    }
+
     const user = await prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: existing.id }, data });
       if (branchId) {
@@ -215,6 +244,7 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
             include: { branch: { select: { id: true, name: true, isActive: true } } },
             orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
           },
+          cashAccount: { select: { id: true, name: true, type: true } },
         },
       });
     });
@@ -268,8 +298,8 @@ router.get("/:id/permissions", authenticateToken, requirePermission("canViewStaf
 
     let perms = await prisma.userPermission.findUnique({ where: { userId: user.id } });
     if (!perms) {
-      // Owner gets all permissions; others get role defaults
-      const defaults = user.role === "owner" ? Object.fromEntries(PERM_KEYS.map(k => [k, true])) : (ROLE_DEFAULTS[user.role] || ROLE_DEFAULTS.attendant);
+      // ALL roles start with empty permissions — no auto-grants
+      const defaults = ROLE_DEFAULTS[user.role] || ROLE_DEFAULTS.attendant;
       const permData = {};
       for (const key of PERM_KEYS) permData[key] = defaults[key] ?? false;
       perms = await prisma.userPermission.create({ data: { userId: user.id, ...permData } });

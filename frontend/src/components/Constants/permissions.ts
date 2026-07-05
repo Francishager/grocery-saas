@@ -41,7 +41,12 @@ export const permissionCategories = [
   { id: 'services', name: 'Services' },
   { id: 'rentals', name: 'Rentals' },
   { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'fuel_station', name: 'Fuel Station' },
+  { id: 'manufacturing', name: 'Manufacturing' },
+  { id: 'agriculture', name: 'Agriculture' },
+  { id: 'service_business', name: 'Service Business' },
   { id: 'communication', name: 'Communication' },
+  { id: 'accounting', name: 'Accounting' },
   { id: 'billing', name: 'Billing & Subscription' },
 ]
 
@@ -171,9 +176,50 @@ export const permissions: Permission[] = [
   
   // Restaurant & Bar
   { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },
-  
+  { id: 'canCreateRestaurant', name: 'Create Restaurant', description: 'Create restaurant orders, tables, reservations', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canEditRestaurant', name: 'Edit Restaurant', description: 'Edit restaurant orders and settings', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canDeleteRestaurant', name: 'Delete Restaurant', description: 'Delete restaurant records', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canViewRestaurantReport', name: 'View Restaurant Reports', description: 'View restaurant-related reports', category: 'restaurant', accessesBusinessData: true },
+
+  // Fuel Station
+  { id: 'canViewFuelStation', name: 'View Fuel Station', description: 'Access fuel station module', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canCreateFuelStation', name: 'Create Fuel Station', description: 'Create pumps, tanks, deliveries, shifts', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canEditFuelStation', name: 'Edit Fuel Station', description: 'Edit fuel station records', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canDeleteFuelStation', name: 'Delete Fuel Station', description: 'Delete fuel station records', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canViewFuelStationReport', name: 'View Fuel Station Reports', description: 'View fuel station reports', category: 'fuel_station', accessesBusinessData: true },
+
+  // Manufacturing
+  { id: 'canViewManufacturing', name: 'View Manufacturing', description: 'Access manufacturing module', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canCreateManufacturing', name: 'Create Manufacturing', description: 'Create production orders, waste records, BOMs', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canEditManufacturing', name: 'Edit Manufacturing', description: 'Edit manufacturing records', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canDeleteManufacturing', name: 'Delete Manufacturing', description: 'Delete manufacturing records', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canViewManufacturingReport', name: 'View Manufacturing Reports', description: 'View manufacturing reports', category: 'manufacturing', accessesBusinessData: true },
+
+  // Agriculture
+  { id: 'canViewAgriculture', name: 'View Agriculture', description: 'Access agriculture module', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canCreateAgriculture', name: 'Create Agriculture', description: 'Create fields, livestock, harvests, expenses', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canEditAgriculture', name: 'Edit Agriculture', description: 'Edit agriculture records', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canDeleteAgriculture', name: 'Delete Agriculture', description: 'Delete agriculture records', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canViewAgricultureReport', name: 'View Agriculture Reports', description: 'View agriculture reports', category: 'agriculture', accessesBusinessData: true },
+
+  // Service Business (appointments, work orders, contracts)
+  { id: 'canViewServiceBusiness', name: 'View Service Business', description: 'Access service business module', category: 'service_business', accessesBusinessData: true },
+  { id: 'canCreateServiceBusiness', name: 'Create Service Business', description: 'Create appointments, work orders, contracts', category: 'service_business', accessesBusinessData: true },
+  { id: 'canEditServiceBusiness', name: 'Edit Service Business', description: 'Edit service business records', category: 'service_business', accessesBusinessData: true },
+  { id: 'canDeleteServiceBusiness', name: 'Delete Service Business', description: 'Delete service business records', category: 'service_business', accessesBusinessData: true },
+  { id: 'canViewServiceBusinessReport', name: 'View Service Business Reports', description: 'View service business reports', category: 'service_business', accessesBusinessData: true },
+
   // Communication
   { id: 'canViewCommunication', name: 'View Communication', description: 'Access communication module', category: 'communication', accessesBusinessData: true },
+  { id: 'canCreateCommunication', name: 'Create Communication', description: 'Create and send messages/notifications', category: 'communication', accessesBusinessData: true },
+  { id: 'canEditCommunication', name: 'Edit Communication', description: 'Edit communication templates and settings', category: 'communication', accessesBusinessData: true },
+  { id: 'canDeleteCommunication', name: 'Delete Communication', description: 'Delete communication records', category: 'communication', accessesBusinessData: true },
+
+  // Accounting
+  { id: 'canViewAccounting', name: 'View Accounting', description: 'View chart of accounts and journal entries', category: 'accounting', accessesBusinessData: true },
+  { id: 'canCreateAccounting', name: 'Create Accounting', description: 'Create accounts and journal entries', category: 'accounting', accessesBusinessData: true },
+  { id: 'canEditAccounting', name: 'Edit Accounting', description: 'Edit accounts and journal entries', category: 'accounting', accessesBusinessData: true },
+  { id: 'canDeleteAccounting', name: 'Delete Accounting', description: 'Delete accounts and journal entries', category: 'accounting', accessesBusinessData: true },
   
   // Billing (Tenant-level - for business owners)
   { id: 'view_own_billing', name: 'View Own Billing', description: 'View own subscription and billing', category: 'billing' },
@@ -214,34 +260,9 @@ export const roles: Role[] = [
   {
     id: 'owner',
     name: 'Owner',
-    description: 'Business owner with full access',
+    description: 'Business owner — permissions must be explicitly assigned',
     isSystem: true,
-    permissions: [
-      'canViewDashboard',
-      'canViewSale', 'canCreateSale', 'canEditSale', 'canDeleteSale', 'canRefundSale',
-      'canViewPurchase', 'canCreatePurchase', 'canEditPurchase', 'canDeletePurchase',
-      'canViewPayable', 'canCreatePayable', 'canEditPayable', 'canDeletePayable',
-      'canViewReceivable', 'canCreateReceivable', 'canEditReceivable', 'canDeleteReceivable',
-      'canViewProduct', 'canCreateProduct', 'canEditProduct', 'canDeleteProduct', 'canAdjustStock', 'canTransferStock',
-      'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense',
-      'canViewCustomer', 'canCreateCustomer', 'canEditCustomer', 'canDeleteCustomer',
-      'canViewSupplier', 'canCreateSupplier', 'canEditSupplier', 'canDeleteSupplier',
-      'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport', 'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport', 'canViewAuditReport', 'canExportReport',
-      'canViewStaff', 'canCreateStaff', 'canEditStaff', 'canDeleteStaff',
-      'canViewBranch', 'canCreateBranch', 'canEditBranch', 'canDeleteBranch',
-      'canViewSettings', 'canEditSettings',
-      'canViewReceipt', 'canCreateReceipt',
-      'canGiveDiscount',
-      'canViewTax', 'canManageTax',
-      // Services
-      'canViewService', 'canCreateService', 'canEditService', 'canDeleteService', 'canManageServiceCategory', 'canViewServiceReport',
-      // Rentals
-      'canViewRental', 'canCreateRental', 'canEditRental', 'canDeleteRental', 'canProcessRentalReturn', 'canViewRentalReport',
-      // Restaurant & Bar
-      'canViewRestaurant',
-      // Communication
-      'canViewCommunication',
-    ],
+    permissions: [],
   },
   {
     id: 'accountant',

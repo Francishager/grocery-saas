@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, cn } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
@@ -47,6 +48,21 @@ interface Customer {
   status: 'active' | 'inactive' | 'blocked'
   trustScore: number
   notes?: string
+}
+
+interface FuelCard {
+  id: string
+  cardNumber: string
+  holderName: string
+  customerId?: string | null
+  customer?: { id: string; name: string; phone?: string } | null
+  cardType: 'prepaid' | 'credit' | 'fleet'
+  balance: number
+  creditLimit: number
+  status: 'active' | 'suspended' | 'expired' | 'cancelled'
+  expiresAt?: string | null
+  notes?: string
+  createdAt: string
 }
 
 interface Supplier {
@@ -121,7 +137,9 @@ export default function ReceivablesPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'sales' | 'payments'>('customers')
+  const { tab: urlTab } = useParams()
+  const navigate = useNavigate()
+  const activeTab = (urlTab === 'sales' || urlTab === 'payments' || urlTab === 'fuel-cards' || urlTab === 'credit-accounts') ? urlTab : 'customers'
   const [summary, setSummary] = useState<any>(null)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [showSaleModal, setShowSaleModal] = useState(false)
@@ -147,6 +165,22 @@ export default function ReceivablesPage() {
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
   const creditEnabled = hasPermission('canViewReceivable')
 
+  // Fuel Cards state
+  const [fuelCards, setFuelCards] = useState<FuelCard[]>([])
+  const [showFuelCardModal, setShowFuelCardModal] = useState(false)
+  const [editingFuelCard, setEditingFuelCard] = useState<FuelCard | null>(null)
+  const [fuelCardForm, setFuelCardForm] = useState({
+    cardNumber: '', holderName: '', customerId: '', cardType: 'prepaid' as 'prepaid' | 'credit' | 'fleet',
+    balance: '0', creditLimit: '0', expiresAt: '', notes: ''
+  })
+
+  // Credit Accounts state
+  const [creditAccounts, setCreditAccounts] = useState<Customer[]>([])
+  const [editingCreditAccount, setEditingCreditAccount] = useState<Customer | null>(null)
+  const [creditAccountForm, setCreditAccountForm] = useState({
+    creditLimit: '0', status: 'active' as 'active' | 'inactive' | 'blocked', trustScore: '50', notes: ''
+  })
+
   useEffect(() => {
     if (!creditEnabled) {
       setLoading(false)
@@ -158,6 +192,8 @@ export default function ReceivablesPage() {
     }
     if (activeTab === 'sales') loadSales()
     if (activeTab === 'payments') loadPayments()
+    if (activeTab === 'fuel-cards') loadFuelCards()
+    if (activeTab === 'credit-accounts') loadCreditAccounts()
     loadReceivablesSummary()
   }, [creditEnabled, activeTab, searchTerm, statusFilter])
 
@@ -238,7 +274,6 @@ export default function ReceivablesPage() {
           setSummary(data)
         }
       } else {
-        // Compute summary from local data
         const localCustomers = await getLocalReceivableCustomers()
         const localSales = await getLocalReceivableSales()
         const totalReceivable = localCustomers.reduce((sum, c) => sum + (c.balance || 0), 0)
@@ -252,6 +287,137 @@ export default function ReceivablesPage() {
       }
     } catch (error) {
       console.error('Failed to load summary:', error)
+    }
+  }
+
+  const loadFuelCards = async () => {
+    try {
+      setLoading(true)
+      const response = await apiFetch(`/api/receivables/fuel-cards?search=${encodeURIComponent(searchTerm)}`)
+      if (response.ok) {
+        const data = await response.json()
+        setFuelCards(data.cards || [])
+      }
+    } catch (error) {
+      console.error('Failed to load fuel cards:', error)
+      toast({ variant: 'destructive', title: 'Failed to load fuel cards' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveFuelCard = async () => {
+    if (!fuelCardForm.cardNumber.trim() || !fuelCardForm.holderName.trim()) {
+      toast({ variant: 'destructive', title: 'Card number and holder name are required' })
+      return
+    }
+    try {
+      const payload = {
+        cardNumber: fuelCardForm.cardNumber.trim(),
+        holderName: fuelCardForm.holderName.trim(),
+        customerId: fuelCardForm.customerId || null,
+        cardType: fuelCardForm.cardType,
+        balance: Number(fuelCardForm.balance) || 0,
+        creditLimit: Number(fuelCardForm.creditLimit) || 0,
+        expiresAt: fuelCardForm.expiresAt || null,
+        notes: fuelCardForm.notes || null,
+      }
+      const url = editingFuelCard
+        ? `/api/receivables/fuel-cards/${editingFuelCard.id}`
+        : '/api/receivables/fuel-cards'
+      const method = editingFuelCard ? 'PUT' : 'POST'
+      const response = await apiFetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (response.ok) {
+        toast({ title: editingFuelCard ? 'Fuel card updated' : 'Fuel card created' })
+        setShowFuelCardModal(false)
+        setEditingFuelCard(null)
+        setFuelCardForm({ cardNumber: '', holderName: '', customerId: '', cardType: 'prepaid', balance: '0', creditLimit: '0', expiresAt: '', notes: '' })
+        loadFuelCards()
+      } else {
+        const err = await response.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: err.error || 'Failed to save fuel card' })
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to save fuel card' })
+    }
+  }
+
+  const deleteFuelCard = async (id: string) => {
+    try {
+      const response = await apiFetch(`/api/receivables/fuel-cards/${id}`, { method: 'DELETE' })
+      if (response.ok) {
+        toast({ title: 'Fuel card deleted' })
+        loadFuelCards()
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to delete fuel card' })
+    }
+  }
+
+  const reloadFuelCard = async (id: string) => {
+    const amount = window.prompt('Enter reload amount:')
+    if (!amount || Number(amount) <= 0) return
+    try {
+      const response = await apiFetch(`/api/receivables/fuel-cards/${id}/reload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: Number(amount) }),
+      })
+      if (response.ok) {
+        toast({ title: 'Fuel card reloaded' })
+        loadFuelCards()
+      } else {
+        const err = await response.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: err.error || 'Failed to reload card' })
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to reload fuel card' })
+    }
+  }
+
+  const loadCreditAccounts = async () => {
+    try {
+      setLoading(true)
+      const response = await apiFetch(`/api/receivables/credit-accounts?search=${encodeURIComponent(searchTerm)}`)
+      if (response.ok) {
+        const data = await response.json()
+        setCreditAccounts(data.accounts || [])
+      }
+    } catch (error) {
+      console.error('Failed to load credit accounts:', error)
+      toast({ variant: 'destructive', title: 'Failed to load credit accounts' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveCreditAccount = async () => {
+    if (!editingCreditAccount) return
+    try {
+      const response = await apiFetch(`/api/receivables/credit-accounts/${editingCreditAccount.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creditLimit: Number(creditAccountForm.creditLimit) || 0,
+          status: creditAccountForm.status,
+          trustScore: Number(creditAccountForm.trustScore) || 0,
+          notes: creditAccountForm.notes || null,
+        }),
+      })
+      if (response.ok) {
+        toast({ title: 'Credit terms updated' })
+        setEditingCreditAccount(null)
+        loadCreditAccounts()
+      } else {
+        const err = await response.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: err.error || 'Failed to update credit account' })
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to update credit account' })
     }
   }
 
@@ -411,7 +577,14 @@ export default function ReceivablesPage() {
 
   const recordPayment = async () => {
     const targetCustomer = selectedSale?.customer || selectedCustomer
-    if (!targetCustomer || !paymentAmount) return
+    if (!targetCustomer) {
+      toast({ variant: 'destructive', title: 'Select a customer first' })
+      return
+    }
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
+      return
+    }
 
     try {
       const response = await apiFetch('/api/receivables/payments', {
@@ -465,7 +638,7 @@ export default function ReceivablesPage() {
       blocked: 'destructive'
     }
     return (
-      <Badge variant={variants[status as keyof typeof variants]}>
+      <Badge variant={variants[status as keyof typeof variants] as 'default' | 'destructive' | 'outline' | 'secondary'}>
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </Badge>
     )
@@ -513,104 +686,66 @@ export default function ReceivablesPage() {
     )
   }
 
+  const tab = activeTab
+
+  const pageTitle =
+    tab === 'customers' ? 'Customers' :
+    tab === 'sales' ? 'Credit Sales' :
+    tab === 'payments' ? 'Payments' :
+    tab === 'fuel-cards' ? 'Fuel Cards' :
+    tab === 'credit-accounts' ? 'Credit Accounts' :
+    'Receivables'
+
+  const pageSubtitle =
+    tab === 'customers' ? 'Manage customer credit accounts and balances' :
+    tab === 'sales' ? 'Track credit sales and outstanding balances' :
+    tab === 'payments' ? 'Record and review customer payments' :
+    tab === 'fuel-cards' ? 'Manage fuel card accounts and transactions' :
+    tab === 'credit-accounts' ? 'Manage customer credit account terms' :
+    'Manage customer credit and outstanding payments'
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Receivables Management</h1>
-          <p className="text-muted-foreground">Manage customer credit and outstanding payments</p>
+          <h1 className="text-2xl font-bold">{pageTitle}</h1>
+          <p className="text-muted-foreground">{pageSubtitle}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => setShowCustomerModal(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Customer
-          </Button>
-          <Button onClick={openSaleModal}>
-            <FileText className="h-4 w-4 mr-2" />
-            New Sale
-          </Button>
+          {tab === 'customers' && (
+            <Button variant="outline" onClick={() => setShowCustomerModal(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Customer
+            </Button>
+          )}
+          {tab === 'sales' && (
+            <Button onClick={openSaleModal}>
+              <FileText className="h-4 w-4 mr-2" />
+              New Sale
+            </Button>
+          )}
+          {tab === 'fuel-cards' && (
+            <Button onClick={() => {
+              setEditingFuelCard(null)
+              setFuelCardForm({ cardNumber: '', holderName: '', customerId: '', cardType: 'prepaid', balance: '0', creditLimit: '0', expiresAt: '', notes: '' })
+              setShowFuelCardModal(true)
+            }}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Fuel Card
+            </Button>
+          )}
         </div>
       </div>
 
       <UsageLimitBanner resource="customers" label="Customers" currentCount={customers.length} />
 
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Receivables</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">
-                {summary.totalReceivables?.toFixed(2)}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Overdue Invoices</CardTitle>
-              <Calendar className="h-4 w-4 text-red-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">
-                {summary.overdueCount || 0}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Customers</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {customers.filter(c => c.status === 'active').length}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Blocked Customers</CardTitle>
-              <Shield className="h-4 w-4 text-orange-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-orange-600">
-                {customers.filter(c => c.status === 'blocked').length}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex space-x-1 border-b">
-        {['customers', 'sales', 'payments'].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab as any)}
-            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
-              activeTab === tab
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4 py-4">
+      {/* Filters — only for customers, sales, payments */}
+      <div className={cn('flex flex-wrap items-center gap-4 py-4', tab !== 'customers' && tab !== 'sales' && tab !== 'payments' && 'hidden')}>
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search customers..."
+            placeholder="Search..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="max-w-sm"
@@ -811,6 +946,121 @@ export default function ReceivablesPage() {
                 </CardContent>
               </Card>
             ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'fuel-cards' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="text-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div></div>
+          ) : fuelCards.length === 0 ? (
+            <Card><CardContent className="p-6 text-sm text-muted-foreground">No fuel cards registered yet. Click "Add Fuel Card" to create one.</CardContent></Card>
+          ) : (
+            <div className="rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="p-2 text-left">Card Number</th>
+                    <th className="p-2 text-left">Holder</th>
+                    <th className="p-2 text-left">Customer</th>
+                    <th className="p-2 text-left">Type</th>
+                    <th className="p-2 text-right">Balance</th>
+                    <th className="p-2 text-right">Credit Limit</th>
+                    <th className="p-2 text-left">Status</th>
+                    <th className="p-2 text-left">Expires</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fuelCards.map(card => (
+                    <tr key={card.id} className="border-t">
+                      <td className="p-2 font-medium">{card.cardNumber}</td>
+                      <td className="p-2">{card.holderName}</td>
+                      <td className="p-2">{card.customer?.name || '—'}</td>
+                      <td className="p-2 capitalize">{card.cardType}</td>
+                      <td className="p-2 text-right font-semibold">{Number(card.balance).toFixed(2)}</td>
+                      <td className="p-2 text-right">{Number(card.creditLimit).toFixed(2)}</td>
+                      <td className="p-2">
+                        <Badge variant={card.status === 'active' ? 'default' : card.status === 'suspended' ? 'destructive' : 'secondary'}>
+                          {card.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2">{card.expiresAt ? new Date(card.expiresAt).toLocaleDateString() : '—'}</td>
+                      <td className="p-2 space-x-1 whitespace-nowrap">
+                        <Button size="sm" variant="outline" onClick={() => reloadFuelCard(card.id)}>Reload</Button>
+                        <Button size="sm" variant="ghost" onClick={() => {
+                          setEditingFuelCard(card)
+                          setFuelCardForm({
+                            cardNumber: card.cardNumber, holderName: card.holderName,
+                            customerId: card.customerId || '', cardType: card.cardType,
+                            balance: String(card.balance), creditLimit: String(card.creditLimit),
+                            expiresAt: card.expiresAt ? card.expiresAt.split('T')[0] : '', notes: card.notes || ''
+                          })
+                          setShowFuelCardModal(true)
+                        }}><Edit className="h-3 w-3" /></Button>
+                        <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteFuelCard(card.id)}><Trash2 className="h-3 w-3" /></Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'credit-accounts' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="text-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div></div>
+          ) : creditAccounts.length === 0 ? (
+            <Card><CardContent className="p-6 text-sm text-muted-foreground">No credit accounts found. Set a credit limit on a customer to create a credit account.</CardContent></Card>
+          ) : (
+            <div className="rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="p-2 text-left">Customer</th>
+                    <th className="p-2 text-left">Phone</th>
+                    <th className="p-2 text-right">Credit Limit</th>
+                    <th className="p-2 text-right">Balance</th>
+                    <th className="p-2 text-right">Available</th>
+                    <th className="p-2 text-left">Trust Score</th>
+                    <th className="p-2 text-left">Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {creditAccounts.map(acct => (
+                    <tr key={acct.id} className="border-t">
+                      <td className="p-2 font-medium">{acct.name}</td>
+                      <td className="p-2">{acct.phone || '—'}</td>
+                      <td className="p-2 text-right">{Number(acct.creditLimit).toFixed(2)}</td>
+                      <td className="p-2 text-right text-red-600 font-semibold">{Number(acct.balance).toFixed(2)}</td>
+                      <td className="p-2 text-right text-green-600">{(Number(acct.creditLimit) - Number(acct.balance)).toFixed(2)}</td>
+                      <td className="p-2">{acct.trustScore}/100</td>
+                      <td className="p-2">
+                        <Badge variant={acct.status === 'active' ? 'default' : acct.status === 'blocked' ? 'destructive' : 'secondary'}>
+                          {acct.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2">
+                        <Button size="sm" variant="ghost" onClick={() => {
+                          setEditingCreditAccount(acct)
+                          setCreditAccountForm({
+                            creditLimit: String(acct.creditLimit),
+                            status: acct.status,
+                            trustScore: String(acct.trustScore),
+                            notes: acct.notes || ''
+                          })
+                        }}><Edit className="h-3 w-3" /></Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
@@ -1226,6 +1476,81 @@ export default function ReceivablesPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Fuel Card Modal */}
+      {showFuelCardModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">{editingFuelCard ? 'Edit Fuel Card' : 'New Fuel Card'}</h3>
+            <div className="space-y-3">
+              <div><Label>Card Number</Label><Input value={fuelCardForm.cardNumber} onChange={e => setFuelCardForm({ ...fuelCardForm, cardNumber: e.target.value })} placeholder="FC-00001" /></div>
+              <div><Label>Holder Name</Label><Input value={fuelCardForm.holderName} onChange={e => setFuelCardForm({ ...fuelCardForm, holderName: e.target.value })} placeholder="John Doe" /></div>
+              <div>
+                <Label>Link to Customer (optional)</Label>
+                <Select value={fuelCardForm.customerId} onValueChange={v => setFuelCardForm({ ...fuelCardForm, customerId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
+                  <SelectContent>
+                    {(customerOptions.length ? customerOptions : customers).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Card Type</Label>
+                <Select value={fuelCardForm.cardType} onValueChange={v => setFuelCardForm({ ...fuelCardForm, cardType: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prepaid">Prepaid</SelectItem>
+                    <SelectItem value="credit">Credit</SelectItem>
+                    <SelectItem value="fleet">Fleet</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Initial Balance</Label><Input type="number" value={fuelCardForm.balance} onChange={e => setFuelCardForm({ ...fuelCardForm, balance: e.target.value })} /></div>
+                <div><Label>Credit Limit</Label><Input type="number" value={fuelCardForm.creditLimit} onChange={e => setFuelCardForm({ ...fuelCardForm, creditLimit: e.target.value })} /></div>
+              </div>
+              <div><Label>Expiry Date (optional)</Label><Input type="date" value={fuelCardForm.expiresAt} onChange={e => setFuelCardForm({ ...fuelCardForm, expiresAt: e.target.value })} /></div>
+              <div><Label>Notes</Label><Textarea value={fuelCardForm.notes} onChange={e => setFuelCardForm({ ...fuelCardForm, notes: e.target.value })} rows={2} /></div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => { setShowFuelCardModal(false); setEditingFuelCard(null) }}>Cancel</Button>
+              <Button onClick={saveFuelCard}>{editingFuelCard ? 'Update Card' : 'Create Card'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Account Edit Modal */}
+      {editingCreditAccount && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-1">Edit Credit Terms</h3>
+            <p className="text-sm text-muted-foreground mb-4">{editingCreditAccount.name}</p>
+            <div className="space-y-3">
+              <div><Label>Credit Limit</Label><Input type="number" value={creditAccountForm.creditLimit} onChange={e => setCreditAccountForm({ ...creditAccountForm, creditLimit: e.target.value })} /></div>
+              <div>
+                <Label>Status</Label>
+                <Select value={creditAccountForm.status} onValueChange={v => setCreditAccountForm({ ...creditAccountForm, status: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="blocked">Blocked</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Trust Score (0-100)</Label><Input type="number" min="0" max="100" value={creditAccountForm.trustScore} onChange={e => setCreditAccountForm({ ...creditAccountForm, trustScore: e.target.value })} /></div>
+              <div><Label>Notes</Label><Textarea value={creditAccountForm.notes} onChange={e => setCreditAccountForm({ ...creditAccountForm, notes: e.target.value })} rows={2} /></div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setEditingCreditAccount(null)}>Cancel</Button>
+              <Button onClick={saveCreditAccount}>Save Changes</Button>
+            </div>
           </div>
         </div>
       )}

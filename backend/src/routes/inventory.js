@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requirePermission } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission, requireFeature } from "../../middleware/auth.js";
 import {
   handleBranchError,
   resolveBranchScope,
@@ -405,6 +405,13 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     });
     const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
 
+    if (!body.product_name || !String(body.product_name).trim()) {
+      return res.status(400).json({ error: "Product name is required" });
+    }
+    if (body.unit_price === undefined || body.unit_price === null || Number(body.unit_price) <= 0) {
+      return res.status(400).json({ error: "Selling price must be greater than 0" });
+    }
+
     // Set itemType (default to product, allow rental)
     const itemTypeValue = ["service", "rental"].includes(itemType) ? itemType : "product";
     body.itemType = itemTypeValue;
@@ -584,6 +591,161 @@ router.delete("/:productId/units/:unitId", authenticateToken, requirePermission(
     await prisma.productUnit.delete({ where: { id: unit.id } });
     res.json({ message: "Unit deleted" });
   } catch (err) { handleBranchError(res, err); }
+});
+
+// =====================================================
+// Bulk Import Inventory from Excel data
+// Frontend parses the Excel file and sends JSON rows.
+// Backend validates each row and returns detailed errors.
+// =====================================================
+router.post("/import", authenticateToken, requirePermission("canImportInventory"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: "body",
+      requireBranch: true,
+      allowOwnerAll: false,
+    });
+
+    const { rows, branchId } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "No data rows provided" });
+    }
+
+    // Fetch existing categories for this tenant to map by name
+    const existingCategories = await prisma.category.findMany({
+      where: { tenantId: scope.tenantId },
+      select: { id: true, name: true },
+    });
+    const categoryMap = new Map(existingCategories.map(c => [c.name.toLowerCase(), c.id]));
+
+    // Fetch existing SKUs and barcodes for duplicate check
+    const existingProducts = await prisma.product.findMany({
+      where: { tenantId: scope.tenantId, branchId: scope.branchId },
+      select: { sku: true, barcode: true },
+    });
+    const existingSkus = new Set(existingProducts.map(p => p.sku).filter(Boolean));
+    const existingBarcodes = new Set(existingProducts.map(p => p.barcode).filter(Boolean));
+
+    const errors = [];
+    const validRows = [];
+    const seenSkus = new Set();
+    const seenBarcodes = new Set();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // +2 because row 1 is the header in Excel
+      const rowErrors = [];
+
+      // Required: name
+      const name = String(row.name || row["Product Name"] || "").trim();
+      if (!name) rowErrors.push("Product Name is required");
+
+      // Required: selling price
+      const price = parseFloat(row.price || row["Selling Price"]);
+      if (isNaN(price) || price <= 0) rowErrors.push("Selling Price must be a number greater than 0");
+
+      // Optional but validated: cost price
+      const cost = row.cost != null || row["Cost Price"] != null ? parseFloat(row.cost ?? row["Cost Price"]) : null;
+      if (cost != null && (isNaN(cost) || cost < 0)) rowErrors.push("Cost Price must be a non-negative number");
+
+      // Optional: quantity
+      const quantity = parseInt(row.quantity ?? row["Stock Quantity"] ?? 0, 10);
+      if (isNaN(quantity) || quantity < 0) rowErrors.push("Stock Quantity must be a non-negative integer");
+
+      // Optional: minStock
+      const minStock = parseInt(row.minStock ?? row["Reorder Level"] ?? 10, 10);
+      if (isNaN(minStock) || minStock < 0) rowErrors.push("Reorder Level must be a non-negative integer");
+
+      // Optional: SKU
+      const sku = String(row.sku || row["SKU"] || "").trim() || null;
+      if (sku) {
+        if (existingSkus.has(sku) || seenSkus.has(sku)) {
+          rowErrors.push(`SKU "${sku}" already exists in this branch`);
+        } else {
+          seenSkus.add(sku);
+        }
+      }
+
+      // Optional: barcode
+      const barcode = String(row.barcode || row["Barcode"] || "").trim() || null;
+      if (barcode) {
+        if (existingBarcodes.has(barcode) || seenBarcodes.has(barcode)) {
+          rowErrors.push(`Barcode "${barcode}" already exists in this branch`);
+        } else {
+          seenBarcodes.add(barcode);
+        }
+      }
+
+      // Optional: category (match by name)
+      const categoryName = String(row.category || row["Category"] || "").trim();
+      let categoryId = null;
+      if (categoryName) {
+        categoryId = categoryMap.get(categoryName.toLowerCase());
+        if (!categoryId) {
+          rowErrors.push(`Category "${categoryName}" not found. Create it first in the inventory page.`);
+        }
+      }
+
+      // Optional: baseUnit
+      const baseUnit = String(row.baseUnit || row["Base Unit"] || "Piece").trim() || "Piece";
+
+      // Optional: description
+      const description = String(row.description || row["Description"] || "").trim() || null;
+
+      // Optional: itemType
+      const itemType = String(row.itemType || row["Item Type"] || "product").trim().toLowerCase();
+      if (!["product", "service", "rental"].includes(itemType)) {
+        rowErrors.push(`Item Type must be "product", "service", or "rental" (got "${itemType}")`);
+      }
+
+      if (rowErrors.length > 0) {
+        errors.push({ row: rowNum, name: name || "(unnamed)", errors: rowErrors });
+      } else {
+        validRows.push({
+          name,
+          price,
+          cost: cost != null ? cost : null,
+          quantity: itemType === "service" ? 0 : quantity,
+          minStock: itemType === "service" ? 0 : minStock,
+          sku,
+          barcode,
+          categoryId,
+          baseUnit: itemType === "service" ? "Service" : baseUnit,
+          description,
+          itemType,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          isActive: true,
+        });
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        error: "Validation failed",
+        validationErrors: errors,
+        validCount: validRows.length,
+        errorCount: errors.length,
+      });
+    }
+
+    // Check usage limit
+    await checkUsageLimit(scope.tenantId, 'products');
+
+    // Bulk create
+    const created = await prisma.$transaction(
+      validRows.map(data => prisma.product.create({ data }))
+    );
+
+    res.status(201).json({
+      message: `Successfully imported ${created.length} product${created.length !== 1 ? 's' : ''}`,
+      imported: created.length,
+    });
+  } catch (err) {
+    if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
+    console.error("Import inventory error:", err);
+    res.status(500).json({ error: "Internal server error during import" });
+  }
 });
 
 export default router;

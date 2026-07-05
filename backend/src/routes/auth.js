@@ -28,8 +28,8 @@ function userPayload(user, userPerm) {
   const isPlatformUser = user.role === "saas_admin";
   let permissions = permissionsForUser(user);
 
-  // For non-owner, non-saas_admin: permissions come EXCLUSIVELY from UserPermission table
-  if (!isPlatformUser && user.role !== "owner") {
+  // For ALL non-saas_admin roles (including owner): permissions come EXCLUSIVELY from UserPermission table
+  if (!isPlatformUser) {
     permissions = [];
     if (userPerm) {
       for (const [key, val] of Object.entries(userPerm)) {

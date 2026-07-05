@@ -39,6 +39,10 @@ export default function BusinessSettingsPage() {
   }
 
   const handleSave = async () => {
+    if (!settings?.name?.trim()) {
+      toast({ variant: 'destructive', title: 'Business name is required' })
+      return
+    }
     setSaving(true)
     try {
       await settingsApi.update(settings)

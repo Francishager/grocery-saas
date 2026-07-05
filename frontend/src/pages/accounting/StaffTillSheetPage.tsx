@@ -1,31 +1,39 @@
 import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useToast } from '@/hooks/use-toast'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { apiFetch } from '@/lib/api'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalBranches } from '@/db/hybrid'
-import { Users, Search, Download } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
+import { Users, Search, Wallet, TrendingUp, TrendingDown, ChevronDown, ChevronRight, Info } from 'lucide-react'
+
+interface CashTransaction {
+  id: string
+  type: string
+  amount: number
+  balanceAfter: number
+  reference?: string
+  description?: string
+  account: { id: string; name: string; type: string }
+  createdAt: string
+}
 
 interface StaffTill {
-  id: string
   staffId: string
-  staff?: { id: string; fname: string; lname: string; role: string }
-  branchId?: string
-  branch?: { id: string; name: string }
-  openingBalance: number
-  closingBalance: number
-  cashIn: number
-  cashOut: number
-  expectedBalance: number
-  variance: number
-  date: string
-  status: string
-  notes?: string
+  staff: { id: string; fname: string; lname: string; email: string; role: string }
+  branch?: { id: string; name: string } | null
+  cashAccount?: { id: string; name: string; type: string; balance: number; currency: string; accountNumber?: string | null } | null
+  currentBalance: number
+  totalCredited: number
+  totalDebited: number
+  netMovement: number
+  transactionCount: number
+  transactions: CashTransaction[]
+  breakdown: Record<string, { count: number; total: number }>
 }
 
 interface Branch {
@@ -36,20 +44,33 @@ interface Branch {
 export default function StaffTillSheetPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
-  const [tills, setTills] = useState<StaffTill[]>([])
+  const [tillSheets, setTillSheets] = useState<StaffTill[]>([])
+  const [summary, setSummary] = useState({ totalStaff: 0, totalCredited: 0, totalDebited: 0, totalBalance: 0 })
   const [branches, setBranches] = useState<Branch[]>([])
-  const [staff, setStaff] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterBranch, setFilterBranch] = useState('')
-  const [filterDate, setFilterDate] = useState('')
+  const [filterStaff, setFilterStaff] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [expandedStaff, setExpandedStaff] = useState<string | null>(null)
 
-  const fetchTills = async () => {
+  const fetchTillSheets = async () => {
     try {
-      const res = await apiFetch('/api/hr/till-sheets')
-      if (res.ok) setTills(await res.json())
+      setLoading(true)
+      const params = new URLSearchParams()
+      if (filterStaff) params.set('staffId', filterStaff)
+      if (filterBranch) params.set('branchId', filterBranch)
+      if (startDate) params.set('startDate', startDate)
+      if (endDate) params.set('endDate', endDate)
+      const res = await apiFetch(`/api/expenses/staff-till-sheets?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        setTillSheets(data.tillSheets || [])
+        setSummary(data.summary || { totalStaff: 0, totalCredited: 0, totalDebited: 0, totalBalance: 0 })
+      }
     } catch {
-      setTills([])
+      setTillSheets([])
     } finally {
       setLoading(false)
     }
@@ -71,74 +92,50 @@ export default function StaffTillSheetPage() {
     }
   }
 
-  const fetchStaff = async () => {
-    try {
-      const res = await apiFetch('/api/staff')
-      if (res.ok) {
-        const data = await res.json()
-        setStaff(data.staff || data || [])
-      }
-    } catch {
-      setStaff([])
-    }
-  }
-
   useEffect(() => {
-    fetchTills()
     fetchBranches()
-    fetchStaff()
   }, [])
 
-  const filteredTills = tills.filter(t => {
+  useEffect(() => {
+    fetchTillSheets()
+  }, [filterStaff, filterBranch, startDate, endDate])
+
+  const filteredTills = tillSheets.filter(t => {
     if (searchTerm) {
       const lower = searchTerm.toLowerCase()
-      const staffName = t.staff ? `${t.staff.fname} ${t.staff.lname}`.toLowerCase() : ''
-      if (!staffName.includes(lower) && !t.id.toLowerCase().includes(lower)) return false
+      const staffName = `${t.staff.fname} ${t.staff.lname}`.toLowerCase()
+      if (!staffName.includes(lower)) return false
     }
-    if (filterBranch && t.branchId !== filterBranch) return false
-    if (filterDate && new Date(t.date).toISOString().split('T')[0] !== filterDate) return false
     return true
   })
 
   const fmt = (val: number) => Number(val || 0).toFixed(2)
 
-  const totalOpening = filteredTills.reduce((s, t) => s + Number(t.openingBalance || 0), 0)
-  const totalClosing = filteredTills.reduce((s, t) => s + Number(t.closingBalance || 0), 0)
-  const totalVariance = filteredTills.reduce((s, t) => s + Number(t.variance || 0), 0)
+  const txnTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      sale: 'Sale', receipt: 'Customer Payment', income: 'Income',
+      expense: 'Expense', payment: 'Supplier Payment', transfer: 'Transfer'
+    }
+    return labels[type] || type
+  }
+
+  const txnTypeColor = (type: string) => {
+    if (['sale', 'receipt', 'income'].includes(type)) return 'text-green-600'
+    if (['expense', 'payment', 'transfer'].includes(type)) return 'text-red-600'
+    return ''
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Staff Till Sheet</h1>
-        <p className="text-muted-foreground">Track staff till balances, cash movements, and variances</p>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Total Opening Balance</p>
-            <p className="text-lg font-bold text-blue-600">{fmt(totalOpening)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Total Closing Balance</p>
-            <p className="text-lg font-bold text-green-600">{fmt(totalClosing)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Total Variance</p>
-            <p className={`text-lg font-bold ${totalVariance < 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(totalVariance)}</p>
-          </CardContent>
-        </Card>
+        <p className="text-muted-foreground">Track each staff's cash account: sales credited, expenses debited, payments in/out</p>
       </div>
 
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-wrap">
             <div className="relative w-full sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -154,87 +151,177 @@ export default function StaffTillSheetPage() {
                 {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="w-full sm:w-44" />
-            <Button variant="outline" onClick={() => { setSearchTerm(''); setFilterBranch(''); setFilterDate('') }}>Reset</Button>
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full sm:w-40" placeholder="From" />
+            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full sm:w-40" placeholder="To" />
+            <Button variant="outline" onClick={() => { setSearchTerm(''); setFilterBranch(''); setFilterStaff(''); setStartDate(''); setEndDate('') }}>Reset</Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Till Sheet Table */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Till Sheets</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => toast({ title: 'Export started' })}>
-              <Download className="h-4 w-4 mr-2" /> Export
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2 px-2 font-medium">Date</th>
-                  <th className="text-left py-2 px-2 font-medium">Staff</th>
-                  <th className="text-left py-2 px-2 font-medium">Branch</th>
-                  <th className="text-right py-2 px-2 font-medium">Opening</th>
-                  <th className="text-right py-2 px-2 font-medium">Cash In</th>
-                  <th className="text-right py-2 px-2 font-medium">Cash Out</th>
-                  <th className="text-right py-2 px-2 font-medium">Expected</th>
-                  <th className="text-right py-2 px-2 font-medium">Closing</th>
-                  <th className="text-right py-2 px-2 font-medium">Variance</th>
-                  <th className="text-left py-2 px-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTills.map(till => (
-                  <tr key={till.id} className="border-b hover:bg-muted/50">
-                    <td className="py-2 px-2 whitespace-nowrap">{new Date(till.date).toLocaleDateString()}</td>
-                    <td className="py-2 px-2">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-3 w-3 text-muted-foreground" />
-                        {till.staff ? `${till.staff.fname} ${till.staff.lname}` : '—'}
-                      </div>
-                    </td>
-                    <td className="py-2 px-2">{till.branch?.name || '—'}</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(till.openingBalance)}</td>
-                    <td className="py-2 px-2 text-right font-mono text-green-600">{fmt(till.cashIn)}</td>
-                    <td className="py-2 px-2 text-right font-mono text-red-600">{fmt(till.cashOut)}</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(till.expectedBalance)}</td>
-                    <td className="py-2 px-2 text-right font-mono font-bold">{fmt(till.closingBalance)}</td>
-                    <td className={`py-2 px-2 text-right font-mono ${till.variance < 0 ? 'text-red-600' : till.variance > 0 ? 'text-green-600' : ''}`}>
-                      {fmt(till.variance)}
-                    </td>
-                    <td className="py-2 px-2">
-                      <Badge variant={till.status === 'balanced' ? 'default' : till.status === 'short' ? 'destructive' : 'secondary'}>
-                        {till.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-                {filteredTills.length === 0 && !loading && (
-                  <tr><td colSpan={10} className="text-center py-8 text-muted-foreground">No till sheets found</td></tr>
+      {/* Till Sheet Cards */}
+      <div className="space-y-4">
+        {filteredTills.map(till => {
+          const isExpanded = expandedStaff === till.staffId
+          return (
+            <Card key={till.staffId}>
+              <CardContent className="p-4">
+                {/* Staff header row */}
+                <div 
+                  className="flex items-center justify-between cursor-pointer"
+                  onClick={() => setExpandedStaff(isExpanded ? null : till.staffId)}
+                >
+                  <div className="flex items-center gap-3">
+                    {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Users className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm">{till.staff.fname} {till.staff.lname}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {till.staff.role} • {till.branch?.name || 'No branch'}
+                        {till.cashAccount && ` • ${till.cashAccount.name}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 sm:gap-6">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <div className="text-right cursor-help">
+                          <div className="flex items-center justify-end gap-1">
+                            <p className="text-xs text-muted-foreground">Credited</p>
+                            <Info className="h-3 w-3 text-muted-foreground/60" />
+                          </div>
+                          <p className="text-sm font-semibold text-green-600">{fmt(till.totalCredited)}</p>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-64">
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold text-green-600">Credited (Money In)</p>
+                          <p className="text-xs text-muted-foreground">Transactions that added money to this account</p>
+                          <div className="space-y-1 pt-1">
+                            {Object.entries(till.breakdown)
+                              .filter(([type]) => ['sale', 'receipt', 'income'].includes(type))
+                              .map(([type, data]) => (
+                                <div key={type} className="flex items-center justify-between text-xs">
+                                  <span>{txnTypeLabel(type)}</span>
+                                  <span className="font-mono font-semibold text-green-600">{fmt(data.total)}</span>
+                                </div>
+                              ))}
+                            {Object.entries(till.breakdown).filter(([type]) => ['sale', 'receipt', 'income'].includes(type)).length === 0 && (
+                              <p className="text-xs text-muted-foreground italic">No credited transactions</p>
+                            )}
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <div className="text-right cursor-help">
+                          <div className="flex items-center justify-end gap-1">
+                            <p className="text-xs text-muted-foreground">Debited</p>
+                            <Info className="h-3 w-3 text-muted-foreground/60" />
+                          </div>
+                          <p className="text-sm font-semibold text-red-600">{fmt(till.totalDebited)}</p>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-64">
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold text-red-600">Debited (Money Out)</p>
+                          <p className="text-xs text-muted-foreground">Transactions that removed money from this account</p>
+                          <div className="space-y-1 pt-1">
+                            {Object.entries(till.breakdown)
+                              .filter(([type]) => ['expense', 'payment', 'transfer'].includes(type))
+                              .map(([type, data]) => (
+                                <div key={type} className="flex items-center justify-between text-xs">
+                                  <span>{txnTypeLabel(type)}</span>
+                                  <span className="font-mono font-semibold text-red-600">{fmt(data.total)}</span>
+                                </div>
+                              ))}
+                            {Object.entries(till.breakdown).filter(([type]) => ['expense', 'payment', 'transfer'].includes(type)).length === 0 && (
+                              <p className="text-xs text-muted-foreground italic">No debited transactions</p>
+                            )}
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">Balance</p>
+                      <p className="text-sm font-bold text-blue-600">{fmt(till.currentBalance)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">Txns</p>
+                      <p className="text-sm font-semibold">{till.transactionCount}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded transaction details */}
+                {isExpanded && (
+                  <div className="mt-4 space-y-3">
+                    {/* Breakdown by type */}
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(till.breakdown).map(([type, data]) => (
+                        <Badge key={type} variant="outline" className="text-xs">
+                          {txnTypeLabel(type)}: {data.count} txn{data.count !== 1 ? 's' : ''} • {fmt(data.total)}
+                        </Badge>
+                      ))}
+                    </div>
+
+                    {/* Transaction list */}
+                    <div className="overflow-x-auto rounded-md border">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/50">
+                            <th className="text-left py-2 px-3 font-medium">Date</th>
+                            <th className="text-left py-2 px-3 font-medium">Type</th>
+                            <th className="text-left py-2 px-3 font-medium">Description</th>
+                            <th className="text-left py-2 px-3 font-medium">Account</th>
+                            <th className="text-left py-2 px-3 font-medium">Reference</th>
+                            <th className="text-right py-2 px-3 font-medium">Amount</th>
+                            <th className="text-right py-2 px-3 font-medium">Balance After</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {till.transactions.map(txn => (
+                            <tr key={txn.id} className="border-b hover:bg-muted/30">
+                              <td className="py-2 px-3 whitespace-nowrap">{new Date(txn.createdAt).toLocaleString()}</td>
+                              <td className="py-2 px-3">
+                                <Badge variant="secondary" className="text-xs">{txnTypeLabel(txn.type)}</Badge>
+                              </td>
+                              <td className="py-2 px-3">{txn.description || '—'}</td>
+                              <td className="py-2 px-3">{txn.account?.name || '—'}</td>
+                              <td className="py-2 px-3 font-mono">{txn.reference || '—'}</td>
+                              <td className={`py-2 px-3 text-right font-mono font-semibold ${txnTypeColor(txn.type)}`}>
+                                {['sale', 'receipt', 'income'].includes(txn.type) ? '+' : '-'}{fmt(txn.amount)}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono">{fmt(txn.balanceAfter)}</td>
+                            </tr>
+                          ))}
+                          {till.transactions.length === 0 && (
+                            <tr><td colSpan={7} className="text-center py-4 text-muted-foreground">No transactions in this period</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 )}
-              </tbody>
-              {filteredTills.length > 0 && (
-                <tfoot>
-                  <tr className="font-bold border-t-2">
-                    <td colSpan={3} className="py-2 px-2">Total</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(totalOpening)}</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(filteredTills.reduce((s, t) => s + Number(t.cashIn || 0), 0))}</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(filteredTills.reduce((s, t) => s + Number(t.cashOut || 0), 0))}</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(filteredTills.reduce((s, t) => s + Number(t.expectedBalance || 0), 0))}</td>
-                    <td className="py-2 px-2 text-right font-mono">{fmt(totalClosing)}</td>
-                    <td className={`py-2 px-2 text-right font-mono ${totalVariance < 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(totalVariance)}</td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
+          )
+        })}
+        {filteredTills.length === 0 && !loading && (
+          <Card>
+            <CardContent className="p-8 text-center text-muted-foreground">
+              No staff till sheets found. Assign cash accounts to staff to see their activity here.
+            </CardContent>
+          </Card>
+        )}
+        {loading && (
+          <Card>
+            <CardContent className="p-8 text-center text-muted-foreground">Loading...</CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   )
 }

@@ -458,8 +458,12 @@ router.post("/reinvite-owner/:tenantId", authenticateToken, requirePlatformAdmin
 router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { business, owner } = req.body;
-    if (!business?.name) return res.status(400).json({ error: "Business name required" });
-    if (!owner?.email) return res.status(400).json({ error: "owner.email required" });
+    if (!business?.name?.trim()) return res.status(400).json({ error: "Business name is required" });
+    if (!business?.businessType) return res.status(400).json({ error: "Business type is required" });
+    if (!business?.planId) return res.status(400).json({ error: "Subscription plan is required" });
+    if (!owner?.email?.trim()) return res.status(400).json({ error: "Owner email is required" });
+    if (!owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
+    if (owner?.password && owner.password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
 
     const existingUser = await prisma.user.findUnique({ where: { email: owner.email } });
     if (existingUser) return res.status(409).json({ error: "Owner email already exists" });
@@ -476,7 +480,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
 
     const { tenant } = await prisma.$transaction(async (tx) => {
       const createdTenant = await tx.tenant.create({
-        data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, status: "active", planId: business.planId },
+        data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, businessType: business.businessType || null, status: "active", planId: business.planId },
       });
 
       const user = await tx.user.create({
@@ -519,75 +523,29 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
   }
 });
 
-// Me/features
+// Me/features — ONLY TenantFeature rows, no plan-level auto-inheritance
 router.get("/me/features", authenticateToken, async (req, res) => {
   try {
     const role = req.user?.role;
     if (role === "saas_admin") return res.json({ features: [] });
 
     const tenantId = req.user?.tenantId;
-    let planCodes = [];
+    let featureCodes = [];
+
     if (tenantId) {
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
-        include: { plan: true },
-      });
-
-      // Backfill: if plan has JSON features without PlanFeature rows, create them
-      if (tenant?.planId && tenant.plan) {
-        const existingPFs = await prisma.planFeature.findMany({
-          where: { planId: tenant.planId },
-          include: { feature: true },
-        });
-        const existingNames = new Set(existingPFs.map(pf => pf.feature?.name).filter(Boolean));
-        const jsonFeatures = Array.isArray(tenant.plan.features) ? tenant.plan.features : [];
-        const missing = jsonFeatures.filter(name => !existingNames.has(name));
-        if (missing.length > 0) {
-          for (const featureName of missing) {
-            let feature = await prisma.feature.findUnique({ where: { name: featureName } });
-            if (!feature) {
-              feature = await prisma.feature.create({
-                data: {
-                  name: featureName,
-                  displayName: featureName.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' '),
-                  category: featureName.split('.')[0] || 'core',
-                  module: featureName.split('.')[0] || 'core',
-                  isActive: true,
-                },
-              });
-            }
-            await prisma.planFeature.create({
-              data: { planId: tenant.planId, featureId: feature.id, enabled: true },
-            });
-          }
-        }
-      }
-
-      const planFeatureRows = tenant?.planId
-        ? await prisma.planFeature.findMany({
-            where: { planId: tenant.planId, enabled: true },
-            include: { feature: true },
-          })
-        : [];
-      const tenantOverrides = await prisma.tenantFeature.findMany({
-        where: { tenantId },
+      // ONLY TenantFeature rows — features are NOT auto-inherited from plan.
+      // SaaS admin must explicitly assign features to each tenant.
+      const tenantFeatures = await prisma.tenantFeature.findMany({
+        where: { tenantId, enabled: true },
         include: { feature: true },
       });
 
-      const effective = new Set(
-        planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean)
-      );
-
-      tenantOverrides.forEach((tf) => {
-        if (!tf.feature?.name) return;
-        if (tf.enabled) effective.add(tf.feature.name);
-        else effective.delete(tf.feature.name);
-      });
-
-      planCodes = Array.from(effective);
+      featureCodes = tenantFeatures
+        .map((tf) => tf.feature?.name)
+        .filter(Boolean);
     }
 
-    res.json({ features: planCodes });
+    res.json({ features: featureCodes });
   } catch (err) {
     console.error("Me/features error:", err);
     res.status(500).json({ error: "Internal server error" });

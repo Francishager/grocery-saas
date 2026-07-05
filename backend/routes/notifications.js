@@ -27,7 +27,7 @@ router.get("/", authenticateToken, async (req, res) => {
 });
 
 // Create notification (internal use)
-router.post("/", authenticateToken, requireFeature("communication"), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("canCreateCommunication"), requireFeature("communication"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { userId, channel = "in_app", title, message, type = "info", metadata } = req.body;
@@ -91,7 +91,7 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
 });
 
 // Send broadcast (SMS/Email template — actual sending would need provider integration)
-router.post("/broadcast", authenticateToken, requirePermission("canViewCommunication"), requireFeature("communication"), async (req, res) => {
+router.post("/broadcast", authenticateToken, requirePermission("canCreateCommunication"), requireFeature("communication"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { channel = "in_app", title, message, type = "info", targetAll = true } = req.body;

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel
 } from 'lucide-react'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -323,6 +323,46 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'rentalsMonthly', label: 'Monthly Rental Report', apiFn: reportsApiV2.rentalsMonthly, renderType: 'table',
         columns: [textCol('month', 'Month'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
+      },
+    ]
+  },
+  {
+    id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport',
+    items: [
+      { id: 'fuelSalesSummary', label: 'Fuel Sales Summary', apiFn: reportsApiV2.fuelSalesSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'shiftCount', label: 'Total Shifts', format: 'number' },
+          { key: 'totalLitres', label: 'Total Litres Sold', format: 'number' },
+          { key: 'cashSales', label: 'Cash Sales', format: 'currency' },
+          { key: 'mobileSales', label: 'Mobile Sales', format: 'currency' },
+          { key: 'creditSales', label: 'Credit Sales', format: 'currency' },
+          { key: 'totalSales', label: 'Total Fuel Sales', format: 'currency' },
+          { key: 'lubricantSales', label: 'Lubricant Sales', format: 'currency' },
+          { key: 'carWashIncome', label: 'Car Wash Income', format: 'currency' },
+          { key: 'expenses', label: 'Expenses', format: 'currency' },
+          { key: 'netAmount', label: 'Net Amount', format: 'currency' },
+        ]
+      },
+      { id: 'fuelByPump', label: 'Sales by Pump', apiFn: reportsApiV2.fuelSalesByPump, renderType: 'table',
+        columns: [textCol('pump', 'Pump'), numberCol('litresSold', 'Litres Sold'), currencyCol('amount', 'Amount'), numberCol('readings', 'Readings')]
+      },
+      { id: 'fuelByTank', label: 'Tank Stock Report', apiFn: reportsApiV2.fuelTankStock, renderType: 'table',
+        columns: [textCol('tank', 'Tank'), textCol('fuelType', 'Fuel Type'), numberCol('capacity', 'Capacity (L)'), numberCol('currentStock', 'Current Stock (L)'), currencyCol('unitCost', 'Unit Cost'), currencyCol('stockValue', 'Stock Value'), numberCol('fillPercent', 'Fill %')]
+      },
+      { id: 'fuelDeliveries', label: 'Fuel Deliveries Report', apiFn: reportsApiV2.fuelDeliveries, renderType: 'table',
+        columns: [textCol('tank', 'Tank'), textCol('fuelType', 'Fuel Type'), textCol('supplierName', 'Supplier'), textCol('invoiceNo', 'Invoice No'), numberCol('litres', 'Litres'), currencyCol('unitCost', 'Unit Cost'), currencyCol('totalCost', 'Total Cost'), dateCol('deliveryDate', 'Delivery Date')]
+      },
+      { id: 'fuelShiftSummary', label: 'Shift Summary Report', apiFn: reportsApiV2.fuelShiftSummary, renderType: 'table',
+        columns: [textCol('shiftNo', 'Shift No'), textCol('pump', 'Pump'), textCol('attendant', 'Attendant'), numberCol('litresSold', 'Litres'), currencyCol('cashSales', 'Cash'), currencyCol('mobileSales', 'Mobile'), currencyCol('creditSales', 'Credit'), currencyCol('totalSales', 'Total'), currencyCol('expenses', 'Expenses'), currencyCol('netAmount', 'Net'), textCol('status', 'Status'), dateCol('startDate', 'Start Date')]
+      },
+      { id: 'fuelLubricantSales', label: 'Lubricant Sales Report', apiFn: reportsApiV2.fuelLubricantSales, renderType: 'table',
+        columns: [textCol('shiftNo', 'Shift No'), textCol('pump', 'Pump'), textCol('attendant', 'Attendant'), currencyCol('lubricantSales', 'Lubricant Sales'), dateCol('startDate', 'Date')]
+      },
+      { id: 'fuelCarWash', label: 'Car Wash Income Report', apiFn: reportsApiV2.fuelCarWashIncome, renderType: 'table',
+        columns: [textCol('shiftNo', 'Shift No'), textCol('pump', 'Pump'), textCol('attendant', 'Attendant'), currencyCol('carWashIncome', 'Car Wash Income'), dateCol('startDate', 'Date')]
+      },
+      { id: 'fuelMeterReadings', label: 'Meter Readings Report', apiFn: reportsApiV2.fuelMeterReadings, renderType: 'table',
+        columns: [textCol('pump', 'Pump'), numberCol('openingReading', 'Opening'), numberCol('closingReading', 'Closing'), numberCol('litresSold', 'Litres Sold'), currencyCol('amount', 'Amount'), dateCol('readingDate', 'Date')]
       },
     ]
   },

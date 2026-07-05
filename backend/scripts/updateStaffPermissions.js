@@ -7,7 +7,7 @@ async function updateStaffPermissions() {
   // Get all staff members with their roles
   const staff = await prisma.user.findMany({
     where: {
-      role: { in: ['manager', 'accountant', 'attendant'] }
+      role: { in: ['owner', 'manager', 'accountant', 'attendant'] }
     },
     include: {
       permissions: true
@@ -75,7 +75,36 @@ function getRoleDefaults(role) {
     canViewReceipt: true, canCreateReceipt: false,
     canGiveDiscount: false,
     canViewTax: false, canManageTax: false,
+    // Services
+    canViewService: false, canCreateService: false, canEditService: false, canDeleteService: false, canManageServiceCategory: false, canViewServiceReport: false,
+    // Rentals
+    canViewRental: false, canCreateRental: false, canEditRental: false, canDeleteRental: false, canProcessRentalReturn: false, canViewRentalReport: false,
+    // Restaurant
+    canViewRestaurant: false, canCreateRestaurant: false, canEditRestaurant: false, canDeleteRestaurant: false, canViewRestaurantReport: false,
+    // Fuel Station
+    canViewFuelStation: false, canCreateFuelStation: false, canEditFuelStation: false, canDeleteFuelStation: false, canViewFuelStationReport: false,
+    // Manufacturing
+    canViewManufacturing: false, canCreateManufacturing: false, canEditManufacturing: false, canDeleteManufacturing: false, canViewManufacturingReport: false,
+    // Agriculture
+    canViewAgriculture: false, canCreateAgriculture: false, canEditAgriculture: false, canDeleteAgriculture: false, canViewAgricultureReport: false,
+    // Service Business
+    canViewServiceBusiness: false, canCreateServiceBusiness: false, canEditServiceBusiness: false, canDeleteServiceBusiness: false, canViewServiceBusinessReport: false,
+    // Communication
+    canViewCommunication: false, canCreateCommunication: false, canEditCommunication: false, canDeleteCommunication: false,
+    // Accounting
+    canViewAccounting: false, canCreateAccounting: false, canEditAccounting: false, canDeleteAccounting: false,
+    // Payment Methods
+    canUseCash: true, canUseMobileMoney: false, canUseBank: false, canUseCard: false,
+    // Data Import
+    canImportInventory: false,
   };
+
+  if (role === 'owner') {
+    // Owner gets ALL permissions enabled
+    const ownerDefaults = {};
+    for (const key of Object.keys(defaults)) ownerDefaults[key] = true;
+    return ownerDefaults;
+  }
 
   if (role === 'manager') {
     return {
@@ -92,6 +121,23 @@ function getRoleDefaults(role) {
       canCreateReceipt: true,
       canGiveDiscount: true,
       canViewTax: true,
+      // Fuel Station — manager gets full access
+      canViewFuelStation: true, canCreateFuelStation: true, canEditFuelStation: true, canDeleteFuelStation: false, canViewFuelStationReport: true,
+      // Manufacturing
+      canViewManufacturing: true, canCreateManufacturing: true, canEditManufacturing: true, canDeleteManufacturing: false, canViewManufacturingReport: true,
+      // Agriculture
+      canViewAgriculture: true, canCreateAgriculture: true, canEditAgriculture: true, canDeleteAgriculture: false, canViewAgricultureReport: true,
+      // Service Business
+      canViewServiceBusiness: true, canCreateServiceBusiness: true, canEditServiceBusiness: true, canDeleteServiceBusiness: false, canViewServiceBusinessReport: true,
+      // Restaurant
+      canViewRestaurant: true, canCreateRestaurant: true, canEditRestaurant: true, canDeleteRestaurant: false, canViewRestaurantReport: true,
+      // Communication
+      canViewCommunication: true, canCreateCommunication: true, canEditCommunication: true, canDeleteCommunication: false,
+      // Accounting
+      canViewAccounting: true, canCreateAccounting: true, canEditAccounting: true, canDeleteAccounting: false,
+      // Services & Rentals
+      canViewService: true, canCreateService: true, canEditService: true, canDeleteService: false, canManageServiceCategory: true, canViewServiceReport: true,
+      canViewRental: true, canCreateRental: true, canEditRental: true, canDeleteRental: false, canProcessRentalReturn: true, canViewRentalReport: true,
     };
   }
 
@@ -108,6 +154,15 @@ function getRoleDefaults(role) {
       canCreateSupplier: true, canViewSupplier: true, canEditSupplier: true,
       canViewSalesReport: true, canViewInventoryReport: true, canViewFinancialReport: true, canViewCustomerReport: true, canViewSupplierReport: true, canViewReceivablesReport: true, canViewPayablesReport: true, canViewPerformanceReport: true, canViewAuditReport: true, canExportReport: true,
       canViewTax: true, canManageTax: true,
+      // Fuel Station — accountant gets view + reports
+      canViewFuelStation: true, canViewFuelStationReport: true,
+      // Accounting
+      canViewAccounting: true, canCreateAccounting: true, canEditAccounting: true,
+      // Communication
+      canViewCommunication: true,
+      // Services & Rentals
+      canViewService: true, canViewServiceReport: true,
+      canViewRental: true, canViewRentalReport: true,
     };
   }
 
@@ -119,6 +174,8 @@ function getRoleDefaults(role) {
       canViewProduct: true,
       canViewCustomer: true,
       canViewReceipt: true,
+      // Fuel Station — attendant gets view + create
+      canViewFuelStation: true, canCreateFuelStation: true, canViewFuelStationReport: false,
     };
   }
 
@@ -127,6 +184,12 @@ function getRoleDefaults(role) {
 
 function getRoleUpdates(role) {
   const updates = {};
+
+  if (role === 'owner') {
+    // Owner gets ALL permissions enabled
+    const ownerDefaults = getRoleDefaults('owner');
+    Object.assign(updates, ownerDefaults);
+  }
 
   if (role === 'manager') {
     updates.canCreatePayable = true;

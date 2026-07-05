@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 
@@ -417,7 +417,7 @@ router.get('/payments', authenticateToken, requirePermission('canViewReceivable'
 })
 
 // Record customer payment
-router.post('/payments', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
+router.post('/payments', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, requireCashAccount, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -428,6 +428,16 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
     const paidAmount = toMoney(amount)
     if (!customerId) return res.status(400).json({ error: 'Customer is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
+
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+
+    // Gate payment method by permission
+    if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
 
     // Get customer
     const customer = await prisma.customer.findFirst({
@@ -457,14 +467,35 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
         customerId,
         saleId,
         amount: paidAmount,
-        paymentMethod,
-        mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : null,
-        phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : null,
-        transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : null,
+        paymentMethod: resolvedPaymentMethod,
+        mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+        phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+        transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
         reference,
         notes
       }
     })
+
+    // Add to user's cash account (money coming in) and record transaction
+    if (req.userCashAccountId) {
+      const updatedAccount = await prisma.cashAccount.update({
+        where: { id: req.userCashAccountId },
+        data: { balance: { increment: paidAmount } }
+      })
+
+      await prisma.cashTransaction.create({
+        data: {
+          tenantId: req.tenant.id,
+          accountId: req.userCashAccountId,
+          type: 'receipt',
+          amount: paidAmount,
+          balanceAfter: updatedAccount.balance,
+          reference: reference || payment.id,
+          description: `Customer payment: ${customer.name || customer.email}`,
+          userId: req.user.id
+        }
+      })
+    }
 
     // Update customer balance
     const newBalance = Math.max(0, customer.balance - paidAmount)
@@ -560,6 +591,225 @@ router.get('/receivables/summary', authenticateToken, requirePermission('canView
   } catch (error) {
     console.error('Receivables summary error:', error)
     handleBranchError(res, error, 'Failed to fetch receivables summary')
+  }
+})
+
+// === FUEL CARDS ===
+
+// List fuel cards
+router.get('/fuel-cards', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { search, status, cardType } = req.query
+
+    const where = scopedWhere(scope, {
+      ...(status && { status }),
+      ...(cardType && { cardType }),
+      ...(search && {
+        OR: [
+          { cardNumber: { contains: search, mode: 'insensitive' } },
+          { holderName: { contains: search, mode: 'insensitive' } }
+        ]
+      })
+    })
+
+    const cards = await prisma.fuelCard.findMany({
+      where,
+      include: { customer: { select: { id: true, name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    res.json({ cards })
+  } catch (error) {
+    console.error('Get fuel cards error:', error)
+    handleBranchError(res, error, 'Failed to fetch fuel cards')
+  }
+})
+
+// Create fuel card
+router.post('/fuel-cards', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    const { cardNumber, holderName, customerId, cardType = 'prepaid', balance = 0, creditLimit = 0, expiresAt, notes } = req.body
+
+    if (!cardNumber?.trim()) return res.status(400).json({ error: 'Card number is required' })
+    if (!holderName?.trim()) return res.status(400).json({ error: 'Holder name is required' })
+
+    // Check unique card number within tenant
+    const existing = await prisma.fuelCard.findFirst({
+      where: { tenantId: scope.tenantId, cardNumber: cardNumber.trim() }
+    })
+    if (existing) return res.status(400).json({ error: 'Card number already exists' })
+
+    // Validate customer if provided
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: customerId }) })
+      if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const card = await prisma.fuelCard.create({
+      data: {
+        cardNumber: cardNumber.trim(),
+        holderName: holderName.trim(),
+        customerId: customerId || null,
+        cardType,
+        balance: toMoney(balance),
+        creditLimit: toMoney(creditLimit),
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        notes,
+        tenantId: scope.tenantId,
+        branchId: scope.branchId
+      },
+      include: { customer: { select: { id: true, name: true, phone: true } } }
+    })
+
+    res.status(201).json(card)
+  } catch (error) {
+    console.error('Create fuel card error:', error)
+    handleBranchError(res, error, 'Failed to create fuel card')
+  }
+})
+
+// Update fuel card
+router.put('/fuel-cards/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const { holderName, customerId, cardType, creditLimit, status, expiresAt, notes } = req.body
+
+    const existing = await prisma.fuelCard.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!existing) return res.status(404).json({ error: 'Fuel card not found' })
+
+    const card = await prisma.fuelCard.update({
+      where: { id },
+      data: {
+        ...(holderName !== undefined && { holderName }),
+        ...(customerId !== undefined && { customerId: customerId || null }),
+        ...(cardType !== undefined && { cardType }),
+        ...(creditLimit !== undefined && { creditLimit: toMoney(creditLimit) }),
+        ...(status !== undefined && { status }),
+        ...(expiresAt !== undefined && { expiresAt: expiresAt ? new Date(expiresAt) : null }),
+        ...(notes !== undefined && { notes })
+      },
+      include: { customer: { select: { id: true, name: true, phone: true } } }
+    })
+
+    res.json(card)
+  } catch (error) {
+    console.error('Update fuel card error:', error)
+    handleBranchError(res, error, 'Failed to update fuel card')
+  }
+})
+
+// Reload fuel card (add balance)
+router.post('/fuel-cards/:id/reload', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    const { id } = req.params
+    const { amount, reference, notes } = req.body
+    const reloadAmount = toMoney(amount)
+    if (reloadAmount <= 0) return res.status(400).json({ error: 'Reload amount must be greater than zero' })
+
+    const card = await prisma.fuelCard.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!card) return res.status(404).json({ error: 'Fuel card not found' })
+    if (card.status !== 'active') return res.status(400).json({ error: 'Card is not active' })
+
+    const newBalance = card.balance + reloadAmount
+    const [updatedCard] = await Promise.all([
+      prisma.fuelCard.update({ where: { id }, data: { balance: newBalance }, include: { customer: { select: { id: true, name: true, phone: true } } } }),
+      prisma.fuelCardTransaction.create({
+        data: {
+          cardId: id,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          type: 'reload',
+          amount: reloadAmount,
+          balanceAfter: newBalance,
+          reference,
+          notes
+        }
+      })
+    ])
+
+    res.json(updatedCard)
+  } catch (error) {
+    console.error('Reload fuel card error:', error)
+    handleBranchError(res, error, 'Failed to reload fuel card')
+  }
+})
+
+// Delete fuel card
+router.delete('/fuel-cards/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    const existing = await prisma.fuelCard.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!existing) return res.status(404).json({ error: 'Fuel card not found' })
+
+    await prisma.fuelCard.delete({ where: { id } })
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Delete fuel card error:', error)
+    handleBranchError(res, error, 'Failed to delete fuel card')
+  }
+})
+
+// === CREDIT ACCOUNTS (customers with credit limit > 0) ===
+
+router.get('/credit-accounts', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { search, status } = req.query
+
+    const where = scopedWhere(scope, {
+      creditLimit: { gt: 0 },
+      ...(status && { status }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } }
+        ]
+      })
+    })
+
+    const accounts = await prisma.customer.findMany({
+      where,
+      orderBy: { balance: 'desc' }
+    })
+
+    res.json({ accounts })
+  } catch (error) {
+    console.error('Get credit accounts error:', error)
+    handleBranchError(res, error, 'Failed to fetch credit accounts')
+  }
+})
+
+// Update credit terms (credit limit, status, trust score)
+router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const { creditLimit, status, trustScore, notes } = req.body
+
+    const existing = await prisma.customer.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!existing) return res.status(404).json({ error: 'Customer not found' })
+
+    const customer = await prisma.customer.update({
+      where: { id },
+      data: {
+        ...(creditLimit !== undefined && { creditLimit: toMoney(creditLimit) }),
+        ...(status !== undefined && { status }),
+        ...(trustScore !== undefined && { trustScore: Math.max(0, Math.min(100, Number(trustScore))) }),
+        ...(notes !== undefined && { notes })
+      }
+    })
+
+    res.json(customer)
+  } catch (error) {
+    console.error('Update credit account error:', error)
+    handleBranchError(res, error, 'Failed to update credit account')
   }
 })
 

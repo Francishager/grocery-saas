@@ -1,6 +1,6 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 
@@ -38,6 +38,8 @@ const MODULES = [
       { name: 'inventory.batch_numbers', displayName: 'Batch Numbers' },
       { name: 'inventory.expiry_tracking', displayName: 'Expiry Tracking' },
       { name: 'inventory.barcode_printing', displayName: 'Barcode Printing' },
+      { name: 'fuel_station.lubricants', displayName: 'Lubricants & Dry Stock' },
+      { name: 'fuel_station.convenience', displayName: 'Convenience Shop' },
     ]
   },
   {
@@ -47,6 +49,8 @@ const MODULES = [
       { name: 'customers.loyalty', displayName: 'Loyalty Program' },
       { name: 'customers.wallet', displayName: 'Customer Wallet' },
       { name: 'customers.statements', displayName: 'Customer Statements' },
+      { name: 'fuel_station.fuel_cards', displayName: 'Fuel Cards' },
+      { name: 'fuel_station.credit_accounts', displayName: 'Credit Accounts' },
     ]
   },
   {
@@ -122,6 +126,8 @@ const MODULES = [
       { name: 'service.job_cards', displayName: 'Job Cards' },
       { name: 'service.technicians', displayName: 'Technician Assignment' },
       { name: 'service.contracts', displayName: 'Service Contracts' },
+      { name: 'fuel_station.car_wash', displayName: 'Car Wash Services' },
+      { name: 'fuel_station.garage', displayName: 'Garage Services' },
     ]
   },
   {
@@ -189,6 +195,78 @@ const MODULES = [
       { name: 'audit', displayName: 'Audit Log' },
     ]
   },
+  {
+    id: 'fuel_station', name: 'Fuel Station', icon: Fuel, color: 'text-yellow-700 bg-yellow-100', features: [
+      { name: 'fuel_station', displayName: 'Fuel Station Module' },
+      { name: 'fuel_station.tanks', displayName: 'Tank Management' },
+      { name: 'fuel_station.pumps', displayName: 'Pump Management' },
+      { name: 'fuel_station.deliveries', displayName: 'Fuel Deliveries' },
+      { name: 'fuel_station.meter_readings', displayName: 'Meter Readings' },
+      { name: 'fuel_station.dipstick', displayName: 'Dipstick Readings' },
+      { name: 'fuel_station.tank_calibration', displayName: 'Tank Calibration' },
+      { name: 'fuel_station.shift_reports', displayName: 'Shift Reports' },
+      { name: 'fuel_station.pricing', displayName: 'Price Management' },
+      { name: 'fuel_station.compliance', displayName: 'Environmental Compliance' },
+      { name: 'fuel_station.reports', displayName: 'Fuel Station Reports' },
+    ]
+  },
+  {
+    id: 'manufacturing', name: 'Manufacturing', icon: Factory, color: 'text-stone-600 bg-stone-100', features: [
+      { name: 'manufacturing', displayName: 'Manufacturing Module' },
+      { name: 'manufacturing.bom', displayName: 'Bill of Materials' },
+      { name: 'manufacturing.production_orders', displayName: 'Production Orders' },
+      { name: 'manufacturing.finished_goods', displayName: 'Finished Goods' },
+      { name: 'manufacturing.costing', displayName: 'Production Costing' },
+      { name: 'manufacturing.waste', displayName: 'Waste Tracking' },
+      { name: 'manufacturing.reports', displayName: 'Production Reports' },
+    ]
+  },
+  {
+    id: 'agriculture', name: 'Agriculture', icon: Sprout, color: 'text-green-700 bg-green-100', features: [
+      { name: 'agriculture', displayName: 'Agriculture Module' },
+      { name: 'agriculture.crop_farming', displayName: 'Crop Farming' },
+      { name: 'agriculture.livestock', displayName: 'Livestock' },
+      { name: 'agriculture.harvesting', displayName: 'Harvesting' },
+      { name: 'agriculture.farm_inventory', displayName: 'Farm Inventory' },
+      { name: 'agriculture.farm_expenses', displayName: 'Farm Expenses' },
+      { name: 'agriculture.fields', displayName: 'Field Management' },
+      { name: 'agriculture.harvest_reports', displayName: 'Harvest Reports' },
+      { name: 'agriculture.milk_reports', displayName: 'Milk Reports' },
+      { name: 'agriculture.egg_reports', displayName: 'Egg Reports' },
+      { name: 'agriculture.yield_reports', displayName: 'Yield Reports' },
+    ]
+  },
+  {
+    id: 'production', name: 'Production Engine', icon: Boxes, color: 'text-amber-700 bg-amber-100', features: [
+      { name: 'production', displayName: 'Production Engine' },
+      { name: 'production.recipes', displayName: 'Recipes' },
+      { name: 'production.bom', displayName: 'Bill of Materials (BOM)' },
+      { name: 'production.orders', displayName: 'Production Orders' },
+      { name: 'production.finished_goods', displayName: 'Finished Goods' },
+      { name: 'production.waste_tracking', displayName: 'Waste Tracking' },
+      { name: 'production.costing', displayName: 'Production Costing' },
+    ]
+  },
+  {
+    id: 'assets', name: 'Asset & Resource Engine', icon: Database, color: 'text-cyan-700 bg-cyan-100', features: [
+      { name: 'assets', displayName: 'Asset & Resource Management' },
+      { name: 'assets.restaurant_tables', displayName: 'Restaurant Tables' },
+      { name: 'assets.fuel_pumps', displayName: 'Fuel Pumps' },
+      { name: 'assets.fuel_tanks', displayName: 'Fuel Tanks' },
+      { name: 'assets.farm_fields', displayName: 'Farm Fields' },
+      { name: 'assets.machines', displayName: 'Machines' },
+      { name: 'assets.vehicles', displayName: 'Vehicles' },
+    ]
+  },
+  {
+    id: 'developer', name: 'Developer & Data', icon: Code, color: 'text-slate-700 bg-slate-100', features: [
+      { name: 'developer', displayName: 'Developer Tools' },
+      { name: 'developer.data_importer', displayName: 'Data Importer' },
+      { name: 'developer.data_exporter', displayName: 'Data Exporter' },
+      { name: 'developer.api_keys', displayName: 'API Keys' },
+      { name: 'developer.webhooks', displayName: 'Webhooks' },
+    ]
+  },
 ]
 
 interface TenantListItem { id: string; name: string; planId: string; plan: { name: string } }
@@ -251,6 +329,15 @@ export const FeaturesPage: React.FC = () => {
     if (!selectedTenant) { setError('Select a tenant first'); return }
     setSaving(true); setError('')
     try {
+      // Auto-create feature in DB if it doesn't exist yet
+      if (!features.find(ef => ef.name === mf.name)) {
+        const mod = MODULES.find(m => m.features.some(f => f.name === mf.name))
+        await apiFetch('/api/platform/features', {
+          method: 'POST',
+          body: JSON.stringify({ name: mf.name, displayName: mf.displayName, category: mod?.id || 'other', module: mod?.id || 'other', description: mf.displayName, isActive: true, slug: mf.name })
+        })
+        await fetchData()
+      }
       const res = await apiFetch(`/api/platform/tenant/${selectedTenant}/features/${mf.name}`, {
         method: 'POST',
         body: JSON.stringify({ enabled })

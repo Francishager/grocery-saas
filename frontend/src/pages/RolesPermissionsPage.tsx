@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
-import { Shield, Plus, MoreVertical, Edit, Ban, Key, Trash2 } from 'lucide-react'
+import { Shield, Plus, MoreVertical, Edit, Ban, Key, Trash2, CheckCheck, Square, Wallet } from 'lucide-react'
 import { staffApi, branchesApi } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,12 +22,22 @@ const PERM_LABELS: Record<string, string> = {
   canCreateSupplier:'Create Supplier', canViewSupplier:'View Supplier', canEditSupplier:'Edit Supplier', canDeleteSupplier:'Delete Supplier',
   canCreateStaff:'Create Staff', canViewStaff:'View Staff', canEditStaff:'Edit Staff', canDeleteStaff:'Delete Staff',
   canCreateBranch:'Create Branch', canViewBranch:'View Branch', canEditBranch:'Edit Branch', canDeleteBranch:'Delete Branch',
-  canViewSalesReport:'View Sales Report',canViewInventoryReport:'View Inventory Report',canViewFinancialReport:'View Financial Report',canViewCustomerReport:'View Customer Report',canViewSupplierReport:'View Supplier Report',canViewReceivablesReport:'View Receivables Report',canViewPayablesReport:'View Payables Report',canViewPerformanceReport:'View Performance Report',canExportReport:'Export Reports',
+  canViewSalesReport:'View Sales Report',canViewInventoryReport:'View Inventory Report',canViewFinancialReport:'View Financial Report',canViewCustomerReport:'View Customer Report',canViewSupplierReport:'View Supplier Report',canViewReceivablesReport:'View Receivables Report',canViewPayablesReport:'View Payables Report',canViewPerformanceReport:'View Performance Report',canViewAuditReport:'View Audit Report',canExportReport:'Export Reports',
   canViewSettings:'View Settings', canEditSettings:'Edit Settings', canGiveDiscount:'Give Discount',
+  canViewReceipt:'View Receipts', canCreateReceipt:'Create Receipt',
   canViewTax:'View Tax', canManageTax:'Manage Tax',
   canViewService:'View Service', canCreateService:'Create Service', canEditService:'Edit Service', canDeleteService:'Delete Service', canManageServiceCategory:'Manage Service Categories', canViewServiceReport:'View Service Report',
   canViewRental:'View Rentals', canCreateRental:'Create Rental', canEditRental:'Edit Rental', canDeleteRental:'Cancel Rental', canProcessRentalReturn:'Process Return', canViewRentalReport:'View Rental Report',
-  canViewRestaurant:'View Restaurant', canViewCommunication:'View Communication',
+  canViewRestaurant:'View Restaurant', canCreateRestaurant:'Create Restaurant', canEditRestaurant:'Edit Restaurant', canDeleteRestaurant:'Delete Restaurant', canViewRestaurantReport:'View Restaurant Report',
+  canViewFuelStation:'View Fuel Station', canCreateFuelStation:'Create Fuel Station', canEditFuelStation:'Edit Fuel Station', canDeleteFuelStation:'Delete Fuel Station', canViewFuelStationReport:'View Fuel Station Report',
+  canViewManufacturing:'View Manufacturing', canCreateManufacturing:'Create Manufacturing', canEditManufacturing:'Edit Manufacturing', canDeleteManufacturing:'Delete Manufacturing', canViewManufacturingReport:'View Manufacturing Report',
+  canViewAgriculture:'View Agriculture', canCreateAgriculture:'Create Agriculture', canEditAgriculture:'Edit Agriculture', canDeleteAgriculture:'Delete Agriculture', canViewAgricultureReport:'View Agriculture Report',
+  canViewServiceBusiness:'View Service Business', canCreateServiceBusiness:'Create Service Business', canEditServiceBusiness:'Edit Service Business', canDeleteServiceBusiness:'Delete Service Business', canViewServiceBusinessReport:'View Service Business Report',
+  canViewCommunication:'View Communication', canCreateCommunication:'Create Communication', canEditCommunication:'Edit Communication', canDeleteCommunication:'Delete Communication',
+  canViewAccounting:'View Accounting', canCreateAccounting:'Create Accounting', canEditAccounting:'Edit Accounting', canDeleteAccounting:'Delete Accounting',
+  canAdjustStock:'Adjust Stock', canTransferStock:'Transfer Stock',
+  canUseCash:'Use Cash', canUseMobileMoney:'Use Mobile Money', canUseBank:'Use Bank Transfer', canUseCard:'Use Card',
+  canImportInventory:'Import Inventory',
 }
 
 const PERM_GROUPS = [
@@ -49,7 +60,15 @@ const PERM_GROUPS = [
   { label: 'Services', prefix: 'Service' },
   { label: 'Rentals', prefix: 'Rental' },
   { label: 'Restaurant', prefix: 'Restaurant' },
+  { label: 'Fuel Station', prefix: 'FuelStation' },
+  { label: 'Manufacturing', prefix: 'Manufacturing' },
+  { label: 'Agriculture', prefix: 'Agriculture' },
+  { label: 'Service Business', prefix: 'ServiceBusiness' },
   { label: 'Communication', prefix: 'Communication' },
+  { label: 'Accounting', prefix: 'Accounting' },
+  { label: 'Stock', prefix: 'Stock' },
+  { label: 'Payment Methods', prefix: 'canUse' },
+  { label: 'Data Import', prefix: 'Import' },
 ]
 
 export default function RolesPermissionsPage() {
@@ -60,17 +79,19 @@ export default function RolesPermissionsPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [expandedPermId, setExpandedPermId] = useState<string | null>(null)
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '', cashAccountId: '' })
   const [formPerms, setFormPerms] = useState<Record<string, boolean>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', cashAccountId: '' })
+  const [cashAccounts, setCashAccounts] = useState<any[]>([])
   const [dropdownId, setDropdownId] = useState<string | null>(null)
   const [createdPassword, setCreatedPassword] = useState<{ name: string; email: string; password: string } | null>(null)
+  const [permSearch, setPermSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   const online = useOnlineStatus()
 
-  useEffect(() => { loadStaff(); loadBranches(); loadPermSchema() }, [])
+  useEffect(() => { loadStaff(); loadBranches(); loadPermSchema(); loadCashAccounts() }, [])
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownId(null)
@@ -114,16 +135,38 @@ export default function RolesPermissionsPage() {
     } catch {}
   }
 
+  const loadCashAccounts = async () => {
+    try {
+      const res = await apiFetch('/api/expenses/cash-accounts')
+      if (res.ok) {
+        const data = await res.json()
+        setCashAccounts(data)
+      }
+    } catch {}
+  }
+
   const handleCreate = async () => {
-    if (!form.email || !form.password || !form.branchId) {
-      toast({ variant: 'destructive', title: 'Email, password, and branch are required' })
+    if (!form.name.trim()) {
+      toast({ variant: 'destructive', title: 'Name is required' })
+      return
+    }
+    if (!form.email.trim()) {
+      toast({ variant: 'destructive', title: 'Email is required' })
+      return
+    }
+    if (!form.password || form.password.length < 6) {
+      toast({ variant: 'destructive', title: 'Password required', description: 'Use at least 6 characters.' })
+      return
+    }
+    if (!form.branchId) {
+      toast({ variant: 'destructive', title: 'Branch is required' })
       return
     }
     try {
       const result = await staffApi.create({ ...form, name: form.name || form.email.split('@')[0], permissions: formPerms })
       toast({ title: 'Staff created successfully' })
       setShowAddForm(false)
-      setForm({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '' })
+      setForm({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '', cashAccountId: '' })
       setFormPerms({})
       loadStaff()
       if (result?.password) {
@@ -147,7 +190,7 @@ export default function RolesPermissionsPage() {
 
   const startEdit = (s: any) => {
     setEditingId(s.id)
-    setEditForm({ name: s.name || '', email: s.email || '', phone: s.phone || '', role: s.role || 'attendant', branchId: s.branchId || '' })
+    setEditForm({ name: s.name || '', email: s.email || '', phone: s.phone || '', role: s.role || 'attendant', branchId: s.branchId || '', cashAccountId: s.cashAccountId || '' })
     setDropdownId(null)
   }
 
@@ -253,9 +296,9 @@ export default function RolesPermissionsPage() {
           <CardHeader><CardTitle>Create New Staff</CardTitle></CardHeader>
           <CardContent>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2"><Label>Full Name</Label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="John Doe" /></div>
-              <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="john@example.com" /></div>
-              <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Min 6 chars" /></div>
+              <div className="space-y-2"><Label>Full Name</Label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="John Doe" required /></div>
+              <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="john@example.com" required /></div>
+              <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Min 6 chars" required minLength={6} /></div>
               <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+256..." /></div>
               <div className="space-y-2">
                 <Label>Role</Label>
@@ -274,13 +317,38 @@ export default function RolesPermissionsPage() {
                   {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
+              <div className="space-y-2">
+                <Label>Cash Account</Label>
+                <select value={form.cashAccountId} onChange={e => setForm(f => ({ ...f, cashAccountId: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <option value="">No cash account (cannot transact)</option>
+                  {cashAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.type})</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">Required for staff who handle cash, record sales, or make payments</p>
+              </div>
             </div>
             {/* Permissions checkboxes on create form */}
             <div className="mt-4 border rounded-lg p-4">
-              <p className="text-sm font-medium mb-3">Permissions (tick to grant access)</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium">Permissions (tick to grant access)</p>
+                <div className="flex items-center gap-2">
+                  <Input className="h-7 w-40 text-xs" placeholder="Search permissions..." value={permSearch} onChange={e => setPermSearch(e.target.value)} />
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
+                    const allKeys = permSchema?.keys || Object.keys(PERM_LABELS)
+                    const allTrue: Record<string, boolean> = {}
+                    allKeys.forEach((k: string) => allTrue[k] = true)
+                    setFormPerms(allTrue)
+                  }}><CheckCheck className="h-3 w-3 mr-1" /> All</Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setFormPerms({})}><Square className="h-3 w-3 mr-1" /> None</Button>
+                </div>
+              </div>
               <div className="space-y-3">
                 {PERM_GROUPS.map(g => {
-                  const groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => k.endsWith(g.prefix))
+                  let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => k.includes(g.prefix) || (g.prefix === 'canUse' && k.startsWith('canUse')))
+                  if (permSearch) {
+                    const q = permSearch.toLowerCase()
+                    groupKeys = groupKeys.filter(k => (PERM_LABELS[k] || k).toLowerCase().includes(q))
+                  }
                   if (!groupKeys.length) return null
                   return (
                     <div key={g.prefix}>
@@ -296,17 +364,6 @@ export default function RolesPermissionsPage() {
                     </div>
                   )
                 })}
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Other</p>
-                  <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
-                    {['canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
-                      <label key={key} className="flex items-center gap-1.5 text-xs">
-                        <input type="checkbox" checked={!!formPerms[key]} onChange={e => setFormPerms(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
-                        {PERM_LABELS[key] || key}
-                      </label>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
             <div className="flex gap-2 mt-4">
@@ -346,6 +403,12 @@ export default function RolesPermissionsPage() {
                             {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
                           </select>
                         </div>
+                        <div><Label className="text-xs">Cash Account</Label>
+                          <select value={editForm.cashAccountId} onChange={e => setEditForm(f => ({ ...f, cashAccountId: e.target.value }))} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm">
+                            <option value="">No cash account (cannot transact)</option>
+                            {cashAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.type})</option>)}
+                          </select>
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <Button onClick={() => handleSaveEdit(s.id)} size="sm">Save</Button>
@@ -361,6 +424,17 @@ export default function RolesPermissionsPage() {
                         <div>
                           <p className="font-medium">{s.name || s.email}</p>
                           <p className="text-sm text-muted-foreground">{s.email} {s.branch?.name && `· ${s.branch.name}`}</p>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            {s.cashAccount ? (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 inline-flex items-center gap-1">
+                                <Wallet className="h-3 w-3" /> {s.cashAccount.name}
+                              </span>
+                            ) : (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 inline-flex items-center gap-1">
+                                <Wallet className="h-3 w-3" /> No cash account
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -396,10 +470,26 @@ export default function RolesPermissionsPage() {
 
                   {expandedPermId === s.id && (
                     <div className="mt-4 border-t pt-4">
-                      <p className="text-sm font-medium mb-3">Permissions for {s.name || s.email}</p>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-sm font-medium">Permissions for {s.name || s.email}</p>
+                        <div className="flex items-center gap-2">
+                          <Input className="h-7 w-40 text-xs" placeholder="Search permissions..." value={permSearch} onChange={e => setPermSearch(e.target.value)} />
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
+                            const allKeys = permSchema?.keys || Object.keys(PERM_LABELS)
+                            const allTrue: Record<string, boolean> = {}
+                            allKeys.forEach((k: string) => allTrue[k] = true)
+                            setPermissions(allTrue)
+                          }}><CheckCheck className="h-3 w-3 mr-1" /> All</Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPermissions({})}><Square className="h-3 w-3 mr-1" /> None</Button>
+                        </div>
+                      </div>
                       <div className="space-y-3">
                         {PERM_GROUPS.map(g => {
-                          const groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => k.endsWith(g.prefix))
+                          let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => k.includes(g.prefix) || (g.prefix === 'canUse' && k.startsWith('canUse')))
+                          if (permSearch) {
+                            const q = permSearch.toLowerCase()
+                            groupKeys = groupKeys.filter(k => (PERM_LABELS[k] || k).toLowerCase().includes(q))
+                          }
                           if (!groupKeys.length) return null
                           return (
                             <div key={g.prefix}>
@@ -415,17 +505,6 @@ export default function RolesPermissionsPage() {
                             </div>
                           )
                         })}
-                        <div>
-                          <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Other</p>
-                          <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
-                            {['canViewSettings','canEditSettings','canGiveDiscount'].map(key => (
-                              <label key={key} className="flex items-center gap-1.5 text-xs">
-                                <input type="checkbox" checked={!!permissions[key]} onChange={e => setPermissions(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
-                                {PERM_LABELS[key] || key}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
                       </div>
                       <Button onClick={() => handleSavePermissions(s.id)} size="sm" className="mt-3">Save Permissions</Button>
                     </div>

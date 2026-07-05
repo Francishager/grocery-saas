@@ -37,6 +37,7 @@ const createEmptyForm = () => ({
   businessSlug: '',
   businessEmail: '',
   businessPhone: '',
+  businessType: '',
   planId: '',
   ownerName: '',
   ownerEmail: '',
@@ -117,6 +118,12 @@ export const ProvisionPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!form.businessName.trim()) { setError('Business name is required'); return }
+    if (!form.businessType) { setError('Business type is required'); return }
+    if (!form.planId) { setError('Subscription plan is required'); return }
+    if (!form.ownerName.trim()) { setError('Owner name is required'); return }
+    if (!form.ownerEmail.trim()) { setError('Owner email is required'); return }
+    if (!form.ownerPassword || form.ownerPassword.length < 6) { setError('Password must be at least 6 characters'); return }
     setLoading(true)
     setError(null)
     setSuccess(false)
@@ -131,6 +138,7 @@ export const ProvisionPage: React.FC = () => {
             slug: form.businessSlug,
             email: form.businessEmail || undefined,
             phone: form.businessPhone,
+            businessType: form.businessType || undefined,
             planId: form.planId || undefined,
           },
           owner: {
@@ -230,7 +238,31 @@ export const ProvisionPage: React.FC = () => {
             <div><label className="block text-sm font-medium mb-1">Phone</label><input value={form.businessPhone} onChange={(e) => handleChange('businessPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" /></div>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Subscription Plan</label>
+            <label className="block text-sm font-medium mb-1">Business Type *</label>
+            <select value={form.businessType} onChange={(e) => handleChange('businessType', e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+              <option value="">Select business type...</option>
+              <option value="retail">Retail Store</option>
+              <option value="pharmacy">Pharmacy</option>
+              <option value="hardware">Hardware Store</option>
+              <option value="supermarket">Supermarket</option>
+              <option value="wholesale">Wholesale</option>
+              <option value="restaurant">Restaurant</option>
+              <option value="bar">Bar</option>
+              <option value="restaurant_bar">Restaurant & Bar</option>
+              <option value="cafe">Cafe</option>
+              <option value="coffee_shop">Coffee Shop</option>
+              <option value="fast_food">Fast Food</option>
+              <option value="hotel_restaurant">Hotel Restaurant</option>
+              <option value="bakery">Bakery</option>
+              <option value="service">Service Business</option>
+              <option value="salon_spa">Salon & Spa</option>
+              <option value="repair_shop">Repair Shop</option>
+              <option value="manufacturing">Manufacturing</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Subscription Plan *</label>
             <select value={form.planId} onChange={(e) => handleChange('planId', e.target.value)} className="w-full px-3 py-2 border rounded-lg">
               <option value="">Select a plan</option>
               {plans.map((p) => <option key={p.id} value={p.id}>{p.name} - {p.price} {p.currency}/{p.billingCycle}</option>)}

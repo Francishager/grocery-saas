@@ -40,6 +40,21 @@ model Branch {
   restaurantTables   RestaurantTable[]
   restaurantOrders   RestaurantOrder[]
   reservations       Reservation[]
+  fuelPumps          FuelPump[]
+  fuelTanks          FuelTank[]
+  fuelDeliveries     FuelDelivery[]
+  fuelShiftReports   FuelShiftReport[]
+  productionOrders   ProductionOrder[]
+  farmFields         FarmField[]
+  livestock          Livestock[]
+  harvests           Harvest[]
+  farmExpenses       FarmExpense[]
+  appointments       Appointment[]
+  workOrders         WorkOrder[]
+  serviceContracts   ServiceContract[]
+  assets             Asset[]
+  fuelCards          FuelCard[]
+  fuelCardTransactions FuelCardTransaction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,6 +154,41 @@ model Tenant {
   happyHourRules       HappyHourRule[]
   comboMeals           ComboMeal[]
   deliveries           Delivery[]
+
+  // =====================
+  // FUEL STATION
+  // =====================
+  fuelPumps        FuelPump[]
+  fuelTanks        FuelTank[]
+  fuelDeliveries   FuelDelivery[]
+  fuelMeterReadings FuelMeterReading[]
+  fuelShiftReports  FuelShiftReport[]
+
+  // =====================
+  // MANUFACTURING
+  // =====================
+  productionOrders  ProductionOrder[]
+  productionWaste   ProductionWaste[]
+
+  // =====================
+  // AGRICULTURE
+  // =====================
+  farmFields        FarmField[]
+  livestock         Livestock[]
+  harvests          Harvest[]
+  farmExpenses      FarmExpense[]
+
+  // =====================
+  // SERVICE ENGINE
+  // =====================
+  appointments      Appointment[]
+  workOrders        WorkOrder[]
+  serviceContracts  ServiceContract[]
+
+  // =====================
+  // ASSETS
+  // =====================
+  assets            Asset[]
 
   // =====================
   // REFERRAL SYSTEM
@@ -278,6 +328,8 @@ model User {
   lastLogin  DateTime?
   otpCode    String?
   otpExpires DateTime?
+  cashAccountId String? // Assigned cash account for cash handling accountability
+  cashAccount   CashAccount? @relation("UserCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -303,6 +355,8 @@ model User {
   notifications     Notification[]
   restaurantOrders  RestaurantOrder[]
   tips              Tip[]
+  fuelShiftReports  FuelShiftReport[]
+  productionOrders  ProductionOrder[]
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -423,9 +477,52 @@ model UserPermission {
   canProcessRentalReturn Boolean @default(false)
   canViewRentalReport Boolean @default(true)
   // Restaurant & Bar
-  canViewRestaurant   Boolean @default(false)
+  canViewRestaurant       Boolean @default(false)
+  canCreateRestaurant     Boolean @default(false)
+  canEditRestaurant       Boolean @default(false)
+  canDeleteRestaurant     Boolean @default(false)
+  canViewRestaurantReport Boolean @default(false)
+  // Fuel Station
+  canViewFuelStation       Boolean @default(false)
+  canCreateFuelStation     Boolean @default(false)
+  canEditFuelStation       Boolean @default(false)
+  canDeleteFuelStation     Boolean @default(false)
+  canViewFuelStationReport Boolean @default(false)
+  // Manufacturing
+  canViewManufacturing       Boolean @default(false)
+  canCreateManufacturing     Boolean @default(false)
+  canEditManufacturing       Boolean @default(false)
+  canDeleteManufacturing     Boolean @default(false)
+  canViewManufacturingReport Boolean @default(false)
+  // Agriculture
+  canViewAgriculture       Boolean @default(false)
+  canCreateAgriculture     Boolean @default(false)
+  canEditAgriculture       Boolean @default(false)
+  canDeleteAgriculture     Boolean @default(false)
+  canViewAgricultureReport Boolean @default(false)
+  // Service Business (appointments, work orders, contracts)
+  canViewServiceBusiness       Boolean @default(false)
+  canCreateServiceBusiness     Boolean @default(false)
+  canEditServiceBusiness       Boolean @default(false)
+  canDeleteServiceBusiness     Boolean @default(false)
+  canViewServiceBusinessReport Boolean @default(false)
   // Communication
-  canViewCommunication Boolean @default(false)
+  canViewCommunication   Boolean @default(false)
+  canCreateCommunication Boolean @default(false)
+  canEditCommunication   Boolean @default(false)
+  canDeleteCommunication Boolean @default(false)
+  // Accounting
+  canViewAccounting   Boolean @default(false)
+  canCreateAccounting Boolean @default(false)
+  canEditAccounting   Boolean @default(false)
+  canDeleteAccounting Boolean @default(false)
+  // Payment Methods (for spending — expenses, payables)
+  canUseCash        Boolean @default(true)
+  canUseMobileMoney Boolean @default(false)
+  canUseBank        Boolean @default(false)
+  canUseCard        Boolean @default(false)
+  // Data Import
+  canImportInventory Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -519,6 +616,11 @@ model Product {
   comboMealItems        ComboMealItem[]
   orderItems            RestaurantOrderItem[]
   recipes               Recipe[]
+  productionOrders      ProductionOrder[]
+  productionWaste       ProductionWaste[]
+  harvests              Harvest[]
+  appointmentProducts   Appointment[]
+  workOrderProducts     WorkOrder[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
@@ -700,6 +802,10 @@ model Customer {
   reservations Reservation[]
   deliveries   Delivery[]
   restaurantOrders RestaurantOrder[]
+  appointments Appointment[]
+  workOrders   WorkOrder[]
+  serviceContracts ServiceContract[]
+  fuelCards        FuelCard[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, branchId, phone])
@@ -837,6 +943,64 @@ enum InvoiceStatus {
   overdue
 }
 
+// Fuel Cards - Prepaid/credit cards issued by fuel station
+model FuelCard {
+  id          String       @id @default(cuid())
+  cardNumber  String
+  tenantId    String
+  branchId    String?
+  branch      Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId  String?
+  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  holderName  String
+  cardType    FuelCardType @default(prepaid)
+  balance     Float        @default(0)
+  creditLimit Float        @default(0)
+  status      FuelCardStatus @default(active)
+  issuedAt    DateTime     @default(now())
+  expiresAt   DateTime?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  transactions FuelCardTransaction[]
+
+  @@unique([tenantId, cardNumber])
+  @@index([tenantId, branchId])
+  @@map("fuel_cards")
+}
+
+enum FuelCardType {
+  prepaid
+  credit
+  fleet
+}
+
+enum FuelCardStatus {
+  active
+  suspended
+  expired
+  cancelled
+}
+
+model FuelCardTransaction {
+  id          String   @id @default(cuid())
+  cardId      String
+  card        FuelCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  tenantId    String
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  type        String   // reload, purchase, adjustment
+  amount      Float
+  balanceAfter Float
+  reference   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@map("fuel_card_transactions")
+}
+
 // =====================================================
 // PAYABLES - Supplier Management
 // =====================================================
@@ -949,6 +1113,8 @@ model Expense {
   description   String
   amount         Float
   paymentMethod  String
+  cashAccountId String? // Which cash account this expense was paid from
+  cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
   mobileProvider String?
   phoneNumber    String?
   transactionId  String?
@@ -972,8 +1138,12 @@ model Expense {
 model CashAccount {
   id              String            @id @default(cuid())
   tenantId        String
-  name            String // "Cash Box", "Mobile Money", "Bank Account"
-  type            String // cash, mobile_money, bank
+  name            String // "Cash Box", "MTN Mobile Money", "Stanbic Bank"
+  type            String // cash, mobile_money, bank, card
+  accountNumber   String? // Phone number for mobile money, account number for bank
+  bankName        String? // Bank name (bank type only)
+  accountHolder   String? // Name of the account holder
+  branchName      String? // Bank branch (bank type only)
   balance         Float             @default(0)
   currency        String            @default("UGX")
   isActive        Boolean           @default(true)
@@ -981,6 +1151,8 @@ model CashAccount {
   updatedAt       DateTime          @updatedAt
   Tenant          Tenant            @relation(fields: [tenantId], references: [id])
   CashTransaction CashTransaction[]
+  Expense         Expense[]
+  AssignedUsers   User[]            @relation("UserCashAccount")
 
   @@unique([tenantId, name])
   @@map("cash_accounts")
@@ -1637,6 +1809,7 @@ model Recipe {
   updatedAt   DateTime @updatedAt
 
   ingredients RecipeIngredient[]
+  productionOrders ProductionOrder[]
 
   @@unique([tenantId, productId])
   @@map("recipes")
@@ -1814,4 +1987,384 @@ enum ReferralRewardStatus {
   unclaimed
   claimed
   expired
+}
+
+// =====================================================
+// FUEL STATION MODULE
+// =====================================================
+
+model FuelPump {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String   // "Pump 1", "Pump 2"
+  tankId      String?
+  tank        FuelTank? @relation(fields: [tankId], references: [id], onDelete: SetNull)
+  nozzleCount Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  meterReadings FuelMeterReading[]
+  shiftReports  FuelShiftReport[]
+
+  @@index([tenantId, branchId])
+  @@map("fuel_pumps")
+}
+
+model FuelTank {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name          String   // "Tank 1 - Petrol", "Tank 2 - Diesel"
+  fuelType      String   // petrol, diesel, kerosene, gas
+  capacity      Float    @default(0) // litres
+  currentStock  Float    @default(0) // litres
+  unitCost      Float    @default(0) // cost per litre
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  pumps       FuelPump[]
+  deliveries  FuelDelivery[]
+
+  @@index([tenantId, branchId])
+  @@map("fuel_tanks")
+}
+
+model FuelDelivery {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  tankId        String
+  tank          FuelTank @relation(fields: [tankId], references: [id])
+  supplierName  String?
+  invoiceNo     String?
+  litres        Float
+  unitCost      Float
+  totalCost     Float
+  deliveryDate  DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@map("fuel_deliveries")
+}
+
+model FuelMeterReading {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pumpId      String
+  pump        FuelPump @relation(fields: [pumpId], references: [id])
+  shiftId     String?
+  openingReading Float  @default(0) // litres at start
+  closingReading Float  @default(0) // litres at end
+  litresSold  Float    @default(0)
+  amount      Float    @default(0)
+  readingDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, pumpId])
+  @@map("fuel_meter_readings")
+}
+
+model FuelShiftReport {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  shiftNo       String
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  pumpId        String?
+  pump          FuelPump? @relation(fields: [pumpId], references: [id])
+  openingReading Float  @default(0)
+  closingReading Float  @default(0)
+  litresSold    Float    @default(0)
+  cashSales     Float    @default(0)
+  mobileSales   Float    @default(0)
+  creditSales   Float    @default(0)
+  totalSales    Float    @default(0)
+  lubricantSales Float   @default(0)
+  carWashIncome Float    @default(0)
+  expenses      Float    @default(0)
+  netAmount     Float    @default(0)
+  startDate     DateTime
+  endDate       DateTime?
+  status        String   @default("open") // open, closed, reconciled
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, shiftNo])
+  @@index([tenantId, branchId])
+  @@map("fuel_shift_reports")
+}
+
+// =====================================================
+// MANUFACTURING MODULE
+// =====================================================
+
+model ProductionOrder {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orderNo       String
+  productId     String   // the finished good to produce
+  product       Product  @relation(fields: [productId], references: [id])
+  recipeId      String?  // linked BOM/Recipe
+  recipe        Recipe?  @relation(fields: [recipeId], references: [id])
+  quantity      Float    @default(0) // units to produce
+  unitCost      Float    @default(0) // cost per unit
+  totalCost     Float    @default(0)
+  wasteQty      Float    @default(0)
+  status        String   @default("pending") // pending, in_progress, completed, cancelled
+  startDate     DateTime?
+  endDate       DateTime?
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  wasteRecords  ProductionWaste[]
+
+  @@unique([tenantId, orderNo])
+  @@index([tenantId, branchId])
+  @@map("production_orders")
+}
+
+model ProductionWaste {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  productId     String?  // wasted ingredient (if applicable)
+  product       Product? @relation(fields: [productId], references: [id])
+  quantity      Float    @default(0)
+  unitCost      Float    @default(0)
+  totalCost     Float    @default(0)
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, productionOrderId])
+  @@map("production_waste")
+}
+
+// =====================================================
+// AGRICULTURE MODULE
+// =====================================================
+
+model FarmField {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String   // "North Field", "Paddock A"
+  areaSize    Float    @default(0) // acres/hectares
+  areaUnit    String   @default("acre") // acre, hectare
+  cropType    String?  // current crop
+  status      String   @default("active") // active, fallow, harvested
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  harvests    Harvest[]
+  fieldExpenses FarmExpense[]
+
+  @@index([tenantId, branchId])
+  @@map("farm_fields")
+}
+
+model Livestock {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String   // "Cattle Herd", "Poultry House 1"
+  type        String   // cattle, poultry, goats, sheep, pigs, fish
+  breed       String?
+  count       Int      @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  harvests    Harvest[]
+  expenses    FarmExpense[]
+
+  @@index([tenantId, branchId])
+  @@map("livestock")
+}
+
+model Harvest {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  fieldId     String?
+  field       FarmField? @relation(fields: [fieldId], references: [id], onDelete: SetNull)
+  livestockId String?
+  livestock   Livestock? @relation(fields: [livestockId], references: [id], onDelete: SetNull)
+  type        String   // crop, milk, eggs, meat
+  productName String?  // e.g. "Maize", "Milk", "Eggs"
+  productId   String?  // linked inventory product (harvest increases stock)
+  product     Product? @relation(fields: [productId], references: [id])
+  quantity    Float    @default(0)
+  unit        String   @default("kg") // kg, litres, trays, bags
+  quality     String?  // grade A, grade B, etc.
+  harvestDate DateTime @default(now())
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@map("harvests")
+}
+
+model FarmExpense {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  fieldId     String?
+  field       FarmField? @relation(fields: [fieldId], references: [id], onDelete: SetNull)
+  livestockId String?
+  livestock   Livestock? @relation(fields: [livestockId], references: [id], onDelete: SetNull)
+  category    String   // seeds, fertilizer, feed, veterinary, labour, fuel, irrigation
+  description String
+  amount      Float
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@map("farm_expenses")
+}
+
+// =====================================================
+// SERVICE ENGINE (Appointments, Work Orders, Contracts)
+// =====================================================
+
+model Appointment {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName String
+  customerPhone String?
+  productId   String?  // service item
+  product     Product? @relation(fields: [productId], references: [id])
+  technicianId String? // assigned user/staff
+  title       String
+  description String?
+  scheduledDate DateTime
+  scheduledTime String  // "09:30"
+  duration    String?   // "1 hour", "30 min"
+  status      String   @default("scheduled") // scheduled, confirmed, in_progress, completed, cancelled, no_show
+  price       Float    @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, scheduledDate])
+  @@map("appointments")
+}
+
+model WorkOrder {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orderNo     String
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName String
+  customerPhone String?
+  productId   String?  // service item
+  product     Product? @relation(fields: [productId], references: [id])
+  technicianId String?
+  title       String
+  description String?
+  status      String   @default("open") // open, in_progress, on_hold, completed, cancelled
+  priority    String   @default("normal") // low, normal, high, urgent
+  estimatedCost Float  @default(0)
+  actualCost  Float    @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, orderNo])
+  @@index([tenantId, branchId])
+  @@map("work_orders")
+}
+
+model ServiceContract {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  contractNo  String
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  title       String
+  description String?
+  startDate   DateTime
+  endDate     DateTime?
+  value       Float    @default(0)
+  billingCycle String  @default("monthly") // one_time, monthly, quarterly, yearly
+  status      String   @default("active") // active, expired, terminated, cancelled
+  terms       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, contractNo])
+  @@index([tenantId, branchId])
+  @@map("service_contracts")
+}
+
+// =====================================================
+// ASSET & RESOURCE ENGINE (generic assets)
+// =====================================================
+
+model Asset {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String
+  assetType   String   // machine, vehicle, equipment, building, land
+  category    String?  // sub-category
+  serialNo    String?
+  purchaseDate DateTime?
+  purchaseCost Float   @default(0)
+  currentValue Float   @default(0)
+  status      String   @default("active") // active, maintenance, retired, sold
+  assignedTo  String?  // user or location
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, branchId])
+  @@map("assets")
 }

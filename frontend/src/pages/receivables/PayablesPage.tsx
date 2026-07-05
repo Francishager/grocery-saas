@@ -382,7 +382,14 @@ export default function PayablesPage() {
   }
 
   const recordPayment = async () => {
-    if (!selectedPurchase || !paymentAmount) return
+    if (!selectedPurchase) {
+      toast({ variant: 'destructive', title: 'Select a purchase first' })
+      return
+    }
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
+      return
+    }
 
     try {
       const response = await apiFetch('/api/payables/payments', {
@@ -498,59 +505,6 @@ export default function PayablesPage() {
       </div>
 
       <UsageLimitBanner resource="suppliers" label="Suppliers" currentCount={suppliers.length} />
-
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Payables</CardTitle>
-              <ArrowUpRight className="h-4 w-4 text-red-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">
-                {summary.totalPayables?.toFixed(2)}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Overdue Purchases</CardTitle>
-              <Calendar className="h-4 w-4 text-orange-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-orange-600">
-                {summary.overdueCount || 0}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Suppliers</CardTitle>
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {suppliers.filter(s => s.status === 'active').length}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Blocked Suppliers</CardTitle>
-              <Trash2 className="h-4 w-4 text-orange-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-orange-600">
-                {suppliers.filter(s => s.status === 'blocked').length}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Tabs */}
       <div className="flex space-x-1 border-b">

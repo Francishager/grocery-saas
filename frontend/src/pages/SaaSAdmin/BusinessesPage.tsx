@@ -11,8 +11,18 @@ interface Tenant {
   subscriptionStart?: string | null
   subscriptionEnd?: string | null
   trialEndsAt?: string | null
+  businessType?: string | null
   _count?: { users: number; customers: number; suppliers: number }
   plan?: { id: string; name: string; price: number; currency: string; billingCycle: string } | null
+}
+
+const BUSINESS_TYPE_LABELS: Record<string, string> = {
+  retail: 'Retail Store', pharmacy: 'Pharmacy', hardware: 'Hardware Store',
+  supermarket: 'Supermarket', wholesale: 'Wholesale', restaurant: 'Restaurant',
+  bar: 'Bar', restaurant_bar: 'Restaurant & Bar', cafe: 'Cafe',
+  coffee_shop: 'Coffee Shop', fast_food: 'Fast Food', hotel_restaurant: 'Hotel Restaurant',
+  bakery: 'Bakery', service: 'Service Business', salon_spa: 'Salon & Spa',
+  repair_shop: 'Repair Shop', manufacturing: 'Manufacturing', other: 'Other',
 }
 
 interface Plan {
@@ -148,6 +158,7 @@ export const BusinessesPage: React.FC = () => {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Business</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Type</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Owner</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Plan</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Status</th>
@@ -161,6 +172,7 @@ export const BusinessesPage: React.FC = () => {
               {paginatedTenants.map(t => (
                 <tr key={t.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><Building size={20} className="text-blue-600" /></div><div><div className="text-sm font-medium">{t.name}</div><div className="text-xs text-gray-500">{t.slug}</div></div></div></td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{BUSINESS_TYPE_LABELS[t.businessType || ''] || t.businessType || '-'}</td>
                   <td className="px-4 py-3"><div className="text-sm font-medium">{t.ownerName || '-'}</div><div className="text-xs text-gray-500">{t.ownerEmail || '-'}</div></td>
                   <td className="px-4 py-3 text-sm text-gray-500">{t.plan?.name || '-'}</td>
                   <td className="px-4 py-3">{statusBadge(t.status)}</td>
@@ -197,6 +209,7 @@ export const BusinessesPage: React.FC = () => {
             <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">{selected.name}</h2><button onClick={() => setSelected(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button></div>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Slug</span><span>{selected.slug}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Type</span><span>{BUSINESS_TYPE_LABELS[selected.businessType || ''] || selected.businessType || '-'}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(selected.status)}</div>
               <div className="flex justify-between"><span className="text-gray-500">Plan</span><span>{selected.plan?.name || '-'}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Owner</span><span>{selected.ownerName || '-'}</span></div>

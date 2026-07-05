@@ -7,7 +7,9 @@ const featureCache = new Map(); // tenantId -> { features: Set, expiresAt: numbe
 const CACHE_TTL = 60_000;
 
 /**
- * Resolve the effective feature set for a tenant (plan features + tenant overrides).
+ * Resolve the effective feature set for a tenant.
+ * ONLY TenantFeature rows are used — features are NOT auto-inherited from plan.
+ * SaaS admin must explicitly assign features to each tenant via TenantFeature.
  * Returns a Set of enabled feature name strings.
  */
 async function getTenantFeatures(tenantId) {
@@ -15,40 +17,15 @@ async function getTenantFeatures(tenantId) {
   const cached = featureCache.get(tenantId);
   if (cached && cached.expiresAt > now) return cached.features;
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    include: { plan: true },
-  });
-
-  if (!tenant) {
-    const empty = new Set();
-    featureCache.set(tenantId, { features: empty, expiresAt: now + CACHE_TTL });
-    return empty;
-  }
-
-  // 1. PlanFeature rows
-  const planFeatureRows = tenant.planId
-    ? await prisma.planFeature.findMany({
-        where: { planId: tenant.planId, enabled: true },
-        include: { feature: true },
-      })
-    : [];
-
-  // 2. TenantFeature overrides
-  const tenantOverrides = await prisma.tenantFeature.findMany({
-    where: { tenantId },
+  // Only TenantFeature rows — no plan-level auto-inheritance
+  const tenantFeatures = await prisma.tenantFeature.findMany({
+    where: { tenantId, enabled: true },
     include: { feature: true },
   });
 
   const effective = new Set(
-    planFeatureRows.map((pf) => pf.feature?.name).filter(Boolean)
+    tenantFeatures.map((tf) => tf.feature?.name).filter(Boolean)
   );
-
-  tenantOverrides.forEach((tf) => {
-    if (!tf.feature?.name) return;
-    if (tf.enabled) effective.add(tf.feature.name);
-    else effective.delete(tf.feature.name);
-  });
 
   featureCache.set(tenantId, { features: effective, expiresAt: now + CACHE_TTL });
   return effective;

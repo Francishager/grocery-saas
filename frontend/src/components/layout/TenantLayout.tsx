@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -10,20 +10,51 @@ import { NotificationBell } from '@/components/NotificationBell'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
 const inventorySubItems = [
-  { to: '/tenant/inventory', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
-  { to: '/tenant/inventory?type=service', label: 'Services', icon: Wrench, permission: 'canViewService', feature: 'inventory.services' },
-  { to: '/tenant/inventory?type=rental', label: 'Rental Items', icon: Clock, permission: 'canViewRental', feature: 'inventory.rentals' },
+  { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
+  { to: '/tenant/inventory/services', label: 'Services', icon: Wrench, permission: 'canViewService', feature: 'inventory.services' },
+  { to: '/tenant/inventory/rentals', label: 'Rental Items', icon: Clock, permission: 'canViewRental', feature: 'inventory.rentals' },
+  { to: '/tenant/inventory/lubricants', label: 'Lubricants & Dry Stock', icon: Droplet, permission: 'canViewProduct', feature: 'fuel_station.lubricants' },
+  { to: '/tenant/inventory/convenience', label: 'Convenience Shop', icon: ShoppingBag, permission: 'canViewProduct', feature: 'fuel_station.convenience' },
+]
+
+const fuelStationSubItems = [
+  { to: '/tenant/fuel-station/tanks', label: 'Tanks & Pumps', icon: Gauge, permission: 'canViewFuelStation', feature: 'fuel_station.tanks' },
+  { to: '/tenant/fuel-station/deliveries', label: 'Fuel Deliveries', icon: Truck, permission: 'canViewFuelStation', feature: 'fuel_station.deliveries' },
+  { to: '/tenant/fuel-station/meter_readings', label: 'Meter Readings', icon: TrendingUpIcon, permission: 'canViewFuelStation', feature: 'fuel_station.meter_readings' },
+  { to: '/tenant/fuel-station/dipstick', label: 'Dipstick Readings', icon: Droplet, permission: 'canViewFuelStation', feature: 'fuel_station.dipstick' },
+  { to: '/tenant/fuel-station/shifts', label: 'Shift Reports', icon: ClipboardIcon, permission: 'canViewFuelStation', feature: 'fuel_station.shift_reports' },
+  { to: '/tenant/fuel-station/pricing', label: 'Price Management', icon: Tags, permission: 'canViewFuelStation', feature: 'fuel_station.pricing' },
+  { to: '/tenant/fuel-station/compliance', label: 'Compliance', icon: ClipboardCheck, permission: 'canViewFuelStation', feature: 'fuel_station.compliance' },
+]
+
+const receivablesSubItems = [
+  { to: '/tenant/receivables/customers', label: 'Customers', icon: CreditCard, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/sales', label: 'Credit Sales', icon: Receipt, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/payments', label: 'Payments', icon: DollarSign, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/fuel-cards', label: 'Fuel Cards', icon: CardIcon, permission: 'canViewReceivable', feature: 'fuel_station.fuel_cards' },
+  { to: '/tenant/receivables/credit-accounts', label: 'Credit Accounts', icon: BadgeDollarSign, permission: 'canViewReceivable', feature: 'fuel_station.credit_accounts' },
+]
+
+const serviceSubItems = [
+  { to: '/tenant/service/appointments', label: 'Appointments', icon: CalendarClock, permission: 'canViewServiceBusiness', feature: 'service' },
+  { to: '/tenant/service/work-orders', label: 'Work Orders', icon: ClipboardList, permission: 'canViewServiceBusiness', feature: 'service' },
+  { to: '/tenant/service/contracts', label: 'Contracts', icon: FileText, permission: 'canViewServiceBusiness', feature: 'service' },
+  { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: 'canViewServiceBusiness', feature: 'fuel_station.car_wash' },
+  { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: 'canViewServiceBusiness', feature: 'fuel_station.garage' },
 ]
 
 const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard', feature: 'dashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
   { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
-  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable' },
+  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable', isReceivables: true },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
-  { to: '/tenant/expenses', label: 'Expenses', icon: Wallet, feature: 'expenses', permission: 'canViewExpense' },
   { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant' },
+  { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
+  { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },
+  { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
+  { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: 'canViewServiceBusiness', isService: true },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport', isAccounting: true },
   { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewStaff' },
@@ -32,6 +63,7 @@ const navItems = [
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
   { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', feature: 'settings', isSettings: true },
+  { to: '/tenant/data-importer', label: 'Data Importer', icon: FileSpreadsheet, permission: 'canImportInventory', feature: 'developer.data_importer' },
   { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: null },
 ]
 
@@ -158,6 +190,49 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'rentalsMonthly', label: 'Monthly Rental Report' },
     ],
   },
+  {
+    id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport', feature: 'fuel_station.reports',
+    items: [
+      { id: 'fuelSalesSummary', label: 'Fuel Sales Summary' },
+      { id: 'fuelByPump', label: 'Sales by Pump' },
+      { id: 'fuelByTank', label: 'Tank Stock Report' },
+      { id: 'fuelDeliveries', label: 'Fuel Deliveries Report' },
+      { id: 'fuelShiftSummary', label: 'Shift Summary Report' },
+      { id: 'fuelLubricantSales', label: 'Lubricant Sales Report' },
+      { id: 'fuelCarWash', label: 'Car Wash Income Report' },
+      { id: 'fuelMeterReadings', label: 'Meter Readings Report' },
+    ],
+  },
+  {
+    id: 'manufacturing', label: 'Manufacturing Reports', icon: Factory, permission: 'canViewManufacturingReport', feature: 'manufacturing.reports',
+    items: [
+      { id: 'mfgProductionSummary', label: 'Production Summary' },
+      { id: 'mfgByProduct', label: 'Production by Product' },
+      { id: 'mfgWasteReport', label: 'Waste Report' },
+      { id: 'mfgCostAnalysis', label: 'Production Cost Analysis' },
+      { id: 'mfgBOMReport', label: 'BOM / Recipe Report' },
+    ],
+  },
+  {
+    id: 'agriculture', label: 'Agriculture Reports', icon: Sprout, permission: 'canViewAgricultureReport', feature: 'agriculture.reports',
+    items: [
+      { id: 'agriHarvestSummary', label: 'Harvest Summary' },
+      { id: 'agriByField', label: 'Harvest by Field' },
+      { id: 'agriByLivestock', label: 'Production by Livestock' },
+      { id: 'agriExpenseReport', label: 'Farm Expense Report' },
+      { id: 'agriYieldReport', label: 'Yield per Acre Report' },
+    ],
+  },
+  {
+    id: 'service', label: 'Service Business Reports', icon: Wrench, permission: 'canViewServiceBusinessReport', feature: 'service.reports',
+    items: [
+      { id: 'svcAppointmentSummary', label: 'Appointment Summary' },
+      { id: 'svcByTechnician', label: 'Jobs by Technician' },
+      { id: 'svcByStatus', label: 'Work Orders by Status' },
+      { id: 'svcRevenueReport', label: 'Service Revenue Report' },
+      { id: 'svcContractReport', label: 'Active Contracts Report' },
+    ],
+  },
 ]
 
 const accountingSubItems = [
@@ -181,6 +256,9 @@ export function TenantLayout() {
   const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [inventoryExpanded, setInventoryExpanded] = useState(false)
   const [accountingExpanded, setAccountingExpanded] = useState(false)
+  const [fuelStationExpanded, setFuelStationExpanded] = useState(false)
+  const [receivablesExpanded, setReceivablesExpanded] = useState(false)
+  const [serviceExpanded, setServiceExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
@@ -193,39 +271,94 @@ export function TenantLayout() {
 
   const toggleReports = () => {
     setReportsExpanded(prev => !prev)
-    if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false) }
+    if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
   }
   const toggleSettings = () => {
     setSettingsExpanded(prev => !prev)
-    if (!settingsExpanded) { setReportsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false) }
+    if (!settingsExpanded) { setReportsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
   }
   const toggleInventory = () => {
     setInventoryExpanded(prev => !prev)
-    if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setAccountingExpanded(false) }
+    if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
   }
   const toggleAccounting = () => {
     setAccountingExpanded(prev => !prev)
-    if (!accountingExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false) }
+    if (!accountingExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
+  }
+  const toggleFuelStation = () => {
+    setFuelStationExpanded(prev => !prev)
+    if (!fuelStationExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
+  }
+  const toggleReceivables = () => {
+    setReceivablesExpanded(prev => !prev)
+    if (!receivablesExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setServiceExpanded(false) }
+  }
+  const toggleService = () => {
+    setServiceExpanded(prev => !prev)
+    if (!serviceExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false) }
   }
 
   // Auto-expand inventory when on an inventory page
   useEffect(() => {
-    if (location.pathname === '/tenant/inventory') setInventoryExpanded(true)
+    if (location.pathname.startsWith('/tenant/inventory')) setInventoryExpanded(true)
     if (location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers') setAccountingExpanded(true)
+    if (location.pathname.startsWith('/tenant/fuel-station')) setFuelStationExpanded(true)
+    if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
+    if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
   }, [location.pathname, location.search])
+  const isOwner = user?.role === 'owner'
   const visibleNavItems = navItems.filter((item) => {
-    if (item.permission && !hasPermission(item.permission)) return false
     if (item.feature && !canAccessFeature(item.feature)) return false
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
+      return false
+    }
     return true
   })
   const visibleInventorySubItems = inventorySubItems.filter((item) => {
-    if (item.permission && !hasPermission(item.permission)) return false
     if (item.feature && !canAccessFeature(item.feature)) return false
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
+      return false
+    }
     return true
   })
   const visibleAccountingSubItems = accountingSubItems.filter((item) => {
-    if (item.permission && !hasPermission(item.permission)) return false
     if (item.feature && !canAccessFeature(item.feature)) return false
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
+      return false
+    }
+    return true
+  })
+  const visibleFuelStationSubItems = fuelStationSubItems.filter((item) => {
+    const parentEnabled = canAccessFeature('fuel_station')
+    const subEnabled = item.feature ? canAccessFeature(item.feature) : false
+    if (!parentEnabled && !subEnabled) return false
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && (parentEnabled || subEnabled)) return true
+      return false
+    }
+    return true
+  })
+  const visibleReceivablesSubItems = receivablesSubItems.filter((item) => {
+    const parentEnabled = canAccessFeature('receivables')
+    const subEnabled = item.feature ? canAccessFeature(item.feature) : false
+    if (!parentEnabled && !subEnabled) return false
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && (parentEnabled || subEnabled)) return true
+      return false
+    }
+    return true
+  })
+  const visibleServiceSubItems = serviceSubItems.filter((item) => {
+    const parentEnabled = canAccessFeature('service')
+    const subEnabled = item.feature ? canAccessFeature(item.feature) : false
+    if (!parentEnabled && !subEnabled) return false
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && (parentEnabled || subEnabled)) return true
+      return false
+    }
     return true
   })
 
@@ -269,7 +402,7 @@ export function TenantLayout() {
                 <div key={item.to}>
                   <button
                     onClick={() => toggleInventory()}
-                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', inventoryExpanded || location.pathname === '/tenant/inventory' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', inventoryExpanded || location.pathname.startsWith('/tenant/inventory') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
                   >
                     <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
                     <span className="flex-1 text-left">{item.label}</span>
@@ -279,11 +412,7 @@ export function TenantLayout() {
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
                       {visibleInventorySubItems.map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
-                          className={({ isActive }) => {
-                            const fullPath = location.pathname + location.search
-                            const isExact = fullPath === sub.to
-                            return cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isExact ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')
-                          }}>
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
                           <sub.icon className="h-4 w-4" />{sub.label}
                         </NavLink>
                       ))}
@@ -315,6 +444,69 @@ export function TenantLayout() {
                     </div>
                   )}
                 </div>
+              ) : item.isFuelStation ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleFuelStation()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', fuelStationExpanded || location.pathname.startsWith('/tenant/fuel-station') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {fuelStationExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {fuelStationExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleFuelStationSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isReceivables ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleReceivables()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', receivablesExpanded || location.pathname.startsWith('/tenant/receivables') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {receivablesExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {receivablesExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleReceivablesSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isService ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleService()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', serviceExpanded || location.pathname.startsWith('/tenant/service') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {serviceExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {serviceExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleServiceSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ) : item.isReports ? (
                 <div key={item.to}>
                   <button
@@ -327,7 +519,7 @@ export function TenantLayout() {
                   </button>
                   {reportsExpanded && (
                     <div className="mt-1 space-y-1">
-                      {reportCategories.filter(cat => hasPermission(cat.permission) && (!cat.feature || canAccessFeature(cat.feature))).map(cat => {
+                      {reportCategories.filter(cat => (isOwner || hasPermission(cat.permission)) && (!cat.feature || canAccessFeature(cat.feature))).map(cat => {
                         const catExpanded = expandedCats.has(cat.id)
                         return (
                           <div key={cat.id}>
@@ -370,7 +562,7 @@ export function TenantLayout() {
                   </button>
                   {settingsExpanded && (
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
-                      {settingsSubItems.filter(sub => (!sub.permission || hasPermission(sub.permission)) && (!sub.feature || canAccessFeature(sub.feature))).map(sub => (
+                      {settingsSubItems.filter(sub => (isOwner || !sub.permission || hasPermission(sub.permission)) && (!sub.feature || canAccessFeature(sub.feature))).map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
                           className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
                           <sub.icon className="h-4 w-4" />{sub.label}

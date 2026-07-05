@@ -35,6 +35,10 @@ export default function TaxManagementPage() {
   }
 
   const handleSave = async () => {
+    if (settings?.taxEnabled && (settings.taxRate === undefined || settings.taxRate === null || settings.taxRate < 0)) {
+      toast({ variant: 'destructive', title: 'Enter a valid tax rate' })
+      return
+    }
     setSaving(true)
     try {
       await settingsApi.update(settings)

@@ -389,9 +389,22 @@ const AcceptInvitation: React.FC = () => {
                 >
                   <option value="">Select type...</option>
                   <option value="retail">Retail Store</option>
-                  <option value="wholesale">Wholesale</option>
+                  <option value="pharmacy">Pharmacy</option>
+                  <option value="hardware">Hardware Store</option>
                   <option value="supermarket">Supermarket</option>
-                  <option value="convenience">Convenience Store</option>
+                  <option value="wholesale">Wholesale</option>
+                  <option value="restaurant">Restaurant</option>
+                  <option value="bar">Bar</option>
+                  <option value="restaurant_bar">Restaurant & Bar</option>
+                  <option value="cafe">Cafe</option>
+                  <option value="coffee_shop">Coffee Shop</option>
+                  <option value="fast_food">Fast Food</option>
+                  <option value="hotel_restaurant">Hotel Restaurant</option>
+                  <option value="bakery">Bakery</option>
+                  <option value="service">Service Business</option>
+                  <option value="salon_spa">Salon & Spa</option>
+                  <option value="repair_shop">Repair Shop</option>
+                  <option value="manufacturing">Manufacturing</option>
                   <option value="other">Other</option>
                 </select>
               </div>

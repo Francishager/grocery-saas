@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { apiFetch } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,10 +8,14 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { useToast } from '@/hooks/use-toast'
+import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye } from 'lucide-react'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts } from '@/db/hybrid'
 import { db } from '@/db/index'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
 
 interface Table { id: string; name: string; capacity: number; status: string; area: string | null; isActive: boolean; _count?: { orders: number } }
 interface Waiter { id: string; name: string; phone: string | null; code: string | null; isActive: boolean; _count?: { orders: number; tips: number } }
@@ -22,6 +26,9 @@ interface Recipe { id: string; name: string; yield: string | null; isActive: boo
 interface Delivery { id: string; customerName: string; customerPhone: string; address: string; riderName: string | null; riderPhone: string | null; deliveryFee: number; status: string; order?: { id: string; orderNo: string } | null }
 interface Product { id: string; name: string; price: number; quantity: number }
 interface DashboardStats { ordersToday: number; openTables: number; occupiedTables: number; kitchenOrders: number; barOrders: number; todaySales: number; avgBill: number; completedCount: number }
+interface HappyHourRule { id: string; name: string; productId: string; product: { id: string; name: string }; startTime: string; endTime: string; daysOfWeek: string; discountType: string; discountValue: number; isActive: boolean }
+interface ComboMeal { id: string; name: string; description: string | null; price: number; isActive: boolean; items: { id: string; productId: string; product: { id: string; name: string }; quantity: number }[] }
+interface Tip { id: string; amount: number; createdAt: string; waiter: { id: string; name: string }; order: { id: string; orderNo: string } | null }
 
 const statusColors: Record<string, string> = {
   available: 'bg-green-100 text-green-700',
@@ -37,6 +44,7 @@ const statusColors: Record<string, string> = {
 }
 
 export default function RestaurantPage() {
+  const { toast } = useToast()
   const [tab, setTab] = useState('dashboard')
   const [tables, setTables] = useState<Table[]>([])
   const [waiters, setWaiters] = useState<Waiter[]>([])
@@ -56,13 +64,42 @@ export default function RestaurantPage() {
   const [showReservationModal, setShowReservationModal] = useState(false)
   const [showRecipeModal, setShowRecipeModal] = useState(false)
   const [showDeliveryModal, setShowDeliveryModal] = useState(false)
+  const [showHappyHourModal, setShowHappyHourModal] = useState(false)
+  const [showComboModal, setShowComboModal] = useState(false)
+  const [showSplitModal, setShowSplitModal] = useState(false)
+  const [showMoveModal, setShowMoveModal] = useState(false)
+  const [showCompleteModal, setShowCompleteModal] = useState(false)
+  const [showEditTableModal, setShowEditTableModal] = useState(false)
+  const [showEditWaiterModal, setShowEditWaiterModal] = useState(false)
+  const [showEditRecipeModal, setShowEditRecipeModal] = useState(false)
+  const [showMergeModal, setShowMergeModal] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [orderStatusFilter, setOrderStatusFilter] = useState('all')
+  const [reservationDateFilter, setReservationDateFilter] = useState('')
+  const [happyHours, setHappyHours] = useState<HappyHourRule[]>([])
+  const [combos, setCombos] = useState<ComboMeal[]>([])
+  const [tips, setTips] = useState<Tip[]>([])
+  const [editingTable, setEditingTable] = useState<Table | null>(null)
+  const [editingWaiter, setEditingWaiter] = useState<Waiter | null>(null)
+  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null)
+  const [splitOrder, setSplitOrder] = useState<Order | null>(null)
+  const [moveOrder, setMoveOrder] = useState<Order | null>(null)
+  const [completeOrderData, setCompleteOrderData] = useState<Order | null>(null)
+  const [mergeTableIds, setMergeTableIds] = useState<string[]>([])
+  const [mergePrimaryId, setMergePrimaryId] = useState('')
   const [tableForm, setTableForm] = useState({ name: '', capacity: 4, area: '' })
   const [waiterForm, setWaiterForm] = useState({ name: '', phone: '', code: '' })
+  const [editTableForm, setEditTableForm] = useState({ name: '', capacity: 4, area: '', status: 'available', isActive: true })
+  const [editWaiterForm, setEditWaiterForm] = useState({ name: '', phone: '', code: '', isActive: true })
   const [reservationForm, setReservationForm] = useState({ customerName: '', customerPhone: '', date: '', time: '', guests: 1, tableId: '', specialRequests: '' })
   const [deliveryForm, setDeliveryForm] = useState({ orderId: '', customerName: '', customerPhone: '', address: '', riderName: '', riderPhone: '', deliveryFee: 0, notes: '' })
   const [orderForm, setOrderForm] = useState({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' })
   const [orderItems, setOrderItems] = useState<{ productId: string; quantity: number; station: string }[]>([])
   const [recipeForm, setRecipeForm] = useState({ productId: '', name: '', yield: '', ingredients: [{ productId: '', quantity: 0, unit: 'Piece' }] })
+  const [happyHourForm, setHappyHourForm] = useState({ name: '', productId: '', startTime: '16:00', endTime: '18:00', daysOfWeek: '1,2,3,4,5', discountType: 'percentage', discountValue: 20 })
+  const [comboForm, setComboForm] = useState({ name: '', description: '', price: 0, items: [{ productId: '', quantity: 1 }] })
+  const [completeForm, setCompleteForm] = useState({ paymentMethod: 'cash', discount: 0, tipAmount: 0, tipWaiterId: '' })
+  const [splitForm, setSplitForm] = useState<{ itemIds: string[]; paymentMethod: string; tipAmount: number }[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -108,74 +145,192 @@ export default function RestaurantPage() {
     try { const res = await apiFetch('/api/restaurant/deliveries'); if (res.ok) setDeliveries(await res.json()) } catch (e) { console.error(e) }
   }, [])
 
+  const fetchHappyHours = useCallback(async () => {
+    try { const res = await apiFetch('/api/restaurant/happy-hour'); if (res.ok) setHappyHours(await res.json()) } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchCombos = useCallback(async () => {
+    try { const res = await apiFetch('/api/restaurant/combos'); if (res.ok) setCombos(await res.json()) } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchTips = useCallback(async () => {
+    try { const res = await apiFetch('/api/restaurant/tips'); if (res.ok) setTips(await res.json()) } catch (e) { console.error(e) }
+  }, [])
+
   useEffect(() => {
     if (tab === 'orders') fetchOrders()
     if (tab === 'kitchen') fetchKitchen()
     if (tab === 'reservations') fetchReservations()
     if (tab === 'recipes') fetchRecipes()
     if (tab === 'delivery') fetchDeliveries()
-  }, [tab, fetchOrders, fetchKitchen, fetchReservations, fetchRecipes, fetchDeliveries])
+    if (tab === 'happy-hour') fetchHappyHours()
+    if (tab === 'combos') fetchCombos()
+    if (tab === 'tips') fetchTips()
+  }, [tab, fetchOrders, fetchKitchen, fetchReservations, fetchRecipes, fetchDeliveries, fetchHappyHours, fetchCombos, fetchTips])
 
   // === Table handlers ===
   const createTable = async () => {
-    try { await apiFetch('/api/restaurant/tables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tableForm) }); setShowTableModal(false); setTableForm({ name: '', capacity: 4, area: '' }); fetchData() } catch (e) { console.error(e) }
+    if (!tableForm.name.trim()) { toast({ variant: 'destructive', title: 'Table name is required' }); return }
+    if (tableForm.capacity < 1) { toast({ variant: 'destructive', title: 'Capacity must be at least 1' }); return }
+    try { const res = await apiFetch('/api/restaurant/tables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tableForm) }); if (res.ok) { toast({ title: 'Table added' }); setShowTableModal(false); setTableForm({ name: '', capacity: 4, area: '' }); fetchData() } else { toast({ variant: 'destructive', title: 'Failed to add table' }) } } catch (e) { toast({ variant: 'destructive', title: 'Failed to add table' }) }
   }
   const deleteTable = async (id: string) => {
-    try { await apiFetch(`/api/restaurant/tables/${id}`, { method: 'DELETE' }); fetchData() } catch (e) { console.error(e) }
+    try { const res = await apiFetch(`/api/restaurant/tables/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Table deleted' }); fetchData() } } catch (e) { console.error(e) }
   }
+  const updateTable = async () => {
+    if (!editingTable) return
+    if (!editTableForm.name.trim()) { toast({ variant: 'destructive', title: 'Table name is required' }); return }
+    if (editTableForm.capacity < 1) { toast({ variant: 'destructive', title: 'Capacity must be at least 1' }); return }
+    try { const res = await apiFetch(`/api/restaurant/tables/${editingTable.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTableForm) }); if (res.ok) { toast({ title: 'Table updated' }); setShowEditTableModal(false); setEditingTable(null); fetchData() } } catch (e) { console.error(e) }
+  }
+  const mergeTables = async () => {
+    if (mergeTableIds.length < 2 || !mergePrimaryId) return toast({ variant: 'destructive', title: 'Select at least 2 tables and a primary' })
+    try { const res = await apiFetch('/api/restaurant/tables/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tableIds: mergeTableIds, primaryTableId: mergePrimaryId }) }); if (res.ok) { toast({ title: 'Tables merged' }); setShowMergeModal(false); setMergeTableIds([]); setMergePrimaryId(''); fetchData() } } catch (e) { console.error(e) }
+  }
+  const openEditTable = (t: Table) => { setEditingTable(t); setEditTableForm({ name: t.name, capacity: t.capacity, area: t.area || '', status: t.status, isActive: t.isActive }); setShowEditTableModal(true) }
 
   // === Waiter handlers ===
   const createWaiter = async () => {
-    try { await apiFetch('/api/restaurant/waiters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(waiterForm) }); setShowWaiterModal(false); setWaiterForm({ name: '', phone: '', code: '' }); fetchData() } catch (e) { console.error(e) }
+    if (!waiterForm.name.trim()) { toast({ variant: 'destructive', title: 'Waiter name is required' }); return }
+    try { const res = await apiFetch('/api/restaurant/waiters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(waiterForm) }); if (res.ok) { toast({ title: 'Waiter added' }); setShowWaiterModal(false); setWaiterForm({ name: '', phone: '', code: '' }); fetchData() } } catch (e) { console.error(e) }
   }
   const deleteWaiter = async (id: string) => {
-    try { await apiFetch(`/api/restaurant/waiters/${id}`, { method: 'DELETE' }); fetchData() } catch (e) { console.error(e) }
+    try { const res = await apiFetch(`/api/restaurant/waiters/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Waiter deleted' }); fetchData() } } catch (e) { console.error(e) }
   }
+  const updateWaiter = async () => {
+    if (!editingWaiter) return
+    if (!editWaiterForm.name.trim()) { toast({ variant: 'destructive', title: 'Waiter name is required' }); return }
+    try { const res = await apiFetch(`/api/restaurant/waiters/${editingWaiter.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editWaiterForm) }); if (res.ok) { toast({ title: 'Waiter updated' }); setShowEditWaiterModal(false); setEditingWaiter(null); fetchData() } } catch (e) { console.error(e) }
+  }
+  const openEditWaiter = (w: Waiter) => { setEditingWaiter(w); setEditWaiterForm({ name: w.name, phone: w.phone || '', code: w.code || '', isActive: w.isActive }); setShowEditWaiterModal(true) }
 
   // === Order handlers ===
   const createOrder = async () => {
+    if (!orderForm.tableId && orderForm.orderType === 'dine_in') { toast({ variant: 'destructive', title: 'Select a table for dine-in orders' }); return }
+    if (orderItems.length === 0) { toast({ variant: 'destructive', title: 'Add at least one item to the order' }); return }
+    if (orderItems.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'All items must have a product and quantity' }); return }
     try {
       const items = orderItems.map(i => {
         const p = products.find(p => p.id === i.productId)
         return { productId: i.productId, quantity: i.quantity, price: p?.price || 0, station: i.station }
       })
-      await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...orderForm, items }) })
-      setShowOrderModal(false); setOrderForm({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); fetchOrders()
+      const res = await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...orderForm, items }) })
+      if (res.ok) { toast({ title: 'Order created' }); setShowOrderModal(false); setOrderForm({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); fetchOrders() }
     } catch (e) { console.error(e) }
   }
   const updateOrderStatus = async (id: string, status: string) => {
-    try { await apiFetch(`/api/restaurant/orders/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchOrders(); if (tab === 'kitchen') fetchKitchen() } catch (e) { console.error(e) }
+    try { const res = await apiFetch(`/api/restaurant/orders/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); if (res.ok) { toast({ title: `Order ${status}` }); fetchOrders(); if (tab === 'kitchen') fetchKitchen() } } catch (e) { console.error(e) }
   }
-  const completeOrder = async (id: string) => {
-    try { await apiFetch(`/api/restaurant/orders/${id}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paymentMethod: 'cash' }) }); fetchOrders() } catch (e) { console.error(e) }
+  const completeOrder = async () => {
+    if (!completeOrderData) return
+    try { const res = await apiFetch(`/api/restaurant/orders/${completeOrderData.id}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(completeForm) }); if (res.ok) { toast({ title: 'Order completed & sale created' }); setShowCompleteModal(false); setCompleteOrderData(null); setCompleteForm({ paymentMethod: 'cash', discount: 0, tipAmount: 0, tipWaiterId: '' }); fetchOrders() } } catch (e) { console.error(e) }
   }
+  const moveOrderTable = async () => {
+    if (!moveOrder) return
+    if (!orderForm.tableId) { toast({ variant: 'destructive', title: 'Select a new table' }); return }
+    try { const res = await apiFetch(`/api/restaurant/orders/${moveOrder.id}/move`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tableId: orderForm.tableId }) }); if (res.ok) { toast({ title: 'Order moved to new table' }); setShowMoveModal(false); setMoveOrder(null); fetchOrders() } } catch (e) { console.error(e) }
+  }
+  const splitBill = async () => {
+    if (!splitOrder) return
+    try { const res = await apiFetch(`/api/restaurant/orders/${splitOrder.id}/split`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ splits: splitForm }) }); if (res.ok) { toast({ title: 'Bill split successfully' }); setShowSplitModal(false); setSplitOrder(null); fetchOrders() } } catch (e) { console.error(e) }
+  }
+  const openCompleteModal = (o: Order) => { setCompleteOrderData(o); setCompleteForm({ paymentMethod: 'cash', discount: 0, tipAmount: 0, tipWaiterId: o.waiter?.id || '' }); setShowCompleteModal(true) }
+  const openMoveModal = (o: Order) => { setMoveOrder(o); setOrderForm({ ...orderForm, tableId: '' }); setShowMoveModal(true) }
+  const openSplitModal = (o: Order) => { setSplitOrder(o); setSplitForm([{ itemIds: [], paymentMethod: 'cash', tipAmount: 0 }]); setShowSplitModal(true) }
   const updateItemStatus = async (orderId: string, itemId: string, status: string) => {
     try { await apiFetch(`/api/restaurant/orders/${orderId}/items/${itemId}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchKitchen() } catch (e) { console.error(e) }
   }
 
   // === Reservation handlers ===
   const createReservation = async () => {
-    try { await apiFetch('/api/restaurant/reservations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reservationForm) }); setShowReservationModal(false); setReservationForm({ customerName: '', customerPhone: '', date: '', time: '', guests: 1, tableId: '', specialRequests: '' }); fetchReservations() } catch (e) { console.error(e) }
+    if (!reservationForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
+    if (!reservationForm.customerPhone.trim()) { toast({ variant: 'destructive', title: 'Customer phone is required' }); return }
+    if (!reservationForm.date) { toast({ variant: 'destructive', title: 'Date is required' }); return }
+    if (!reservationForm.time) { toast({ variant: 'destructive', title: 'Time is required' }); return }
+    if (reservationForm.guests < 1) { toast({ variant: 'destructive', title: 'Guests must be at least 1' }); return }
+    try { const res = await apiFetch('/api/restaurant/reservations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reservationForm) }); if (res.ok) { toast({ title: 'Reservation created' }); setShowReservationModal(false); setReservationForm({ customerName: '', customerPhone: '', date: '', time: '', guests: 1, tableId: '', specialRequests: '' }); fetchReservations() } } catch (e) { console.error(e) }
   }
   const updateReservationStatus = async (id: string, status: string) => {
-    try { await apiFetch(`/api/restaurant/reservations/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchReservations() } catch (e) { console.error(e) }
+    try { const res = await apiFetch(`/api/restaurant/reservations/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); if (res.ok) { toast({ title: `Reservation ${status}` }); fetchReservations() } } catch (e) { console.error(e) }
+  }
+  const deleteReservation = async (id: string) => {
+    try { const res = await apiFetch(`/api/restaurant/reservations/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Reservation deleted' }); fetchReservations() } } catch (e) { console.error(e) }
   }
 
   // === Recipe handlers ===
   const createRecipe = async () => {
-    try { await apiFetch('/api/restaurant/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(recipeForm) }); setShowRecipeModal(false); setRecipeForm({ productId: '', name: '', yield: '', ingredients: [{ productId: '', quantity: 0, unit: 'Piece' }] }); fetchRecipes() } catch (e) { console.error(e) }
+    if (!recipeForm.productId) { toast({ variant: 'destructive', title: 'Select a product for this recipe' }); return }
+    if (!recipeForm.name.trim()) { toast({ variant: 'destructive', title: 'Recipe name is required' }); return }
+    if (recipeForm.ingredients.length === 0 || recipeForm.ingredients.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'Add at least one valid ingredient' }); return }
+    try { const res = await apiFetch('/api/restaurant/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(recipeForm) }); if (res.ok) { toast({ title: 'Recipe created' }); setShowRecipeModal(false); setRecipeForm({ productId: '', name: '', yield: '', ingredients: [{ productId: '', quantity: 0, unit: 'Piece' }] }); fetchRecipes() } } catch (e) { console.error(e) }
   }
   const deleteRecipe = async (id: string) => {
-    try { await apiFetch(`/api/restaurant/recipes/${id}`, { method: 'DELETE' }); fetchRecipes() } catch (e) { console.error(e) }
+    try { const res = await apiFetch(`/api/restaurant/recipes/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Recipe deleted' }); fetchRecipes() } } catch (e) { console.error(e) }
   }
+  const updateRecipe = async () => {
+    if (!editingRecipe) return
+    if (!recipeForm.productId) { toast({ variant: 'destructive', title: 'Select a product for this recipe' }); return }
+    if (!recipeForm.name.trim()) { toast({ variant: 'destructive', title: 'Recipe name is required' }); return }
+    if (recipeForm.ingredients.length === 0 || recipeForm.ingredients.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'Add at least one valid ingredient' }); return }
+    try { const res = await apiFetch(`/api/restaurant/recipes/${editingRecipe.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(recipeForm) }); if (res.ok) { toast({ title: 'Recipe updated' }); setShowEditRecipeModal(false); setEditingRecipe(null); setRecipeForm({ productId: '', name: '', yield: '', ingredients: [{ productId: '', quantity: 0, unit: 'Piece' }] }); fetchRecipes() } } catch (e) { console.error(e) }
+  }
+  const openEditRecipe = (r: Recipe) => { setEditingRecipe(r); setRecipeForm({ productId: r.product.id, name: r.name, yield: r.yield || '', ingredients: r.ingredients.map(i => ({ productId: i.productId, quantity: i.quantity, unit: i.unit })) }); setShowEditRecipeModal(true) }
 
   // === Delivery handlers ===
   const createDelivery = async () => {
-    try { await apiFetch('/api/restaurant/deliveries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deliveryForm) }); setShowDeliveryModal(false); setDeliveryForm({ orderId: '', customerName: '', customerPhone: '', address: '', riderName: '', riderPhone: '', deliveryFee: 0, notes: '' }); fetchDeliveries() } catch (e) { console.error(e) }
+    if (!deliveryForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
+    if (!deliveryForm.customerPhone.trim()) { toast({ variant: 'destructive', title: 'Customer phone is required' }); return }
+    if (!deliveryForm.address.trim()) { toast({ variant: 'destructive', title: 'Delivery address is required' }); return }
+    try { const res = await apiFetch('/api/restaurant/deliveries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deliveryForm) }); if (res.ok) { toast({ title: 'Delivery created' }); setShowDeliveryModal(false); setDeliveryForm({ orderId: '', customerName: '', customerPhone: '', address: '', riderName: '', riderPhone: '', deliveryFee: 0, notes: '' }); fetchDeliveries() } } catch (e) { console.error(e) }
   }
   const updateDeliveryStatus = async (id: string, status: string) => {
-    try { await apiFetch(`/api/restaurant/deliveries/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchDeliveries() } catch (e) { console.error(e) }
+    try { const res = await apiFetch(`/api/restaurant/deliveries/${id}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); if (res.ok) { toast({ title: `Delivery ${status}` }); fetchDeliveries() } } catch (e) { console.error(e) }
   }
+
+  // === Happy Hour handlers ===
+  const createHappyHour = async () => {
+    if (!happyHourForm.name.trim()) { toast({ variant: 'destructive', title: 'Rule name is required' }); return }
+    if (!happyHourForm.productId) { toast({ variant: 'destructive', title: 'Select a product' }); return }
+    if (!happyHourForm.startTime || !happyHourForm.endTime) { toast({ variant: 'destructive', title: 'Start and end times are required' }); return }
+    if (happyHourForm.discountValue <= 0) { toast({ variant: 'destructive', title: 'Discount value must be greater than 0' }); return }
+    try { const res = await apiFetch('/api/restaurant/happy-hour', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(happyHourForm) }); if (res.ok) { toast({ title: 'Happy hour rule created' }); setShowHappyHourModal(false); setHappyHourForm({ name: '', productId: '', startTime: '16:00', endTime: '18:00', daysOfWeek: '1,2,3,4,5', discountType: 'percentage', discountValue: 20 }); fetchHappyHours() } } catch (e) { console.error(e) }
+  }
+  const updateHappyHour = async (id: string, data: Partial<HappyHourRule>) => {
+    try { const res = await apiFetch(`/api/restaurant/happy-hour/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); if (res.ok) { toast({ title: 'Happy hour rule updated' }); fetchHappyHours() } } catch (e) { console.error(e) }
+  }
+  const deleteHappyHour = async (id: string) => {
+    try { const res = await apiFetch(`/api/restaurant/happy-hour/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Happy hour rule deleted' }); fetchHappyHours() } } catch (e) { console.error(e) }
+  }
+
+  // === Combo handlers ===
+  const createCombo = async () => {
+    if (!comboForm.name.trim()) { toast({ variant: 'destructive', title: 'Combo name is required' }); return }
+    if (comboForm.price <= 0) { toast({ variant: 'destructive', title: 'Price must be greater than 0' }); return }
+    if (comboForm.items.length === 0 || comboForm.items.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'Add at least one valid item' }); return }
+    try { const res = await apiFetch('/api/restaurant/combos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(comboForm) }); if (res.ok) { toast({ title: 'Combo meal created' }); setShowComboModal(false); setComboForm({ name: '', description: '', price: 0, items: [{ productId: '', quantity: 1 }] }); fetchCombos() } } catch (e) { console.error(e) }
+  }
+  const updateCombo = async (id: string, data: any) => {
+    try { const res = await apiFetch(`/api/restaurant/combos/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); if (res.ok) { toast({ title: 'Combo meal updated' }); fetchCombos() } } catch (e) { console.error(e) }
+  }
+  const deleteCombo = async (id: string) => {
+    try { const res = await apiFetch(`/api/restaurant/combos/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Combo meal deleted' }); fetchCombos() } } catch (e) { console.error(e) }
+  }
+
+  // === Filtered data ===
+  const filteredOrders = useMemo(() => orders.filter(o => {
+    if (orderStatusFilter !== 'all' && o.status !== orderStatusFilter) return false
+    if (searchQuery && !o.orderNo.toLowerCase().includes(searchQuery.toLowerCase()) && !o.items.some(i => i.product.name.toLowerCase().includes(searchQuery.toLowerCase()))) return false
+    return true
+  }), [orders, orderStatusFilter, searchQuery])
+
+  const { paginatedItems: paginatedOrders, currentPage: ordersPage, totalPages: ordersTotalPages, totalItems: ordersTotal, goToPage: ordersGoToPage } = usePagination(filteredOrders, 8)
+
+  const filteredReservations = useMemo(() => reservations.filter(r => {
+    if (reservationDateFilter && r.date !== reservationDateFilter) return false
+    return true
+  }), [reservations, reservationDateFilter])
+
+  const totalTips = useMemo(() => tips.reduce((sum, t) => sum + t.amount, 0), [tips])
 
   const addOrderItem = () => setOrderItems([...orderItems, { productId: '', quantity: 1, station: 'kitchen' }])
   const updateOrderItem = (idx: number, field: string, value: string) => setOrderItems(orderItems.map((i, x) => x === idx ? { ...i, [field]: value } : i))
@@ -183,6 +338,11 @@ export default function RestaurantPage() {
   const addRecipeIngredient = () => setRecipeForm({ ...recipeForm, ingredients: [...recipeForm.ingredients, { productId: '', quantity: 0, unit: 'Piece' }] })
   const updateRecipeIngredient = (idx: number, field: string, value: string) => setRecipeForm({ ...recipeForm, ingredients: recipeForm.ingredients.map((i, x) => x === idx ? { ...i, [field]: field === 'quantity' ? Number(value) : value } : i) })
   const removeRecipeIngredient = (idx: number) => setRecipeForm({ ...recipeForm, ingredients: recipeForm.ingredients.filter((_, x) => x !== idx) })
+  const addComboItem = () => setComboForm({ ...comboForm, items: [...comboForm.items, { productId: '', quantity: 1 }] })
+  const updateComboItem = (idx: number, field: string, value: string) => setComboForm({ ...comboForm, items: comboForm.items.map((i, x) => x === idx ? { ...i, [field]: field === 'quantity' ? Number(value) : value } : i) })
+  const removeComboItem = (idx: number) => setComboForm({ ...comboForm, items: comboForm.items.filter((_, x) => x !== idx) })
+  const toggleSplitItem = (splitIdx: number, itemId: string) => setSplitForm(splitForm.map((s, i) => i === splitIdx ? { ...s, itemIds: s.itemIds.includes(itemId) ? s.itemIds.filter(id => id !== itemId) : [...s.itemIds, itemId] } : s))
+  const addSplitGroup = () => setSplitForm([...splitForm, { itemIds: [], paymentMethod: 'cash', tipAmount: 0 }])
 
   return (
     <div className="space-y-6">
@@ -200,32 +360,33 @@ export default function RestaurantPage() {
           <TabsTrigger value="recipes">Recipes</TabsTrigger>
           <TabsTrigger value="delivery">Delivery</TabsTrigger>
           <TabsTrigger value="waiters">Waiters</TabsTrigger>
+          <TabsTrigger value="happy-hour"><Timer className="h-3 w-3 mr-1" /> Happy Hour</TabsTrigger>
+          <TabsTrigger value="combos"><Tag className="h-3 w-3 mr-1" /> Combos</TabsTrigger>
+          <TabsTrigger value="tips"><DollarSign className="h-3 w-3 mr-1" /> Tips</TabsTrigger>
         </TabsList>
 
         {/* Dashboard */}
         <TabsContent value="dashboard">
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><UtensilsCrossed className="h-4 w-4" /> Orders Today</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats?.ordersToday ?? 0}</div></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Table2 className="h-4 w-4" /> Open Tables</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats?.openTables ?? 0}</div></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Users className="h-4 w-4" /> Occupied Tables</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats?.occupiedTables ?? 0}</div></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Today's Sales</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{(stats?.todaySales ?? 0).toLocaleString()}</div></CardContent></Card>
-          </div>
-          <div className="grid gap-4 md:grid-cols-4 mt-4">
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><ChefHat className="h-4 w-4" /> Kitchen Orders</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats?.kitchenOrders ?? 0}</div></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Clock className="h-4 w-4" /> Avg Bill</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{(stats?.avgBill ?? 0).toLocaleString()}</div></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Completed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats?.completedCount ?? 0}</div></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Bike className="h-4 w-4" /> Deliveries</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{deliveries.length}</div></CardContent></Card>
-          </div>
         </TabsContent>
 
         {/* Tables */}
         <TabsContent value="tables">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowTableModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Table</Button></div>
+          <div className="flex justify-between mb-4">
+            <Button variant="outline" onClick={() => setShowMergeModal(true)} disabled={tables.length < 2}><Merge className="h-4 w-4 mr-1" /> Merge Tables</Button>
+            <Button onClick={() => setShowTableModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Table</Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
             {tables.map(t => (
               <Card key={t.id} className={t.isActive ? '' : 'opacity-50'}>
                 <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between"><span className="flex items-center gap-2"><Table2 className="h-4 w-4" /> {t.name}</span><Badge className={statusColors[t.status]}>{t.status}</Badge></CardTitle></CardHeader>
-                <CardContent><div className="text-sm text-muted-foreground">Capacity: {t.capacity} {t.area && `· ${t.area}`}</div><div className="flex gap-2 mt-3"><Button size="sm" variant="outline" onClick={() => deleteTable(t.id)}><Trash2 className="h-3 w-3" /></Button></div></CardContent>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground">Capacity: {t.capacity} {t.area && `· ${t.area}`}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Orders: {t._count?.orders ?? 0}</div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" variant="outline" onClick={() => openEditTable(t)}><Pencil className="h-3 w-3" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteTable(t.id)}><Trash2 className="h-3 w-3" /></Button>
+                  </div>
+                </CardContent>
               </Card>
             ))}
           </div>
@@ -234,26 +395,50 @@ export default function RestaurantPage() {
 
         {/* Orders */}
         <TabsContent value="orders">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowOrderModal(true)}><Plus className="h-4 w-4 mr-1" /> New Order</Button></div>
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input className="pl-9" placeholder="Search by order no or item..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            </div>
+            <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
+              <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="preparing">Preparing</SelectItem>
+                <SelectItem value="ready">Ready</SelectItem>
+                <SelectItem value="served">Served</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={() => setShowOrderModal(true)}><Plus className="h-4 w-4 mr-1" /> New Order</Button>
+          </div>
           <div className="space-y-3">
-            {orders.map(o => (
+            {paginatedOrders.map(o => (
               <Card key={o.id}>
                 <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between"><span className="flex items-center gap-2">{o.orderNo} {o.table && <Badge variant="outline">{o.table.name}</Badge>} {o.waiter && <Badge variant="secondary">{o.waiter.name}</Badge>}</span><div className="flex items-center gap-2"><Badge className={statusColors[o.status]}>{o.status}</Badge><Badge variant="outline">{o.orderType}</Badge></div></CardTitle></CardHeader>
                 <CardContent>
-                  <div className="space-y-1 mb-3">{o.items.map(i => <div key={i.id} className="flex justify-between text-sm"><span>{i.quantity}× {i.product.name}</span><span>{i.total.toLocaleString()}</span></div>)}</div>
-                  <div className="flex justify-between font-medium border-t pt-2"><span>Total</span><span>{o.total.toLocaleString()}</span></div>
-                  <div className="flex gap-2 mt-3">
+                  <div className="space-y-1 mb-3">{o.items.map(i => <div key={i.id} className="flex justify-between text-sm"><span>{i.quantity}× {i.product.name} {i.station && <Badge variant="outline" className="text-xs ml-1">{i.station}</Badge>}</span><span>{i.total.toLocaleString()}</span></div>)}</div>
+                  <div className="flex justify-between font-medium border-t pt-2"><span>Subtotal</span><span>{o.subtotal.toLocaleString()}</span></div>
+                  {o.discount > 0 && <div className="flex justify-between text-sm text-red-600"><span>Discount</span><span>-{o.discount.toLocaleString()}</span></div>}
+                  {o.tipAmount > 0 && <div className="flex justify-between text-sm"><span>Tip</span><span>{o.tipAmount.toLocaleString()}</span></div>}
+                  <div className="flex justify-between font-medium border-t pt-2 mt-1"><span>Total</span><span>{o.total.toLocaleString()}</span></div>
+                  <div className="flex flex-wrap gap-2 mt-3">
                     {o.status === 'pending' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'preparing')}>Start Preparing</Button>}
                     {o.status === 'preparing' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'ready')}>Mark Ready</Button>}
                     {o.status === 'ready' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'served')}>Mark Served</Button>}
-                    {o.status === 'served' && <Button size="sm" onClick={() => completeOrder(o.id)}><CheckCircle className="h-3 w-3 mr-1" /> Complete & Pay</Button>}
-                    {o.status !== 'completed' && o.status !== 'cancelled' && <Button size="sm" variant="outline" onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel</Button>}
+                    {o.status === 'served' && <Button size="sm" onClick={() => openCompleteModal(o)}><CheckCircle className="h-3 w-3 mr-1" /> Complete & Pay</Button>}
+                    {o.status === 'served' && <Button size="sm" variant="outline" onClick={() => openSplitModal(o)}><Split className="h-3 w-3 mr-1" /> Split Bill</Button>}
+                    {o.status !== 'completed' && o.status !== 'cancelled' && o.table && <Button size="sm" variant="outline" onClick={() => openMoveModal(o)}><ArrowRightLeft className="h-3 w-3 mr-1" /> Move Table</Button>}
+                    {o.status !== 'completed' && o.status !== 'cancelled' && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel</Button>}
                   </div>
                 </CardContent>
               </Card>
             ))}
           </div>
-          {orders.length === 0 && <div className="text-center text-muted-foreground py-8">No orders yet.</div>}
+          {filteredOrders.length === 0 && <div className="text-center text-muted-foreground py-8">No orders found.</div>}
+          {ordersTotal > 8 && <Pagination currentPage={ordersPage} totalPages={ordersTotalPages} onPageChange={ordersGoToPage} totalItems={ordersTotal} />}
         </TabsContent>
 
         {/* Kitchen / Bar Display */}
@@ -308,9 +493,13 @@ export default function RestaurantPage() {
 
         {/* Reservations */}
         <TabsContent value="reservations">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowReservationModal(true)}><Plus className="h-4 w-4 mr-1" /> New Reservation</Button></div>
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <Input type="date" value={reservationDateFilter} onChange={e => setReservationDateFilter(e.target.value)} className="sm:w-[180px]" />
+            <div className="flex-1" />
+            <Button onClick={() => setShowReservationModal(true)}><Plus className="h-4 w-4 mr-1" /> New Reservation</Button>
+          </div>
           <div className="space-y-3">
-            {reservations.map(r => (
+            {filteredReservations.map(r => (
               <Card key={r.id}>
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between">
@@ -319,13 +508,14 @@ export default function RestaurantPage() {
                       {r.status === 'reserved' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check In</Button>}
                       {r.status === 'checked_in' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'completed')}>Complete</Button>}
                       {r.status !== 'cancelled' && r.status !== 'completed' && <Button size="sm" variant="outline" onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel</Button>}
+                      <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteReservation(r.id)}><Trash2 className="h-3 w-3" /></Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
             ))}
           </div>
-          {reservations.length === 0 && <div className="text-center text-muted-foreground py-8">No reservations yet.</div>}
+          {filteredReservations.length === 0 && <div className="text-center text-muted-foreground py-8">No reservations found.</div>}
         </TabsContent>
 
         {/* Recipes */}
@@ -334,8 +524,8 @@ export default function RestaurantPage() {
           <div className="space-y-3">
             {recipes.map(r => (
               <Card key={r.id}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span>{r.name} ({r.product.name})</span><Button size="sm" variant="ghost" onClick={() => deleteRecipe(r.id)}><Trash2 className="h-3 w-3" /></Button></CardTitle></CardHeader>
-                <CardContent><div className="text-sm space-y-1">{r.ingredients.map(i => <div key={i.id} className="flex justify-between"><span>{i.product.name}</span><span className="text-muted-foreground">{i.quantity} {i.unit}</span></div>)}</div></CardContent>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2">{r.name} <Badge variant="outline">{r.product.name}</Badge>{!r.isActive && <Badge variant="secondary">Inactive</Badge>}</span><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => openEditRecipe(r)}><Pencil className="h-3 w-3" /></Button><Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteRecipe(r.id)}><Trash2 className="h-3 w-3" /></Button></div></CardTitle></CardHeader>
+                <CardContent><div className="text-sm space-y-1">{r.ingredients.map(i => <div key={i.id} className="flex justify-between"><span>{i.product.name}</span><span className="text-muted-foreground">{i.quantity} {i.unit}</span></div>)}</div>{r.yield && <div className="text-xs text-muted-foreground mt-2">Yield: {r.yield}</div>}</CardContent>
               </Card>
             ))}
           </div>
@@ -370,12 +560,69 @@ export default function RestaurantPage() {
           <div className="grid gap-4 md:grid-cols-3">
             {waiters.map(w => (
               <Card key={w.id} className={w.isActive ? '' : 'opacity-50'}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}</span><Button size="sm" variant="ghost" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button></CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}</span><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => openEditWaiter(w)}><Pencil className="h-3 w-3" /></Button><Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button></div></CardTitle></CardHeader>
                 <CardContent><div className="text-sm text-muted-foreground">{w.phone || 'No phone'} {w.code && `· Code: ${w.code}`}</div><div className="text-sm mt-1">Orders: {w._count?.orders ?? 0} · Tips: {w._count?.tips ?? 0}</div></CardContent>
               </Card>
             ))}
           </div>
           {waiters.length === 0 && <div className="text-center text-muted-foreground py-8">No waiters yet.</div>}
+        </TabsContent>
+
+        {/* Happy Hour */}
+        <TabsContent value="happy-hour">
+          <div className="flex justify-end mb-4"><Button onClick={() => setShowHappyHourModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Rule</Button></div>
+          <div className="space-y-3">
+            {happyHours.map(h => (
+              <Card key={h.id} className={h.isActive ? '' : 'opacity-50'}>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Timer className="h-4 w-4" /> {h.name} <Badge variant="outline">{h.product.name}</Badge></span><Badge className={h.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100'}>{h.isActive ? 'Active' : 'Inactive'}</Badge></CardTitle></CardHeader>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground">{h.startTime} - {h.endTime} · Days: {h.daysOfWeek} · {h.discountType === 'percentage' ? `${h.discountValue}%` : h.discountValue} off</div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" variant="outline" onClick={() => updateHappyHour(h.id, { isActive: !h.isActive })}>{h.isActive ? 'Disable' : 'Enable'}</Button>
+                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteHappyHour(h.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          {happyHours.length === 0 && <div className="text-center text-muted-foreground py-8">No happy hour rules yet. Create time-based discounts for products.</div>}
+        </TabsContent>
+
+        {/* Combos */}
+        <TabsContent value="combos">
+          <div className="flex justify-end mb-4"><Button onClick={() => setShowComboModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Combo</Button></div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {combos.map(c => (
+              <Card key={c.id} className={c.isActive ? '' : 'opacity-50'}>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Tag className="h-4 w-4" /> {c.name}</span><Badge className={c.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100'}>{c.isActive ? 'Active' : 'Inactive'}</Badge></CardTitle></CardHeader>
+                <CardContent>
+                  {c.description && <p className="text-sm text-muted-foreground mb-2">{c.description}</p>}
+                  <div className="text-sm space-y-1 mb-2">{c.items.map(i => <div key={i.id} className="flex justify-between"><span>{i.quantity}× {i.product.name}</span></div>)}</div>
+                  <div className="flex justify-between font-medium border-t pt-2"><span>Combo Price</span><span>{c.price.toLocaleString()}</span></div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" variant="outline" onClick={() => updateCombo(c.id, { isActive: !c.isActive, name: c.name, description: c.description, price: c.price, items: c.items.map(i => ({ productId: i.productId, quantity: i.quantity })) })}>{c.isActive ? 'Disable' : 'Enable'}</Button>
+                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCombo(c.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          {combos.length === 0 && <div className="text-center text-muted-foreground py-8">No combo meals yet. Create bundled meal deals.</div>}
+        </TabsContent>
+
+        {/* Tips */}
+        <TabsContent value="tips">
+          <div className="space-y-3">
+            {tips.map(t => (
+              <Card key={t.id}>
+                <CardContent className="pt-4 flex items-center justify-between">
+                  <div><div className="font-medium flex items-center gap-2"><DollarSign className="h-4 w-4 text-green-600" /> {t.amount.toLocaleString()}</div><div className="text-sm text-muted-foreground">{t.waiter.name} {t.order && `· ${t.order.orderNo}`} · {new Date(t.createdAt).toLocaleString()}</div></div>
+                  <Badge variant="secondary">Tip</Badge>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          {tips.length === 0 && <div className="text-center text-muted-foreground py-8">No tips recorded yet. Tips are added when completing orders.</div>}
         </TabsContent>
       </Tabs>
 
@@ -487,6 +734,174 @@ export default function RestaurantPage() {
             <div><Label>Notes</Label><Input value={deliveryForm.notes} onChange={e => setDeliveryForm({ ...deliveryForm, notes: e.target.value })} /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setShowDeliveryModal(false)}>Cancel</Button><Button onClick={createDelivery}>Create Delivery</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Table Modal */}
+      <Dialog open={showEditTableModal} onOpenChange={setShowEditTableModal}>
+        <DialogContent><DialogHeader><DialogTitle>Edit Table</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Name</Label><Input value={editTableForm.name} onChange={e => setEditTableForm({ ...editTableForm, name: e.target.value })} /></div>
+            <div><Label>Capacity</Label><Input type="number" value={editTableForm.capacity} onChange={e => setEditTableForm({ ...editTableForm, capacity: Number(e.target.value) })} /></div>
+            <div><Label>Area</Label><Input value={editTableForm.area} onChange={e => setEditTableForm({ ...editTableForm, area: e.target.value })} /></div>
+            <div><Label>Status</Label><Select value={editTableForm.status} onValueChange={v => setEditTableForm({ ...editTableForm, status: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="available">Available</SelectItem><SelectItem value="occupied">Occupied</SelectItem><SelectItem value="reserved">Reserved</SelectItem><SelectItem value="cleaning">Cleaning</SelectItem></SelectContent></Select></div>
+            <div className="flex items-center gap-2"><Label>Active</Label><Switch checked={editTableForm.isActive} onCheckedChange={v => setEditTableForm({ ...editTableForm, isActive: v })} /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowEditTableModal(false)}>Cancel</Button><Button onClick={updateTable}>Save Changes</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Waiter Modal */}
+      <Dialog open={showEditWaiterModal} onOpenChange={setShowEditWaiterModal}>
+        <DialogContent><DialogHeader><DialogTitle>Edit Waiter</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Name</Label><Input value={editWaiterForm.name} onChange={e => setEditWaiterForm({ ...editWaiterForm, name: e.target.value })} /></div>
+            <div><Label>Phone</Label><Input value={editWaiterForm.phone} onChange={e => setEditWaiterForm({ ...editWaiterForm, phone: e.target.value })} /></div>
+            <div><Label>Code</Label><Input value={editWaiterForm.code} onChange={e => setEditWaiterForm({ ...editWaiterForm, code: e.target.value })} /></div>
+            <div className="flex items-center gap-2"><Label>Active</Label><Switch checked={editWaiterForm.isActive} onCheckedChange={v => setEditWaiterForm({ ...editWaiterForm, isActive: v })} /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowEditWaiterModal(false)}>Cancel</Button><Button onClick={updateWaiter}>Save Changes</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Recipe Modal */}
+      <Dialog open={showEditRecipeModal} onOpenChange={setShowEditRecipeModal}>
+        <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Edit Recipe</DialogTitle></DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+            <div><Label>Recipe Name</Label><Input value={recipeForm.name} onChange={e => setRecipeForm({ ...recipeForm, name: e.target.value })} /></div>
+            <div><Label>Yield</Label><Input value={recipeForm.yield} onChange={e => setRecipeForm({ ...recipeForm, yield: e.target.value })} /></div>
+            <div><Label>Ingredients</Label>
+              <div className="space-y-2">{recipeForm.ingredients.map((ing, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-6"><Select value={ing.productId} onValueChange={v => updateRecipeIngredient(idx, 'productId', v)}><SelectTrigger><SelectValue placeholder="Select ingredient" /></SelectTrigger><SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div>
+                  <div className="col-span-3"><Input type="number" step="0.01" value={ing.quantity} onChange={e => updateRecipeIngredient(idx, 'quantity', e.target.value)} /></div>
+                  <div className="col-span-2"><Input value={ing.unit} onChange={e => updateRecipeIngredient(idx, 'unit', e.target.value)} /></div>
+                  <div className="col-span-1"><Button size="sm" variant="ghost" onClick={() => removeRecipeIngredient(idx)}>✕</Button></div>
+                </div>
+              ))}</div>
+              <Button size="sm" variant="outline" onClick={addRecipeIngredient} className="mt-2"><Plus className="h-3 w-3 mr-1" /> Add Ingredient</Button>
+            </div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowEditRecipeModal(false)}>Cancel</Button><Button onClick={updateRecipe}>Save Changes</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge Tables Modal */}
+      <Dialog open={showMergeModal} onOpenChange={setShowMergeModal}>
+        <DialogContent><DialogHeader><DialogTitle>Merge Tables</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Select tables to merge. The primary table will absorb the others.</p>
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {tables.filter(t => t.isActive).map(t => (
+                <div key={t.id} className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer ${mergeTableIds.includes(t.id) ? 'border-primary bg-primary/5' : ''}`} onClick={() => setMergeTableIds(mergeTableIds.includes(t.id) ? mergeTableIds.filter(id => id !== t.id) : [...mergeTableIds, t.id])}>
+                  <input type="checkbox" checked={mergeTableIds.includes(t.id)} readOnly />
+                  <Table2 className="h-4 w-4" />
+                  <span className="text-sm font-medium">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">Capacity: {t.capacity}</span>
+                </div>
+              ))}
+            </div>
+            {mergeTableIds.length >= 2 && (
+              <div><Label>Primary Table</Label><Select value={mergePrimaryId} onValueChange={setMergePrimaryId}><SelectTrigger><SelectValue placeholder="Select primary table" /></SelectTrigger><SelectContent>{mergeTableIds.map(id => { const t = tables.find(t => t.id === id); return t ? <SelectItem key={id} value={id}>{t.name}</SelectItem> : null })}</SelectContent></Select></div>
+            )}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => { setShowMergeModal(false); setMergeTableIds([]); setMergePrimaryId('') }}>Cancel</Button><Button onClick={mergeTables}><Merge className="h-4 w-4 mr-1" /> Merge</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Complete Order Modal */}
+      <Dialog open={showCompleteModal} onOpenChange={setShowCompleteModal}>
+        <DialogContent><DialogHeader><DialogTitle>Complete Order {completeOrderData?.orderNo}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Payment Method</Label><Select value={completeForm.paymentMethod} onValueChange={v => setCompleteForm({ ...completeForm, paymentMethod: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="card">Card</SelectItem><SelectItem value="mobile_money">Mobile Money</SelectItem><SelectItem value="wallet">Wallet</SelectItem></SelectContent></Select></div>
+            <div><Label>Discount</Label><Input type="number" value={completeForm.discount} onChange={e => setCompleteForm({ ...completeForm, discount: Number(e.target.value) })} /></div>
+            <div><Label>Tip Amount</Label><Input type="number" value={completeForm.tipAmount} onChange={e => setCompleteForm({ ...completeForm, tipAmount: Number(e.target.value) })} /></div>
+            {completeForm.tipAmount > 0 && (
+              <div><Label>Tip Waiter</Label><Select value={completeForm.tipWaiterId} onValueChange={v => setCompleteForm({ ...completeForm, tipWaiterId: v })}><SelectTrigger><SelectValue placeholder="Assign tip to waiter" /></SelectTrigger><SelectContent>{waiters.filter(w => w.isActive).map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
+            )}
+            <div className="rounded-lg bg-muted p-3 text-sm"><div className="flex justify-between"><span>Order Total</span><span className="font-bold">{completeOrderData?.total.toLocaleString()}</span></div></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowCompleteModal(false)}>Cancel</Button><Button onClick={completeOrder}><CheckCircle className="h-4 w-4 mr-1" /> Complete & Create Sale</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move Order Modal */}
+      <Dialog open={showMoveModal} onOpenChange={setShowMoveModal}>
+        <DialogContent><DialogHeader><DialogTitle>Move Order {moveOrder?.orderNo}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Current table: {moveOrder?.table?.name || 'None'}</p>
+            <div><Label>New Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select new table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.id !== moveOrder?.table?.id).map(t => <SelectItem key={t.id} value={t.id}>{t.name} (Cap: {t.capacity})</SelectItem>)}</SelectContent></Select></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowMoveModal(false)}>Cancel</Button><Button onClick={moveOrderTable}><ArrowRightLeft className="h-4 w-4 mr-1" /> Move Order</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Split Bill Modal */}
+      <Dialog open={showSplitModal} onOpenChange={setShowSplitModal}>
+        <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Split Bill {splitOrder?.orderNo}</DialogTitle></DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            <p className="text-sm text-muted-foreground">Select which items go to each split group. Each group becomes a separate sale.</p>
+            {splitForm.map((split, sIdx) => (
+              <div key={sIdx} className="rounded-lg border p-3 space-y-2">
+                <div className="flex items-center justify-between"><span className="font-medium text-sm">Split Group {sIdx + 1}</span>{splitForm.length > 1 && <Button size="sm" variant="ghost" onClick={() => setSplitForm(splitForm.filter((_, i) => i !== sIdx))}><Trash2 className="h-3 w-3" /></Button>}</div>
+                <div className="space-y-1">{splitOrder?.items.map(i => (
+                  <label key={i.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={split.itemIds.includes(i.id)} onChange={() => toggleSplitItem(sIdx, i.id)} />
+                    <span>{i.quantity}× {i.product.name}</span>
+                    <span className="text-muted-foreground ml-auto">{i.total.toLocaleString()}</span>
+                  </label>
+                ))}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">Payment</Label><Select value={split.paymentMethod} onValueChange={v => setSplitForm(splitForm.map((s, i) => i === sIdx ? { ...s, paymentMethod: v } : s))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="card">Card</SelectItem><SelectItem value="mobile_money">Mobile Money</SelectItem></SelectContent></Select></div>
+                  <div><Label className="text-xs">Tip</Label><Input type="number" value={split.tipAmount} onChange={e => setSplitForm(splitForm.map((s, i) => i === sIdx ? { ...s, tipAmount: Number(e.target.value) } : s))} /></div>
+                </div>
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={addSplitGroup}><Plus className="h-3 w-3 mr-1" /> Add Split Group</Button>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowSplitModal(false)}>Cancel</Button><Button onClick={splitBill}><Split className="h-4 w-4 mr-1" /> Split Bill</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Happy Hour Modal */}
+      <Dialog open={showHappyHourModal} onOpenChange={setShowHappyHourModal}>
+        <DialogContent><DialogHeader><DialogTitle>Add Happy Hour Rule</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Rule Name</Label><Input value={happyHourForm.name} onChange={e => setHappyHourForm({ ...happyHourForm, name: e.target.value })} placeholder="Friday Cocktails 50% off" /></div>
+            <div><Label>Product</Label><Select value={happyHourForm.productId} onValueChange={v => setHappyHourForm({ ...happyHourForm, productId: v })}><SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger><SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Start Time</Label><Input type="time" value={happyHourForm.startTime} onChange={e => setHappyHourForm({ ...happyHourForm, startTime: e.target.value })} /></div>
+              <div><Label>End Time</Label><Input type="time" value={happyHourForm.endTime} onChange={e => setHappyHourForm({ ...happyHourForm, endTime: e.target.value })} /></div>
+            </div>
+            <div><Label>Days of Week</Label><Input value={happyHourForm.daysOfWeek} onChange={e => setHappyHourForm({ ...happyHourForm, daysOfWeek: e.target.value })} placeholder="1,2,3,4,5 (Mon-Fri)" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Discount Type</Label><Select value={happyHourForm.discountType} onValueChange={v => setHappyHourForm({ ...happyHourForm, discountType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Percentage</SelectItem><SelectItem value="fixed">Fixed Amount</SelectItem></SelectContent></Select></div>
+              <div><Label>Discount Value</Label><Input type="number" value={happyHourForm.discountValue} onChange={e => setHappyHourForm({ ...happyHourForm, discountValue: Number(e.target.value) })} /></div>
+            </div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowHappyHourModal(false)}>Cancel</Button><Button onClick={createHappyHour}>Create Rule</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Combo Modal */}
+      <Dialog open={showComboModal} onOpenChange={setShowComboModal}>
+        <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Add Combo Meal</DialogTitle></DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+            <div><Label>Combo Name</Label><Input value={comboForm.name} onChange={e => setComboForm({ ...comboForm, name: e.target.value })} placeholder="Lunch Special" /></div>
+            <div><Label>Description</Label><Input value={comboForm.description} onChange={e => setComboForm({ ...comboForm, description: e.target.value })} placeholder="Burger + fries + drink" /></div>
+            <div><Label>Combo Price</Label><Input type="number" value={comboForm.price} onChange={e => setComboForm({ ...comboForm, price: Number(e.target.value) })} /></div>
+            <div><Label>Items</Label>
+              <div className="space-y-2">{comboForm.items.map((item, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-8"><Select value={item.productId} onValueChange={v => updateComboItem(idx, 'productId', v)}><SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger><SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div>
+                  <div className="col-span-3"><Input type="number" min={1} value={item.quantity} onChange={e => updateComboItem(idx, 'quantity', e.target.value)} /></div>
+                  <div className="col-span-1"><Button size="sm" variant="ghost" onClick={() => removeComboItem(idx)}>✕</Button></div>
+                </div>
+              ))}</div>
+              <Button size="sm" variant="outline" onClick={addComboItem} className="mt-2"><Plus className="h-3 w-3 mr-1" /> Add Item</Button>
+            </div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowComboModal(false)}>Cancel</Button><Button onClick={createCombo}>Create Combo</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

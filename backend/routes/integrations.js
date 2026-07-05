@@ -1,12 +1,12 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 
 const router = Router();
 
 // List integrations
-router.get("/", authenticateToken, requireFeature("integrations"), async (req, res) => {
+router.get("/", authenticateToken, requirePermission("canViewSettings"), requireFeature("integrations"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const configs = await prisma.integrationConfig.findMany({
@@ -20,7 +20,7 @@ router.get("/", authenticateToken, requireFeature("integrations"), async (req, r
 });
 
 // Get single integration
-router.get("/:id", authenticateToken, requireFeature("integrations"), async (req, res) => {
+router.get("/:id", authenticateToken, requirePermission("canViewSettings"), requireFeature("integrations"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const config = await prisma.integrationConfig.findFirst({
@@ -34,7 +34,7 @@ router.get("/:id", authenticateToken, requireFeature("integrations"), async (req
 });
 
 // Create/configure integration
-router.post("/", authenticateToken, requireFeature("integrations"), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("canEditSettings"), requireFeature("integrations"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { provider, displayName, credentials, settings, isActive } = req.body;
@@ -58,7 +58,7 @@ router.post("/", authenticateToken, requireFeature("integrations"), async (req, 
 });
 
 // Update integration
-router.put("/:id", authenticateToken, requireFeature("integrations"), async (req, res) => {
+router.put("/:id", authenticateToken, requirePermission("canEditSettings"), requireFeature("integrations"), async (req, res) => {
   try {
     const { displayName, credentials, settings, isActive } = req.body;
     const config = await prisma.integrationConfig.update({
@@ -77,7 +77,7 @@ router.put("/:id", authenticateToken, requireFeature("integrations"), async (req
 });
 
 // Delete integration
-router.delete("/:id", authenticateToken, requireFeature("integrations"), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePermission("canEditSettings"), requireFeature("integrations"), async (req, res) => {
   try {
     await prisma.integrationConfig.delete({ where: { id: req.params.id } });
     res.json({ message: "Integration deleted" });
@@ -87,7 +87,7 @@ router.delete("/:id", authenticateToken, requireFeature("integrations"), async (
 });
 
 // Test integration connection
-router.post("/:id/test", authenticateToken, requireFeature("integrations"), async (req, res) => {
+router.post("/:id/test", authenticateToken, requirePermission("canEditSettings"), requireFeature("integrations"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const config = await prisma.integrationConfig.findFirst({

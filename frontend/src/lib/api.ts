@@ -571,6 +571,16 @@ export const reportsApiV2 = {
   rentalsReturns: (params?: ReportParams) => api.get<any>('/api/reports/rentals/returns', { params }),
   rentalsDaily: (params?: ReportParams) => api.get<any>('/api/reports/rentals/daily', { params }),
   rentalsMonthly: (params?: ReportParams) => api.get<any>('/api/reports/rentals/monthly', { params }),
+
+  // Fuel Station Reports
+  fuelSalesSummary: (params?: ReportParams) => api.get<any>('/api/reports/fuel/sales-summary', { params }),
+  fuelSalesByPump: (params?: ReportParams) => api.get<any>('/api/reports/fuel/sales-by-pump', { params }),
+  fuelTankStock: (params?: ReportParams) => api.get<any>('/api/reports/fuel/tank-stock', { params }),
+  fuelDeliveries: (params?: ReportParams) => api.get<any>('/api/reports/fuel/deliveries', { params }),
+  fuelShiftSummary: (params?: ReportParams) => api.get<any>('/api/reports/fuel/shift-summary', { params }),
+  fuelLubricantSales: (params?: ReportParams) => api.get<any>('/api/reports/fuel/lubricant-sales', { params }),
+  fuelCarWashIncome: (params?: ReportParams) => api.get<any>('/api/reports/fuel/car-wash-income', { params }),
+  fuelMeterReadings: (params?: ReportParams) => api.get<any>('/api/reports/fuel/meter-readings', { params }),
 }
 
 // Admin endpoints
@@ -787,6 +797,8 @@ export interface StaffMember {
   branchId?: string | null
   branch?: BranchOption | null
   branches?: Array<{ id: string; name: string; isPrimary?: boolean }>
+  cashAccountId?: string | null
+  cashAccount?: { id: string; name: string; type: string } | null
 }
 
 export interface StaffPayload {
@@ -799,6 +811,7 @@ export interface StaffPayload {
   role: 'manager' | 'accountant' | 'attendant'
   branchId: string
   permissions?: Record<string, boolean>
+  cashAccountId?: string | null
 }
 
 export interface RegisterData {

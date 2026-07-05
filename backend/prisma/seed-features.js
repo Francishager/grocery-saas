@@ -101,6 +101,7 @@ async function seedFeatures() {
     { name: 'service.job_cards', displayName: 'Job Cards', module: 'service', category: 'advanced', description: 'Job card management' },
     { name: 'service.technicians', displayName: 'Technician Assignment', module: 'service', category: 'advanced', description: 'Assign technicians to jobs' },
     { name: 'service.contracts', displayName: 'Service Contracts', module: 'service', category: 'advanced', description: 'Manage service contracts' },
+    { name: 'service.reports', displayName: 'Service Reports', module: 'service', category: 'advanced', description: 'Service business reports' },
 
     // ===== Multi Branch =====
     { name: 'multi_branch', displayName: 'Multi-Branch', module: 'multi_branch', category: 'advanced', description: 'Manage multiple branches' },
@@ -152,6 +153,35 @@ async function seedFeatures() {
     { name: 'restaurant.delivery', displayName: 'Delivery', module: 'restaurant', category: 'advanced', description: 'Delivery orders and tracking' },
     { name: 'restaurant.tips', displayName: 'Tips', module: 'restaurant', category: 'advanced', description: 'Tips management for waiters' },
     { name: 'restaurant.reports', displayName: 'Restaurant Reports', module: 'restaurant', category: 'advanced', description: 'Restaurant-specific reports' },
+
+    // ===== Fuel Station =====
+    { name: 'fuel_station', displayName: 'Fuel Station', module: 'fuel_station', category: 'advanced', description: 'Fuel station management' },
+    { name: 'fuel_station.pumps', displayName: 'Pumps & Tanks', module: 'fuel_station', category: 'advanced', description: 'Manage fuel pumps and tanks' },
+    { name: 'fuel_station.deliveries', displayName: 'Fuel Deliveries', module: 'fuel_station', category: 'advanced', description: 'Record fuel deliveries' },
+    { name: 'fuel_station.meter_readings', displayName: 'Meter Readings', module: 'fuel_station', category: 'advanced', description: 'Pump meter readings' },
+    { name: 'fuel_station.shift_reports', displayName: 'Shift Reports', module: 'fuel_station', category: 'advanced', description: 'Fuel shift reconciliation' },
+    { name: 'fuel_station.lubricants', displayName: 'Lubricants', module: 'fuel_station', category: 'advanced', description: 'Lubricant sales tracking' },
+    { name: 'fuel_station.car_wash', displayName: 'Car Wash', module: 'fuel_station', category: 'advanced', description: 'Car wash service tracking' },
+    { name: 'fuel_station.reports', displayName: 'Fuel Station Reports', module: 'fuel_station', category: 'advanced', description: 'Fuel station-specific reports' },
+
+    // ===== Manufacturing =====
+    { name: 'manufacturing', displayName: 'Manufacturing', module: 'manufacturing', category: 'advanced', description: 'Manufacturing module' },
+    { name: 'manufacturing.production_orders', displayName: 'Production Orders', module: 'manufacturing', category: 'advanced', description: 'Create and manage production orders' },
+    { name: 'manufacturing.bom', displayName: 'Bill of Materials', module: 'manufacturing', category: 'advanced', description: 'BOM / Recipe management' },
+    { name: 'manufacturing.waste', displayName: 'Waste Tracking', module: 'manufacturing', category: 'advanced', description: 'Track production waste' },
+    { name: 'manufacturing.costing', displayName: 'Production Costing', module: 'manufacturing', category: 'advanced', description: 'Track production costs' },
+    { name: 'manufacturing.reports', displayName: 'Manufacturing Reports', module: 'manufacturing', category: 'advanced', description: 'Manufacturing-specific reports' },
+
+    // ===== Agriculture =====
+    { name: 'agriculture', displayName: 'Agriculture', module: 'agriculture', category: 'advanced', description: 'Agriculture module' },
+    { name: 'agriculture.fields', displayName: 'Field Management', module: 'agriculture', category: 'advanced', description: 'Manage farm fields' },
+    { name: 'agriculture.livestock', displayName: 'Livestock', module: 'agriculture', category: 'advanced', description: 'Manage livestock' },
+    { name: 'agriculture.harvests', displayName: 'Harvest Records', module: 'agriculture', category: 'advanced', description: 'Record harvests and yields' },
+    { name: 'agriculture.expenses', displayName: 'Farm Expenses', module: 'agriculture', category: 'advanced', description: 'Track farm expenses' },
+    { name: 'agriculture.reports', displayName: 'Agriculture Reports', module: 'agriculture', category: 'advanced', description: 'Agriculture-specific reports' },
+
+    // ===== Assets & Resources =====
+    { name: 'assets', displayName: 'Assets & Resources', module: 'assets', category: 'advanced', description: 'Manage machines, vehicles, equipment' },
   ]
 
   for (const feature of allFeatures) {
@@ -227,6 +257,11 @@ async function seedPlanFeatures() {
           'restaurant.reservations', 'restaurant.recipes', 'restaurant.happy_hour',
           'restaurant.combos', 'restaurant.delivery', 'restaurant.tips',
           'restaurant.waiters', 'restaurant.reports',
+          'fuel_station', 'fuel_station.pumps', 'fuel_station.deliveries', 'fuel_station.meter_readings', 'fuel_station.shift_reports', 'fuel_station.lubricants', 'fuel_station.car_wash', 'fuel_station.reports',
+          'manufacturing', 'manufacturing.production_orders', 'manufacturing.bom', 'manufacturing.waste', 'manufacturing.costing', 'manufacturing.reports',
+          'agriculture', 'agriculture.fields', 'agriculture.livestock', 'agriculture.harvests', 'agriculture.expenses', 'agriculture.reports',
+          'service', 'service.appointments', 'service.work_orders', 'service.job_cards', 'service.technicians', 'service.contracts', 'service.reports',
+          'assets',
         ]
         break
       case 'enterprise':

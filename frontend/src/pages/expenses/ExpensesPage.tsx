@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -8,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import CreateExpenseModal from '@/components/modals/CreateExpenseModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalExpenses, getLocalCashAccounts, getLocalCashTransactions } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
@@ -24,7 +24,6 @@ import {
   Calendar,
   Filter,
   Download,
-  Plus,
   Eye
 } from 'lucide-react'
 
@@ -34,6 +33,8 @@ interface Expense {
   description: string
   amount: number
   paymentMethod: string
+  cashAccountId?: string | null
+  cashAccount?: { id: string; name: string; type: string } | null
   reference?: string
   notes?: string
   date: string
@@ -51,6 +52,10 @@ interface CashAccount {
   balance: number
   currency: string
   isActive: boolean
+  accountNumber?: string | null
+  bankName?: string | null
+  accountHolder?: string | null
+  branchName?: string | null
 }
 
 interface CashTransaction {
@@ -76,6 +81,7 @@ interface CashTransaction {
 export default function ExpensesPage() {
   const { hasPermission } = useJWTAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
   
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
@@ -87,7 +93,6 @@ export default function ExpensesPage() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
-  const [showExpenseModal, setShowExpenseModal] = useState(false)
   const expensesEnabled = hasPermission('canViewExpense')
   const online = useOnlineStatus()
 
@@ -217,7 +222,43 @@ export default function ExpensesPage() {
       supplies: '📎',
       insurance: '🛡️',
       taxes: '📋',
-      other: '📝'
+      cleaning: '🧹',
+      security: '👮',
+      waste_disposal: '🗑️',
+      purchases: '📦',
+      raw_materials: '🏭',
+      packaging: '🎁',
+      freight_in: '🚛',
+      staff_meals: '🍽️',
+      staff_training: '🎓',
+      medical: '🏥',
+      pensions: '🏦',
+      travel: '✈️',
+      accommodation: '🏨',
+      meals: '🍴',
+      fuel: '⛽',
+      promotions: '🏷️',
+      samples: '🎁',
+      legal: '⚖️',
+      accounting: '�',
+      consulting: '🧠',
+      software_licenses: '💻',
+      internet: '🌐',
+      hosting: '☁️',
+      bank_charges: '🏦',
+      loan_interest: '📉',
+      fx_losses: '💱',
+      fines: '⚠️',
+      licenses: '📜',
+      inspection_fees: '🔍',
+      equipment_purchase: '🛠️',
+      equipment_rental: '🔁',
+      depreciation: '📉',
+      donations: '🤝',
+      refunds: '↩️',
+      write_offs: '❌',
+      miscellaneous: '📝',
+      other: '�📝'
     }
     return icons[category] || '📝'
   }
@@ -248,64 +289,7 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold">Expenses & Cash Flow</h1>
           <p className="text-muted-foreground">Track business expenses and manage cash accounts</p>
         </div>
-        <Button onClick={() => setShowExpenseModal(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Expense
-        </Button>
       </div>
-
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Income</CardTitle>
-              <TrendingUp className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">
-                {summary.totalIncome?.toFixed(2)}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-              <TrendingDown className="h-4 w-4 text-red-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">
-                {summary.totalExpenses?.toFixed(2)}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Net Cash Flow</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${summary.netCashFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {summary.netCashFlow?.toFixed(2)}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Cash</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {summary.cashPosition?.totalCash?.toFixed(2)}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Tabs */}
       <div className="flex space-x-1 border-b">
@@ -376,6 +360,14 @@ export default function ExpensesPage() {
                         <p className="text-xs text-muted-foreground">
                           By {expense.user?.fname || ''} {expense.user?.lname || ''} • {new Date(expense.date).toLocaleDateString()}
                         </p>
+                        {expense.cashAccount && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            <span className="inline-flex items-center gap-1">
+                              <Wallet className="h-3 w-3" />
+                              Paid from: <span className="font-medium">{expense.cashAccount.name}</span>
+                            </span>
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -397,34 +389,50 @@ export default function ExpensesPage() {
       )}
 
       {activeTab === 'accounts' && (
-        <div className="grid gap-4">
-          {cashAccounts.map((account) => (
-            <Card key={account.id}>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Wallet className="h-5 w-5 text-primary" />
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Cash Accounts ({cashAccounts.length})</h3>
+            <Button size="sm" variant="outline" onClick={() => navigate('/tenant/accounting/transactions')}>
+              <Wallet className="h-4 w-4 mr-2" />Manage Accounts
+            </Button>
+          </div>
+
+          <div className="grid gap-4">
+            {cashAccounts.map((account) => (
+              <Card key={account.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        {account.type === 'bank' ? <Building2 className="h-5 w-5 text-primary" /> :
+                         account.type === 'mobile_money' ? <CreditCard className="h-5 w-5 text-primary" /> :
+                         <Wallet className="h-5 w-5 text-primary" />}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{account.name}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {account.type.replace(/_/g, ' ')} • {account.currency}
+                          {account.accountNumber && ` • ${account.accountNumber}`}
+                          {account.bankName && ` • ${account.bankName}`}
+                        </p>
+                        {account.accountHolder && (
+                          <p className="text-xs text-muted-foreground">Holder: {account.accountHolder}</p>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-semibold">{account.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {account.type} • {account.currency}
-                      </p>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold">
+                        {account.balance.toFixed(2)}
+                      </div>
+                      <Badge variant={account.isActive ? 'default' : 'secondary'}>
+                        {account.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold">
-                      {account.balance.toFixed(2)}
-                    </div>
-                    <Badge variant={account.isActive ? 'default' : 'secondary'}>
-                      {account.isActive ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 
@@ -462,17 +470,6 @@ export default function ExpensesPage() {
           ))}
         </div>
       )}
-
-      <CreateExpenseModal
-        isOpen={showExpenseModal}
-        onClose={() => setShowExpenseModal(false)}
-        onSuccess={() => {
-          loadExpenses()
-          loadCashAccounts()
-          loadTransactions()
-          loadCashFlowSummary()
-        }}
-      />
     </div>
   )
 }
