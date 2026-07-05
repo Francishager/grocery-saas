@@ -100,10 +100,28 @@ function getRoleDefaults(role) {
   };
 
   if (role === 'owner') {
-    // Owner gets ALL permissions enabled
-    const ownerDefaults = {};
-    for (const key of Object.keys(defaults)) ownerDefaults[key] = true;
-    return ownerDefaults;
+    // Owner gets core business permissions — module permissions (fuel station, etc.)
+    // stay false and are controlled by plan/feature flags
+    return {
+      ...defaults,
+      canCreateSale: true, canViewSale: true, canEditSale: true, canRefundSale: true, canDeleteSale: true,
+      canCreateProduct: true, canViewProduct: true, canEditProduct: true, canDeleteProduct: true, canAdjustStock: true, canTransferStock: true,
+      canCreatePurchase: true, canViewPurchase: true, canEditPurchase: true, canDeletePurchase: true,
+      canCreateExpense: true, canViewExpense: true, canEditExpense: true, canDeleteExpense: true,
+      canCreatePayable: true, canViewPayable: true, canEditPayable: true, canDeletePayable: true,
+      canCreateReceivable: true, canViewReceivable: true, canEditReceivable: true, canDeleteReceivable: true,
+      canCreateCustomer: true, canViewCustomer: true, canEditCustomer: true, canDeleteCustomer: true,
+      canCreateSupplier: true, canViewSupplier: true, canEditSupplier: true, canDeleteSupplier: true,
+      canCreateStaff: true, canViewStaff: true, canEditStaff: true, canDeleteStaff: true,
+      canCreateBranch: true, canViewBranch: true, canEditBranch: true, canDeleteBranch: true,
+      canViewSalesReport: true, canViewInventoryReport: true, canViewFinancialReport: true, canViewCustomerReport: true, canViewSupplierReport: true, canViewReceivablesReport: true, canViewPayablesReport: true, canViewPerformanceReport: true, canViewAuditReport: true, canExportReport: true,
+      canViewSettings: true, canEditSettings: true,
+      canViewReceipt: true, canCreateReceipt: true,
+      canGiveDiscount: true,
+      canViewTax: true, canManageTax: true,
+      canImportInventory: true,
+      canUseCash: true, canUseMobileMoney: true, canUseBank: true, canUseCard: true,
+    };
   }
 
   if (role === 'manager') {
@@ -121,23 +139,6 @@ function getRoleDefaults(role) {
       canCreateReceipt: true,
       canGiveDiscount: true,
       canViewTax: true,
-      // Fuel Station — manager gets full access
-      canViewFuelStation: true, canCreateFuelStation: true, canEditFuelStation: true, canDeleteFuelStation: false, canViewFuelStationReport: true,
-      // Manufacturing
-      canViewManufacturing: true, canCreateManufacturing: true, canEditManufacturing: true, canDeleteManufacturing: false, canViewManufacturingReport: true,
-      // Agriculture
-      canViewAgriculture: true, canCreateAgriculture: true, canEditAgriculture: true, canDeleteAgriculture: false, canViewAgricultureReport: true,
-      // Service Business
-      canViewServiceBusiness: true, canCreateServiceBusiness: true, canEditServiceBusiness: true, canDeleteServiceBusiness: false, canViewServiceBusinessReport: true,
-      // Restaurant
-      canViewRestaurant: true, canCreateRestaurant: true, canEditRestaurant: true, canDeleteRestaurant: false, canViewRestaurantReport: true,
-      // Communication
-      canViewCommunication: true, canCreateCommunication: true, canEditCommunication: true, canDeleteCommunication: false,
-      // Accounting
-      canViewAccounting: true, canCreateAccounting: true, canEditAccounting: true, canDeleteAccounting: false,
-      // Services & Rentals
-      canViewService: true, canCreateService: true, canEditService: true, canDeleteService: false, canManageServiceCategory: true, canViewServiceReport: true,
-      canViewRental: true, canCreateRental: true, canEditRental: true, canDeleteRental: false, canProcessRentalReturn: true, canViewRentalReport: true,
     };
   }
 
@@ -154,15 +155,6 @@ function getRoleDefaults(role) {
       canCreateSupplier: true, canViewSupplier: true, canEditSupplier: true,
       canViewSalesReport: true, canViewInventoryReport: true, canViewFinancialReport: true, canViewCustomerReport: true, canViewSupplierReport: true, canViewReceivablesReport: true, canViewPayablesReport: true, canViewPerformanceReport: true, canViewAuditReport: true, canExportReport: true,
       canViewTax: true, canManageTax: true,
-      // Fuel Station — accountant gets view + reports
-      canViewFuelStation: true, canViewFuelStationReport: true,
-      // Accounting
-      canViewAccounting: true, canCreateAccounting: true, canEditAccounting: true,
-      // Communication
-      canViewCommunication: true,
-      // Services & Rentals
-      canViewService: true, canViewServiceReport: true,
-      canViewRental: true, canViewRentalReport: true,
     };
   }
 
@@ -174,8 +166,6 @@ function getRoleDefaults(role) {
       canViewProduct: true,
       canViewCustomer: true,
       canViewReceipt: true,
-      // Fuel Station — attendant gets view + create
-      canViewFuelStation: true, canCreateFuelStation: true, canViewFuelStationReport: false,
     };
   }
 
@@ -186,7 +176,7 @@ function getRoleUpdates(role) {
   const updates = {};
 
   if (role === 'owner') {
-    // Owner gets ALL permissions enabled
+    // Owner gets core permissions — module permissions stay false
     const ownerDefaults = getRoleDefaults('owner');
     Object.assign(updates, ownerDefaults);
   }

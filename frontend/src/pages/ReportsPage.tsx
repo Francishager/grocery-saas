@@ -13,6 +13,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { exportToExcel, exportToPDF, printReport } from '@/lib/exportUtils'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useOnlineStatus } from '@/db/hooks'
@@ -34,6 +35,7 @@ interface ReportCategory {
   label: string
   icon: IconType
   permission: string
+  feature?: string
   items: ReportItem[]
 }
 
@@ -327,7 +329,7 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
-    id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport',
+    id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport', feature: 'fuel_station.reports',
     items: [
       { id: 'fuelSalesSummary', label: 'Fuel Sales Summary', apiFn: reportsApiV2.fuelSalesSummary, renderType: 'summary',
         summaryKeys: [
@@ -574,10 +576,12 @@ export default function ReportsPage() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const { toast } = useToast()
-  const { hasPermission } = useJWTAuth()
+  const { hasPermission, user } = useJWTAuth()
+  const { canAccessFeature } = useFeatureAccess()
   const online = useOnlineStatus()
+  const isOwner = user?.role === 'owner'
 
-  const visibleCategories = useMemo(() => CATEGORIES.filter(c => hasPermission(c.permission)), [hasPermission])
+  const visibleCategories = useMemo(() => CATEGORIES.filter(c => (isOwner || hasPermission(c.permission)) && (!c.feature || canAccessFeature(c.feature))), [hasPermission, isOwner, canAccessFeature])
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
 
   const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])
