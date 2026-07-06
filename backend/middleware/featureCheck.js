@@ -8,8 +8,8 @@ const CACHE_TTL = 60_000;
 
 /**
  * Resolve the effective feature set for a tenant.
- * ONLY TenantFeature rows are used — features are NOT auto-inherited from plan.
- * SaaS admin must explicitly assign features to each tenant via TenantFeature.
+ * Plan features (PlanFeature) are the primary source.
+ * Tenant overrides (TenantFeature) can enable/disable on top of plan features.
  * Returns a Set of enabled feature name strings.
  */
 async function getTenantFeatures(tenantId) {
@@ -17,15 +17,38 @@ async function getTenantFeatures(tenantId) {
   const cached = featureCache.get(tenantId);
   if (cached && cached.expiresAt > now) return cached.features;
 
-  // Only TenantFeature rows — no plan-level auto-inheritance
-  const tenantFeatures = await prisma.tenantFeature.findMany({
-    where: { tenantId, enabled: true },
-    include: { feature: true },
+  const effective = new Set();
+
+  // 1. Plan-level features (primary source)
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { planId: true },
   });
 
-  const effective = new Set(
-    tenantFeatures.map((tf) => tf.feature?.name).filter(Boolean)
-  );
+  if (tenant?.planId) {
+    const planFeatures = await prisma.planFeature.findMany({
+      where: { planId: tenant.planId, enabled: true },
+      include: { feature: true },
+    });
+    planFeatures.forEach((pf) => {
+      if (pf.feature?.name) effective.add(pf.feature.name);
+    });
+  }
+
+  // 2. Tenant-level overrides (can enable/disable plan features or add extras)
+  const tenantFeatures = await prisma.tenantFeature.findMany({
+    where: { tenantId },
+    include: { feature: true },
+  });
+  tenantFeatures.forEach((tf) => {
+    if (tf.feature?.name) {
+      if (tf.enabled) {
+        effective.add(tf.feature.name);
+      } else {
+        effective.delete(tf.feature.name);
+      }
+    }
+  });
 
   featureCache.set(tenantId, { features: effective, expiresAt: now + CACHE_TTL });
   return effective;

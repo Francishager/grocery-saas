@@ -51,6 +51,7 @@ export const TenantDetailPage: React.FC = () => {
   const [searchParams] = useSearchParams()
   const [detail, setDetail] = useState<TenantDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [savingLimits, setSavingLimits] = useState(false)
   const [savingInfo, setSavingInfo] = useState(false)
@@ -64,6 +65,7 @@ export const TenantDetailPage: React.FC = () => {
   const fetchDetail = useCallback(async () => {
     if (!tenantId) return
     setLoading(true)
+    setFetchError(null)
     try {
       const res = await apiFetch(`/api/platform/tenants/${tenantId}/detail`)
       if (res.ok) {
@@ -95,8 +97,13 @@ export const TenantDetailPage: React.FC = () => {
           if (info.source === 'override') overrides[name] = info.enabled
         })
         setFeatureOverrides(overrides)
+      } else {
+        const errData = await res.json().catch(() => ({}))
+        setFetchError(errData.message || errData.error || `Failed to load tenant (${res.status})`)
       }
-    } catch {}
+    } catch (err) {
+      setFetchError('Network error — please check your connection and try again')
+    }
     setLoading(false)
   }, [tenantId])
 
@@ -197,11 +204,14 @@ export const TenantDetailPage: React.FC = () => {
     </div>
   )
 
-  if (!detail) return (
+  if (!detail && !loading) return (
     <div className="text-center py-12">
       <AlertTriangle className="w-12 h-12 text-yellow-300 mx-auto mb-4" />
-      <p className="text-gray-500">Tenant not found</p>
-      <button onClick={() => navigate('/saas/businesses')} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg">Back to Businesses</button>
+      <p className="text-gray-500">{fetchError || 'Tenant not found'}</p>
+      <div className="flex items-center justify-center gap-3 mt-4">
+        {fetchError && <button onClick={fetchDetail} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Retry</button>}
+        <button onClick={() => navigate('/saas/businesses')} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">Back to Businesses</button>
+      </div>
     </div>
   )
 

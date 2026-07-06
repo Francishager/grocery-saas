@@ -523,29 +523,50 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
   }
 });
 
-// Me/features — ONLY TenantFeature rows, no plan-level auto-inheritance
+// Me/features — plan features + tenant overrides
 router.get("/me/features", authenticateToken, async (req, res) => {
   try {
     const role = req.user?.role;
     if (role === "saas_admin") return res.json({ features: [] });
 
     const tenantId = req.user?.tenantId;
-    let featureCodes = [];
+    const featureMap = {};
 
     if (tenantId) {
-      // ONLY TenantFeature rows — features are NOT auto-inherited from plan.
-      // SaaS admin must explicitly assign features to each tenant.
-      const tenantFeatures = await prisma.tenantFeature.findMany({
-        where: { tenantId, enabled: true },
-        include: { feature: true },
+      // 1. Plan-level features (primary source)
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { planId: true },
       });
 
-      featureCodes = tenantFeatures
-        .map((tf) => tf.feature?.name)
-        .filter(Boolean);
+      if (tenant?.planId) {
+        const planFeatures = await prisma.planFeature.findMany({
+          where: { planId: tenant.planId, enabled: true },
+          include: { feature: true },
+        });
+        planFeatures.forEach((pf) => {
+          if (pf.feature?.name) {
+            featureMap[pf.feature.name] = { enabled: true, source: "plan" };
+          }
+        });
+      }
+
+      // 2. Tenant-level overrides (can enable/disable plan features or add extras)
+      const tenantFeatures = await prisma.tenantFeature.findMany({
+        where: { tenantId },
+        include: { feature: true },
+      });
+      tenantFeatures.forEach((tf) => {
+        if (tf.feature?.name) {
+          featureMap[tf.feature.name] = {
+            enabled: tf.enabled,
+            source: "override",
+          };
+        }
+      });
     }
 
-    res.json({ features: featureCodes });
+    res.json({ features: featureMap });
   } catch (err) {
     console.error("Me/features error:", err);
     res.status(500).json({ error: "Internal server error" });
