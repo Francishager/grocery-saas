@@ -86,6 +86,41 @@ async function request<T>(
   return data
 }
 // Drop-in fetch replacement  prepends API_URL and adds auth
+let isRefreshing = false
+let refreshPromise: Promise<string | null> | null = null
+
+async function tryRefreshToken(): Promise<string | null> {
+  if (isRefreshing && refreshPromise) return refreshPromise
+  isRefreshing = true
+  refreshPromise = (async () => {
+    try {
+      const stored = localStorage.getItem('auth_tokens')
+      if (!stored) return null
+      const tokens = JSON.parse(stored)
+      if (!tokens?.refreshToken) return null
+      const API_BASE = import.meta.env.VITE_API_URL || 'https://grocery-saas-backend.up.railway.app'
+      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      if (data.tokens?.accessToken) {
+        localStorage.setItem('auth_tokens', JSON.stringify(data.tokens))
+        if (data.user) localStorage.setItem('auth_user', JSON.stringify(data.user))
+        return data.tokens.accessToken
+      }
+      return null
+    } catch {
+      return null
+    } finally {
+      isRefreshing = false
+    }
+  })()
+  return refreshPromise
+}
+
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = getAuthToken()
   const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) || {}) }
@@ -93,14 +128,25 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (init?.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
   const url = path.startsWith('http') ? path : `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
   return fetch(url, { ...init, headers }).then(async (res) => {
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       const data = await res.clone().json().catch(() => ({}))
-      if (data?.message === 'Invalid token' || data?.message === 'Token expired') {
+      const msg = data?.message || ''
+      // Token expired or invalid — try refresh once, then redirect if it fails
+      if (msg === 'Token expired' || msg === 'Invalid token' || msg === 'Access token required' || msg === 'Invalid or expired refresh token') {
+        const newToken = await tryRefreshToken()
+        if (newToken) {
+          // Retry the original request with the new token
+          const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` }
+          return fetch(url, { ...init, headers: retryHeaders })
+        }
+        // Refresh failed — clear auth and redirect
         localStorage.removeItem('token')
         localStorage.removeItem('auth_tokens')
         localStorage.removeItem('auth_user')
         localStorage.removeItem('user')
-        window.location.href = '/login'
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/saas/login') {
+          window.location.href = '/login'
+        }
       }
     }
     return res

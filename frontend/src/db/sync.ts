@@ -47,8 +47,8 @@ async function pullTable<T extends { id: string; updatedAt?: string }>(
   try {
     const res = await apiFetch(endpoint)
     if (!res.ok) {
-      // 403/404 = no permission or not found — expected, skip silently
-      if (res.status !== 403 && res.status !== 404) {
+      // 401 = token expired/missing (apiFetch handles redirect), 403/404 = no permission — all expected, skip silently
+      if (res.status !== 401 && res.status !== 403 && res.status !== 404) {
         console.warn(`[sync] ${String(table)}: HTTP ${res.status}`)
       }
       return 0

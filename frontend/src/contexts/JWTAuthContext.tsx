@@ -329,9 +329,17 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       }
 
       const data = await response.json()
-      setTokens(data)
-      persistAuth(user, data)
-      onTokenRefresh?.(data)
+      // /refresh returns { user, tokens } — update both
+      if (data.tokens) {
+        setTokens(data.tokens)
+        if (data.user) {
+          setUser(data.user)
+          persistAuth(data.user, data.tokens)
+        } else {
+          persistAuth(user, data.tokens)
+        }
+        onTokenRefresh?.(data.tokens)
+      }
     } catch {
       // Network error (offline, DNS failure, timeout, etc.) — keep cached session
       // The user can still use the app offline with their existing token
@@ -380,6 +388,20 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     setTokens(newTokens)
     persistAuth(user, newTokens)
   }, [user])
+
+  // Check if access token is expired on mount and refresh if needed
+  useEffect(() => {
+    if (!tokens?.accessToken || !tokens?.refreshToken) return
+    try {
+      const payload = JSON.parse(atob(tokens.accessToken.split('.')[1]))
+      if (payload.exp * 1000 < Date.now()) {
+        refreshTokens()
+      }
+    } catch {
+      refreshTokens()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Refresh user data from server on mount (syncs avatar, permissions, etc. across devices)
   useEffect(() => {

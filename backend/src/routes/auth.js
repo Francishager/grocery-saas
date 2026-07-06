@@ -134,6 +134,49 @@ router.post("/register", async (req, res) => {
   }
 });
 
+// Refresh access token using refresh token
+router.post("/refresh", async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(401).json({ message: "Refresh token required" });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid or expired refresh token" });
+    }
+
+    if (decoded.type !== "refresh") {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      include: { tenant: true, branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] } },
+    });
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: "User not found or inactive" });
+    }
+
+    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
+      JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+    const newRefreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
+
+    res.json({
+      user: userPayload(user, userPerm),
+      tokens: { accessToken, refreshToken: newRefreshToken, expiresIn: 86400, tokenType: "Bearer" },
+    });
+  } catch (err) {
+    console.error("Refresh token error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Me
 router.get("/me", authenticateToken, async (req, res) => {
   try {
