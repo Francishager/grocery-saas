@@ -382,4 +382,35 @@ class GroceryDB extends Dexie {
 
 export const db = new GroceryDB()
 
+/** Clear all tenant-scoped tables — call on logout to prevent cross-tenant data leakage */
+export async function clearTenantData() {
+  await Promise.all([
+    db.products.clear(),
+    db.sales.clear(),
+    db.customers.clear(),
+    db.categories.clear(),
+    db.branches.clear(),
+    db.settings.clear(),
+    db.expenses.clear(),
+    db.suppliers.clear(),
+    db.purchases.clear(),
+    db.payments.clear(),
+    db.transfers.clear(),
+    db.rentals.clear(),
+    db.returns.clear(),
+    db.accounts.clear(),
+    db.journalEntries.clear(),
+    db.employees.clear(),
+    db.leaveRequests.clear(),
+    db.payroll.clear(),
+    db.notifications.clear(),
+    db.auditLogs.clear(),
+    db.staff.clear(),
+    db.cashAccounts.clear(),
+    db.cashTransactions.clear(),
+    db.syncQueue.clear(),
+    db.syncMeta.clear(),
+  ])
+}
+
 export type { Table }

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
 import { featureAccessService } from '@/services/featureAccessService'
+import { clearTenantData } from '@/db/index'
 
 export interface User {
   id: string
@@ -270,6 +271,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       persistAuth(null, null)
       // Reset feature access service on logout
       featureAccessService.reset()
+      // Clear IndexedDB to prevent cross-tenant data leakage
+      clearTenantData().catch(() => {})
       setLoading(false)
       onLogout?.()
     }
