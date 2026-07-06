@@ -1,10 +1,10 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, Building, Users, Settings, Activity, Shield, Globe,
   Loader2, RefreshCw, Save, Ban, CheckCircle, Trash2, AlertTriangle,
-  TrendingUp, DollarSign, Calendar, Mail, Phone, MapPin, Server, Package,
+  TrendingUp, DollarSign, Calendar, Mail, Phone, MapPin, Server, Package, Pencil,
 } from 'lucide-react'
 
 interface TenantUser {
@@ -48,12 +48,13 @@ type Tab = 'overview' | 'features' | 'limits' | 'branches' | 'users' | 'activity
 export const TenantDetailPage: React.FC = () => {
   const { tenantId } = useParams<{ tenantId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [detail, setDetail] = useState<TenantDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('overview')
   const [savingLimits, setSavingLimits] = useState(false)
   const [savingInfo, setSavingInfo] = useState(false)
-  const [editInfo, setEditInfo] = useState(false)
+  const [editInfo, setEditInfo] = useState(searchParams.get('edit') === '1')
   const [infoForm, setInfoForm] = useState({ name: '', email: '', phone: '', address: '', businessType: '', status: '', currency: 'UGX', timezone: 'Africa/Kampala', taxRate: 0, taxEnabled: false, taxId: '' })
   const [limitsForm, setLimitsForm] = useState({ maxProducts: 100, maxUsers: 5, maxBranches: 1, maxCustomers: 100, maxSuppliers: 50 })
   const [featureOverrides, setFeatureOverrides] = useState<Record<string, boolean>>({})
@@ -226,6 +227,10 @@ export const TenantDetailPage: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => { setTab('overview'); setEditInfo(!editInfo) }} className={`px-4 py-2 border rounded-lg hover:bg-gray-50 flex items-center gap-2 ${editInfo ? 'bg-blue-50 border-blue-300 text-blue-700' : ''}`}>
+            <Pencil size={16} />
+            {editInfo ? 'Editing' : 'Edit'}
+          </button>
           <button onClick={fetchDetail} className="px-3 py-2 border rounded-lg hover:bg-gray-50">
             <RefreshCw size={18} />
           </button>

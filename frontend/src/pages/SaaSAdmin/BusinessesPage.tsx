@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft, ExternalLink } from 'lucide-react'
+import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft, ExternalLink, Pencil } from 'lucide-react'
 
 interface Tenant {
   id: string; name: string; slug: string; status: string; planId?: string | null
@@ -182,6 +182,7 @@ export const BusinessesPage: React.FC = () => {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => navigate(`/saas/businesses/${t.id}`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="View Details"><ExternalLink size={16} /></button>
+                      <button onClick={() => navigate(`/saas/businesses/${t.id}?edit=1`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Edit Business"><Pencil size={16} /></button>
                       <button onClick={() => setSelected(t)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="Quick View"><Eye size={16} /></button>
                       <button onClick={() => openPlanModal(t)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
                       <button onClick={() => handleAction(t.id, t.status === 'suspended' ? 'activate' : 'suspend')} disabled={actionLoading === t.id} className={`p-1 rounded ${t.status === 'suspended' ? 'text-green-600 hover:bg-green-50' : 'text-red-600 hover:bg-red-50'}`} title={t.status === 'suspended' ? 'Activate' : 'Suspend'}>
