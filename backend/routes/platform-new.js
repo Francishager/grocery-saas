@@ -827,7 +827,9 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
     })
   } catch (error) {
     console.error('Get tenant detail error:', error)
-    res.status(500).json({ error: 'Failed to fetch tenant detail' })
+    console.error('Stack:', error?.stack)
+    console.error('Tenant ID:', req.params.tenantId)
+    res.status(500).json({ error: 'Failed to fetch tenant detail', detail: error?.message })
   }
 })
 

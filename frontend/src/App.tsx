@@ -74,8 +74,8 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
 }
  
 function App() {
-  const { isAuthenticated } = useJWTAuth()
-  useEffect(() => { if (isAuthenticated) initSync() }, [isAuthenticated])
+  const { isAuthenticated, isPlatformUser } = useJWTAuth()
+  useEffect(() => { if (isAuthenticated && !isPlatformUser()) initSync() }, [isAuthenticated, isPlatformUser])
 
   return (
     <BrowserRouter>
