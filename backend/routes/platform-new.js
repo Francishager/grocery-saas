@@ -36,7 +36,7 @@ router.get('/features', authenticateToken, requirePlatformAdmin, async (req, res
     const features = await prisma.feature.findMany({
       where,
       include: { _count: { select: { planFeatures: true, tenantFeatures: true } } },
-      orderBy: { category: 'asc', name: 'asc' }
+      orderBy: [{ category: 'asc' }, { name: 'asc' }]
     })
 
     res.json(features)
@@ -744,7 +744,7 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
 
     // Get enabled features
     const [allFeatures, planFeatures, tenantFeatureOverrides] = await Promise.all([
-      prisma.feature.findMany({ where: { isActive: true }, orderBy: { category: 'asc', name: 'asc' } }),
+      prisma.feature.findMany({ where: { isActive: true }, orderBy: [{ category: 'asc' }, { name: 'asc' }] }),
       tenant.planId
         ? prisma.planFeature.findMany({ where: { planId: tenant.planId, enabled: true }, include: { feature: true } })
         : Promise.resolve([]),
