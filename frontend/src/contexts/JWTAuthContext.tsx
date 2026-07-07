@@ -95,7 +95,7 @@ export interface JWTAuthProviderProps {
 
 export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   children,
-  apiEndpoint = '/api/auth',
+  apiEndpoint,
   tokenStorageKey = 'auth_tokens',
   userStorageKey = 'auth_user',
   onLogin,
@@ -104,6 +104,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   autoRefresh = true,
   refreshThreshold = 300, // 5 minutes before expiry
 }) => {
+  const resolvedApiEndpoint = apiEndpoint || `${import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'}/api/auth`
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(userStorageKey)
@@ -164,7 +165,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     setError(null)
 
     try {
-      const response = await fetch(`${apiEndpoint}/login`, {
+      const response = await fetch(`${resolvedApiEndpoint}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -249,14 +250,14 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     } finally {
       setLoading(false)
     }
-  }, [apiEndpoint, onLogin, tokenStorageKey, userStorageKey])
+  }, [resolvedApiEndpoint, onLogin, tokenStorageKey, userStorageKey])
 
   const logout = useCallback(async () => {
     setLoading(true)
 
     try {
       if (tokens?.accessToken) {
-        await fetch(`${apiEndpoint}/logout`, {
+        await fetch(`${resolvedApiEndpoint}/logout`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${tokens.accessToken}`,
@@ -276,14 +277,14 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       setLoading(false)
       onLogout?.()
     }
-  }, [apiEndpoint, tokens, onLogout])
+  }, [resolvedApiEndpoint, tokens, onLogout])
 
   const register = useCallback(async (data: { email: string; password: string; name: string }) => {
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch(`${apiEndpoint}/register`, {
+      const response = await fetch(`${resolvedApiEndpoint}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -307,13 +308,13 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     } finally {
       setLoading(false)
     }
-  }, [apiEndpoint, onLogin])
+  }, [resolvedApiEndpoint, onLogin])
 
   const refreshTokens = useCallback(async () => {
     if (!tokens?.refreshToken) return
 
     try {
-      const response = await fetch(`${apiEndpoint}/refresh`, {
+      const response = await fetch(`${resolvedApiEndpoint}/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: tokens.refreshToken }),
@@ -345,7 +346,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       // The user can still use the app offline with their existing token
       // Silent
     }
-  }, [apiEndpoint, tokens, user, logout, onTokenRefresh])
+  }, [resolvedApiEndpoint, tokens, user, logout, onTokenRefresh])
 
   const updateUser = useCallback((updates: Partial<User>) => {
     setUser((prev) => {
@@ -409,7 +410,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
     const refreshUser = async () => {
       try {
-        const response = await fetch(`${apiEndpoint}/me`, {
+        const response = await fetch(`${resolvedApiEndpoint}/me`, {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
         })
         if (response.ok) {

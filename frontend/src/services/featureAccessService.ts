@@ -34,6 +34,7 @@ class FeatureAccessService {
   private features: FeatureAccess = {}
   private usageLimits: UsageLimits | null = null
   private loading = false
+  private loadedTenantId: string | null = null
   private error: string | null = null
   private listeners: Array<() => void> = []
 
@@ -64,23 +65,10 @@ class FeatureAccessService {
   // Load features for current tenant
   async loadFeatures(tenantId?: string) {
     if (!tenantId) return
+    // Skip if already loaded for this tenant and not in error state
+    if (this.loadedTenantId === tenantId && !this.error && Object.keys(this.features).length > 0) return
     // Prevent concurrent loads — if already loading, skip
     if (this.loading) return
-
-    // If offline, try to restore cached features from localStorage
-    if (!navigator.onLine) {
-      const cached = localStorage.getItem('cachedFeatures')
-      if (cached) {
-        try {
-          this.features = JSON.parse(cached)
-          const cachedLimits = localStorage.getItem('cachedUsageLimits')
-          if (cachedLimits) this.usageLimits = JSON.parse(cachedLimits)
-        } catch {}
-      }
-      this.loading = false
-      this.notifyListeners()
-      return
-    }
 
     this.loading = true
     this.error = null
@@ -95,6 +83,7 @@ class FeatureAccessService {
 
       const data = await response.json()
       this.features = this.normalizeFeatures(data.features || {})
+      this.loadedTenantId = tenantId
 
       // Cache features in localStorage for offline access
       localStorage.setItem('cachedFeatures', JSON.stringify(this.features))
@@ -109,6 +98,7 @@ class FeatureAccessService {
       if (cached) {
         try { this.features = JSON.parse(cached) } catch {}
       }
+      this.loadedTenantId = null
       this.error = error instanceof Error ? error.message : 'Failed to load features'
     } finally {
       this.loading = false
@@ -296,6 +286,7 @@ class FeatureAccessService {
     this.features = {}
     this.usageLimits = null
     this.loading = false
+    this.loadedTenantId = null
     this.error = null
     this.notifyListeners()
   }
@@ -332,9 +323,9 @@ export function useFeatureAccess() {
     // Sync immediately in case the service already has data
     syncState()
 
-    // Load features if we have a tenant and haven't loaded yet
+    // Load features if we have a tenant — always reload on user/tenant change
     if (user?.tenantId) {
-      if (!featureAccessService.isLoading() && Object.keys(featureAccessService.getFeatureAccess()).length === 0) {
+      if (!featureAccessService.isLoading()) {
         featureAccessService.loadFeatures(user.tenantId)
       }
     } else {

@@ -5,7 +5,7 @@ import { JWTAuthProvider } from './contexts/JWTAuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import './index.css'
 
-const API_URL = import.meta.env.VITE_API_URL || ''
+const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

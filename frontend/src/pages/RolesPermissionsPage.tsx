@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
-import { useOnlineStatus } from '@/db/hooks'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 
 const PERM_LABELS: Record<string, string> = {
@@ -89,7 +88,6 @@ export default function RolesPermissionsPage() {
   const [permSearch, setPermSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
-  const online = useOnlineStatus()
 
   useEffect(() => { loadStaff(); loadBranches(); loadPermSchema(); loadCashAccounts() }, [])
   useEffect(() => {
@@ -102,12 +100,8 @@ export default function RolesPermissionsPage() {
 
   const loadStaff = async () => {
     try {
-      if (online) {
-        const data = await staffApi.list()
-        setStaff(data)
-      } else {
-        setStaff(await getLocalStaff() as any)
-      }
+      const data = await staffApi.list()
+      setStaff(data)
     } catch (err: any) {
       try { setStaff(await getLocalStaff() as any) } catch {
         toast({ variant: 'destructive', title: 'Failed to load staff', description: err?.message })
@@ -117,12 +111,8 @@ export default function RolesPermissionsPage() {
 
   const loadBranches = async () => {
     try {
-      if (online) {
-        const data = await branchesApi.active()
-        setBranches(data)
-      } else {
-        setBranches(await getLocalBranches() as any)
-      }
+      const data = await branchesApi.active()
+      setBranches(data)
     } catch {
       try { setBranches(await getLocalBranches() as any) } catch {}
     }

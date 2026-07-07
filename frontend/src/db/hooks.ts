@@ -9,7 +9,7 @@ import {
   type SyncStatus,
 } from './sync'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-backend.up.railway.app'
+const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
 
 // Live queries — automatically re-render when IndexedDB data changes
 export function useLocalProducts(search?: string) {
@@ -100,37 +100,45 @@ export function useSyncNow() {
 
 // Online status — uses navigator.onLine + real ping check
 // navigator.onLine is unreliable on mobile (reports true on WiFi without internet)
+// We default to true and only mark offline after consecutive failures to avoid false negatives
 export function useOnlineStatus(): boolean {
-  const [online, setOnline] = useState(navigator.onLine)
+  const [online, setOnline] = useState(true)
 
   useEffect(() => {
     let active = true
     let pingTimer: ReturnType<typeof setInterval>
+    let consecutiveFailures = 0
 
     const checkRealConnectivity = async () => {
       if (!navigator.onLine) {
-        if (active) setOnline(false)
+        if (active) { consecutiveFailures = 0; setOnline(false) }
         return
       }
       try {
-        // Quick HEAD request to our own API — if it fails, we're effectively offline
         const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 5000)
+        const timeout = setTimeout(() => controller.abort(), 10000)
         const res = await fetch(`${API_URL}/api/health`, {
           method: 'GET',
           signal: controller.signal,
           cache: 'no-store',
         })
         clearTimeout(timeout)
-        if (active) setOnline(res.ok)
-      } catch {
-        // If the ping fails (timeout, network error, abort), we're offline
-        if (active) setOnline(false)
+        if (active) {
+          consecutiveFailures = 0
+          setOnline(res.ok)
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return // timeout — keep previous state
+        if (active) {
+          consecutiveFailures++
+          // Only mark offline after 2 consecutive failures to avoid false negatives
+          if (consecutiveFailures >= 2) setOnline(false)
+        }
       }
     }
 
-    const on = () => { if (active) setOnline(true); checkRealConnectivity() }
-    const off = () => { if (active) setOnline(false) }
+    const on = () => { if (active) { consecutiveFailures = 0; setOnline(true) }; checkRealConnectivity() }
+    const off = () => { if (active) { consecutiveFailures = 0; setOnline(false) } }
 
     window.addEventListener('online', on)
     window.addEventListener('offline', off)

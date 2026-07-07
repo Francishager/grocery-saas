@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-backend.up.railway.app'
+const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
 
 interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>
@@ -98,7 +98,7 @@ async function tryRefreshToken(): Promise<string | null> {
       if (!stored) return null
       const tokens = JSON.parse(stored)
       if (!tokens?.refreshToken) return null
-      const API_BASE = import.meta.env.VITE_API_URL || 'https://grocery-saas-backend.up.railway.app'
+      const API_BASE = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
       const res = await fetch(`${API_BASE}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
