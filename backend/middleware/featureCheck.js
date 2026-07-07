@@ -79,8 +79,8 @@ export function requireFeature(featureName) {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    // Platform admins and owners bypass feature checks
-    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser || req.user.role === 'owner') {
+    // Platform admins bypass feature checks
+    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
       return next();
     }
 
@@ -125,7 +125,7 @@ export function requireAllFeatures(...featureNames) {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser || req.user.role === 'owner') {
+    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
       return next();
     }
 
