@@ -72,7 +72,7 @@ export const ALL_PERMISSION_KEYS = [
 // Only saas_admin bypasses all checks (platform-level).
 // =====================================================
 export const ROLE_DEFAULTS = {
-  owner: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
+  owner: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, true])),
   manager: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
   accountant: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
   attendant: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
@@ -81,11 +81,12 @@ export const ROLE_DEFAULTS = {
 // =====================================================
 // Resolve permissions for a user.
 // - saas_admin: wildcard "*" (platform-level, bypasses all checks)
-// - ALL other roles (including owner): permissions come ONLY
-//   from the UserPermission table. No auto-permissions.
+// - owner: ALL permissions (business owner has full access)
+// - Other roles: permissions come ONLY from the UserPermission table
 // =====================================================
 export function permissionsForUser(user) {
   if (user.role === "saas_admin") return ["*"];
+  if (user.role === "owner") return [...ALL_PERMISSION_KEYS];
   // No role gets hardcoded permissions — must be explicitly assigned
   return [];
 }

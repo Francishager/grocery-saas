@@ -182,11 +182,12 @@ export const requirePermission = (permission) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
     
+    // Owner role always has full access
+    if (req.user.role === 'owner') return next();
+    
     const permissions = req.user.permissions || [];
-    console.log('[auth] Checking permission:', permission, 'User permissions:', permissions);
     
     if (!permissions.includes(permission) && !permissions.includes('*')) {
-      console.log('[auth] Permission denied - required:', permission, 'user has:', permissions);
       return res.status(403).json({ 
         message: 'Permission denied',
         required: permission,

@@ -359,6 +359,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
   const hasPermission = useCallback((permission: string): boolean => {
     if (!user) return false
+    if (user.role === 'owner' || user.role === 'saas_admin') return true
     const perms = user.permissions || []
     return perms.includes(permission) || perms.includes('*')
   }, [user])

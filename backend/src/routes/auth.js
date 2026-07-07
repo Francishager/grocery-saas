@@ -28,8 +28,9 @@ function userPayload(user, userPerm) {
   const isPlatformUser = user.role === "saas_admin";
   let permissions = permissionsForUser(user);
 
-  // For ALL non-saas_admin roles (including owner): permissions come EXCLUSIVELY from UserPermission table
-  if (!isPlatformUser) {
+  // owner gets all permissions from permissionsForUser
+  // Other non-saas_admin roles: permissions come from UserPermission table
+  if (!isPlatformUser && user.role !== "owner") {
     permissions = [];
     if (userPerm) {
       for (const [key, val] of Object.entries(userPerm)) {
@@ -82,17 +83,34 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Fetch granular permissions BEFORE signing JWT so they're included in the token
+    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+
+    // Build permissions list: saas_admin gets wildcard, owner gets all, others get explicit permissions from UserPermission table
+    let jwtPermissions;
+    if (user.role === "saas_admin") {
+      jwtPermissions = ["*"];
+    } else if (user.role === "owner") {
+      jwtPermissions = permissionsForUser(user); // returns all permission keys
+    } else {
+      jwtPermissions = [];
+      if (userPerm) {
+        for (const [key, val] of Object.entries(userPerm)) {
+          if (key.startsWith("can") && val === true) {
+            jwtPermissions.push(key);
+          }
+        }
+      }
+    }
+
     const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
     const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
-
-    // Fetch granular permissions
-    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
 
     res.json({
       user: userPayload(user, userPerm),
@@ -160,8 +178,26 @@ router.post("/refresh", async (req, res) => {
     }
 
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+
+    // Build permissions list: saas_admin gets wildcard, owner gets all, others get explicit permissions from UserPermission table
+    let jwtPermissions;
+    if (user.role === "saas_admin") {
+      jwtPermissions = ["*"];
+    } else if (user.role === "owner") {
+      jwtPermissions = permissionsForUser(user); // returns all permission keys
+    } else {
+      jwtPermissions = [];
+      if (userPerm) {
+        for (const [key, val] of Object.entries(userPerm)) {
+          if (key.startsWith("can") && val === true) {
+            jwtPermissions.push(key);
+          }
+        }
+      }
+    }
+
     const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
