@@ -208,6 +208,18 @@ async function seedPlanFeatures() {
     let planFeatureNames = []
 
     switch (plan.slug) {
+      case 'freemium':
+        // Freemium: same baseline as starter/default, but explicitly includes
+        // core financial controls for small businesses: Expenses and Returns & Refunds.
+        planFeatureNames = [
+          'dashboard', 'sales', 'sales.pos', 'sales.returns',
+          'customers',
+          'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
+          'expenses',
+          'reports', 'reports.sales', 'reports.inventory',
+          'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+        ]
+        break
       case 'starter':
         planFeatureNames = [
           'dashboard', 'sales', 'sales.pos',
