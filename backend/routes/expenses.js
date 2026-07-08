@@ -378,7 +378,7 @@ router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpens
 // Create cash account
 router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
-    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName } = req.body
+    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId } = req.body
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'Account name is required' })
@@ -414,6 +414,8 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExp
       return res.status(400).json({ error: 'Account with this name already exists' })
     }
 
+    const balanceValue = toMoney(balance, 0)
+
     const account = await prisma.cashAccount.create({
       data: {
         tenantId: req.tenant.id,
@@ -424,13 +426,114 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExp
         bankName: type === 'bank' ? bankName : null,
         accountHolder: accountHolder || null,
         branchName: type === 'bank' ? (branchName || null) : null,
+        balance: balanceValue
       }
     })
+
+    // Optionally assign this cash account to a staff member for till accountability
+    if (assignedStaffId) {
+      const staff = await prisma.user.findFirst({
+        where: { id: assignedStaffId, tenantId: req.tenant.id, isActive: true }
+      })
+      if (!staff) {
+        return res.status(400).json({ error: 'Invalid staff selected for this cash account' })
+      }
+
+      await prisma.user.update({
+        where: { id: assignedStaffId },
+        data: { cashAccountId: account.id }
+      })
+    }
 
     res.status(201).json(account)
   } catch (error) {
     console.error('Create cash account error:', error)
     res.status(500).json({ error: 'Failed to create cash account' })
+  }
+})
+
+// Update cash account
+router.put('/cash-accounts/:id', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive } = req.body
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Account name is required' })
+    }
+    if (!type || !['cash', 'mobile_money', 'bank', 'card'].includes(type)) {
+      return res.status(400).json({ error: 'Valid account type is required (cash, mobile_money, bank, card)' })
+    }
+    if (type === 'bank') {
+      if (!bankName || !String(bankName).trim()) {
+        return res.status(400).json({ error: 'Bank name is required for bank accounts' })
+      }
+      if (!accountNumber || !String(accountNumber).trim()) {
+        return res.status(400).json({ error: 'Account number is required for bank accounts' })
+      }
+    }
+    if (type === 'mobile_money') {
+      if (!accountNumber || !String(accountNumber).trim()) {
+        return res.status(400).json({ error: 'Phone number is required for mobile money accounts' })
+      }
+    }
+
+    const existing = await prisma.cashAccount.findFirst({
+      where: { id, tenantId: req.tenant.id }
+    })
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Cash account not found' })
+    }
+
+    const nameConflict = await prisma.cashAccount.findFirst({
+      where: {
+        tenantId: req.tenant.id,
+        name,
+        id: { not: id }
+      }
+    })
+
+    if (nameConflict) {
+      return res.status(400).json({ error: 'Account with this name already exists' })
+    }
+
+    const balanceValue = balance !== undefined ? toMoney(balance, existing.balance) : existing.balance
+
+    const account = await prisma.cashAccount.update({
+      where: { id },
+      data: {
+        name,
+        type,
+        currency,
+        accountNumber: accountNumber || null,
+        bankName: type === 'bank' ? bankName : null,
+        accountHolder: accountHolder || null,
+        branchName: type === 'bank' ? (branchName || null) : null,
+        balance: balanceValue,
+        ...(typeof isActive === 'boolean' ? { isActive } : {}),
+      }
+    })
+
+    // Optionally (re)assign this cash account to a staff member
+    if (assignedStaffId) {
+      const staff = await prisma.user.findFirst({
+        where: { id: assignedStaffId, tenantId: req.tenant.id, isActive: true }
+      })
+      if (!staff) {
+        return res.status(400).json({ error: 'Invalid staff selected for this cash account' })
+      }
+
+      await prisma.user.update({
+        where: { id: assignedStaffId },
+        data: { cashAccountId: id }
+      })
+    }
+
+    res.json(account)
+  } catch (error) {
+    console.error('Update cash account error:', error)
+    res.status(500).json({ error: 'Failed to update cash account' })
   }
 })
 
