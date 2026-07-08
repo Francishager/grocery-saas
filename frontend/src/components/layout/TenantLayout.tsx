@@ -237,6 +237,7 @@ const reportCategories: ReportCategoryDef[] = [
 
 const accountingSubItems = [
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport' },
+  { to: '/tenant/accounting/expenses', label: 'Expenses & Cash Flow', icon: CreditCard, feature: 'expenses', permission: 'canViewExpense' },
   { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: 'canViewFinancialReport' },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
   { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: 'canViewFinancialReport' },

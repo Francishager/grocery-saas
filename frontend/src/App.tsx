@@ -47,6 +47,7 @@ import AgriculturePage from '@/pages/AgriculturePage'
 import ServiceBusinessPage from '@/pages/ServiceBusinessPage'
 import UserProfilePage from '@/pages/UserProfilePage'
 import ReferralPage from '@/pages/ReferralPage'
+import ExpensesPage from '@/pages/expenses/ExpensesPage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -148,6 +149,7 @@ function App() {
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting"><AccountingPage /></FeatureGuard>} />
+          <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission="canViewExpense"><ExpensesPage /></FeatureGuard>} />
           <Route path="accounting/transactions" element={<FeatureGuard feature="accounting"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="inventory"><DataImporterPage /></FeatureGuard>} />
