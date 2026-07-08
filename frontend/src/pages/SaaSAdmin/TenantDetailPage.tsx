@@ -518,7 +518,8 @@ export const TenantDetailPage: React.FC = () => {
                 <p className="text-gray-500">No branches created yet</p>
               </div>
             ) : (
-              <table className="w-full">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[600px]">
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Branch Name</th>
@@ -547,6 +548,7 @@ export const TenantDetailPage: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>
@@ -559,7 +561,8 @@ export const TenantDetailPage: React.FC = () => {
               <h2 className="text-lg font-semibold">Users & IP Addresses</h2>
               <p className="text-sm text-gray-500">All users in this tenant and their IP addresses from audit logs</p>
             </div>
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px]">
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">User</th>
@@ -598,6 +601,7 @@ export const TenantDetailPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -609,7 +613,8 @@ export const TenantDetailPage: React.FC = () => {
               <h2 className="text-lg font-semibold">Recent Activity (Audit Logs)</h2>
               <p className="text-sm text-gray-500">Last 50 actions from this tenant with IP addresses</p>
             </div>
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px]">
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">User</th>
@@ -633,6 +638,7 @@ export const TenantDetailPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

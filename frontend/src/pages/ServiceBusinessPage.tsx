@@ -126,8 +126,8 @@ export default function ServiceBusinessPage() {
       {tab === 'appointments' && (
         <div className="space-y-4">
           <Button onClick={() => setShowApptModal(true)}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {appointments.map(a => (
@@ -154,8 +154,8 @@ export default function ServiceBusinessPage() {
       {tab === 'work-orders' && (
         <div className="space-y-4">
           <Button onClick={() => setShowWOModal(true)}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-left">Priority</th><th className="p-2 text-right">Est. Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {workOrders.map(w => (
@@ -182,8 +182,8 @@ export default function ServiceBusinessPage() {
       {tab === 'contracts' && (
         <div className="space-y-4">
           <Button onClick={() => setShowContractModal(true)}><Plus className="mr-1 h-4 w-4" /> New Contract</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Contract No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-right">Value</th><th className="p-2 text-left">Billing</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {contracts.map(c => (
@@ -205,8 +205,8 @@ export default function ServiceBusinessPage() {
 
       {tab === 'car-wash' && (
         <div className="space-y-4">
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Attendant</th></tr></thead>
               <tbody>
                 <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Car wash records will appear here once logged</td></tr>
@@ -218,8 +218,8 @@ export default function ServiceBusinessPage() {
 
       {tab === 'garage' && (
         <div className="space-y-4">
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th></tr></thead>
               <tbody>
                 <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Garage service records will appear here once logged</td></tr>

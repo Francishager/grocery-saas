@@ -142,8 +142,8 @@ export default function FuelStationPage() {
               </Card>
             ))}
           </div>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Pump</th><th className="p-2 text-left">Tank</th><th className="p-2 text-left">Nozzles</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {pumps.map(p => (
@@ -161,8 +161,8 @@ export default function FuelStationPage() {
       </div>
 
       <div className={cn('space-y-4', tab !== 'deliveries' && 'hidden')}>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Tank</th><th className="p-2 text-left">Supplier</th><th className="p-2 text-right">Litres</th><th className="p-2 text-right">Unit Cost</th><th className="p-2 text-right">Total</th></tr></thead>
               <tbody>
                 {deliveries.map(d => (
@@ -181,8 +181,8 @@ export default function FuelStationPage() {
       </div>
 
       <div className={cn('space-y-4', tab !== 'meter_readings' && 'hidden')}>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Pump</th><th className="p-2 text-right">Opening</th><th className="p-2 text-right">Closing</th><th className="p-2 text-right">Litres Sold</th><th className="p-2 text-right">Amount</th></tr></thead>
               <tbody>
                 {readings.map(r => (
@@ -201,8 +201,8 @@ export default function FuelStationPage() {
       </div>
 
       <div className={cn('space-y-4', tab !== 'dipstick' && 'hidden')}>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Tank</th><th className="p-2 text-right">Dipstick Level</th><th className="p-2 text-right">Book Stock</th><th className="p-2 text-right">Variance</th><th className="p-2 text-left">Attendant</th></tr></thead>
               <tbody>
                 <tr className="border-t"><td colSpan={6} className="p-8 text-center text-muted-foreground">Dipstick readings will appear here once recorded</td></tr>
@@ -212,8 +212,8 @@ export default function FuelStationPage() {
       </div>
 
       <div className={cn('space-y-4', tab !== 'shifts' && 'hidden')}>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Shift No</th><th className="p-2 text-left">Pump</th><th className="p-2 text-right">Litres</th><th className="p-2 text-right">Total Sales</th><th className="p-2 text-right">Net</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {shifts.map(s => (
@@ -233,8 +233,8 @@ export default function FuelStationPage() {
       </div>
 
       <div className={cn('space-y-4', tab !== 'pricing' && 'hidden')}>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Fuel Type</th><th className="p-2 text-right">Pump Price</th><th className="p-2 text-right">Cost Price</th><th className="p-2 text-right">Margin</th><th className="p-2 text-left">Effective Date</th></tr></thead>
               <tbody>
                 {tanks.map(t => (
@@ -252,8 +252,8 @@ export default function FuelStationPage() {
       </div>
 
       <div className={cn('space-y-4', tab !== 'compliance' && 'hidden')}>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Inspection Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Result</th><th className="p-2 text-left">Next Due</th><th className="p-2 text-left">Notes</th></tr></thead>
               <tbody>
                 <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Compliance records will appear here once logged</td></tr>

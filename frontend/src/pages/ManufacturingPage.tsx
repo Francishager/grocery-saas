@@ -98,8 +98,8 @@ export default function ManufacturingPage() {
 
         <TabsContent value="orders" className="space-y-4">
           <Button onClick={() => setShowOrderModal(true)}><Plus className="mr-1 h-4 w-4" /> New Production Order</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Product</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {orders.map(o => (
@@ -144,8 +144,8 @@ export default function ManufacturingPage() {
 
         <TabsContent value="waste" className="space-y-4">
           <Button onClick={() => setShowWasteModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Waste</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Order</th><th className="p-2 text-left">Product</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Reason</th></tr></thead>
               <tbody>
                 {waste.map(w => (

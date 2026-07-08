@@ -351,11 +351,11 @@ export default function TransactionAccountsPage() {
 
       {/* Account type tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-4 h-auto w-full">
-          <TabsTrigger value="bank" className="text-base font-medium"><Landmark className="h-5 w-5 mr-2" /> Bank Accounts</TabsTrigger>
-          <TabsTrigger value="cash" className="text-base font-medium"><Wallet className="h-5 w-5 mr-2" /> Cash Accounts</TabsTrigger>
-          <TabsTrigger value="safe" className="text-base font-medium"><Shield className="h-5 w-5 mr-2" /> Safe Accounts</TabsTrigger>
-          <TabsTrigger value="mobile_money" className="text-base font-medium"><Smartphone className="h-5 w-5 mr-2" /> Mobile Money</TabsTrigger>
+        <TabsList className="grid grid-cols-2 sm:grid-cols-4 h-auto w-full">
+          <TabsTrigger value="bank" className="text-xs sm:text-base font-medium"><Landmark className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Bank Accounts</span><span className="sm:hidden">Bank</span></TabsTrigger>
+          <TabsTrigger value="cash" className="text-xs sm:text-base font-medium"><Wallet className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Cash Accounts</span><span className="sm:hidden">Cash</span></TabsTrigger>
+          <TabsTrigger value="safe" className="text-xs sm:text-base font-medium"><Shield className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Safe Accounts</span><span className="sm:hidden">Safe</span></TabsTrigger>
+          <TabsTrigger value="mobile_money" className="text-xs sm:text-base font-medium"><Smartphone className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Mobile Money</span><span className="sm:hidden">Mobile</span></TabsTrigger>
         </TabsList>
 
         <TabsContent value="bank" className="space-y-4">

@@ -797,7 +797,7 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
                   
-                  <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Credit Limit</p>
                       <p className="font-semibold">{Number(customer.creditLimit || 0).toFixed(2)}</p>
@@ -870,7 +870,7 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Total</p>
                       <p className="font-semibold">{Number(sale.total || 0).toFixed(2)}</p>
@@ -957,8 +957,8 @@ export default function ReceivablesPage() {
           ) : fuelCards.length === 0 ? (
             <Card><CardContent className="p-6 text-sm text-muted-foreground">No fuel cards registered yet. Click "Add Fuel Card" to create one.</CardContent></Card>
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full text-sm">
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-muted">
                   <tr>
                     <th className="p-2 text-left">Card Number</th>
@@ -1017,8 +1017,8 @@ export default function ReceivablesPage() {
           ) : creditAccounts.length === 0 ? (
             <Card><CardContent className="p-6 text-sm text-muted-foreground">No credit accounts found. Set a credit limit on a customer to create a credit account.</CardContent></Card>
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full text-sm">
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-muted">
                   <tr>
                     <th className="p-2 text-left">Customer</th>
@@ -1510,7 +1510,7 @@ export default function ReceivablesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><Label>Initial Balance</Label><Input type="number" value={fuelCardForm.balance} onChange={e => setFuelCardForm({ ...fuelCardForm, balance: e.target.value })} /></div>
                 <div><Label>Credit Limit</Label><Input type="number" value={fuelCardForm.creditLimit} onChange={e => setFuelCardForm({ ...fuelCardForm, creditLimit: e.target.value })} /></div>
               </div>

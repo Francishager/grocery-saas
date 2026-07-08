@@ -154,7 +154,8 @@ export const BusinessesPage: React.FC = () => {
         ) : tenants.length === 0 ? (
           <div className="text-center py-12"><Building className="w-12 h-12 text-gray-300 mx-auto mb-4" /><p className="text-gray-500">No tenants found</p></div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[800px]">
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Business</th>
@@ -194,6 +195,7 @@ export const BusinessesPage: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         <Pagination
           currentPage={currentPage}

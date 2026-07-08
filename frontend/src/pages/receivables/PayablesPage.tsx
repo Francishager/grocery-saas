@@ -574,7 +574,7 @@ export default function PayablesPage() {
                     </div>
                   </div>
                   
-                  <div className="mt-4 grid grid-cols-2 gap-4">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-muted-foreground">Outstanding Balance</p>
                       <p className="text-lg font-bold text-red-600">
@@ -620,7 +620,7 @@ export default function PayablesPage() {
                     </div>
                   </div>
                   
-                  <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Total Amount</p>
                       <p className="font-semibold">{purchase.total.toFixed(2)}</p>

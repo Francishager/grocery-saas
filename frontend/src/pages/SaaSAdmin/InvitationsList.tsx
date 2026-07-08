@@ -182,7 +182,8 @@ export const InvitationsList: React.FC = () => {
             <p className="text-gray-500">No invitations found</p>
           </div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px]">
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Email</th>
@@ -245,6 +246,7 @@ export const InvitationsList: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         <Pagination
           currentPage={currentPage}

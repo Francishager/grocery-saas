@@ -442,12 +442,12 @@ export default function AccountingPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-5 h-auto w-full">
-          <TabsTrigger value="chart-of-accounts" className="text-base font-medium"><Calculator className="h-5 w-5 mr-2" /> Chart of Accounts</TabsTrigger>
-          <TabsTrigger value="account-categories" className="text-base font-medium"><BookOpen className="h-5 w-5 mr-2" /> Account Categories</TabsTrigger>
-          <TabsTrigger value="journal-entry" className="text-base font-medium"><BookOpen className="h-5 w-5 mr-2" /> Register Entries</TabsTrigger>
-          <TabsTrigger value="journal-ledger" className="text-base font-medium"><Scale className="h-5 w-5 mr-2" /> Journal Ledger</TabsTrigger>
-          <TabsTrigger value="tax-management" className="text-base font-medium"><DollarSign className="h-5 w-5 mr-2" /> Tax Management</TabsTrigger>
+        <TabsList className="grid grid-cols-3 sm:grid-cols-5 h-auto w-full">
+          <TabsTrigger value="chart-of-accounts" className="text-xs sm:text-base font-medium"><Calculator className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Chart of Accounts</span><span className="sm:hidden">Accounts</span></TabsTrigger>
+          <TabsTrigger value="account-categories" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Categories</span><span className="sm:hidden">Cats</span></TabsTrigger>
+          <TabsTrigger value="journal-entry" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Register Entries</span><span className="sm:hidden">Entry</span></TabsTrigger>
+          <TabsTrigger value="journal-ledger" className="text-xs sm:text-base font-medium"><Scale className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Journal Ledger</span><span className="sm:hidden">Ledger</span></TabsTrigger>
+          <TabsTrigger value="tax-management" className="text-xs sm:text-base font-medium"><DollarSign className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Tax Management</span><span className="sm:hidden">Tax</span></TabsTrigger>
         </TabsList>
 
         {/* ─── Chart of Accounts Tab ─── */}
@@ -656,16 +656,16 @@ export default function AccountingPage() {
         {/* ─── Register Journal Ledger Entries Tab ─── */}
         <TabsContent value="journal-entry" className="space-y-4">
           {/* Sub-tabs to toggle between single and multiple journal */}
-          <div className="grid grid-cols-2 gap-2 border-b pb-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border-b pb-2">
             <button
               onClick={() => setJeSubForm('single')}
-              className={`px-4 py-3 text-base font-medium rounded-md transition-colors ${jeSubForm === 'single' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+              className={`px-4 py-3 text-sm sm:text-base font-medium rounded-md transition-colors ${jeSubForm === 'single' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
             >
               Journal Ledger Entry
             </button>
             <button
               onClick={() => setJeSubForm('multiple')}
-              className={`px-4 py-3 text-base font-medium rounded-md transition-colors ${jeSubForm === 'multiple' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+              className={`px-4 py-3 text-sm sm:text-base font-medium rounded-md transition-colors ${jeSubForm === 'multiple' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
             >
               Multiple General Journal
             </button>
@@ -769,7 +769,7 @@ export default function AccountingPage() {
                 </Button>
               </div>
               {/* Heading row */}
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 px-3 pb-2 border-b font-semibold text-sm">
+              <div className="hidden md:grid grid-cols-1 md:grid-cols-5 gap-3 px-3 pb-2 border-b font-semibold text-sm">
                 <div>Debit Account (DR)</div>
                 <div>Credit Account (CR)</div>
                 <div>Amount</div>

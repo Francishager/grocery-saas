@@ -147,7 +147,8 @@ export const PlatformAuditPage: React.FC = () => {
           <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
         ) : (
           <>
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[800px]">
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Tenant</th>
@@ -180,6 +181,7 @@ export const PlatformAuditPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
 
             {/* Pagination */}
             {pagination.pages > 1 && (

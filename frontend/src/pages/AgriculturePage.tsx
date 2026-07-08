@@ -134,8 +134,8 @@ export default function AgriculturePage() {
 
         <TabsContent value="harvests" className="space-y-4">
           <Button onClick={() => setShowHarvestModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Harvest</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Product</th><th className="p-2 text-left">Source</th><th className="p-2 text-right">Qty</th><th className="p-2 text-left">Quality</th></tr></thead>
               <tbody>
                 {harvests.map(h => (
@@ -155,8 +155,8 @@ export default function AgriculturePage() {
 
         <TabsContent value="expenses" className="space-y-4">
           <Button onClick={() => setShowExpenseModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Farm Expense</Button>
-          <div className="rounded-md border">
-            <table className="w-full text-sm">
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Category</th><th className="p-2 text-left">Description</th><th className="p-2 text-left">Source</th><th className="p-2 text-right">Amount</th></tr></thead>
               <tbody>
                 {expenses.map(e => (

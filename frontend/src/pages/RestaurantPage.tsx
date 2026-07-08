@@ -851,7 +851,7 @@ export default function RestaurantPage() {
                     <span className="text-muted-foreground ml-auto">{i.total.toLocaleString()}</span>
                   </label>
                 ))}</div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div><Label className="text-xs">Payment</Label><Select value={split.paymentMethod} onValueChange={v => setSplitForm(splitForm.map((s, i) => i === sIdx ? { ...s, paymentMethod: v } : s))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="card">Card</SelectItem><SelectItem value="mobile_money">Mobile Money</SelectItem></SelectContent></Select></div>
                   <div><Label className="text-xs">Tip</Label><Input type="number" value={split.tipAmount} onChange={e => setSplitForm(splitForm.map((s, i) => i === sIdx ? { ...s, tipAmount: Number(e.target.value) } : s))} /></div>
                 </div>
@@ -869,12 +869,12 @@ export default function RestaurantPage() {
           <div className="space-y-3">
             <div><Label>Rule Name</Label><Input value={happyHourForm.name} onChange={e => setHappyHourForm({ ...happyHourForm, name: e.target.value })} placeholder="Friday Cocktails 50% off" /></div>
             <div><Label>Product</Label><Select value={happyHourForm.productId} onValueChange={v => setHappyHourForm({ ...happyHourForm, productId: v })}><SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger><SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Start Time</Label><Input type="time" value={happyHourForm.startTime} onChange={e => setHappyHourForm({ ...happyHourForm, startTime: e.target.value })} /></div>
               <div><Label>End Time</Label><Input type="time" value={happyHourForm.endTime} onChange={e => setHappyHourForm({ ...happyHourForm, endTime: e.target.value })} /></div>
             </div>
             <div><Label>Days of Week</Label><Input value={happyHourForm.daysOfWeek} onChange={e => setHappyHourForm({ ...happyHourForm, daysOfWeek: e.target.value })} placeholder="1,2,3,4,5 (Mon-Fri)" /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Discount Type</Label><Select value={happyHourForm.discountType} onValueChange={v => setHappyHourForm({ ...happyHourForm, discountType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentage">Percentage</SelectItem><SelectItem value="fixed">Fixed Amount</SelectItem></SelectContent></Select></div>
               <div><Label>Discount Value</Label><Input type="number" value={happyHourForm.discountValue} onChange={e => setHappyHourForm({ ...happyHourForm, discountValue: Number(e.target.value) })} /></div>
             </div>
