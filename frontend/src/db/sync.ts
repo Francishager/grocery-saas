@@ -33,10 +33,35 @@ function getUserRole(): string | null {
   }
 }
 
-/** Roles that have access to HR endpoints */
+function getUserPermissions(): string[] {
+  try {
+    const raw = localStorage.getItem('auth_user')
+    if (!raw) return []
+    const user = JSON.parse(raw)
+    return user?.permissions || []
+  } catch {
+    return []
+  }
+}
+
+/** Check if user has permission to sync HR endpoints */
 function canSyncHR(): boolean {
   const role = getUserRole()
-  return role === 'owner' || role === 'admin' || role === 'manager'
+  if (role !== 'owner' && role !== 'admin' && role !== 'manager') return false
+  const perms = getUserPermissions()
+  if (!perms.includes('canViewStaff') && !perms.includes('*')) return false
+
+  // Check if hr feature is enabled via cached features
+  try {
+    const cached = localStorage.getItem('cachedFeatures')
+    if (cached) {
+      const features = JSON.parse(cached)
+      const hrEnabled = features?.hr?.enabled === true
+      if (!hrEnabled) return false
+    }
+  } catch {}
+
+  return true
 }
 
 async function pullTable<T extends { id: string; updatedAt?: string }>(
