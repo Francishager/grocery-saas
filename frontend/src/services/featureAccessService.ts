@@ -198,45 +198,10 @@ class FeatureAccessService {
     // While features are still loading, allow access (don't block the UI)
     if (this.loading) return true
 
-    // Check if feature is enabled — default allow if not in the map
-    if (!this.isFeatureEnabled(featureName)) return false
-
-    // Role-based restrictions
-    const featureRoleRestrictions: Record<string, string[]> = {
-      credit: ['owner', 'manager', 'accountant'],
-      payables: ['owner', 'manager', 'accountant'],
-      receivables: ['owner', 'manager', 'accountant'],
-      suppliers: ['owner', 'manager', 'accountant'],
-      expenses: ['owner', 'manager', 'accountant'],
-      cash_flow: ['owner', 'manager', 'accountant'],
-      advanced_reports: ['owner', 'accountant'],
-      multi_branch: ['owner'],
-      staff: ['owner', 'manager'],
-      audit: ['owner', 'manager', 'accountant'],
-      sms: ['owner'],
-      whatsapp: ['owner'],
-      offline_mode: ['owner', 'manager', 'accountant', 'attendant'],
-      fuel_station: ['owner', 'manager', 'attendant'],
-      'fuel_station.pricing': ['owner', 'manager'],
-      'fuel_station.fuel_cards': ['owner', 'manager', 'accountant'],
-      'fuel_station.credit_accounts': ['owner', 'manager', 'accountant'],
-      'fuel_station.compliance': ['owner', 'manager'],
-      'fuel_station.tank_calibration': ['owner', 'manager'],
-      'fuel_station.attendants': ['owner', 'manager'],
-      'fuel_station.reports': ['owner', 'manager', 'accountant', 'attendant'],
-      manufacturing: ['owner', 'manager'],
-      agriculture: ['owner', 'manager'],
-      service: ['owner', 'manager', 'attendant'],
-      restaurant: ['owner', 'manager', 'attendant'],
-      accounting: ['owner', 'manager', 'accountant'],
-    }
-
-    const allowedRoles = featureRoleRestrictions[featureName]
-    if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
-      return false
-    }
-
-    return true
+    // Pure plan-based gating: if the feature is enabled for this tenant
+    // (plan + tenant overrides), it is accessible here. Fine-grained user
+    // access is controlled via permissions, not hard-coded role lists.
+    return this.isFeatureEnabled(featureName)
   }
 
   // Get all features by category
