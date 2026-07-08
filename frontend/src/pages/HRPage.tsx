@@ -81,6 +81,7 @@ export default function HRPage() {
       if (online) {
         const res = await apiFetch('/api/hr')
         if (res.ok) setEmployees(await res.json())
+        else if (res.status === 403) setEmployees(await getLocalEmployees() as any)
       } else {
         setEmployees(await getLocalEmployees() as any)
       }
@@ -95,6 +96,7 @@ export default function HRPage() {
       if (online) {
         const res = await apiFetch('/api/hr/leave-requests')
         if (res.ok) setLeaveRequests(await res.json())
+        else if (res.status === 403) setLeaveRequests(await getLocalLeaveRequests() as any)
       } else {
         setLeaveRequests(await getLocalLeaveRequests() as any)
       }
@@ -108,6 +110,7 @@ export default function HRPage() {
       if (online) {
         const res = await apiFetch('/api/hr/payroll')
         if (res.ok) setPayroll(await res.json())
+        else if (res.status === 403) setPayroll(await getLocalPayroll() as any)
       } else {
         setPayroll(await getLocalPayroll() as any)
       }

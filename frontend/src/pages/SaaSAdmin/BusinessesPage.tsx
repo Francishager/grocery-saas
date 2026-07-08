@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft, ExternalLink, Pencil } from 'lucide-react'
+import { Building, Search, Eye, Ban, CheckCircle, Loader2, RefreshCw, X, Plus, ArrowRightLeft, ExternalLink, Pencil, MoreVertical } from 'lucide-react'
 
 interface Tenant {
   id: string; name: string; slug: string; status: string; planId?: string | null
@@ -41,6 +41,7 @@ export const BusinessesPage: React.FC = () => {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Tenant | null>(null)
   const [planTenant, setPlanTenant] = useState<Tenant | null>(null)
   const [planChanging, setPlanChanging] = useState<string | null>(null)
@@ -180,16 +181,45 @@ export const BusinessesPage: React.FC = () => {
                   <td className="px-4 py-3 text-sm text-gray-500">{t._count?.users || 0}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{t._count?.customers || 0}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(t.createdAt)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => navigate(`/saas/businesses/${t.id}`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="View Details"><ExternalLink size={16} /></button>
-                      <button onClick={() => navigate(`/saas/businesses/${t.id}?edit=1`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Edit Business"><Pencil size={16} /></button>
-                      <button onClick={() => setSelected(t)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded" title="Quick View"><Eye size={16} /></button>
-                      <button onClick={() => openPlanModal(t)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Change Plan"><ArrowRightLeft size={16} /></button>
-                      <button onClick={() => handleAction(t.id, t.status === 'suspended' ? 'activate' : 'suspend')} disabled={actionLoading === t.id} className={`p-1 rounded ${t.status === 'suspended' ? 'text-green-600 hover:bg-green-50' : 'text-red-600 hover:bg-red-50'}`} title={t.status === 'suspended' ? 'Activate' : 'Suspend'}>
-                        {actionLoading === t.id ? <Loader2 size={16} className="animate-spin" /> : t.status === 'suspended' ? <CheckCircle size={16} /> : <Ban size={16} />}
-                      </button>
-                    </div>
+                  <td className="px-4 py-3 text-right relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setOpenMenuId(openMenuId === t.id ? null : t.id)
+                      }}
+                      className="p-1.5 rounded hover:bg-gray-100 inline-flex items-center justify-center"
+                      title="Actions"
+                    >
+                      <MoreVertical size={18} className="text-gray-500" />
+                    </button>
+                    {openMenuId === t.id && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
+                        <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-md border bg-white shadow-lg py-1">
+                          <button onClick={() => { setOpenMenuId(null); navigate(`/saas/businesses/${t.id}`) }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-gray-50 text-gray-700">
+                            <ExternalLink size={14} /> View Details
+                          </button>
+                          <button onClick={() => { setOpenMenuId(null); navigate(`/saas/businesses/${t.id}?edit=1`) }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-gray-50 text-gray-700">
+                            <Pencil size={14} /> Edit Business
+                          </button>
+                          <button onClick={() => { setOpenMenuId(null); setSelected(t) }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-gray-50 text-gray-700">
+                            <Eye size={14} /> Quick View
+                          </button>
+                          <button onClick={() => { setOpenMenuId(null); openPlanModal(t) }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-gray-50 text-gray-700">
+                            <ArrowRightLeft size={14} /> Change Plan
+                          </button>
+                          <div className="border-t my-1" />
+                          <button
+                            onClick={() => { setOpenMenuId(null); handleAction(t.id, t.status === 'suspended' ? 'activate' : 'suspend') }}
+                            disabled={actionLoading === t.id}
+                            className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-gray-50 ${t.status === 'suspended' ? 'text-green-600' : 'text-red-600'}`}
+                          >
+                            {actionLoading === t.id ? <Loader2 size={14} className="animate-spin" /> : t.status === 'suspended' ? <CheckCircle size={14} /> : <Ban size={14} />}
+                            {t.status === 'suspended' ? 'Activate' : 'Suspend'}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -55,6 +55,7 @@ model Branch {
   assets             Asset[]
   fuelCards          FuelCard[]
   fuelCardTransactions FuelCardTransaction[]
+  taxPayments        TaxPayment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -189,6 +190,7 @@ model Tenant {
   // ASSETS
   // =====================
   assets            Asset[]
+  taxPayments       TaxPayment[]
 
   // =====================
   // REFERRAL SYSTEM
@@ -2367,4 +2369,27 @@ model Asset {
 
   @@index([tenantId, branchId])
   @@map("assets")
+}
+
+// =====================================================
+// TAX PAYMENTS
+// =====================================================
+
+model TaxPayment {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  amount        Float
+  currency      String   @default("USD")
+  periodFrom    DateTime?
+  periodTo      DateTime?
+  prn           String?
+  paymentMethod String   @default("cash")
+  dateOfPayment DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@map("tax_payments")
 }

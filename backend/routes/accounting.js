@@ -236,4 +236,47 @@ router.get("/reports/balance-sheet", authenticateToken, requirePermission("canVi
   }
 });
 
+// List tax payments
+router.get("/tax-payments", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const payments = await prisma.taxPayment.findMany({
+      where: scopedWhere(scope, {}),
+      include: { branch: { select: { id: true, name: true } } },
+      orderBy: { dateOfPayment: "desc" },
+    });
+    res.json(payments);
+  } catch (err) {
+    handleBranchError(res, err, "Failed to fetch tax payments");
+  }
+});
+
+// Create tax payment
+router.post("/tax-payments", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const { branch, amount, currency, from, to, prn, paymentMethod, dateOfPayment } = req.body;
+    if (!amount) return res.status(400).json({ error: "Amount required" });
+
+    const payment = await prisma.taxPayment.create({
+      data: {
+        tenantId,
+        branchId: branch || null,
+        amount: Number(amount),
+        currency: currency || "USD",
+        periodFrom: from ? new Date(from) : null,
+        periodTo: to ? new Date(to) : null,
+        prn: prn || null,
+        paymentMethod: paymentMethod || "cash",
+        dateOfPayment: dateOfPayment ? new Date(dateOfPayment) : new Date(),
+      },
+      include: { branch: { select: { id: true, name: true } } },
+    });
+    res.status(201).json(payment);
+  } catch (err) {
+    console.error("Create tax payment error:", err);
+    res.status(500).json({ error: "Failed to create tax payment" });
+  }
+});
+
 export default router;

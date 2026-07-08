@@ -89,7 +89,7 @@ export default function TransactionAccountsPage() {
   const fetchAccounts = async () => {
     try {
       if (online) {
-        const res = await apiFetch('/api/cash-accounts')
+        const res = await apiFetch('/api/expenses/cash-accounts')
         if (res.ok) setAccounts(await res.json())
       } else {
         setAccounts(await getLocalCashAccounts())
@@ -209,7 +209,7 @@ export default function TransactionAccountsPage() {
         payload.depletionAlertThreshold = form.depletionAlertThreshold ? Number(form.depletionAlertThreshold) : undefined
       }
 
-      const url = editingAccount ? `/api/cash-accounts/${editingAccount.id}` : '/api/cash-accounts'
+      const url = editingAccount ? `/api/expenses/cash-accounts/${editingAccount.id}` : '/api/expenses/cash-accounts'
       const method = editingAccount ? 'PUT' : 'POST'
 
       const res = await apiFetch(url, {
