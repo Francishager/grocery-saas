@@ -303,7 +303,11 @@ export const requireFeature = (featureName) => {
  * Require the authenticated user to have a cash account assigned.
  * Enforces cash-handling accountability — no user can record sales,
  * receive payments, or make payments without being assigned to a
- * cash account. Owners and platform admins bypass this check.
+ * cash account.
+ *
+ * Business owner accounts are explicitly blocked from performing
+ * cash transactions and must instead use a staff account when
+ * handling money. Platform admins still bypass this check.
  * Also loads the user's permissions for payment method gating.
  */
 export const requireCashAccount = async (req, res, next) => {
@@ -314,6 +318,14 @@ export const requireCashAccount = async (req, res, next) => {
   // Platform admins bypass
   if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
     return next();
+  }
+
+  // Block business owner accounts from performing cash transactions
+  if (req.user.role === 'owner') {
+    return res.status(403).json({
+      error: 'Business owner accounts cannot perform cash transactions. Please create a staff account to handle sales and payments.',
+      code: 'OWNER_CANNOT_TRANSACT',
+    });
   }
 
   // Check if user has a cash account assigned
@@ -353,8 +365,8 @@ export const requireCashAccount = async (req, res, next) => {
  * Must be called after requireCashAccount.
  */
 export const checkPaymentMethodPermission = (req, paymentMethod) => {
-  // Owners and platform admins can use all payment methods
-  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser || req.user.role === 'owner') {
+  // Platform admins can use all payment methods
+  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
     return true;
   }
 
