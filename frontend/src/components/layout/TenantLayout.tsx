@@ -342,11 +342,9 @@ export function TenantLayout() {
     return true
   })
   const visibleReceivablesSubItems = receivablesSubItems.filter((item) => {
-    const parentEnabled = canAccessFeature('receivables')
-    const subEnabled = item.feature ? canAccessFeature(item.feature) : false
-    if (!parentEnabled && !subEnabled) return false
+    if (item.feature && !canAccessFeature(item.feature)) return false
     if (item.permission && !hasPermission(item.permission)) {
-      if (isOwner && (parentEnabled || subEnabled)) return true
+      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
       return false
     }
     return true
