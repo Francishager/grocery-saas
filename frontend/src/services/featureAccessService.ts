@@ -155,7 +155,7 @@ class FeatureAccessService {
   // Returns true if the feature is not in the map (default allow — only PlanFeature/TenantFeature entries can disable).
   isFeatureEnabled(featureName: string): boolean {
     const entry = this.features[featureName]
-    if (entry === undefined) return true // Not in plan → default allow
+    if (entry === undefined) return false // Not in plan → default allow
     return entry.enabled === true
   }
 
