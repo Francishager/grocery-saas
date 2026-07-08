@@ -405,10 +405,10 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     });
     const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
 
-    if (!body.product_name || !String(body.product_name).trim()) {
+    if (!body.name || !String(body.name).trim()) {
       return res.status(400).json({ error: "Product name is required" });
     }
-    if (body.unit_price === undefined || body.unit_price === null || Number(body.unit_price) <= 0) {
+    if (body.price === undefined || body.price === null || Number(body.price) <= 0) {
       return res.status(400).json({ error: "Selling price must be greater than 0" });
     }
 
