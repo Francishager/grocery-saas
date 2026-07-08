@@ -77,7 +77,7 @@ async function checkedSaleItems(items, scope) {
 }
 
 // Create single sale
-router.post("/", authenticateToken, requirePermission("canCreateSale"), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("canCreateSale"), requireCashAccount, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: "body",
@@ -146,6 +146,27 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), async (r
         await tx.product.update({
           where: { id: item.productId },
           data: { quantity: { decrement: item.baseQty } },
+        });
+      }
+
+      // Add sale total to user's assigned cash account (money coming in)
+      if (req.userCashAccountId) {
+        const updatedAccount = await tx.cashAccount.update({
+          where: { id: req.userCashAccountId },
+          data: { balance: { increment: total } },
+        });
+
+        await tx.cashTransaction.create({
+          data: {
+            tenantId: scope.tenantId,
+            accountId: req.userCashAccountId,
+            type: "sale",
+            amount: total,
+            balanceAfter: updatedAccount.balance,
+            reference: created.receiptNo,
+            description: `Sale: ${created.receiptNo}`,
+            userId,
+          },
         });
       }
 

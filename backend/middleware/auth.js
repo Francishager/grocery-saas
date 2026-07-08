@@ -316,27 +316,6 @@ export const requireCashAccount = async (req, res, next) => {
     return next();
   }
 
-  // Owners bypass — they own the business and can transact freely
-  if (req.user.role === 'owner') {
-    // Still load their cash account if assigned
-    const ownerUser = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        cashAccountId: true,
-        cashAccount: { select: { id: true, name: true, type: true, balance: true, accountNumber: true, bankName: true } },
-        permissions: true,
-      },
-    });
-    if (ownerUser?.cashAccountId) {
-      req.userCashAccountId = ownerUser.cashAccountId;
-      req.userCashAccount = ownerUser.cashAccount;
-    }
-    if (ownerUser?.permissions) {
-      req.userPermissions = ownerUser.permissions;
-    }
-    return next();
-  }
-
   // Check if user has a cash account assigned
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
