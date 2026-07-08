@@ -360,12 +360,65 @@ router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpens
   try {
     await ensureDefaultCashAccounts(req.tenant.id)
 
-    const accounts = await prisma.cashAccount.findMany({
+    // Include assigned users so we can surface staff + branch on the API response
+    const rawAccounts = await prisma.cashAccount.findMany({
       where: {
         tenantId: req.tenant.id,
         isActive: true
       },
-      orderBy: { name: 'asc' }
+      orderBy: { name: 'asc' },
+      include: {
+        AssignedUsers: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            fname: true,
+            lname: true,
+            email: true,
+            role: true,
+            branches: {
+              include: { branch: { select: { id: true, name: true } } },
+            },
+          },
+        },
+      },
+    })
+
+    const accounts = rawAccounts.map((account) => {
+      const staff = account.AssignedUsers?.[0] || null
+      const primaryBranch = staff?.branches?.find((b) => b.isPrimary)?.branch || staff?.branches?.[0]?.branch || null
+
+      return {
+        id: account.id,
+        tenantId: account.tenantId,
+        name: account.name,
+        type: account.type,
+        accountNumber: account.accountNumber,
+        bankName: account.bankName,
+        accountHolder: account.accountHolder,
+        branchName: account.branchName,
+        balance: account.balance,
+        currency: account.currency,
+        isActive: account.isActive,
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt,
+
+        // Derived fields for UI
+        branchId: primaryBranch?.id || null,
+        branch: primaryBranch,
+        assignedStaffId: staff?.id || null,
+        assignedStaff: staff
+          ? {
+              id: staff.id,
+              name: `${staff.fname || ''} ${staff.lname || ''}`.trim() || staff.email,
+            }
+          : null,
+
+        // Mobile money helpers (reuse existing columns)
+        phoneNumber: account.type === 'mobile_money' ? account.accountNumber : null,
+        mobileMoneyName: account.type === 'mobile_money' ? account.accountHolder : null,
+        network: null,
+      }
     })
 
     res.json(accounts)
