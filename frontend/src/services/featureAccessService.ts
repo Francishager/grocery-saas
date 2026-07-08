@@ -150,8 +150,13 @@ class FeatureAccessService {
   }
 
   // Check if feature is enabled (primary API)
+  // Returns true if the feature is explicitly enabled.
+  // Returns false if the feature is explicitly disabled.
+  // Returns true if the feature is not in the map (default allow — only PlanFeature/TenantFeature entries can disable).
   isFeatureEnabled(featureName: string): boolean {
-    return this.features[featureName]?.enabled === true
+    const entry = this.features[featureName]
+    if (entry === undefined) return true // Not in plan → default allow
+    return entry.enabled === true
   }
 
   // Alias for isFeatureEnabled — matches spec naming convention hasFeature('inventory.products')
@@ -190,7 +195,10 @@ class FeatureAccessService {
     // SaaS Admin can access everything
     if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
 
-    // Check if feature is enabled — no offline bypass
+    // While features are still loading, allow access (don't block the UI)
+    if (this.loading) return true
+
+    // Check if feature is enabled — default allow if not in the map
     if (!this.isFeatureEnabled(featureName)) return false
 
     // Role-based restrictions
