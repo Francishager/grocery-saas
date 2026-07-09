@@ -138,4 +138,58 @@ router.put("/shifts/:id/close", authenticateToken, requirePermission("canEditFue
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== DIPSTICK READINGS =====
+router.get("/dipstick", authenticateToken, requirePermission("canViewFuelStation"), requireFeature("fuel_station.dipstick"), async (req, res) => {
+  try {
+    const rows = await prisma.fuelDipstickReading.findMany({ where: { tenantId: t(req) }, include: { tank: true }, orderBy: { readingDate: "desc" } });
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/dipstick", authenticateToken, requirePermission("canCreateFuelStation"), requireFeature("fuel_station.dipstick"), async (req, res) => {
+  try {
+    const { tankId, readingDate, dipstickLevel, bookStock, attendant, notes } = req.body;
+    if (!tankId) return res.status(400).json({ error: 'Tank is required' });
+    const variance = (Number(dipstickLevel) || 0) - (Number(bookStock) || 0);
+    const row = await prisma.fuelDipstickReading.create({ data: { tankId, readingDate: readingDate ? new Date(readingDate) : undefined, dipstickLevel: Number(dipstickLevel) || 0, bookStock: Number(bookStock) || 0, variance, attendant, notes, tenantId: t(req) } });
+    res.status(201).json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== PRICING =====
+router.get("/pricing", authenticateToken, requirePermission("canViewFuelStation"), requireFeature("fuel_station.pricing"), async (req, res) => {
+  try {
+    const rows = await prisma.fuelPricing.findMany({ where: { tenantId: t(req) }, orderBy: { effectiveDate: "desc" } });
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/pricing", authenticateToken, requirePermission("canCreateFuelStation"), requireFeature("fuel_station.pricing"), async (req, res) => {
+  try {
+    const { fuelType, pumpPrice, costPrice, effectiveDate, notes } = req.body;
+    if (!fuelType?.trim()) return res.status(400).json({ error: 'Fuel type is required' });
+    const margin = (Number(pumpPrice) || 0) - (Number(costPrice) || 0);
+    const row = await prisma.fuelPricing.create({ data: { fuelType, pumpPrice: Number(pumpPrice) || 0, costPrice: Number(costPrice) || 0, margin, effectiveDate: effectiveDate ? new Date(effectiveDate) : undefined, notes, tenantId: t(req) } });
+    res.status(201).json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== COMPLIANCE =====
+router.get("/compliance", authenticateToken, requirePermission("canViewFuelStation"), requireFeature("fuel_station.compliance"), async (req, res) => {
+  try {
+    const rows = await prisma.fuelCompliance.findMany({ where: { tenantId: t(req) }, orderBy: { inspectionDate: "desc" } });
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/compliance", authenticateToken, requirePermission("canCreateFuelStation"), requireFeature("fuel_station.compliance"), async (req, res) => {
+  try {
+    const { inspectionDate, type, result, nextDue, notes } = req.body;
+    if (!type?.trim()) return res.status(400).json({ error: 'Inspection type is required' });
+    if (!result?.trim()) return res.status(400).json({ error: 'Result is required' });
+    const row = await prisma.fuelCompliance.create({ data: { inspectionDate: inspectionDate ? new Date(inspectionDate) : undefined, type, result, nextDue: nextDue ? new Date(nextDue) : undefined, notes, tenantId: t(req) } });
+    res.status(201).json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

@@ -17,6 +17,9 @@ interface FuelTank { id: string; name: string; fuelType: string; capacity: numbe
 interface Delivery { id: string; tankId: string; tank?: FuelTank; supplierName: string | null; invoiceNo: string | null; litres: number; unitCost: number; totalCost: number; deliveryDate: string }
 interface MeterReading { id: string; pumpId: string; pump?: Pump; openingReading: number; closingReading: number; litresSold: number; amount: number; readingDate: string }
 interface ShiftReport { id: string; shiftNo: string; pump?: Pump | null; user: { id: string; fname?: string; lname?: string }; openingReading: number; closingReading: number; litresSold: number; cashSales: number; mobileSales: number; creditSales: number; totalSales: number; lubricantSales: number; carWashIncome: number; expenses: number; netAmount: number; status: string; startDate: string; endDate: string | null }
+interface DipstickReading { id: string; tankId: string; tank?: FuelTank; readingDate: string; dipstickLevel: number; bookStock: number; variance: number; attendant: string | null; notes: string | null }
+interface Pricing { id: string; fuelType: string; pumpPrice: number; costPrice: number; margin: number; effectiveDate: string; notes: string | null }
+interface Compliance { id: string; inspectionDate: string; type: string; result: string; nextDue: string | null; notes: string | null }
 
 export default function FuelStationPage() {
   const { tab: urlTab } = useParams()
@@ -26,32 +29,49 @@ export default function FuelStationPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [readings, setReadings] = useState<MeterReading[]>([])
   const [shifts, setShifts] = useState<ShiftReport[]>([])
+  const [dipsticks, setDipsticks] = useState<DipstickReading[]>([])
+  const [pricings, setPricings] = useState<Pricing[]>([])
+  const [compliances, setCompliances] = useState<Compliance[]>([])
   const [loading, setLoading] = useState(false)
   const [showPumpModal, setShowPumpModal] = useState(false)
   const [showTankModal, setShowTankModal] = useState(false)
   const [showDeliveryModal, setShowDeliveryModal] = useState(false)
   const [showShiftModal, setShowShiftModal] = useState(false)
+  const [showReadingModal, setShowReadingModal] = useState(false)
+  const [showDipstickModal, setShowDipstickModal] = useState(false)
+  const [showPricingModal, setShowPricingModal] = useState(false)
+  const [showComplianceModal, setShowComplianceModal] = useState(false)
   const [pumpForm, setPumpForm] = useState({ name: '', tankId: '', nozzleCount: 1 })
   const [tankForm, setTankForm] = useState({ name: '', fuelType: 'petrol', capacity: 0, currentStock: 0, unitCost: 0 })
   const [deliveryForm, setDeliveryForm] = useState({ tankId: '', supplierName: '', invoiceNo: '', litres: 0, unitCost: 0 })
   const [shiftForm, setShiftForm] = useState({ shiftNo: '', pumpId: '', openingReading: 0, startDate: '' })
+  const [readingForm, setReadingForm] = useState({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0 })
+  const [dipstickForm, setDipstickForm] = useState({ tankId: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' })
+  const [pricingForm, setPricingForm] = useState({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, notes: '' })
+  const [complianceForm, setComplianceForm] = useState({ type: 'environmental', result: 'pass', inspectionDate: '', nextDue: '', notes: '' })
   const { toast } = useToast()
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, tk, d, r, s] = await Promise.all([
+      const [p, tk, d, r, s, ds, pr, cp] = await Promise.all([
         apiFetch('/api/fuel/pumps').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/tanks').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/deliveries').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/meter-readings').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/shifts').then(r => r.json()).catch(() => []),
+        apiFetch('/api/fuel/dipstick').then(r => r.json()).catch(() => []),
+        apiFetch('/api/fuel/pricing').then(r => r.json()).catch(() => []),
+        apiFetch('/api/fuel/compliance').then(r => r.json()).catch(() => []),
       ])
       setPumps(Array.isArray(p) ? p : [])
       setTanks(Array.isArray(tk) ? tk : [])
       setDeliveries(Array.isArray(d) ? d : [])
       setReadings(Array.isArray(r) ? r : [])
       setShifts(Array.isArray(s) ? s : [])
+      setDipsticks(Array.isArray(ds) ? ds : [])
+      setPricings(Array.isArray(pr) ? pr : [])
+      setCompliances(Array.isArray(cp) ? cp : [])
     } catch (e) { console.error(e) } finally { setLoading(false) }
   }, [])
 
@@ -86,6 +106,28 @@ export default function FuelStationPage() {
     await apiFetch(`/api/fuel/shifts/${id}/close`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
     loadData()
   }
+  const createReading = async () => {
+    if (!readingForm.pumpId) { toast({ variant: 'destructive', title: 'Select a pump' }); return }
+    try { await apiFetch('/api/fuel/meter-readings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readingForm) })
+    setShowReadingModal(false); setReadingForm({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0 }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record reading' }) }
+  }
+  const createDipstick = async () => {
+    if (!dipstickForm.tankId) { toast({ variant: 'destructive', title: 'Select a tank' }); return }
+    try { await apiFetch('/api/fuel/dipstick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dipstickForm) })
+    setShowDipstickModal(false); setDipstickForm({ tankId: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record dipstick reading' }) }
+  }
+  const createPricing = async () => {
+    if (!pricingForm.fuelType.trim()) { toast({ variant: 'destructive', title: 'Fuel type is required' }); return }
+    if (pricingForm.pumpPrice <= 0) { toast({ variant: 'destructive', title: 'Pump price must be greater than 0' }); return }
+    try { await apiFetch('/api/fuel/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pricingForm) })
+    setShowPricingModal(false); setPricingForm({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to save price' }) }
+  }
+  const createCompliance = async () => {
+    if (!complianceForm.type.trim()) { toast({ variant: 'destructive', title: 'Inspection type is required' }); return }
+    if (!complianceForm.result.trim()) { toast({ variant: 'destructive', title: 'Result is required' }); return }
+    try { await apiFetch('/api/fuel/compliance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(complianceForm) })
+    setShowComplianceModal(false); setComplianceForm({ type: 'environmental', result: 'pass', inspectionDate: '', nextDue: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to log compliance' }) }
+  }
   const deletePump = async (id: string) => { try { await apiFetch(`/api/fuel/pumps/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
   const deleteTank = async (id: string) => { try { await apiFetch(`/api/fuel/tanks/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
@@ -115,6 +157,10 @@ export default function FuelStationPage() {
             <Button variant="outline" onClick={() => setShowPumpModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Pump</Button>
           </>}
           {tab === 'deliveries' && <Button onClick={() => setShowDeliveryModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Delivery</Button>}
+          {tab === 'meter_readings' && <Button onClick={() => setShowReadingModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Reading</Button>}
+          {tab === 'dipstick' && <Button onClick={() => setShowDipstickModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Dipstick</Button>}
+          {tab === 'pricing' && <Button onClick={() => setShowPricingModal(true)}><Plus className="mr-1 h-4 w-4" /> Set Price</Button>}
+          {tab === 'compliance' && <Button onClick={() => setShowComplianceModal(true)}><Plus className="mr-1 h-4 w-4" /> Log Inspection</Button>}
           {tab === 'shifts' && <Button onClick={() => setShowShiftModal(true)}><Plus className="mr-1 h-4 w-4" /> New Shift</Button>}
         </div>
       </div>
@@ -205,7 +251,17 @@ export default function FuelStationPage() {
             <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Tank</th><th className="p-2 text-right">Dipstick Level</th><th className="p-2 text-right">Book Stock</th><th className="p-2 text-right">Variance</th><th className="p-2 text-left">Attendant</th></tr></thead>
               <tbody>
-                <tr className="border-t"><td colSpan={6} className="p-8 text-center text-muted-foreground">Dipstick readings will appear here once recorded</td></tr>
+                {dipsticks.length === 0 && <tr className="border-t"><td colSpan={6} className="p-8 text-center text-muted-foreground">No dipstick readings yet. Click "Record Dipstick" to add one.</td></tr>}
+                {dipsticks.map(d => (
+                  <tr key={d.id} className="border-t">
+                    <td className="p-2">{new Date(d.readingDate).toLocaleDateString()}</td>
+                    <td className="p-2">{d.tank?.name || '—'}</td>
+                    <td className="p-2 text-right">{d.dipstickLevel.toFixed(1)}L</td>
+                    <td className="p-2 text-right">{d.bookStock.toFixed(1)}L</td>
+                    <td className={cn('p-2 text-right font-medium', d.variance < 0 ? 'text-red-500' : 'text-green-600')}>{d.variance.toFixed(1)}L</td>
+                    <td className="p-2">{d.attendant || '—'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -237,13 +293,14 @@ export default function FuelStationPage() {
             <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Fuel Type</th><th className="p-2 text-right">Pump Price</th><th className="p-2 text-right">Cost Price</th><th className="p-2 text-right">Margin</th><th className="p-2 text-left">Effective Date</th></tr></thead>
               <tbody>
-                {tanks.map(t => (
-                  <tr key={t.id} className="border-t">
-                    <td className="p-2 font-medium">{t.name} ({t.fuelType})</td>
-                    <td className="p-2 text-right">—</td>
-                    <td className="p-2 text-right">{t.unitCost.toFixed(0)}</td>
-                    <td className="p-2 text-right">—</td>
-                    <td className="p-2">—</td>
+                {pricings.length === 0 && <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">No prices set. Click "Set Price" to add one.</td></tr>}
+                {pricings.map(p => (
+                  <tr key={p.id} className="border-t">
+                    <td className="p-2 font-medium capitalize">{p.fuelType}</td>
+                    <td className="p-2 text-right">{p.pumpPrice.toFixed(0)}</td>
+                    <td className="p-2 text-right">{p.costPrice.toFixed(0)}</td>
+                    <td className={cn('p-2 text-right font-medium', p.margin < 0 ? 'text-red-500' : 'text-green-600')}>{p.margin.toFixed(0)}</td>
+                    <td className="p-2">{new Date(p.effectiveDate).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -256,7 +313,16 @@ export default function FuelStationPage() {
             <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Inspection Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Result</th><th className="p-2 text-left">Next Due</th><th className="p-2 text-left">Notes</th></tr></thead>
               <tbody>
-                <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Compliance records will appear here once logged</td></tr>
+                {compliances.length === 0 && <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">No compliance records. Click "Log Inspection" to add one.</td></tr>}
+                {compliances.map(c => (
+                  <tr key={c.id} className="border-t">
+                    <td className="p-2">{new Date(c.inspectionDate).toLocaleDateString()}</td>
+                    <td className="p-2">{c.type}</td>
+                    <td className="p-2"><Badge variant={c.result === 'pass' ? 'default' : c.result === 'fail' ? 'destructive' : 'secondary'}>{c.result}</Badge></td>
+                    <td className="p-2">{c.nextDue ? new Date(c.nextDue).toLocaleDateString() : '—'}</td>
+                    <td className="p-2">{c.notes || '—'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -340,6 +406,107 @@ export default function FuelStationPage() {
             <div><Label>Start Date</Label><Input type="datetime-local" value={shiftForm.startDate} onChange={e => setShiftForm({ ...shiftForm, startDate: e.target.value })} /></div>
           </div>
           <DialogFooter><Button onClick={createShift}>Start Shift</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Meter Reading Modal */}
+      <Dialog open={showReadingModal} onOpenChange={setShowReadingModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Meter Reading</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Pump</Label>
+              <Select value={readingForm.pumpId} onValueChange={v => setReadingForm({ ...readingForm, pumpId: v })}>
+                <SelectTrigger><SelectValue placeholder="Select pump" /></SelectTrigger><SelectContent>
+                  {pumps.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Opening Reading</Label><Input type="number" value={readingForm.openingReading} onChange={e => setReadingForm({ ...readingForm, openingReading: +e.target.value })} /></div>
+              <div><Label>Closing Reading</Label><Input type="number" value={readingForm.closingReading} onChange={e => setReadingForm({ ...readingForm, closingReading: +e.target.value })} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Litres Sold</Label><Input type="number" value={readingForm.litresSold} onChange={e => setReadingForm({ ...readingForm, litresSold: +e.target.value })} /></div>
+              <div><Label>Amount</Label><Input type="number" value={readingForm.amount} onChange={e => setReadingForm({ ...readingForm, amount: +e.target.value })} /></div>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={createReading}>Save Reading</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dipstick Modal */}
+      <Dialog open={showDipstickModal} onOpenChange={setShowDipstickModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record Dipstick Reading</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Tank</Label>
+              <Select value={dipstickForm.tankId} onValueChange={v => setDipstickForm({ ...dipstickForm, tankId: v })}>
+                <SelectTrigger><SelectValue placeholder="Select tank" /></SelectTrigger><SelectContent>
+                  {tanks.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Dipstick Level (L)</Label><Input type="number" value={dipstickForm.dipstickLevel} onChange={e => setDipstickForm({ ...dipstickForm, dipstickLevel: +e.target.value })} /></div>
+              <div><Label>Book Stock (L)</Label><Input type="number" value={dipstickForm.bookStock} onChange={e => setDipstickForm({ ...dipstickForm, bookStock: +e.target.value })} /></div>
+            </div>
+            <div><Label>Attendant</Label><Input value={dipstickForm.attendant} onChange={e => setDipstickForm({ ...dipstickForm, attendant: e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={dipstickForm.notes} onChange={e => setDipstickForm({ ...dipstickForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createDipstick}>Save Reading</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pricing Modal */}
+      <Dialog open={showPricingModal} onOpenChange={setShowPricingModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Set Fuel Price</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Fuel Type</Label>
+              <Select value={pricingForm.fuelType} onValueChange={v => setPricingForm({ ...pricingForm, fuelType: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                  <SelectItem value="petrol">Petrol</SelectItem><SelectItem value="diesel">Diesel</SelectItem><SelectItem value="kerosene">Kerosene</SelectItem><SelectItem value="gas">Gas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Pump Price</Label><Input type="number" value={pricingForm.pumpPrice} onChange={e => setPricingForm({ ...pricingForm, pumpPrice: +e.target.value })} /></div>
+              <div><Label>Cost Price</Label><Input type="number" value={pricingForm.costPrice} onChange={e => setPricingForm({ ...pricingForm, costPrice: +e.target.value })} /></div>
+            </div>
+            <div><Label>Notes</Label><Input value={pricingForm.notes} onChange={e => setPricingForm({ ...pricingForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createPricing}>Save Price</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Compliance Modal */}
+      <Dialog open={showComplianceModal} onOpenChange={setShowComplianceModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Log Compliance Inspection</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Type</Label>
+                <Select value={complianceForm.type} onValueChange={v => setComplianceForm({ ...complianceForm, type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                    <SelectItem value="environmental">Environmental</SelectItem><SelectItem value="safety">Safety</SelectItem><SelectItem value="calibration">Calibration</SelectItem><SelectItem value="fire">Fire</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Result</Label>
+                <Select value={complianceForm.result} onValueChange={v => setComplianceForm({ ...complianceForm, result: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                    <SelectItem value="pass">Pass</SelectItem><SelectItem value="fail">Fail</SelectItem><SelectItem value="pending">Pending</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Inspection Date</Label><Input type="datetime-local" value={complianceForm.inspectionDate} onChange={e => setComplianceForm({ ...complianceForm, inspectionDate: e.target.value })} /></div>
+              <div><Label>Next Due</Label><Input type="date" value={complianceForm.nextDue} onChange={e => setComplianceForm({ ...complianceForm, nextDue: e.target.value })} /></div>
+            </div>
+            <div><Label>Notes</Label><Input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createCompliance}>Log Inspection</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

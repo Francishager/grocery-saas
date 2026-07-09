@@ -44,6 +44,9 @@ model Branch {
   fuelTanks          FuelTank[]
   fuelDeliveries     FuelDelivery[]
   fuelShiftReports   FuelShiftReport[]
+  fuelDipstickReadings FuelDipstickReading[]
+  fuelPricing        FuelPricing[]
+  fuelCompliance     FuelCompliance[]
   productionOrders   ProductionOrder[]
   farmFields         FarmField[]
   livestock          Livestock[]
@@ -164,6 +167,9 @@ model Tenant {
   fuelDeliveries   FuelDelivery[]
   fuelMeterReadings FuelMeterReading[]
   fuelShiftReports  FuelShiftReport[]
+  fuelDipstickReadings FuelDipstickReading[]
+  fuelPricing        FuelPricing[]
+  fuelCompliance     FuelCompliance[]
 
   // =====================
   // MANUFACTURING
@@ -2034,6 +2040,7 @@ model FuelTank {
 
   pumps       FuelPump[]
   deliveries  FuelDelivery[]
+  dipstickReadings FuelDipstickReading[]
 
   @@index([tenantId, branchId])
   @@map("fuel_tanks")
@@ -2110,6 +2117,61 @@ model FuelShiftReport {
   @@unique([tenantId, shiftNo])
   @@index([tenantId, branchId])
   @@map("fuel_shift_reports")
+}
+
+model FuelDipstickReading {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  tankId       String
+  tank         FuelTank @relation(fields: [tankId], references: [id])
+  readingDate  DateTime @default(now())
+  dipstickLevel Float   @default(0) // physical litres measured by dipstick
+  bookStock    Float    @default(0) // system book stock at time of reading
+  variance     Float    @default(0) // dipstickLevel - bookStock
+  attendant    String?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, tankId])
+  @@map("fuel_dipstick_readings")
+}
+
+model FuelPricing {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  fuelType      String   // petrol, diesel, kerosene, gas
+  pumpPrice     Float    @default(0) // selling price per litre
+  costPrice     Float    @default(0) // cost per litre
+  margin        Float    @default(0) // pumpPrice - costPrice
+  effectiveDate DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, fuelType])
+  @@map("fuel_pricing")
+}
+
+model FuelCompliance {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  inspectionDate DateTime @default(now())
+  type          String   // e.g. environmental, safety, calibration
+  result        String   // pass, fail, pending
+  nextDue       DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@map("fuel_compliance")
 }
 
 // =====================================================
