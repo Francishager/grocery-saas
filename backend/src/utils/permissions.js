@@ -11,7 +11,7 @@ export const ALL_PERMISSION_KEYS = [
   "canCreatePurchase", "canViewPurchase", "canEditPurchase", "canDeletePurchase",
   "canCreatePayable", "canViewPayable", "canEditPayable", "canDeletePayable",
   // Expenses
-  "canCreateExpense", "canViewExpense", "canEditExpense", "canDeleteExpense",
+  "canCreateExpense", "canViewExpense", "canEditExpense", "canDeleteExpense", "canViewStaffTillSheet",
   // Customers / Receivables
   "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
   "canCreateReceivable", "canViewReceivable", "canEditReceivable", "canDeleteReceivable",
