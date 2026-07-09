@@ -124,11 +124,35 @@ export default function ServiceBusinessPage() {
   const openWOs = workOrders.filter(w => w.status === 'open' || w.status === 'in_progress').length
   const activeContracts = contracts.filter(c => c.status === 'active').length
 
+  const sectionLabels: Record<string, string> = {
+    appointments: 'Appointments',
+    'work-orders': 'Work Orders',
+    contracts: 'Contracts',
+    'car-wash': 'Car Wash',
+    garage: 'Garage Services',
+  }
+  const sectionDescription: Record<string, string> = {
+    appointments: 'Manage scheduled service appointments and confirmations.',
+    'work-orders': 'Track work orders, priorities, and status updates.',
+    contracts: 'Manage service contracts and billing cycles.',
+    'car-wash': 'Record and manage car wash services.',
+    garage: 'Record and manage garage services and repairs.',
+  }
+  const currentSectionLabel = sectionLabels[tab] || 'Appointments'
+  const currentSectionDescription = sectionDescription[tab] || 'Manage scheduled service appointments and confirmations.'
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Wrench className="h-7 w-7" /> Service Business</h1>
-        <p className="text-sm text-muted-foreground">Appointments, work orders, and service contracts</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2"><Wrench className="h-7 w-7" /> Service Business</h1>
+            <p className="text-sm text-muted-foreground">{currentSectionLabel}</p>
+          </div>
+          <div className="rounded-xl border border-muted/50 bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+            {currentSectionDescription}
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -136,20 +160,6 @@ export default function ServiceBusinessPage() {
         <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{openWOs}</div><p className="text-xs text-muted-foreground">Open Work Orders</p></CardContent></Card>
         <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{activeContracts}</div><p className="text-xs text-muted-foreground">Active Contracts</p></CardContent></Card>
         <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{contracts.reduce((s, c) => s + c.value, 0).toFixed(0)}</div><p className="text-xs text-muted-foreground">Contract Value</p></CardContent></Card>
-      </div>
-
-      <div className="flex gap-1 overflow-x-auto border-b pb-px">
-        {[
-          { key: 'appointments', label: 'Appointments', icon: CalendarClock },
-          { key: 'work-orders', label: 'Work Orders', icon: ClipboardList },
-          { key: 'contracts', label: 'Contracts', icon: FileText },
-          { key: 'car-wash', label: 'Car Wash', icon: Droplet },
-          { key: 'garage', label: 'Garage Services', icon: Wrench },
-        ].map(t => (
-          <button key={t.key} onClick={() => navigate(`/tenant/service/${t.key}`)} className={cn('flex items-center gap-1.5 whitespace-nowrap rounded-t-md px-4 py-3 text-sm font-medium transition-colors', tab === t.key ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground')}>
-            <t.icon className="h-4 w-4" /> {t.label}
-          </button>
-        ))}
       </div>
 
       {tab === 'appointments' && (
