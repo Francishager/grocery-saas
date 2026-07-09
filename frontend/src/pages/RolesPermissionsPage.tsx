@@ -10,33 +10,33 @@ import { useToast } from '@/hooks/use-toast'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 
 const PERM_LABELS: Record<string, string> = {
-  canViewDashboard:'View Dashboard',
-  canCreateSale:'Create Sale', canViewSale:'View Sale', canEditSale:'Edit Sale', canDeleteSale:'Delete Sale', canRefundSale:'Refund Sale',
-  canCreateProduct:'Create Product', canViewProduct:'View Product', canEditProduct:'Edit Product', canDeleteProduct:'Delete Product',
-  canCreatePurchase:'Create Purchase', canViewPurchase:'View Purchase', canEditPurchase:'Edit Purchase', canDeletePurchase:'Delete Purchase',
-  canCreatePayable:'Create Payable', canViewPayable:'View Payable', canEditPayable:'Edit Payable', canDeletePayable:'Delete Payable',
-  canCreateExpense:'Create Expense', canViewExpense:'View Expense', canEditExpense:'Edit Expense', canDeleteExpense:'Delete Expense',
-  canCreateCustomer:'Create Customer', canViewCustomer:'View Customer', canEditCustomer:'Edit Customer', canDeleteCustomer:'Delete Customer',
-  canCreateReceivable:'Create Receivable', canViewReceivable:'View Receivable', canEditReceivable:'Edit Receivable', canDeleteReceivable:'Delete Receivable',
-  canCreateSupplier:'Create Supplier', canViewSupplier:'View Supplier', canEditSupplier:'Edit Supplier', canDeleteSupplier:'Delete Supplier',
-  canCreateStaff:'Create Staff', canViewStaff:'View Staff', canEditStaff:'Edit Staff', canDeleteStaff:'Delete Staff',
-  canCreateBranch:'Create Branch', canViewBranch:'View Branch', canEditBranch:'Edit Branch', canDeleteBranch:'Delete Branch',
-  canViewSalesReport:'View Sales Report',canViewInventoryReport:'View Inventory Report',canViewFinancialReport:'View Financial Report',canViewCustomerReport:'View Customer Report',canViewSupplierReport:'View Supplier Report',canViewReceivablesReport:'View Receivables Report',canViewPayablesReport:'View Payables Report',canViewPerformanceReport:'View Performance Report',canViewAuditReport:'View Audit Report',canExportReport:'Export Reports',
-  canViewSettings:'View Settings', canEditSettings:'Edit Settings', canGiveDiscount:'Give Discount',
-  canViewReceipt:'View Receipts', canCreateReceipt:'Create Receipt',
-  canViewTax:'View Tax', canManageTax:'Manage Tax',
-  canViewService:'View Service', canCreateService:'Create Service', canEditService:'Edit Service', canDeleteService:'Delete Service', canManageServiceCategory:'Manage Service Categories', canViewServiceReport:'View Service Report',
-  canViewRental:'View Rentals', canCreateRental:'Create Rental', canEditRental:'Edit Rental', canDeleteRental:'Cancel Rental', canProcessRentalReturn:'Process Return', canViewRentalReport:'View Rental Report',
-  canViewRestaurant:'View Restaurant', canCreateRestaurant:'Create Restaurant', canEditRestaurant:'Edit Restaurant', canDeleteRestaurant:'Delete Restaurant', canViewRestaurantReport:'View Restaurant Report',
-  canViewFuelStation:'View Fuel Station', canCreateFuelStation:'Create Fuel Station', canEditFuelStation:'Edit Fuel Station', canDeleteFuelStation:'Delete Fuel Station', canViewFuelStationReport:'View Fuel Station Report',
-  canViewManufacturing:'View Manufacturing', canCreateManufacturing:'Create Manufacturing', canEditManufacturing:'Edit Manufacturing', canDeleteManufacturing:'Delete Manufacturing', canViewManufacturingReport:'View Manufacturing Report',
-  canViewAgriculture:'View Agriculture', canCreateAgriculture:'Create Agriculture', canEditAgriculture:'Edit Agriculture', canDeleteAgriculture:'Delete Agriculture', canViewAgricultureReport:'View Agriculture Report',
-  canViewServiceBusiness:'View Service Business', canCreateServiceBusiness:'Create Service Business', canEditServiceBusiness:'Edit Service Business', canDeleteServiceBusiness:'Delete Service Business', canViewServiceBusinessReport:'View Service Business Report',
-  canViewCommunication:'View Communication', canCreateCommunication:'Create Communication', canEditCommunication:'Edit Communication', canDeleteCommunication:'Delete Communication',
-  canViewAccounting:'View Accounting', canCreateAccounting:'Create Accounting', canEditAccounting:'Edit Accounting', canDeleteAccounting:'Delete Accounting',
-  canAdjustStock:'Adjust Stock', canTransferStock:'Transfer Stock',
-  canUseCash:'Use Cash', canUseMobileMoney:'Use Mobile Money', canUseBank:'Use Bank Transfer', canUseCard:'Use Card',
-  canImportInventory:'Import Inventory',
+  canViewDashboard:'Can view dashboard',
+  canCreateSale:'Can create sales', canViewSale:'Can view sales', canEditSale:'Can edit sales', canDeleteSale:'Can delete sales', canRefundSale:'Can refund sales',
+  canCreateProduct:'Can create products', canViewProduct:'Can view products', canEditProduct:'Can edit products', canDeleteProduct:'Can delete products',
+  canCreatePurchase:'Can create purchases', canViewPurchase:'Can view purchases', canEditPurchase:'Can edit purchases', canDeletePurchase:'Can delete purchases',
+  canCreatePayable:'Can create bills', canViewPayable:'Can view bills', canEditPayable:'Can edit bills', canDeletePayable:'Can delete bills',
+  canCreateExpense:'Can create expenses', canViewExpense:'Can view expenses', canEditExpense:'Can edit expenses', canDeleteExpense:'Can delete expenses',
+  canCreateCustomer:'Can create customers', canViewCustomer:'Can view customers', canEditCustomer:'Can edit customers', canDeleteCustomer:'Can delete customers',
+  canCreateReceivable:'Can create credit sales', canViewReceivable:'Can view receivables', canEditReceivable:'Can edit receivables', canDeleteReceivable:'Can delete receivables',
+  canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
+  canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaff:'Can edit staff', canDeleteStaff:'Can delete staff',
+  canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
+  canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
+  canViewSettings:'Can view settings', canEditSettings:'Can edit settings', canGiveDiscount:'Can give discounts',
+  canViewReceipt:'Can view receipts', canCreateReceipt:'Can create receipts',
+  canViewTax:'Can view tax', canManageTax:'Can manage tax',
+  canViewService:'Can view services', canCreateService:'Can create services', canEditService:'Can edit services', canDeleteService:'Can delete services', canManageServiceCategory:'Can manage service categories', canViewServiceReport:'Can view service reports',
+  canViewRental:'Can view rentals', canCreateRental:'Can create rentals', canEditRental:'Can edit rentals', canDeleteRental:'Can cancel rentals', canProcessRentalReturn:'Can process returns', canViewRentalReport:'Can view rental reports',
+  canViewRestaurant:'Can view restaurant', canCreateRestaurant:'Can create restaurant entries', canEditRestaurant:'Can edit restaurant entries', canDeleteRestaurant:'Can delete restaurant entries', canViewRestaurantReport:'Can view restaurant reports',
+  canViewFuelStation:'Can view fuel station', canCreateFuelStation:'Can create fuel station entries', canEditFuelStation:'Can edit fuel station entries', canDeleteFuelStation:'Can delete fuel station entries', canViewFuelStationReport:'Can view fuel station reports',
+  canViewManufacturing:'Can view manufacturing', canCreateManufacturing:'Can create manufacturing entries', canEditManufacturing:'Can edit manufacturing entries', canDeleteManufacturing:'Can delete manufacturing entries', canViewManufacturingReport:'Can view manufacturing reports',
+  canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries', canViewAgricultureReport:'Can view agriculture reports',
+  canViewServiceBusiness:'Can view service business', canCreateServiceBusiness:'Can create service business entries', canEditServiceBusiness:'Can edit service business entries', canDeleteServiceBusiness:'Can delete service business entries', canViewServiceBusinessReport:'Can view service business reports',
+  canViewCommunication:'Can view communication', canCreateCommunication:'Can create communication', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
+  canViewAccounting:'Can view accounting', canCreateAccounting:'Can create transaction accounts', canEditAccounting:'Can edit transaction accounts', canDeleteAccounting:'Can delete transaction accounts',
+  canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock',
+  canUseCash:'Can use cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
+  canImportInventory:'Can import inventory',
 }
 
 const ACCOUNTING_ACCESS_KEYS = [
@@ -44,6 +44,14 @@ const ACCOUNTING_ACCESS_KEYS = [
   'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense',
   'canViewFinancialReport', 'canTransferStock',
   'canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard',
+]
+
+const REPORT_PERMISSION_KEYS = [
+  'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport',
+  'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport',
+  'canViewAuditReport', 'canExportReport', 'canViewServiceReport', 'canViewRentalReport',
+  'canViewRestaurantReport', 'canViewFuelStationReport', 'canViewManufacturingReport', 'canViewAgricultureReport',
+  'canViewServiceBusinessReport',
 ]
 
 const PERM_GROUPS = [
@@ -58,7 +66,7 @@ const PERM_GROUPS = [
   { label: 'Suppliers', prefix: 'Supplier' },
   { label: 'Staff', prefix: 'Staff' },
   { label: 'Branches', prefix: 'Branch' },
-  { label: 'Reports', prefix: 'Report' },
+  { label: 'Reports', matcher: (key: string) => REPORT_PERMISSION_KEYS.includes(key) },
   { label: 'Settings', prefix: 'Settings' },
   { label: 'Receipts', prefix: 'Receipt' },
   { label: 'Discounts', prefix: 'Discount' },
@@ -286,8 +294,8 @@ export default function RolesPermissionsPage() {
       )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Roles & Permissions</h1>
-          <p className="text-muted-foreground">Manage staff, assign roles, and configure permissions</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Staff Access & Permissions</h1>
+          <p className="text-muted-foreground">Choose what each staff member can see, create, edit, or manage in the business.</p>
         </div>
         <Button onClick={() => setShowAddForm(!showAddForm)} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />Add Staff
@@ -333,7 +341,7 @@ export default function RolesPermissionsPage() {
             {/* Permissions checkboxes on create form */}
             <div className="mt-4 border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium">Permissions (tick to grant access)</p>
+                <p className="text-sm font-medium">Permissions (tick to allow this staff member to do these tasks)</p>
                 <div className="flex items-center gap-2">
                   <Input className="h-7 w-40 text-xs" placeholder="Search permissions..." value={permSearch} onChange={e => setPermSearch(e.target.value)} />
                   <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
