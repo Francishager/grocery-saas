@@ -159,7 +159,7 @@ function App() {
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
           <Route path="restaurant" element={<FeatureGuard feature="restaurant"><RestaurantPage /></FeatureGuard>} />
           <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
-          <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station"><FuelStationPage /></FeatureGuard>} />
+          <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station" permission="canViewFuelStation"><FuelStationPage /></FeatureGuard>} />
           <Route path="manufacturing" element={<FeatureGuard feature="manufacturing"><ManufacturingPage /></FeatureGuard>} />
           <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
           <Route path="service" element={<Navigate to="/tenant/service/appointments" replace />} />

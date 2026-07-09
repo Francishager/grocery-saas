@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Fuel, Plus, Trash2, TrendingUp, Gauge, Truck, ClipboardList } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 interface Pump { id: string; name: string; tankId: string | null; tank?: FuelTank | null; nozzleCount: number; isActive: boolean }
 interface FuelTank { id: string; name: string; fuelType: string; capacity: number; currentStock: number; unitCost: number; isActive: boolean; pumps?: Pump[] }
@@ -37,7 +39,7 @@ export default function FuelStationPage() {
   const [showTankModal, setShowTankModal] = useState(false)
   const [showDeliveryModal, setShowDeliveryModal] = useState(false)
   const [showShiftModal, setShowShiftModal] = useState(false)
-  const [showReadingModal, setShowReadingModal] = useState(false)
+  const [showMeterModal, setShowMeterModal] = useState(false)
   const [showDipstickModal, setShowDipstickModal] = useState(false)
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [showComplianceModal, setShowComplianceModal] = useState(false)
@@ -45,11 +47,17 @@ export default function FuelStationPage() {
   const [tankForm, setTankForm] = useState({ name: '', fuelType: 'petrol', capacity: 0, currentStock: 0, unitCost: 0 })
   const [deliveryForm, setDeliveryForm] = useState({ tankId: '', supplierName: '', invoiceNo: '', litres: 0, unitCost: 0 })
   const [shiftForm, setShiftForm] = useState({ shiftNo: '', pumpId: '', openingReading: 0, startDate: '' })
-  const [readingForm, setReadingForm] = useState({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0 })
+  const [meterForm, setMeterForm] = useState({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0, readingDate: '' })
   const [dipstickForm, setDipstickForm] = useState({ tankId: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' })
   const [pricingForm, setPricingForm] = useState({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, notes: '' })
   const [complianceForm, setComplianceForm] = useState({ type: 'environmental', result: 'pass', inspectionDate: '', nextDue: '', notes: '' })
   const { toast } = useToast()
+  const { hasPermission, user } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
+  const currentFeature = tab === 'tanks' ? 'fuel_station.pumps' : tab === 'deliveries' ? 'fuel_station.deliveries' : tab === 'meter_readings' ? 'fuel_station.meter_readings' : tab === 'dipstick' ? 'fuel_station.dipstick' : tab === 'shifts' ? 'fuel_station.shift_reports' : tab === 'pricing' ? 'fuel_station.pricing' : tab === 'compliance' ? 'fuel_station.compliance' : 'fuel_station'
+  const canViewCurrentTab = hasFeature(currentFeature) && (isOwner || hasPermission('canViewFuelStation'))
+  const canCreateCurrentTab = hasFeature(currentFeature) && (isOwner || hasPermission('canCreateFuelStation'))
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -102,31 +110,39 @@ export default function FuelStationPage() {
     try { await apiFetch('/api/fuel/shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(shiftForm) })
     setShowShiftModal(false); setShiftForm({ shiftNo: '', pumpId: '', openingReading: 0, startDate: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to create shift' }) }
   }
+  const createMeterReading = async () => {
+    if (!meterForm.pumpId) { toast({ variant: 'destructive', title: 'Select a pump' }); return }
+    if (!meterForm.readingDate) { toast({ variant: 'destructive', title: 'Reading date is required' }); return }
+    try {
+      await apiFetch('/api/fuel/meter-readings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...meterForm, openingReading: Number(meterForm.openingReading), closingReading: Number(meterForm.closingReading), litresSold: Number(meterForm.litresSold), amount: Number(meterForm.amount) }) })
+      setShowMeterModal(false); setMeterForm({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0, readingDate: '' }); loadData()
+    } catch { toast({ variant: 'destructive', title: 'Failed to record meter reading' }) }
+  }
+  const createDipstickReading = async () => {
+    if (!dipstickForm.tankId) { toast({ variant: 'destructive', title: 'Select a tank' }); return }
+    try {
+      await apiFetch('/api/fuel/dipstick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...dipstickForm, dipstickLevel: Number(dipstickForm.dipstickLevel), bookStock: Number(dipstickForm.bookStock) }) })
+      setShowDipstickModal(false); setDipstickForm({ tankId: '', readingDate: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' }); loadData()
+    } catch { toast({ variant: 'destructive', title: 'Failed to record dipstick reading' }) }
+  }
+  const createPricingEntry = async () => {
+    if (!pricingForm.fuelType.trim()) { toast({ variant: 'destructive', title: 'Fuel type is required' }); return }
+    try {
+      await apiFetch('/api/fuel/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...pricingForm, pumpPrice: Number(pricingForm.pumpPrice), costPrice: Number(pricingForm.costPrice) }) })
+      setShowPricingModal(false); setPricingForm({ fuelType: '', pumpPrice: 0, costPrice: 0, effectiveDate: '', notes: '' }); loadData()
+    } catch { toast({ variant: 'destructive', title: 'Failed to save pricing' }) }
+  }
+  const createComplianceEntry = async () => {
+    if (!complianceForm.type.trim()) { toast({ variant: 'destructive', title: 'Inspection type is required' }); return }
+    if (!complianceForm.result.trim()) { toast({ variant: 'destructive', title: 'Result is required' }); return }
+    try {
+      await apiFetch('/api/fuel/compliance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(complianceForm) })
+      setShowComplianceModal(false); setComplianceForm({ inspectionDate: '', type: '', result: '', nextDue: '', notes: '' }); loadData()
+    } catch { toast({ variant: 'destructive', title: 'Failed to save compliance record' }) }
+  }
   const closeShift = async (id: string, data: Record<string, unknown>) => {
     await apiFetch(`/api/fuel/shifts/${id}/close`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
     loadData()
-  }
-  const createReading = async () => {
-    if (!readingForm.pumpId) { toast({ variant: 'destructive', title: 'Select a pump' }); return }
-    try { await apiFetch('/api/fuel/meter-readings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readingForm) })
-    setShowReadingModal(false); setReadingForm({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0 }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record reading' }) }
-  }
-  const createDipstick = async () => {
-    if (!dipstickForm.tankId) { toast({ variant: 'destructive', title: 'Select a tank' }); return }
-    try { await apiFetch('/api/fuel/dipstick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dipstickForm) })
-    setShowDipstickModal(false); setDipstickForm({ tankId: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record dipstick reading' }) }
-  }
-  const createPricing = async () => {
-    if (!pricingForm.fuelType.trim()) { toast({ variant: 'destructive', title: 'Fuel type is required' }); return }
-    if (pricingForm.pumpPrice <= 0) { toast({ variant: 'destructive', title: 'Pump price must be greater than 0' }); return }
-    try { await apiFetch('/api/fuel/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pricingForm) })
-    setShowPricingModal(false); setPricingForm({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to save price' }) }
-  }
-  const createCompliance = async () => {
-    if (!complianceForm.type.trim()) { toast({ variant: 'destructive', title: 'Inspection type is required' }); return }
-    if (!complianceForm.result.trim()) { toast({ variant: 'destructive', title: 'Result is required' }); return }
-    try { await apiFetch('/api/fuel/compliance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(complianceForm) })
-    setShowComplianceModal(false); setComplianceForm({ type: 'environmental', result: 'pass', inspectionDate: '', nextDue: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to log compliance' }) }
   }
   const deletePump = async (id: string) => { try { await apiFetch(`/api/fuel/pumps/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
   const deleteTank = async (id: string) => { try { await apiFetch(`/api/fuel/tanks/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
@@ -134,6 +150,21 @@ export default function FuelStationPage() {
   const totalStock = tanks.reduce((s, t) => s + t.currentStock, 0)
   const totalCapacity = tanks.reduce((s, t) => s + t.capacity, 0)
   const openShifts = shifts.filter(s => s.status === 'open').length
+
+  if (!canViewCurrentTab) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <CardTitle className="text-xl">Section unavailable</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">This fuel-station section is not enabled for your current plan or permissions.</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -152,16 +183,16 @@ export default function FuelStationPage() {
           }</p>
         </div>
         <div className="flex gap-2">
-          {tab === 'tanks' && <>
+          {tab === 'tanks' && canCreateCurrentTab && <>
             <Button onClick={() => setShowTankModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Tank</Button>
             <Button variant="outline" onClick={() => setShowPumpModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Pump</Button>
           </>}
-          {tab === 'deliveries' && <Button onClick={() => setShowDeliveryModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Delivery</Button>}
-          {tab === 'meter_readings' && <Button onClick={() => setShowReadingModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Reading</Button>}
-          {tab === 'dipstick' && <Button onClick={() => setShowDipstickModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Dipstick</Button>}
-          {tab === 'pricing' && <Button onClick={() => setShowPricingModal(true)}><Plus className="mr-1 h-4 w-4" /> Set Price</Button>}
-          {tab === 'compliance' && <Button onClick={() => setShowComplianceModal(true)}><Plus className="mr-1 h-4 w-4" /> Log Inspection</Button>}
-          {tab === 'shifts' && <Button onClick={() => setShowShiftModal(true)}><Plus className="mr-1 h-4 w-4" /> New Shift</Button>}
+          {tab === 'deliveries' && canCreateCurrentTab && <Button onClick={() => setShowDeliveryModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Delivery</Button>}
+          {tab === 'meter_readings' && canCreateCurrentTab && <Button onClick={() => setShowMeterModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Reading</Button>}
+          {tab === 'dipstick' && canCreateCurrentTab && <Button onClick={() => setShowDipstickModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Dipstick</Button>}
+          {tab === 'pricing' && canCreateCurrentTab && <Button onClick={() => setShowPricingModal(true)}><Plus className="mr-1 h-4 w-4" /> Set Price</Button>}
+          {tab === 'compliance' && canCreateCurrentTab && <Button onClick={() => setShowComplianceModal(true)}><Plus className="mr-1 h-4 w-4" /> Log Inspection</Button>}
+          {tab === 'shifts' && canCreateCurrentTab && <Button onClick={() => setShowShiftModal(true)}><Plus className="mr-1 h-4 w-4" /> New Shift</Button>}
         </div>
       </div>
 
@@ -409,28 +440,96 @@ export default function FuelStationPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showMeterModal} onOpenChange={setShowMeterModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record Meter Reading</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Pump</Label>
+              <Select value={meterForm.pumpId} onValueChange={v => setMeterForm({ ...meterForm, pumpId: v })}>
+                <SelectTrigger><SelectValue placeholder="Select pump" /></SelectTrigger><SelectContent>{pumps.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Reading Date</Label><Input type="datetime-local" value={meterForm.readingDate} onChange={e => setMeterForm({ ...meterForm, readingDate: e.target.value })} /></div>
+            <div><Label>Opening Reading</Label><Input type="number" value={meterForm.openingReading} onChange={e => setMeterForm({ ...meterForm, openingReading: +e.target.value })} /></div>
+            <div><Label>Closing Reading</Label><Input type="number" value={meterForm.closingReading} onChange={e => setMeterForm({ ...meterForm, closingReading: +e.target.value })} /></div>
+            <div><Label>Litres Sold</Label><Input type="number" value={meterForm.litresSold} onChange={e => setMeterForm({ ...meterForm, litresSold: +e.target.value })} /></div>
+            <div><Label>Amount</Label><Input type="number" value={meterForm.amount} onChange={e => setMeterForm({ ...meterForm, amount: +e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createMeterReading}>Save Reading</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDipstickModal} onOpenChange={setShowDipstickModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record Dipstick Reading</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Tank</Label>
+              <Select value={dipstickForm.tankId} onValueChange={v => setDipstickForm({ ...dipstickForm, tankId: v })}>
+                <SelectTrigger><SelectValue placeholder="Select tank" /></SelectTrigger><SelectContent>{tanks.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Reading Date</Label><Input type="datetime-local" value={dipstickForm.readingDate} onChange={e => setDipstickForm({ ...dipstickForm, readingDate: e.target.value })} /></div>
+            <div><Label>Dipstick Level</Label><Input type="number" value={dipstickForm.dipstickLevel} onChange={e => setDipstickForm({ ...dipstickForm, dipstickLevel: +e.target.value })} /></div>
+            <div><Label>Book Stock</Label><Input type="number" value={dipstickForm.bookStock} onChange={e => setDipstickForm({ ...dipstickForm, bookStock: +e.target.value })} /></div>
+            <div><Label>Attendant</Label><Input value={dipstickForm.attendant} onChange={e => setDipstickForm({ ...dipstickForm, attendant: e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={dipstickForm.notes} onChange={e => setDipstickForm({ ...dipstickForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createDipstickReading}>Save Dipstick</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPricingModal} onOpenChange={setShowPricingModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Pricing Entry</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Fuel Type</Label><Input value={pricingForm.fuelType} onChange={e => setPricingForm({ ...pricingForm, fuelType: e.target.value })} placeholder="Petrol" /></div>
+            <div><Label>Pump Price</Label><Input type="number" value={pricingForm.pumpPrice} onChange={e => setPricingForm({ ...pricingForm, pumpPrice: +e.target.value })} /></div>
+            <div><Label>Cost Price</Label><Input type="number" value={pricingForm.costPrice} onChange={e => setPricingForm({ ...pricingForm, costPrice: +e.target.value })} /></div>
+            <div><Label>Effective Date</Label><Input type="datetime-local" value={pricingForm.effectiveDate} onChange={e => setPricingForm({ ...pricingForm, effectiveDate: e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={pricingForm.notes} onChange={e => setPricingForm({ ...pricingForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createPricingEntry}>Save Price</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showComplianceModal} onOpenChange={setShowComplianceModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Log Compliance Record</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Inspection Date</Label><Input type="datetime-local" value={complianceForm.inspectionDate} onChange={e => setComplianceForm({ ...complianceForm, inspectionDate: e.target.value })} /></div>
+            <div><Label>Type</Label><Input value={complianceForm.type} onChange={e => setComplianceForm({ ...complianceForm, type: e.target.value })} placeholder="Environmental" /></div>
+            <div><Label>Result</Label><Input value={complianceForm.result} onChange={e => setComplianceForm({ ...complianceForm, result: e.target.value })} placeholder="Passed" /></div>
+            <div><Label>Next Due</Label><Input type="datetime-local" value={complianceForm.nextDue} onChange={e => setComplianceForm({ ...complianceForm, nextDue: e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createComplianceEntry}>Save Record</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Meter Reading Modal */}
-      <Dialog open={showReadingModal} onOpenChange={setShowReadingModal}>
+      {/* Meter Reading Modal */}
+      <Dialog open={showMeterModal} onOpenChange={setShowMeterModal}>
         <DialogContent>
           <DialogHeader><DialogTitle>Add Meter Reading</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Pump</Label>
-              <Select value={readingForm.pumpId} onValueChange={v => setReadingForm({ ...readingForm, pumpId: v })}>
+              <Select value={meterForm.pumpId} onValueChange={v => setMeterForm({ ...meterForm, pumpId: v })}>
                 <SelectTrigger><SelectValue placeholder="Select pump" /></SelectTrigger><SelectContent>
                   {pumps.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
+            <div><Label>Reading Date</Label><Input type="datetime-local" value={meterForm.readingDate} onChange={e => setMeterForm({ ...meterForm, readingDate: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Opening Reading</Label><Input type="number" value={readingForm.openingReading} onChange={e => setReadingForm({ ...readingForm, openingReading: +e.target.value })} /></div>
-              <div><Label>Closing Reading</Label><Input type="number" value={readingForm.closingReading} onChange={e => setReadingForm({ ...readingForm, closingReading: +e.target.value })} /></div>
+              <div><Label>Opening Reading</Label><Input type="number" value={meterForm.openingReading} onChange={e => setMeterForm({ ...meterForm, openingReading: +e.target.value })} /></div>
+              <div><Label>Closing Reading</Label><Input type="number" value={meterForm.closingReading} onChange={e => setMeterForm({ ...meterForm, closingReading: +e.target.value })} /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Litres Sold</Label><Input type="number" value={readingForm.litresSold} onChange={e => setReadingForm({ ...readingForm, litresSold: +e.target.value })} /></div>
-              <div><Label>Amount</Label><Input type="number" value={readingForm.amount} onChange={e => setReadingForm({ ...readingForm, amount: +e.target.value })} /></div>
+              <div><Label>Litres Sold</Label><Input type="number" value={meterForm.litresSold} onChange={e => setMeterForm({ ...meterForm, litresSold: +e.target.value })} /></div>
+              <div><Label>Amount</Label><Input type="number" value={meterForm.amount} onChange={e => setMeterForm({ ...meterForm, amount: +e.target.value })} /></div>
             </div>
           </div>
-          <DialogFooter><Button onClick={createReading}>Save Reading</Button></DialogFooter>
+          <DialogFooter><Button onClick={createMeterReading}>Save Reading</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

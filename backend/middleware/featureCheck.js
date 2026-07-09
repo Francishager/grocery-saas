@@ -6,6 +6,19 @@ const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 const featureCache = new Map(); // tenantId -> { features: Set, expiresAt: number }
 const CACHE_TTL = 60_000;
 
+function hasFeatureAccess(features, featureName) {
+  if (!featureName) return false;
+  if (features.has(featureName)) return true;
+
+  const parts = String(featureName).split('.');
+  for (let index = parts.length - 1; index > 0; index -= 1) {
+    const parentFeature = parts.slice(0, index).join('.');
+    if (features.has(parentFeature)) return true;
+  }
+
+  return false;
+}
+
 /**
  * Resolve the effective feature set for a tenant.
  * Plan features (PlanFeature) are the primary source.
@@ -95,8 +108,7 @@ export function requireFeature(featureName) {
     try {
       const features = await getTenantFeatures(tenantId);
 
-      // Check exact feature only — no parent module auto-enabling
-      const hasFeature = features.has(featureName);
+      const hasFeature = hasFeatureAccess(features, featureName);
 
       if (!hasFeature) {
         return res.status(403).json({
@@ -140,7 +152,7 @@ export function requireAllFeatures(...featureNames) {
     try {
       const features = await getTenantFeatures(tenantId);
 
-      const missing = featureNames.find((fn) => !features.has(fn));
+      const missing = featureNames.find((fn) => !hasFeatureAccess(features, fn));
 
       if (missing) {
         return res.status(403).json({

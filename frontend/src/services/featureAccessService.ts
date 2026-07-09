@@ -152,11 +152,20 @@ class FeatureAccessService {
   // Check if feature is enabled (primary API)
   // Returns true if the feature is explicitly enabled.
   // Returns false if the feature is explicitly disabled.
-  // Returns true if the feature is not in the map (default allow — only PlanFeature/TenantFeature entries can disable).
+  // If a child feature is requested and the parent module is enabled,
+  // that child is treated as accessible as part of the parent module.
   isFeatureEnabled(featureName: string): boolean {
     const entry = this.features[featureName]
-    if (entry === undefined) return false // Not in plan → default allow
-    return entry.enabled === true
+    if (entry !== undefined) return entry.enabled === true
+
+    const parts = featureName.split('.')
+    for (let index = parts.length - 1; index > 0; index -= 1) {
+      const parentName = parts.slice(0, index).join('.')
+      const parentEntry = this.features[parentName]
+      if (parentEntry?.enabled) return true
+    }
+
+    return false
   }
 
   // Alias for isFeatureEnabled — matches spec naming convention hasFeature('inventory.products')
