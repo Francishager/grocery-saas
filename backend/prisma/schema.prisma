@@ -418,6 +418,7 @@ model UserPermission {
   canViewExpense   Boolean @default(true)
   canEditExpense   Boolean @default(false)
   canDeleteExpense Boolean @default(false)
+  canViewStaffTillSheet Boolean @default(false)
   // Customers / Receivables
   canCreateCustomer Boolean @default(false)
   canViewCustomer   Boolean @default(true)

@@ -5,6 +5,7 @@ import {
   CreditCard, BarChart3, Calendar, Loader2,
   FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel
 } from 'lucide-react'
+import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -432,6 +433,177 @@ function SummaryCards({ data, keys }: { data: any; keys: ReportItem['summaryKeys
   )
 }
 
+function AdvancedSalesSummary({ data }: { data: any }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const trendData = Array.isArray(data.trend) && data.trend.length > 0
+    ? data.trend
+    : [
+        { label: 'Sales', value: Number(data.totalRevenue || 0) },
+      ]
+
+  const performance = [
+    { name: 'Revenue', value: Number(data.totalRevenue || 0) },
+    { name: 'Discount', value: Number(data.totalDiscount || 0) },
+    { name: 'Tax', value: Number(data.totalTax || 0) },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <SummaryCards data={data} keys={[
+        { key: 'count', label: 'Total Sales', format: 'number' },
+        { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+        { key: 'totalSubtotal', label: 'Subtotal', format: 'currency' },
+        { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
+        { key: 'totalTax', label: 'Total Tax', format: 'currency' },
+        { key: 'avgSale', label: 'Average Sale', format: 'currency' },
+      ]} />
+      <div className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Revenue Trend</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trendData}>
+                <defs>
+                  <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                <YAxis tickLine={false} axisLine={false} />
+                <Tooltip formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <Area type="monotone" dataKey="value" stroke="#2563eb" fill="url(#revenueFill)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Revenue Mix</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={performance} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                  <Cell fill="#2563eb" />
+                  <Cell fill="#f59e0b" />
+                  <Cell fill="#10b981" />
+                </Pie>
+                <Tooltip formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function AdvancedFastMoving({ data }: { data: any }) {
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  if (!rows.length) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const topProducts = rows.slice(0, 8)
+  const chartData = topProducts.map((row: any) => ({ name: row.product, quantity: Number(row.quantity || 0), revenue: Number(row.revenue || 0) }))
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Top Movers</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tickLine={false} axisLine={false} />
+                <Tooltip formatter={(value: any) => formatNumber(Number(value) || 0)} />
+                <Bar dataKey="quantity" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Revenue Leaders</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {topProducts.map((row: any, idx: number) => (
+              <div key={row.product || idx} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{row.product}</span>
+                  <span className="text-sm text-muted-foreground">{Number(row.quantity || 0)} sold</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-muted">
+                  <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (Number(row.revenue || 0) / Math.max(...topProducts.map((x: any) => Number(x.revenue || 0))) || 0) * 100)}%` }} />
+                </div>
+                <p className="mt-2 text-sm font-semibold">{formatCurrency(Number(row.revenue || 0))}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+      <ReportTable data={rows} columns={[
+        { key: 'product', label: 'Product', format: 'text' },
+        { key: 'quantity', label: 'Qty Sold', format: 'number' },
+        { key: 'revenue', label: 'Revenue', format: 'currency' },
+      ]} />
+    </div>
+  )
+}
+
+function AdvancedBranchPerformance({ data }: { data: any }) {
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  if (!rows.length) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const chartData = rows.map((row: any) => ({ name: row.branch, revenue: Number(row.revenue || 0), sales: Number(row.count || 0), avgSale: Number(row.avgSale || 0) }))
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Branch Revenue</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tickLine={false} axisLine={false} />
+                <Tooltip formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <Bar dataKey="revenue" fill="#0f766e" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Sales vs Avg Sale</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tickLine={false} axisLine={false} />
+                <Tooltip />
+                <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="avgSale" stroke="#f59e0b" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+      <ReportTable data={rows} columns={[
+        { key: 'branch', label: 'Branch', format: 'text' },
+        { key: 'count', label: 'Sales', format: 'number' },
+        { key: 'revenue', label: 'Revenue', format: 'currency' },
+        { key: 'discount', label: 'Discount', format: 'currency' },
+        { key: 'avgSale', label: 'Avg Sale', format: 'currency' },
+      ]} />
+    </div>
+  )
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('en-US').format(value || 0)
+}
+
 function PnLReport({ data }: { data: any }) {
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
   const rows = [
@@ -734,7 +906,19 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {currentReport.renderType === 'table' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
-                    {currentReport.renderType === 'summary' && <SummaryCards data={reportData} keys={currentReport.summaryKeys} />}
+                    {currentReport.renderType === 'summary' && (
+                      <>
+                        {currentReport.id === 'salesSummary' ? (
+                          <AdvancedSalesSummary data={reportData} />
+                        ) : currentReport.id === 'inventoryFastMoving' ? (
+                          <AdvancedFastMoving data={reportData} />
+                        ) : currentReport.id === 'performanceBranch' ? (
+                          <AdvancedBranchPerformance data={reportData} />
+                        ) : (
+                          <SummaryCards data={reportData} keys={currentReport.summaryKeys} />
+                        )}
+                      </>
+                    )}
                     {currentReport.renderType === 'pnL' && <PnLReport data={reportData} />}
                     {currentReport.renderType === 'balanceSheet' && <BalanceSheetReport data={reportData} />}
                     {currentReport.renderType === 'trialBalance' && <TrialBalanceReport data={reportData} />}

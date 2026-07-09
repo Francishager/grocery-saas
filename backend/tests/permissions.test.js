@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { resolveEffectivePermissions } from '../src/utils/permissions.js';
 
 test('returns explicit permissions from a user permission record', () => {
@@ -18,4 +20,11 @@ test('returns full permissions for owners and platform admins', () => {
   assert.ok(ownerPermissions.includes('canViewDashboard'));
   assert.ok(ownerPermissions.includes('canCreateSale'));
   assert.deepEqual(platformPermissions, ['*']);
+});
+
+test('prisma schema exposes the staff till sheet permission field', () => {
+  const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
+  const schema = readFileSync(schemaPath, 'utf8');
+
+  assert.match(schema, /canViewStaffTillSheet\s+Boolean/);
 });
