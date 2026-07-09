@@ -15,6 +15,8 @@ import { cn } from '@/lib/utils'
 interface Appointment { id: string; customerName: string; customerPhone: string | null; title: string; scheduledDate: string; scheduledTime: string; duration: string | null; status: string; price: number; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null }
 interface WorkOrder { id: string; orderNo: string; customerName: string; customerPhone: string | null; title: string; status: string; priority: string; estimatedCost: number; actualCost: number; startDate: string | null; endDate: string | null; product?: { id: string; name: string } | null }
 interface ServiceContract { id: string; contractNo: string; title: string; customer: { id: string; name: string }; startDate: string; endDate: string | null; value: number; billingCycle: string; status: string }
+interface CarWashRecord { id: string; createdAt: string; customerName: string; title: string; estimatedCost: number; technicianId?: string | null; notes?: string | null }
+interface GarageRecord { id: string; createdAt: string; customerName: string; title: string; estimatedCost: number; status?: string | null; technicianId?: string | null; notes?: string | null }
 
 const statusColors: Record<string, string> = {
   scheduled: 'bg-blue-100 text-blue-700',
@@ -37,6 +39,12 @@ export default function ServiceBusinessPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
   const [contracts, setContracts] = useState<ServiceContract[]>([])
+  const [carWashRecords, setCarWashRecords] = useState<CarWashRecord[]>([])
+  const [garageRecords, setGarageRecords] = useState<GarageRecord[]>([])
+  const [showCarWashModal, setShowCarWashModal] = useState(false)
+  const [showGarageModal, setShowGarageModal] = useState(false)
+  const [carWashForm, setCarWashForm] = useState({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' })
+  const [garageForm, setGarageForm] = useState({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' })
   const [showApptModal, setShowApptModal] = useState(false)
   const [showWOModal, setShowWOModal] = useState(false)
   const [showContractModal, setShowContractModal] = useState(false)
@@ -47,14 +55,18 @@ export default function ServiceBusinessPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [a, w, c] = await Promise.all([
+      const [a, w, c, car, gar] = await Promise.all([
         apiFetch('/api/service/appointments').then(r => r.json()).catch(() => []),
         apiFetch('/api/service/work-orders').then(r => r.json()).catch(() => []),
         apiFetch('/api/service/contracts').then(r => r.json()).catch(() => []),
+        apiFetch('/api/service/car-wash').then(r => r.json()).catch(() => []),
+        apiFetch('/api/service/garage').then(r => r.json()).catch(() => []),
       ])
       setAppointments(Array.isArray(a) ? a : [])
       setWorkOrders(Array.isArray(w) ? w : [])
       setContracts(Array.isArray(c) ? c : [])
+      setCarWashRecords(Array.isArray(car) ? car : [])
+      setGarageRecords(Array.isArray(gar) ? gar : [])
     } catch (e) { console.error(e) }
   }, [])
 
@@ -117,7 +129,7 @@ export default function ServiceBusinessPage() {
           { key: 'car-wash', label: 'Car Wash', icon: Droplet },
           { key: 'garage', label: 'Garage Services', icon: Wrench },
         ].map(t => (
-          <button key={t.key} onClick={() => navigate(`/tenant/service/${t.key}`)} className={cn('flex items-center gap-1.5 whitespace-nowrap rounded-t-md px-3 py-2 text-sm font-medium transition-colors', tab === t.key ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground')}>
+          <button key={t.key} onClick={() => navigate(`/tenant/service/${t.key}`)} className={cn('flex items-center gap-1.5 whitespace-nowrap rounded-t-md px-4 py-3 text-sm font-medium transition-colors', tab === t.key ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <t.icon className="h-4 w-4" /> {t.label}
           </button>
         ))}
@@ -205,11 +217,21 @@ export default function ServiceBusinessPage() {
 
       {tab === 'car-wash' && (
         <div className="space-y-4">
+          <Button onClick={() => setShowCarWashModal(true)}><Plus className="mr-1 h-4 w-4" /> New Car Wash</Button>
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Attendant</th></tr></thead>
               <tbody>
-                <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Car wash records will appear here once logged</td></tr>
+                {carWashRecords.length === 0 && <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Car wash records will appear here once logged</td></tr>}
+                {carWashRecords.map(r => (
+                  <tr key={r.id} className="border-t">
+                    <td className="p-2">{new Date(r.createdAt).toLocaleDateString()}</td>
+                    <td className="p-2">{r.customerName}</td>
+                    <td className="p-2">{r.title}</td>
+                    <td className="p-2 text-right">{(r.estimatedCost || 0).toFixed(0)}</td>
+                    <td className="p-2">{r.technicianId || '-'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -218,16 +240,58 @@ export default function ServiceBusinessPage() {
 
       {tab === 'garage' && (
         <div className="space-y-4">
+          <Button onClick={() => setShowGarageModal(true)}><Plus className="mr-1 h-4 w-4" /> New Garage Service</Button>
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th></tr></thead>
               <tbody>
-                <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Garage service records will appear here once logged</td></tr>
+                {garageRecords.length === 0 && <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Garage service records will appear here once logged</td></tr>}
+                {garageRecords.map(g => (
+                  <tr key={g.id} className="border-t">
+                    <td className="p-2">{new Date(g.createdAt).toLocaleDateString()}</td>
+                    <td className="p-2">{g.customerName}</td>
+                    <td className="p-2">{g.title}</td>
+                    <td className="p-2 text-right">{(g.estimatedCost || 0).toFixed(0)}</td>
+                    <td className="p-2">{g.status || '-'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      <Dialog open={showCarWashModal} onOpenChange={setShowCarWashModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record Car Wash</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Vehicle</Label><Input value={carWashForm.vehicle} onChange={e => setCarWashForm({ ...carWashForm, vehicle: e.target.value })} placeholder="Plate or description" /></div>
+            <div><Label>Service Type</Label><Input value={carWashForm.serviceType} onChange={e => setCarWashForm({ ...carWashForm, serviceType: e.target.value })} placeholder="Exterior, Full, Valet" /></div>
+            <div><Label>Amount</Label><Input type="number" value={carWashForm.amount} onChange={e => setCarWashForm({ ...carWashForm, amount: +e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={carWashForm.notes} onChange={e => setCarWashForm({ ...carWashForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={async () => {
+            if (!carWashForm.vehicle.trim() || !carWashForm.serviceType.trim()) { toast({ variant: 'destructive', title: 'Vehicle and service type required' }); return }
+            try { await apiFetch('/api/service/car-wash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(carWashForm) }); setShowCarWashModal(false); setCarWashForm({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record car wash' }) }
+          }}>Create</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showGarageModal} onOpenChange={setShowGarageModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record Garage Service</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Vehicle</Label><Input value={garageForm.vehicle} onChange={e => setGarageForm({ ...garageForm, vehicle: e.target.value })} placeholder="Plate or description" /></div>
+            <div><Label>Service</Label><Input value={garageForm.service} onChange={e => setGarageForm({ ...garageForm, service: e.target.value })} placeholder="Brake repair, Oil change" /></div>
+            <div><Label>Cost</Label><Input type="number" value={garageForm.cost} onChange={e => setGarageForm({ ...garageForm, cost: +e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={garageForm.notes} onChange={e => setGarageForm({ ...garageForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={async () => {
+            if (!garageForm.vehicle.trim() || !garageForm.service.trim()) { toast({ variant: 'destructive', title: 'Vehicle and service required' }); return }
+            try { await apiFetch('/api/service/garage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(garageForm) }); setShowGarageModal(false); setGarageForm({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record garage service' }) }
+          }}>Create</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showApptModal} onOpenChange={setShowApptModal}>
         <DialogContent>

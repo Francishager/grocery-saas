@@ -109,3 +109,71 @@ router.delete("/contracts/:id", authenticateToken, requirePermission("canDeleteS
 });
 
 export default router;
+
+// ===== CAR WASH & GARAGE (simple work-order based entries) =====
+// These endpoints create lightweight work order records for car-wash and garage services
+// so the frontend can record and list services without a separate DB model.
+router.get('/car-wash', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+  try {
+    const where = { tenantId: t(req) };
+    const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
+    // Filter client-side for car wash related entries (product slug or title/notes match)
+    const items = orders.filter(o => (o.product && (o.product.slug === 'car-wash-valet' || (o.product.name || '').toLowerCase().includes('car wash'))) || (o.title && o.title.toLowerCase().includes('car wash')) || (o.notes && o.notes.toLowerCase().includes('car wash')));
+    res.json(items);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+  try {
+    const { date, vehicle, serviceType, amount, attendantId, branchId, notes } = req.body;
+    if (!serviceType || !vehicle) return res.status(400).json({ error: 'Vehicle and service type are required' });
+    const order = await prisma.workOrder.create({ data: {
+      orderNo: `CW-${Date.now()}`,
+      customerName: vehicle,
+      customerPhone: null,
+      productId: null,
+      technicianId: attendantId || null,
+      title: serviceType,
+      description: notes || null,
+      priority: 'normal',
+      estimatedCost: amount || 0,
+      actualCost: amount || 0,
+      branchId: branchId || null,
+      notes: JSON.stringify({ vehicle, serviceType, extra: notes || null }),
+      tenantId: t(req),
+    } });
+    res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/garage', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+  try {
+    const where = { tenantId: t(req) };
+    const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
+    const items = orders.filter(o => (o.product && (o.product.slug === 'auto-repair-services' || (o.product.name || '').toLowerCase().includes('repair') || (o.product.name || '').toLowerCase().includes('garage'))) || (o.title && (o.title.toLowerCase().includes('repair') || o.title.toLowerCase().includes('garage'))) || (o.notes && o.notes.toLowerCase().includes('repair')));
+    res.json(items);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/garage', authenticateToken, requirePermission('canCreateServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+  try {
+    const { date, vehicle, service, cost, attendantId, branchId, notes } = req.body;
+    if (!service || !vehicle) return res.status(400).json({ error: 'Vehicle and service description are required' });
+    const order = await prisma.workOrder.create({ data: {
+      orderNo: `GR-${Date.now()}`,
+      customerName: vehicle,
+      customerPhone: null,
+      productId: null,
+      technicianId: attendantId || null,
+      title: service,
+      description: notes || null,
+      priority: 'normal',
+      estimatedCost: cost || 0,
+      actualCost: cost || 0,
+      branchId: branchId || null,
+      notes: JSON.stringify({ vehicle, service, extra: notes || null }),
+      tenantId: t(req),
+    } });
+    res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
