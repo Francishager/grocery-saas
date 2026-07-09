@@ -122,7 +122,7 @@ export default function SalesPage() {
 
   const loadTaxConfig = async () => {
     try {
-      const data = await settingsApi.get()
+      const data = await settingsApi.getTaxConfig()
       setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
     } catch {}
   }

@@ -182,6 +182,9 @@ async function seedFeatures() {
 
     // ===== Assets & Resources =====
     { name: 'assets', displayName: 'Assets & Resources', module: 'assets', category: 'advanced', description: 'Manage machines, vehicles, equipment' },
+
+    // ===== Developer / Data Tools =====
+    { name: 'developer.data_importer', displayName: 'Data Importer', module: 'developer', category: 'core', description: 'Bulk import products, customers, and inventory data via CSV/Excel' },
   ]
 
   for (const feature of allFeatures) {
@@ -218,6 +221,7 @@ async function seedPlanFeatures() {
           'expenses',
           'reports', 'reports.sales', 'reports.inventory',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+          'developer.data_importer',
         ]
         break
       case 'starter':
@@ -227,6 +231,7 @@ async function seedPlanFeatures() {
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'reports', 'reports.sales', 'reports.inventory',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+          'developer.data_importer',
         ]
         break
       case 'growth':
@@ -243,6 +248,7 @@ async function seedPlanFeatures() {
           'reports', 'reports.sales', 'reports.inventory', 'reports.customers',
           'reports.suppliers', 'reports.financial',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+          'developer.data_importer',
         ]
         break
       case 'professional':
@@ -260,6 +266,7 @@ async function seedPlanFeatures() {
           'reports', 'reports.sales', 'reports.inventory', 'reports.customers',
           'reports.suppliers', 'reports.financial', 'reports.performance',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+          'developer.data_importer',
           'multi_branch',
           'audit',
           'rentals',
@@ -286,6 +293,7 @@ async function seedPlanFeatures() {
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'reports', 'reports.sales', 'reports.inventory',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
+          'developer.data_importer',
         ]
     }
 

@@ -76,6 +76,24 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
   }
 });
 
+// Get tax config only (no canViewSettings permission required — needed by sales/POS for all staff)
+router.get("/tax-config", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { taxEnabled: true, taxRate: true, taxId: true, currency: true },
+    });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json(tenant);
+  } catch (err) {
+    console.error("Get tax config error:", err);
+    res.status(500).json({ error: "Failed to load tax config" });
+  }
+});
+
 // Upload logo to Cloudinary
 router.post("/logo", authenticateToken, requirePermission("canEditSettings"), upload.single("logo"), async (req, res) => {
   try {

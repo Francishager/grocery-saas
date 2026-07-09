@@ -24,7 +24,8 @@ import {
   Calendar,
   Filter,
   Download,
-  Eye
+  Eye,
+  Plus
 } from 'lucide-react'
 
 interface Expense {
@@ -94,6 +95,7 @@ export default function ExpensesPage() {
   const [endDate, setEndDate] = useState('')
   const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
   const expensesEnabled = hasPermission('canViewExpense')
+  const canCreateExpense = hasPermission('canCreateExpense')
   const online = useOnlineStatus()
 
   useEffect(() => {
@@ -289,6 +291,12 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold">Expenses & Cash Flow</h1>
           <p className="text-muted-foreground">Track business expenses and manage cash accounts</p>
         </div>
+        {canCreateExpense && (
+          <Button onClick={() => navigate('/tenant/accounting/expenses?new=true')}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Expense
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}

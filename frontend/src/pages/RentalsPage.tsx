@@ -108,7 +108,7 @@ export default function RentalsPage() {
   const loadTaxConfig = async () => {
     try {
       if (online) {
-        const data = await settingsApi.get()
+        const data = await settingsApi.getTaxConfig()
         setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
       } else {
         const local = await getLocalSettings()

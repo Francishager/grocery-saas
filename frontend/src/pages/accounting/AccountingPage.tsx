@@ -251,7 +251,7 @@ export default function AccountingPage() {
     if (user?.branchId && !hasPermission('canViewBranch')) {
       setAccBranch(user.branchId)
     }
-    apiFetch('/api/settings').then(async (res) => {
+    apiFetch('/api/settings/tax-config').then(async (res) => {
       if (res.ok) {
         const data = await res.json()
         if (data.currency) setAccCurrency(data.currency)

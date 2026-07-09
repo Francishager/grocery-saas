@@ -765,6 +765,9 @@ export const settingsApi = {
   get: () =>
     api.get<any>('/api/settings'),
 
+  getTaxConfig: () =>
+    api.get<any>('/api/settings/tax-config'),
+
   update: (data: Record<string, any>) =>
     api.put<{ message: string; tenant: any }>('/api/settings', { body: data }),
 

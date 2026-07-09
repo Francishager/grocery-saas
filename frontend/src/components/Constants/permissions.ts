@@ -221,6 +221,9 @@ export const permissions: Permission[] = [
   { id: 'canEditAccounting', name: 'Edit Accounting', description: 'Edit accounts and journal entries', category: 'accounting', accessesBusinessData: true },
   { id: 'canDeleteAccounting', name: 'Delete Accounting', description: 'Delete accounts and journal entries', category: 'accounting', accessesBusinessData: true },
   
+  // Data Import
+  { id: 'canImportInventory', name: 'Import Inventory Data', description: 'Bulk import products and inventory via CSV/Excel', category: 'inventory', accessesBusinessData: true },
+  
   // Billing (Tenant-level - for business owners)
   { id: 'view_own_billing', name: 'View Own Billing', description: 'View own subscription and billing', category: 'billing' },
   { id: 'manage_own_billing', name: 'Manage Own Billing', description: 'Manage own subscription and payments', category: 'billing' },

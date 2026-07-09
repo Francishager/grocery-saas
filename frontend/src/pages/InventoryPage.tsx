@@ -250,6 +250,10 @@ export default function InventoryPage() {
 
     try {
       if (editingItem) {
+        if (!canEditCurrent) {
+          toast({ variant: 'destructive', title: 'You do not have permission to edit products' })
+          return
+        }
         if (online) {
           await inventoryApi.update(String(editingItem.id), formData)
           if (formData.itemType === 'product') await saveSellingUnits(String(editingItem.id))
@@ -274,6 +278,10 @@ export default function InventoryPage() {
         }
         toast({ title: 'Item updated successfully' })
       } else {
+        if (!canCreateCurrent) {
+          toast({ variant: 'destructive', title: 'You do not have permission to create products' })
+          return
+        }
         if (online) {
           const result = await inventoryApi.create(formData)
           if (formData.itemType === 'product') {
@@ -435,7 +443,7 @@ export default function InventoryPage() {
              'Manage your products'}
           </p>
         </div>
-        {canManageInventory && (
+        {canCreateCurrent && (
           <Button onClick={openNewForm}>
             <Plus className="mr-2 h-4 w-4" />
             {lockedType === 'product' ? 'Add Product' : 'Add Item'}
@@ -915,7 +923,7 @@ export default function InventoryPage() {
                       </td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          {canManageInventory && (
+                          {canEditCurrent && (
                             <Button
                               variant="ghost"
                               size="icon"

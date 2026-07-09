@@ -131,7 +131,7 @@ export default function TransactionAccountsPage() {
     fetchAccounts()
     fetchBranches()
     fetchStaff()
-    apiFetch('/api/settings').then(async (res) => {
+    apiFetch('/api/settings/tax-config').then(async (res) => {
       if (res.ok) {
         const data = await res.json()
         if (data.currency) setForm(f => ({ ...f, currency: data.currency }))
