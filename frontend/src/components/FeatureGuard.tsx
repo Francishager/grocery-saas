@@ -8,7 +8,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface FeatureGuardProps {
   feature: string
-  permission?: string
+  permission?: string | string[]
   children: ReactNode
   fallback?: ReactNode
 }
@@ -32,7 +32,10 @@ export function FeatureGuard({ feature, permission, children, fallback }: Featur
   }
 
   if (hasFeature(feature)) {
-    if (permission && !hasPermission(permission)) {
+    const requiredPermissions = Array.isArray(permission) ? permission : permission ? [permission] : []
+    const hasRequiredPermission = requiredPermissions.length === 0 || requiredPermissions.some((perm) => hasPermission(perm))
+
+    if (permission && !hasRequiredPermission) {
       return (
         <div className="flex min-h-[60vh] items-center justify-center p-6">
           <Card className="max-w-md text-center">

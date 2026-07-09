@@ -236,11 +236,10 @@ const reportCategories: ReportCategoryDef[] = [
 ]
 
 const accountingSubItems = [
-  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport' },
-  { to: '/tenant/accounting/expenses', label: 'Expenses & Cash Flow', icon: CreditCard, feature: 'expenses', permission: 'canViewExpense' },
-  { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: 'canViewFinancialReport' },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport'] },
+  { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: ['canViewAccounting', 'canViewFinancialReport'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
-  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: 'canViewFinancialReport' },
+  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: ['canViewAccounting', 'canViewFinancialReport'] },
 ]
 
 const settingsSubItems = [
@@ -308,9 +307,15 @@ export function TenantLayout() {
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
   }, [location.pathname, location.search])
   const isOwner = user?.role === 'owner'
-  function subItemVisible(item: { feature?: string | null; permission?: string }) {
+  function hasRequiredPermission(permission?: string | string[]) {
+    if (!permission) return true
+    const permissions = Array.isArray(permission) ? permission : [permission]
+    return permissions.some((perm) => hasPermission(perm))
+  }
+
+  function subItemVisible(item: { feature?: string | null; permission?: string | string[] }) {
     if (item.feature && !canAccessFeature(item.feature)) return false
-    if (item.permission && !hasPermission(item.permission)) {
+    if (item.permission && !hasRequiredPermission(item.permission)) {
       if (isOwner && item.feature && canAccessFeature(item.feature)) return true
       return false
     }
@@ -362,7 +367,7 @@ export function TenantLayout() {
       if (item.isReports && visibleReportCategories.length > 0) return true
       return false
     }
-    if (item.permission && !hasPermission(item.permission)) {
+    if (item.permission && !hasRequiredPermission(item.permission)) {
       if (isOwner && item.feature && canAccessFeature(item.feature)) return true
       // For parent items with sub-items, show if any sub-item is visible
       if (item.isAccounting && visibleAccountingSubItems.length > 0) return true
