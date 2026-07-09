@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
+import { notifyOwnerOfLowStock } from "../utils/notifications.js";
 
 const router = Router();
 const purchaseRoles = ["owner", "manager", "accountant"];
@@ -74,13 +75,16 @@ router.post("/", authenticateToken, requirePermission("canCreatePurchase"), asyn
       });
 
       for (const item of purchaseItems) {
-        await tx.product.update({
+        const updatedProduct = await tx.product.update({
           where: { id: item.productId },
           data: {
             quantity: { increment: item.quantity },
             cost: item.cost,
           },
         });
+        if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
+          await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
+        }
       }
 
       return created;
@@ -124,13 +128,16 @@ router.post("/checkout", authenticateToken, requirePermission("canCreatePurchase
       });
 
       for (const item of purchaseItems) {
-        await tx.product.update({
+        const updatedProduct = await tx.product.update({
           where: { id: item.productId },
           data: {
             quantity: { increment: item.quantity },
             cost: item.cost,
           },
         });
+        if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
+          await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
+        }
       }
 
       return created;

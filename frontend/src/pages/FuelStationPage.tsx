@@ -48,8 +48,8 @@ export default function FuelStationPage() {
   const [deliveryForm, setDeliveryForm] = useState({ tankId: '', supplierName: '', invoiceNo: '', litres: 0, unitCost: 0 })
   const [shiftForm, setShiftForm] = useState({ shiftNo: '', pumpId: '', openingReading: 0, startDate: '' })
   const [meterForm, setMeterForm] = useState({ pumpId: '', openingReading: 0, closingReading: 0, litresSold: 0, amount: 0, readingDate: '' })
-  const [dipstickForm, setDipstickForm] = useState({ tankId: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' })
-  const [pricingForm, setPricingForm] = useState({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, notes: '' })
+  const [dipstickForm, setDipstickForm] = useState({ tankId: '', readingDate: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' })
+  const [pricingForm, setPricingForm] = useState({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, effectiveDate: '', notes: '' })
   const [complianceForm, setComplianceForm] = useState({ type: 'environmental', result: 'pass', inspectionDate: '', nextDue: '', notes: '' })
   const { toast } = useToast()
   const { hasPermission, user } = useJWTAuth()
@@ -552,7 +552,7 @@ export default function FuelStationPage() {
             <div><Label>Attendant</Label><Input value={dipstickForm.attendant} onChange={e => setDipstickForm({ ...dipstickForm, attendant: e.target.value })} /></div>
             <div><Label>Notes</Label><Input value={dipstickForm.notes} onChange={e => setDipstickForm({ ...dipstickForm, notes: e.target.value })} /></div>
           </div>
-          <DialogFooter><Button onClick={createDipstick}>Save Reading</Button></DialogFooter>
+          <DialogFooter><Button onClick={createDipstickReading}>Save Dipstick</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -574,7 +574,7 @@ export default function FuelStationPage() {
             </div>
             <div><Label>Notes</Label><Input value={pricingForm.notes} onChange={e => setPricingForm({ ...pricingForm, notes: e.target.value })} /></div>
           </div>
-          <DialogFooter><Button onClick={createPricing}>Save Price</Button></DialogFooter>
+          <DialogFooter><Button onClick={createPricingEntry}>Save Price</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -605,7 +605,7 @@ export default function FuelStationPage() {
             </div>
             <div><Label>Notes</Label><Input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} /></div>
           </div>
-          <DialogFooter><Button onClick={createCompliance}>Log Inspection</Button></DialogFooter>
+          <DialogFooter><Button onClick={createComplianceEntry}>Log Inspection</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

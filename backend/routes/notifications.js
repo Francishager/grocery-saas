@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
+import { notifyOwnerOfDailySalesSummary } from "../src/utils/notifications.js";
 
 const router = Router();
 
@@ -87,6 +88,30 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
     res.json({ count });
   } catch (err) {
     res.status(500).json({ error: "Failed to get unread count" });
+  }
+});
+
+router.post("/daily-sales-summary", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    const [agg, count] = await Promise.all([
+      prisma.sale.aggregate({ where: { tenantId, createdAt: { gte: start, lt: end } }, _sum: { total: true, discount: true, tax: true, subtotal: true } }),
+      prisma.sale.count({ where: { tenantId, createdAt: { gte: start, lt: end } } }),
+    ]);
+    const summary = {
+      salesCount: count,
+      totalRevenue: agg._sum.total || 0,
+      totalDiscount: agg._sum.discount || 0,
+      totalTax: agg._sum.tax || 0,
+      currency: (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { currency: true } }).catch(() => null))?.currency || 'UGX',
+    };
+    await notifyOwnerOfDailySalesSummary({ tenantId, summary });
+    res.json({ message: 'Daily sales summary notification queued', summary });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to queue daily sales summary' });
   }
 });
 

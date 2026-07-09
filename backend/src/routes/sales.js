@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission, requireCashAccount } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
+import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
 
 const router = Router();
 
@@ -143,10 +144,13 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       // Deduct stock in base units (skip service items)
       for (const item of saleItems) {
         if (item.itemType === "service") continue;
-        await tx.product.update({
+        const updatedProduct = await tx.product.update({
           where: { id: item.productId },
           data: { quantity: { decrement: item.baseQty } },
         });
+        if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
+          await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
+        }
       }
 
       // Add sale total to user's assigned cash account (money coming in)
@@ -171,6 +175,13 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       }
 
       return created;
+    });
+
+    await notifyOwnerOfSale({
+      tenantId: scope.tenantId,
+      sale,
+      user: await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null),
+      productNames: saleItems.map((item) => item.product?.name || item.productId),
     });
 
     res.status(201).json({ message: "Sale recorded", sale });
@@ -244,10 +255,13 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       // Deduct stock in base units (skip service items)
       for (const item of saleItems) {
         if (item.itemType === "service") continue;
-        await tx.product.update({
+        const updatedProduct = await tx.product.update({
           where: { id: item.productId },
           data: { quantity: { decrement: item.baseQty } },
         });
+        if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
+          await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
+        }
       }
 
       // Add sale total to user's assigned cash account (money coming in)
@@ -272,6 +286,13 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       }
 
       return created;
+    });
+
+    await notifyOwnerOfSale({
+      tenantId: scope.tenantId,
+      sale,
+      user: await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null),
+      productNames: saleItems.map((item) => item.product?.name || item.productId),
     });
 
     res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale });
