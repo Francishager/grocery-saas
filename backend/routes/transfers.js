@@ -2,7 +2,7 @@ import { Router } from "express";
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
-import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
+import { resolveBranchScope, handleBranchError } from "../src/utils/branchAccess.js";
 
 const router = Router();
 
@@ -10,8 +10,20 @@ const router = Router();
 router.get("/", authenticateToken, requireFeature("inventory.transfers"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    // StockTransfer has no branchId — it has fromBranchId/toBranchId.
+    // For owner with canAccessAllBranches, filter by tenant only.
+    // For staff, show transfers involving their branch (from or to).
+    const where = scope.canAccessAllBranches
+      ? { tenantId: scope.tenantId }
+      : {
+          tenantId: scope.tenantId,
+          OR: [
+            { fromBranchId: scope.branchId },
+            { toBranchId: scope.branchId },
+          ],
+        };
     const transfers = await prisma.stockTransfer.findMany({
-      where: scopedWhere(scope, {}),
+      where,
       include: {
         fromBranch: { select: { id: true, name: true } },
         toBranch: { select: { id: true, name: true } },
@@ -30,8 +42,18 @@ router.get("/", authenticateToken, requireFeature("inventory.transfers"), async 
 router.get("/:id", authenticateToken, requireFeature("inventory.transfers"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const where = scope.canAccessAllBranches
+      ? { id: req.params.id, tenantId: scope.tenantId }
+      : {
+          id: req.params.id,
+          tenantId: scope.tenantId,
+          OR: [
+            { fromBranchId: scope.branchId },
+            { toBranchId: scope.branchId },
+          ],
+        };
     const transfer = await prisma.stockTransfer.findFirst({
-      where: scopedWhere(scope, { id: req.params.id }),
+      where,
       include: {
         fromBranch: true,
         toBranch: true,

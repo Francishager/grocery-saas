@@ -4,9 +4,11 @@ import { Lock, ArrowUpRight, MessageSquare, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface FeatureGuardProps {
   feature: string
+  permission?: string
   children: ReactNode
   fallback?: ReactNode
 }
@@ -16,8 +18,9 @@ interface FeatureGuardProps {
  * Otherwise shows an UpgradePlan UI.
  * Features are strictly enforced — no offline bypass.
  */
-export function FeatureGuard({ feature, children, fallback }: FeatureGuardProps) {
+export function FeatureGuard({ feature, permission, children, fallback }: FeatureGuardProps) {
   const { hasFeature, loading, features } = useFeatureAccess()
+  const { hasPermission } = useJWTAuth()
 
   // Only show loading on first load when we have no cached features yet
   if (loading && Object.keys(features).length === 0) {
@@ -29,6 +32,25 @@ export function FeatureGuard({ feature, children, fallback }: FeatureGuardProps)
   }
 
   if (hasFeature(feature)) {
+    if (permission && !hasPermission(permission)) {
+      return (
+        <div className="flex min-h-[60vh] items-center justify-center p-6">
+          <Card className="max-w-md text-center">
+            <CardHeader>
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+                <Lock className="h-8 w-8 text-amber-600" />
+              </div>
+              <CardTitle className="text-xl">Permission Required</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                You do not have permission to access this page. Contact your administrator.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
     return <>{children}</>
   }
 

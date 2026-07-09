@@ -44,23 +44,32 @@ function getUserPermissions(): string[] {
   }
 }
 
-/** Check if user has permission to sync HR endpoints */
-function canSyncHR(): boolean {
-  const role = getUserRole()
-  if (role !== 'owner' && role !== 'admin' && role !== 'manager') return false
-  const perms = getUserPermissions()
-  if (!perms.includes('canViewStaff') && !perms.includes('*')) return false
-
-  // Check if hr feature is enabled via cached features
+/** Check if a feature is enabled in cached plan features */
+function isFeatureEnabled(featureName: string): boolean {
   try {
     const cached = localStorage.getItem('cachedFeatures')
-    if (cached) {
-      const features = JSON.parse(cached)
-      const hrEnabled = features?.hr?.enabled === true
-      if (!hrEnabled) return false
-    }
-  } catch {}
+    if (!cached) return true // No cache yet — allow (backend will 403 if not enabled)
+    const features = JSON.parse(cached)
+    const entry = features?.[featureName]
+    if (entry === undefined) return false // Not in plan
+    return entry.enabled === true
+  } catch {
+    return true // On error, allow
+  }
+}
 
+/** Check if user has a specific permission (owner/saas_admin bypass) */
+function userHasPermission(permission: string): boolean {
+  const role = getUserRole()
+  if (role === 'owner' || role === 'saas_admin') return true
+  const perms = getUserPermissions()
+  return perms.includes(permission) || perms.includes('*')
+}
+
+/** Check if sync should pull an endpoint based on feature + permission */
+function canPull(feature: string | null, permission?: string): boolean {
+  if (feature && !isFeatureEnabled(feature)) return false
+  if (permission && !userHasPermission(permission)) return false
   return true
 }
 
@@ -140,6 +149,7 @@ export async function pullAll(): Promise<void> {
     updatedAt: b.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('expenses', 'canViewExpense'))
   total += await pullTable('/api/expenses/expenses?limit=500', 'expenses', (e: any) => ({
     id: e.id, category: e.category, description: e.description,
     amount: e.amount, paymentMethod: e.paymentMethod, reference: e.reference,
@@ -147,6 +157,7 @@ export async function pullAll(): Promise<void> {
     user: e.user, updatedAt: e.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('payables', 'canViewSupplier'))
   total += await pullTable('/api/payables/suppliers?limit=500', 'suppliers', (s: any) => ({
     id: s.id, name: s.name, email: s.email, phone: s.phone,
     address: s.address, balance: s.balance ?? 0, status: s.status || 'active',
@@ -154,6 +165,7 @@ export async function pullAll(): Promise<void> {
     updatedAt: s.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('payables', 'canViewPurchase'))
   total += await pullTable('/api/payables/purchases?limit=500', 'purchases', (p: any) => ({
     id: p.id, refNo: p.refNo, supplierId: p.supplierId, supplier: p.supplier,
     total: p.total ?? 0, amountPaid: p.amountPaid ?? 0, balance: p.balance ?? 0,
@@ -162,6 +174,7 @@ export async function pullAll(): Promise<void> {
     createdAt: p.createdAt, updatedAt: p.updatedAt || p.createdAt,
   }))
 
+  if (canPull('payables', 'canViewPayable'))
   total += await pullTable('/api/payables/payments?limit=500', 'payments', (p: any) => ({
     id: p.id, amount: p.amount ?? 0, paymentMethod: p.paymentMethod,
     reference: p.reference, notes: p.notes,
@@ -172,6 +185,7 @@ export async function pullAll(): Promise<void> {
     createdAt: p.createdAt, updatedAt: p.updatedAt || p.createdAt,
   }))
 
+  if (canPull('inventory.transfers', 'canTransferStock'))
   total += await pullTable('/api/transfers?limit=500', 'transfers', (t: any) => ({
     id: t.id, transferNo: t.transferNo, status: t.status, notes: t.notes,
     fromBranchId: t.fromBranchId || t.fromBranch?.id, toBranchId: t.toBranchId || t.toBranch?.id,
@@ -179,6 +193,7 @@ export async function pullAll(): Promise<void> {
     createdAt: t.createdAt, updatedAt: t.updatedAt || t.createdAt,
   }))
 
+  if (canPull('rentals', 'canViewRental'))
   total += await pullTable('/api/rentals?limit=500', 'rentals', (r: any) => ({
     id: r.id, rentalNo: r.rentalNo, customerName: r.customer?.name,
     customerPhone: r.customer?.phone, branchId: r.branch?.id,
@@ -190,6 +205,7 @@ export async function pullAll(): Promise<void> {
     updatedAt: r.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('sales.returns', 'canRefundSale'))
   total += await pullTable('/api/returns?limit=500', 'returns', (r: any) => ({
     id: r.id, returnNo: r.returnNo, total: r.total ?? 0, reason: r.reason,
     refundMethod: r.refundMethod, status: r.status, saleId: r.sale?.id,
@@ -197,19 +213,21 @@ export async function pullAll(): Promise<void> {
     createdAt: r.createdAt, updatedAt: r.updatedAt || r.createdAt,
   }))
 
+  if (canPull('accounting', 'canViewAccounting'))
   total += await pullTable('/api/accounting/accounts', 'accounts', (a: any) => ({
     id: a.id, code: a.code, name: a.name, type: a.type, subType: a.subType,
     balance: a.balance ?? 0, isActive: a.isActive, parentId: a.parentId,
     updatedAt: a.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('accounting', 'canViewAccounting'))
   total += await pullTable('/api/accounting/journal?limit=500', 'journalEntries', (j: any) => ({
     id: j.id, entryNo: j.entryNo, date: j.date, description: j.description,
     reference: j.reference, status: j.status, lines: j.lines,
     updatedAt: j.updatedAt || new Date().toISOString(),
   }))
 
-  if (canSyncHR()) {
+  if (canPull('hr', 'canViewStaff')) {
     total += await pullTable('/api/hr?limit=500', 'employees', (e: any) => ({
       id: e.id, firstName: e.firstName, lastName: e.lastName, email: e.email,
       phone: e.phone, position: e.position, department: e.department,
@@ -219,7 +237,7 @@ export async function pullAll(): Promise<void> {
     }))
   }
 
-  if (canSyncHR()) {
+  if (canPull('hr', 'canViewStaff')) {
     total += await pullTable('/api/hr/leave-requests', 'leaveRequests', (l: any) => ({
       id: l.id, leaveType: l.leaveType, startDate: l.startDate, endDate: l.endDate,
       days: l.days, reason: l.reason, status: l.status,
@@ -228,7 +246,7 @@ export async function pullAll(): Promise<void> {
     }))
   }
 
-  if (canSyncHR()) {
+  if (canPull('hr', 'canViewStaff')) {
     total += await pullTable('/api/hr/payroll', 'payroll', (p: any) => ({
       id: p.id, period: p.period, grossSalary: p.grossSalary ?? 0,
       deductions: p.deductions ?? 0, netSalary: p.netSalary ?? 0,
@@ -238,17 +256,20 @@ export async function pullAll(): Promise<void> {
     }))
   }
 
+  if (canPull('communication', 'canViewCommunication'))
   total += await pullTable('/api/notifications', 'notifications', (n: any) => ({
     id: n.id, channel: n.channel, title: n.title, message: n.message,
     type: n.type, isRead: n.isRead, createdAt: n.createdAt,
   }))
 
+  if (canPull('expenses', 'canViewExpense'))
   total += await pullTable('/api/expenses/cash-accounts', 'cashAccounts', (a: any) => ({
     id: a.id, name: a.name, type: a.type, balance: a.balance ?? 0,
     currency: a.currency, isActive: a.isActive,
     updatedAt: a.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('expenses', 'canViewExpense'))
   total += await pullTable('/api/expenses/cash-transactions?limit=500', 'cashTransactions', (t: any) => ({
     id: t.id, amount: t.amount, type: t.type, balanceAfter: t.balanceAfter ?? 0,
     reference: t.reference, description: t.description,
@@ -258,7 +279,7 @@ export async function pullAll(): Promise<void> {
   }))
 
   // Staff — uses staffApi internally, but we pull via the API endpoint
-  if (canSyncHR()) {
+  if (canPull('settings.users', 'canViewStaff')) {
   try {
     const res = await apiFetch('/api/staff')
     if (res.ok) {
@@ -279,6 +300,7 @@ export async function pullAll(): Promise<void> {
   }
   }
 
+  if (canPull('settings', 'canViewSettings'))
   try {
     const res = await apiFetch('/api/settings')
     if (res.ok) {

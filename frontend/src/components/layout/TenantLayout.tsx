@@ -308,30 +308,16 @@ export function TenantLayout() {
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
   }, [location.pathname, location.search])
   const isOwner = user?.role === 'owner'
-  const visibleNavItems = navItems.filter((item) => {
+  function subItemVisible(item: { feature?: string | null; permission?: string }) {
     if (item.feature && !canAccessFeature(item.feature)) return false
     if (item.permission && !hasPermission(item.permission)) {
       if (isOwner && item.feature && canAccessFeature(item.feature)) return true
       return false
     }
     return true
-  })
-  const visibleInventorySubItems = inventorySubItems.filter((item) => {
-    if (item.feature && !canAccessFeature(item.feature)) return false
-    if (item.permission && !hasPermission(item.permission)) {
-      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
-      return false
-    }
-    return true
-  })
-  const visibleAccountingSubItems = accountingSubItems.filter((item) => {
-    if (item.feature && !canAccessFeature(item.feature)) return false
-    if (item.permission && !hasPermission(item.permission)) {
-      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
-      return false
-    }
-    return true
-  })
+  }
+  const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
+  const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
   const visibleFuelStationSubItems = fuelStationSubItems.filter((item) => {
     const parentEnabled = canAccessFeature('fuel_station')
     const subEnabled = item.feature ? canAccessFeature(item.feature) : false
@@ -342,20 +328,50 @@ export function TenantLayout() {
     }
     return true
   })
-  const visibleReceivablesSubItems = receivablesSubItems.filter((item) => {
-    if (item.feature && !canAccessFeature(item.feature)) return false
-    if (item.permission && !hasPermission(item.permission)) {
-      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
-      return false
-    }
-    return true
-  })
+  const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter((item) => {
     const parentEnabled = canAccessFeature('service')
     const subEnabled = item.feature ? canAccessFeature(item.feature) : false
     if (!parentEnabled && !subEnabled) return false
     if (item.permission && !hasPermission(item.permission)) {
       if (isOwner && (parentEnabled || subEnabled)) return true
+      return false
+    }
+    return true
+  })
+  const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
+  const visibleReportCategories = reportCategories.filter((cat) => {
+    if (cat.feature && !canAccessFeature(cat.feature)) return false
+    if (cat.permission && !hasPermission(cat.permission)) {
+      if (isOwner && cat.feature && canAccessFeature(cat.feature)) return true
+      return false
+    }
+    return true
+  })
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.feature && !canAccessFeature(item.feature)) {
+      // For parent items with sub-items, show if any sub-item is visible
+      // even when the parent's own feature is not enabled (e.g. Accounting
+      // parent has feature 'accounting' but Expenses sub-item has 'expenses')
+      if (item.isAccounting && visibleAccountingSubItems.length > 0) return true
+      if (item.isInventory && visibleInventorySubItems.length > 0) return true
+      if (item.isFuelStation && visibleFuelStationSubItems.length > 0) return true
+      if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
+      if (item.isService && visibleServiceSubItems.length > 0) return true
+      if (item.isSettings && visibleSettingsSubItems.length > 0) return true
+      if (item.isReports && visibleReportCategories.length > 0) return true
+      return false
+    }
+    if (item.permission && !hasPermission(item.permission)) {
+      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
+      // For parent items with sub-items, show if any sub-item is visible
+      if (item.isAccounting && visibleAccountingSubItems.length > 0) return true
+      if (item.isInventory && visibleInventorySubItems.length > 0) return true
+      if (item.isFuelStation && visibleFuelStationSubItems.length > 0) return true
+      if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
+      if (item.isService && visibleServiceSubItems.length > 0) return true
+      if (item.isSettings && visibleSettingsSubItems.length > 0) return true
+      if (item.isReports && visibleReportCategories.length > 0) return true
       return false
     }
     return true
@@ -518,7 +534,7 @@ export function TenantLayout() {
                   </button>
                   {reportsExpanded && (
                     <div className="mt-1 space-y-1">
-                      {reportCategories.filter(cat => (isOwner || hasPermission(cat.permission)) && (!cat.feature || canAccessFeature(cat.feature))).map(cat => {
+                      {visibleReportCategories.map(cat => {
                         const catExpanded = expandedCats.has(cat.id)
                         return (
                           <div key={cat.id}>
@@ -561,7 +577,7 @@ export function TenantLayout() {
                   </button>
                   {settingsExpanded && (
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
-                      {settingsSubItems.filter(sub => (isOwner || !sub.permission || hasPermission(sub.permission)) && (!sub.feature || canAccessFeature(sub.feature))).map(sub => (
+                      {visibleSettingsSubItems.map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
                           className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
                           <sub.icon className="h-4 w-4" />{sub.label}
