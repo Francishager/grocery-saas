@@ -1,7 +1,7 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
-import { requireFeature } from "../middleware/featureCheck.js";
+import { requireFeature, requireAnyFeature } from "../middleware/featureCheck.js";
 
 const router = Router();
 const t = (req) => req.user.tenantId || req.user.tenant_id;
@@ -113,7 +113,7 @@ export default router;
 // ===== CAR WASH & GARAGE (simple work-order based entries) =====
 // These endpoints create lightweight work order records for car-wash and garage services
 // so the frontend can record and list services without a separate DB model.
-router.get('/car-wash', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+router.get('/car-wash', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
     const where = { tenantId: t(req) };
     const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
@@ -123,7 +123,7 @@ router.get('/car-wash', authenticateToken, requirePermission('canViewServiceBusi
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
     const { date, vehicle, serviceType, amount, attendantId, branchId, notes } = req.body;
     if (!serviceType || !vehicle) return res.status(400).json({ error: 'Vehicle and service type are required' });
@@ -162,7 +162,7 @@ router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceB
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/car-wash/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+router.get('/car-wash/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
     const order = await prisma.workOrder.findUnique({ where: { id: req.params.id } });
     if (!order) return res.status(404).json({ error: 'Not found' });
@@ -170,7 +170,7 @@ router.get('/car-wash/:id', authenticateToken, requirePermission('canViewService
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/car-wash/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+router.put('/car-wash/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
     const { vehicle, serviceType, amount, attendantId, notes } = req.body;
     const data = {};
@@ -184,14 +184,14 @@ router.put('/car-wash/:id', authenticateToken, requirePermission('canEditService
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/car-wash/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+router.delete('/car-wash/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
     await prisma.workOrder.delete({ where: { id: req.params.id } });
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/garage', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+router.get('/garage', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
     const where = { tenantId: t(req) };
     const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
@@ -200,7 +200,7 @@ router.get('/garage', authenticateToken, requirePermission('canViewServiceBusine
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/garage', authenticateToken, requirePermission('canCreateServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+router.post('/garage', authenticateToken, requirePermission('canCreateServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
     const { date, vehicle, service, cost, attendantId, branchId, notes } = req.body;
     if (!service || !vehicle) return res.status(400).json({ error: 'Vehicle and service description are required' });
@@ -239,7 +239,7 @@ router.post('/garage', authenticateToken, requirePermission('canCreateServiceBus
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/garage/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+router.get('/garage/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
     const order = await prisma.workOrder.findUnique({ where: { id: req.params.id } });
     if (!order) return res.status(404).json({ error: 'Not found' });
@@ -247,7 +247,7 @@ router.get('/garage/:id', authenticateToken, requirePermission('canViewServiceBu
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/garage/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+router.put('/garage/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
     const { vehicle, service, cost, attendantId, status, notes } = req.body;
     const data = {};
@@ -262,7 +262,7 @@ router.put('/garage/:id', authenticateToken, requirePermission('canEditServiceBu
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/garage/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+router.delete('/garage/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
     await prisma.workOrder.delete({ where: { id: req.params.id } });
     res.json({ message: 'Deleted' });

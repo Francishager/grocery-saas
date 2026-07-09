@@ -171,4 +171,31 @@ export function requireAllFeatures(...featureNames) {
   };
 }
 
+/**
+ * Middleware factory: requireAnyFeature(['name.one', 'name.two'])
+ * Passes if any of the provided feature names is enabled for the tenant.
+ */
+export function requireAnyFeature(featureNames) {
+  return async (req, res, next) => {
+    if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) return next();
+
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    if (!tenantId) return res.status(403).json({ message: 'Tenant access required', code: 'TENANT_REQUIRED' });
+
+    try {
+      const features = await getTenantFeatures(tenantId);
+      const found = featureNames.find((fn) => hasFeatureAccess(features, fn));
+      if (!found) {
+        return res.status(403).json({ message: 'This feature is not available on your current subscription plan.', code: 'FEATURE_NOT_ENABLED', feature: featureNames[0] });
+      }
+      req.tenantFeatures = features;
+      next();
+    } catch (err) {
+      console.error('Feature check error:', err);
+      return res.status(500).json({ message: 'Failed to verify feature access' });
+    }
+  };
+}
+
 export default { requireFeature, requireAllFeatures, invalidateFeatureCache };
