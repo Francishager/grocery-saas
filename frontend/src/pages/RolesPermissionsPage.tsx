@@ -39,6 +39,13 @@ const PERM_LABELS: Record<string, string> = {
   canImportInventory:'Import Inventory',
 }
 
+const ACCOUNTING_ACCESS_KEYS = [
+  'canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting',
+  'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense',
+  'canViewFinancialReport', 'canTransferStock',
+  'canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard',
+]
+
 const PERM_GROUPS = [
   { label: 'Dashboard', prefix: 'Dashboard' },
   { label: 'Sales', prefix: 'Sale' },
@@ -64,11 +71,17 @@ const PERM_GROUPS = [
   { label: 'Agriculture', prefix: 'Agriculture' },
   { label: 'Service Business', prefix: 'ServiceBusiness' },
   { label: 'Communication', prefix: 'Communication' },
-  { label: 'Accounting', prefix: 'Accounting' },
+  { label: 'Accounting Access', matcher: (key: string) => ACCOUNTING_ACCESS_KEYS.includes(key) },
   { label: 'Stock', prefix: 'Stock' },
   { label: 'Payment Methods', prefix: 'canUse' },
   { label: 'Data Import', prefix: 'Import' },
 ]
+
+function matchesPermissionGroup(group: { prefix?: string; matcher?: (key: string) => boolean }, key: string) {
+  if (group.matcher) return group.matcher(key)
+  if (group.prefix === 'canUse') return key.startsWith('canUse')
+  return key.includes(group.prefix || '')
+}
 
 export default function RolesPermissionsPage() {
   const [staff, setStaff] = useState<any[]>([])
@@ -334,7 +347,7 @@ export default function RolesPermissionsPage() {
               </div>
               <div className="space-y-3">
                 {PERM_GROUPS.map(g => {
-                  let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => k.includes(g.prefix) || (g.prefix === 'canUse' && k.startsWith('canUse')))
+                  let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => matchesPermissionGroup(g, k))
                   if (permSearch) {
                     const q = permSearch.toLowerCase()
                     groupKeys = groupKeys.filter(k => (PERM_LABELS[k] || k).toLowerCase().includes(q))
@@ -475,7 +488,7 @@ export default function RolesPermissionsPage() {
                       </div>
                       <div className="space-y-3">
                         {PERM_GROUPS.map(g => {
-                          let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => k.includes(g.prefix) || (g.prefix === 'canUse' && k.startsWith('canUse')))
+                          let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => matchesPermissionGroup(g, k))
                           if (permSearch) {
                             const q = permSearch.toLowerCase()
                             groupKeys = groupKeys.filter(k => (PERM_LABELS[k] || k).toLowerCase().includes(q))
