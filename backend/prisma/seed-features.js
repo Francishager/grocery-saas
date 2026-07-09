@@ -163,9 +163,6 @@ async function seedFeatures() {
     { name: 'fuel_station.lubricants', displayName: 'Lubricants', module: 'fuel_station', category: 'advanced', description: 'Lubricant sales tracking' },
     { name: 'fuel_station.car_wash', displayName: 'Car Wash', module: 'fuel_station', category: 'advanced', description: 'Car wash service tracking' },
     { name: 'fuel_station.reports', displayName: 'Fuel Station Reports', module: 'fuel_station', category: 'advanced', description: 'Fuel station-specific reports' },
-    { name: 'fuel_station.dipstick', displayName: 'Dipstick Readings', module: 'fuel_station', category: 'advanced', description: 'Tank dipstick readings and variance' },
-    { name: 'fuel_station.pricing', displayName: 'Fuel Pricing', module: 'fuel_station', category: 'advanced', description: 'Fuel price management' },
-    { name: 'fuel_station.compliance', displayName: 'Compliance', module: 'fuel_station', category: 'advanced', description: 'Environmental compliance tracking' },
 
     // ===== Manufacturing =====
     { name: 'manufacturing', displayName: 'Manufacturing', module: 'manufacturing', category: 'advanced', description: 'Manufacturing module' },
@@ -279,7 +276,7 @@ async function seedPlanFeatures() {
           'restaurant.reservations', 'restaurant.recipes', 'restaurant.happy_hour',
           'restaurant.combos', 'restaurant.delivery', 'restaurant.tips',
           'restaurant.waiters', 'restaurant.reports',
-          'fuel_station', 'fuel_station.pumps', 'fuel_station.deliveries', 'fuel_station.meter_readings', 'fuel_station.shift_reports', 'fuel_station.lubricants', 'fuel_station.car_wash', 'fuel_station.reports', 'fuel_station.dipstick', 'fuel_station.pricing', 'fuel_station.compliance',
+          'fuel_station', 'fuel_station.pumps', 'fuel_station.deliveries', 'fuel_station.meter_readings', 'fuel_station.shift_reports', 'fuel_station.lubricants', 'fuel_station.car_wash', 'fuel_station.reports',
           'manufacturing', 'manufacturing.production_orders', 'manufacturing.bom', 'manufacturing.waste', 'manufacturing.costing', 'manufacturing.reports',
           'agriculture', 'agriculture.fields', 'agriculture.livestock', 'agriculture.harvests', 'agriculture.expenses', 'agriculture.reports',
           'service', 'service.appointments', 'service.work_orders', 'service.job_cards', 'service.technicians', 'service.contracts', 'service.reports',
