@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../src/db.js';
-import { permissionsForUser } from '../src/utils/permissions.js';
+import { resolveEffectivePermissions } from '../src/utils/permissions.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -31,20 +31,10 @@ export const authenticateToken = async (req, res, next) => {
   try {
     // Resolve permissions from the single source of truth.
     // - saas_admin: wildcard "*" (bypasses all checks)
-    // - ALL other roles (including owner): permissions come EXCLUSIVELY
-    //   from UserPermission table. No role gets auto-permissions.
+    // - owner: full access
+    // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
-    let permissions = permissionsForUser(decoded);
-
-    // For ALL non-saas_admin roles: merge UserPermission overrides
-    if (decoded.role !== 'saas_admin' && userPerm) {
-      permissions = [];
-      for (const [key, val] of Object.entries(userPerm)) {
-        if (key.startsWith('can') && val === true) {
-          permissions.push(key);
-        }
-      }
-    }
+    const permissions = resolveEffectivePermissions(decoded, userPerm);
 
     req.user = { ...decoded, permissions };
   } catch (fetchErr) {

@@ -6,7 +6,7 @@ import cloudinary from "cloudinary";
 import prisma from "../db.js";
 import { authenticateToken } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
-import { permissionsForUser } from "../utils/permissions.js";
+import { resolveEffectivePermissions } from "../utils/permissions.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -26,20 +26,7 @@ function primaryBranchId(user) {
 
 function userPayload(user, userPerm) {
   const isPlatformUser = user.role === "saas_admin";
-  let permissions = permissionsForUser(user);
-
-  // owner gets all permissions from permissionsForUser
-  // Other non-saas_admin roles: permissions come from UserPermission table
-  if (!isPlatformUser && user.role !== "owner") {
-    permissions = [];
-    if (userPerm) {
-      for (const [key, val] of Object.entries(userPerm)) {
-        if (key.startsWith("can") && val === true) {
-          permissions.push(key);
-        }
-      }
-    }
-  }
+  const permissions = resolveEffectivePermissions(user, userPerm);
 
   return {
     id: user.id,
@@ -87,21 +74,7 @@ router.post("/login", async (req, res) => {
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
 
     // Build permissions list: saas_admin gets wildcard, owner gets all, others get explicit permissions from UserPermission table
-    let jwtPermissions;
-    if (user.role === "saas_admin") {
-      jwtPermissions = ["*"];
-    } else if (user.role === "owner") {
-      jwtPermissions = permissionsForUser(user); // returns all permission keys
-    } else {
-      jwtPermissions = [];
-      if (userPerm) {
-        for (const [key, val] of Object.entries(userPerm)) {
-          if (key.startsWith("can") && val === true) {
-            jwtPermissions.push(key);
-          }
-        }
-      }
-    }
+    const jwtPermissions = resolveEffectivePermissions(user, userPerm);
 
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
@@ -180,21 +153,7 @@ router.post("/refresh", async (req, res) => {
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
 
     // Build permissions list: saas_admin gets wildcard, owner gets all, others get explicit permissions from UserPermission table
-    let jwtPermissions;
-    if (user.role === "saas_admin") {
-      jwtPermissions = ["*"];
-    } else if (user.role === "owner") {
-      jwtPermissions = permissionsForUser(user); // returns all permission keys
-    } else {
-      jwtPermissions = [];
-      if (userPerm) {
-        for (const [key, val] of Object.entries(userPerm)) {
-          if (key.startsWith("can") && val === true) {
-            jwtPermissions.push(key);
-          }
-        }
-      }
-    }
+    const jwtPermissions = resolveEffectivePermissions(user, userPerm);
 
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },

@@ -79,6 +79,44 @@ export const ROLE_DEFAULTS = {
 };
 
 // =====================================================
+// Normalize a permission record to the canonical permission-key shape.
+// =====================================================
+export function normalizePermissionRecord(permissionRecord = {}) {
+  const normalized = {};
+  for (const key of ALL_PERMISSION_KEYS) {
+    normalized[key] = Boolean(permissionRecord?.[key] ?? false);
+  }
+  return normalized;
+}
+
+// =====================================================
+// Resolve the effective permissions for a user.
+// The effective set is the union of any inherited/base permissions
+// (for example from a plan template or a future override layer) plus
+// the explicit user-permission record.
+// =====================================================
+export function resolveEffectivePermissions(user, permissionRecord = null, inheritedPermissions = []) {
+  if (!user) return [];
+  if (user.role === "saas_admin") return ["*"];
+  if (user.role === "owner") return [...ALL_PERMISSION_KEYS];
+
+  const granted = new Set();
+
+  if (Array.isArray(inheritedPermissions)) {
+    inheritedPermissions.filter(Boolean).forEach((permission) => granted.add(permission));
+  }
+
+  const normalized = normalizePermissionRecord(permissionRecord || {});
+  for (const [key, enabled] of Object.entries(normalized)) {
+    if (enabled && key.startsWith("can")) {
+      granted.add(key);
+    }
+  }
+
+  return [...granted];
+}
+
+// =====================================================
 // Resolve permissions for a user.
 // - saas_admin: wildcard "*" (platform-level, bypasses all checks)
 // - owner: ALL permissions (business owner has full access)
