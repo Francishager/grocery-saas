@@ -2407,6 +2407,41 @@ model ServiceContract {
   @@map("service_contracts")
 }
 
+// Dedicated Car Wash records (optional, new)
+model CarWashRecord {
+  id          String   @id @default(cuid())
+  tenantId    String
+  branchId    String?
+  vehicle     String
+  serviceType String
+  amount      Float    @default(0)
+  attendantId String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, branchId])
+  @@map("car_wash_records")
+}
+
+// Dedicated Garage service records (optional, new)
+model GarageService {
+  id          String   @id @default(cuid())
+  tenantId    String
+  branchId    String?
+  vehicle     String
+  service     String
+  cost        Float    @default(0)
+  attendantId String?
+  status      String   @default("open")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, branchId])
+  @@map("garage_services")
+}
+
 // =====================================================
 // ASSET & RESOURCE ENGINE (generic assets)
 // =====================================================

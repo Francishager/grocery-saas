@@ -45,6 +45,8 @@ export default function ServiceBusinessPage() {
   const [showGarageModal, setShowGarageModal] = useState(false)
   const [carWashForm, setCarWashForm] = useState({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' })
   const [garageForm, setGarageForm] = useState({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' })
+  const [editingCarWashId, setEditingCarWashId] = useState<string | null>(null)
+  const [editingGarageId, setEditingGarageId] = useState<string | null>(null)
   const [showApptModal, setShowApptModal] = useState(false)
   const [showWOModal, setShowWOModal] = useState(false)
   const [showContractModal, setShowContractModal] = useState(false)
@@ -102,6 +104,21 @@ export default function ServiceBusinessPage() {
   const deleteAppt = async (id: string) => { try { await apiFetch(`/api/service/appointments/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
   const deleteWO = async (id: string) => { try { await apiFetch(`/api/service/work-orders/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
   const deleteContract = async (id: string) => { try { await apiFetch(`/api/service/contracts/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
+
+  const deleteCarWash = async (id: string) => { try { await apiFetch(`/api/service/car-wash/${id}`, { method: 'DELETE' }) } catch (e) { console.error(e) } ; loadData() }
+  const deleteGarage = async (id: string) => { try { await apiFetch(`/api/service/garage/${id}`, { method: 'DELETE' }) } catch (e) { console.error(e) } ; loadData() }
+
+  const openEditCarWash = (r: CarWashRecord) => {
+    setEditingCarWashId(r.id)
+    setCarWashForm({ vehicle: r.customerName || '', serviceType: r.title || '', amount: r.estimatedCost || 0, attendantId: r.technicianId || '', notes: r.notes || '' })
+    setShowCarWashModal(true)
+  }
+
+  const openEditGarage = (g: GarageRecord) => {
+    setEditingGarageId(g.id)
+    setGarageForm({ vehicle: g.customerName || '', service: g.title || '', cost: g.estimatedCost || 0, attendantId: g.technicianId || '', notes: g.notes || '' })
+    setShowGarageModal(true)
+  }
 
   const upcomingAppts = appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length
   const openWOs = workOrders.filter(w => w.status === 'open' || w.status === 'in_progress').length
@@ -217,12 +234,12 @@ export default function ServiceBusinessPage() {
 
       {tab === 'car-wash' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowCarWashModal(true)}><Plus className="mr-1 h-4 w-4" /> New Car Wash</Button>
+          <Button onClick={() => { setEditingCarWashId(null); setCarWashForm({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' }); setShowCarWashModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Car Wash</Button>
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[500px]">
-              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Attendant</th></tr></thead>
+              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Attendant</th><th></th></tr></thead>
               <tbody>
-                {carWashRecords.length === 0 && <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Car wash records will appear here once logged</td></tr>}
+                {carWashRecords.length === 0 && <tr className="border-t"><td colSpan={6} className="p-8 text-center text-muted-foreground">Car wash records will appear here once logged</td></tr>}
                 {carWashRecords.map(r => (
                   <tr key={r.id} className="border-t">
                     <td className="p-2">{new Date(r.createdAt).toLocaleDateString()}</td>
@@ -230,6 +247,10 @@ export default function ServiceBusinessPage() {
                     <td className="p-2">{r.title}</td>
                     <td className="p-2 text-right">{(r.estimatedCost || 0).toFixed(0)}</td>
                     <td className="p-2">{r.technicianId || '-'}</td>
+                    <td className="p-2 space-x-1">
+                      <Button size="sm" variant="outline" onClick={() => openEditCarWash(r)}>Edit</Button>
+                      <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteCarWash(r.id)}>Delete</Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -240,12 +261,12 @@ export default function ServiceBusinessPage() {
 
       {tab === 'garage' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowGarageModal(true)}><Plus className="mr-1 h-4 w-4" /> New Garage Service</Button>
+          <Button onClick={() => { setEditingGarageId(null); setGarageForm({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' }); setShowGarageModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Garage Service</Button>
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[500px]">
-              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th></tr></thead>
+              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
-                {garageRecords.length === 0 && <tr className="border-t"><td colSpan={5} className="p-8 text-center text-muted-foreground">Garage service records will appear here once logged</td></tr>}
+                {garageRecords.length === 0 && <tr className="border-t"><td colSpan={6} className="p-8 text-center text-muted-foreground">Garage service records will appear here once logged</td></tr>}
                 {garageRecords.map(g => (
                   <tr key={g.id} className="border-t">
                     <td className="p-2">{new Date(g.createdAt).toLocaleDateString()}</td>
@@ -253,6 +274,10 @@ export default function ServiceBusinessPage() {
                     <td className="p-2">{g.title}</td>
                     <td className="p-2 text-right">{(g.estimatedCost || 0).toFixed(0)}</td>
                     <td className="p-2">{g.status || '-'}</td>
+                    <td className="p-2 space-x-1">
+                      <Button size="sm" variant="outline" onClick={() => openEditGarage(g)}>Edit</Button>
+                      <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteGarage(g.id)}>Delete</Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -272,8 +297,16 @@ export default function ServiceBusinessPage() {
           </div>
           <DialogFooter><Button onClick={async () => {
             if (!carWashForm.vehicle.trim() || !carWashForm.serviceType.trim()) { toast({ variant: 'destructive', title: 'Vehicle and service type required' }); return }
-            try { await apiFetch('/api/service/car-wash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(carWashForm) }); setShowCarWashModal(false); setCarWashForm({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record car wash' }) }
-          }}>Create</Button></DialogFooter>
+            try {
+              if (editingCarWashId) {
+                await apiFetch(`/api/service/car-wash/${editingCarWashId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(carWashForm) })
+                setEditingCarWashId(null)
+              } else {
+                await apiFetch('/api/service/car-wash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(carWashForm) })
+              }
+              setShowCarWashModal(false); setCarWashForm({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' }); loadData()
+            } catch { toast({ variant: 'destructive', title: 'Failed to record car wash' }) }
+          }}>{editingCarWashId ? 'Update' : 'Create'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -288,8 +321,16 @@ export default function ServiceBusinessPage() {
           </div>
           <DialogFooter><Button onClick={async () => {
             if (!garageForm.vehicle.trim() || !garageForm.service.trim()) { toast({ variant: 'destructive', title: 'Vehicle and service required' }); return }
-            try { await apiFetch('/api/service/garage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(garageForm) }); setShowGarageModal(false); setGarageForm({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to record garage service' }) }
-          }}>Create</Button></DialogFooter>
+            try {
+              if (editingGarageId) {
+                await apiFetch(`/api/service/garage/${editingGarageId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(garageForm) })
+                setEditingGarageId(null)
+              } else {
+                await apiFetch('/api/service/garage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(garageForm) })
+              }
+              setShowGarageModal(false); setGarageForm({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' }); loadData()
+            } catch { toast({ variant: 'destructive', title: 'Failed to record garage service' }) }
+          }}>{editingGarageId ? 'Update' : 'Create'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

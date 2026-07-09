@@ -142,7 +142,52 @@ router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceB
       notes: JSON.stringify({ vehicle, serviceType, extra: notes || null }),
       tenantId: t(req),
     } });
+    // If dedicated CarWashRecord model exists in Prisma client, create a record there as well
+    try {
+      if (prisma.carWashRecord) {
+        await prisma.carWashRecord.create({ data: {
+          tenantId: t(req),
+          branchId: branchId || null,
+          vehicle,
+          serviceType,
+          amount: amount || 0,
+          attendantId: attendantId || null,
+          notes: notes || null,
+        } });
+      }
+    } catch (e) {
+      console.warn('CarWashRecord model write skipped or failed:', e.message || e);
+    }
     res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/car-wash/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+  try {
+    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id } });
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    res.json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/car-wash/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+  try {
+    const { vehicle, serviceType, amount, attendantId, notes } = req.body;
+    const data = {};
+    if (vehicle !== undefined) data.customerName = vehicle;
+    if (serviceType !== undefined) data.title = serviceType;
+    if (amount !== undefined) { data.estimatedCost = amount; data.actualCost = amount }
+    if (attendantId !== undefined) data.technicianId = attendantId;
+    if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
+    const updated = await prisma.workOrder.update({ where: { id: req.params.id }, data });
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/car-wash/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireFeature('service.car_wash'), async (req, res) => {
+  try {
+    await prisma.workOrder.delete({ where: { id: req.params.id } });
+    res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -174,6 +219,52 @@ router.post('/garage', authenticateToken, requirePermission('canCreateServiceBus
       notes: JSON.stringify({ vehicle, service, extra: notes || null }),
       tenantId: t(req),
     } });
+    try {
+      if (prisma.garageService) {
+        await prisma.garageService.create({ data: {
+          tenantId: t(req),
+          branchId: branchId || null,
+          vehicle,
+          service,
+          cost: cost || 0,
+          attendantId: attendantId || null,
+          status: 'open',
+          notes: notes || null,
+        } });
+      }
+    } catch (e) {
+      console.warn('GarageService model write skipped or failed:', e.message || e);
+    }
     res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/garage/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+  try {
+    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id } });
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    res.json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/garage/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+  try {
+    const { vehicle, service, cost, attendantId, status, notes } = req.body;
+    const data = {};
+    if (vehicle !== undefined) data.customerName = vehicle;
+    if (service !== undefined) data.title = service;
+    if (cost !== undefined) { data.estimatedCost = cost; data.actualCost = cost }
+    if (attendantId !== undefined) data.technicianId = attendantId;
+    if (status !== undefined) data.status = status;
+    if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
+    const updated = await prisma.workOrder.update({ where: { id: req.params.id }, data });
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/garage/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireFeature('service.garage'), async (req, res) => {
+  try {
+    await prisma.workOrder.delete({ where: { id: req.params.id } });
+    res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
