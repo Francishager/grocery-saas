@@ -96,10 +96,10 @@ export const permissions: Permission[] = [
   { id: 'canTransferStock', name: 'Transfer Stock', description: 'Transfer stock between branches', category: 'inventory', accessesBusinessData: true },
   
   // Expenses
-  { id: 'canViewExpense', name: 'View Expenses', description: 'View expenses list', category: 'expenses', accessesBusinessData: true },
-  { id: 'canCreateExpense', name: 'Create Expenses', description: 'Create new expenses', category: 'expenses', accessesBusinessData: true },
-  { id: 'canEditExpense', name: 'Edit Expenses', description: 'Edit existing expenses', category: 'expenses', accessesBusinessData: true },
-  { id: 'canDeleteExpense', name: 'Delete Expenses', description: 'Delete expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canViewExpense', name: 'View Expense Records', description: 'View expense records and details', category: 'expenses', accessesBusinessData: true },
+  { id: 'canCreateExpense', name: 'Create Expense Records', description: 'Create new expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canEditExpense', name: 'Edit Expense Records', description: 'Edit existing expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canDeleteExpense', name: 'Delete Expense Records', description: 'Delete expense records', category: 'expenses', accessesBusinessData: true },
   
   // Customers / Receivables
   { id: 'canViewCustomer', name: 'View Customers', description: 'View customers list', category: 'customers', accessesBusinessData: true },
@@ -216,10 +216,10 @@ export const permissions: Permission[] = [
   { id: 'canDeleteCommunication', name: 'Delete Communication', description: 'Delete communication records', category: 'communication', accessesBusinessData: true },
 
   // Accounting
-  { id: 'canViewAccounting', name: 'View Accounting', description: 'View chart of accounts and journal entries', category: 'accounting', accessesBusinessData: true },
-  { id: 'canCreateAccounting', name: 'Create Accounting', description: 'Create accounts and journal entries', category: 'accounting', accessesBusinessData: true },
-  { id: 'canEditAccounting', name: 'Edit Accounting', description: 'Edit accounts and journal entries', category: 'accounting', accessesBusinessData: true },
-  { id: 'canDeleteAccounting', name: 'Delete Accounting', description: 'Delete accounts and journal entries', category: 'accounting', accessesBusinessData: true },
+  { id: 'canViewAccounting', name: 'View Accounting Module', description: 'Open the accounting module and view transaction accounts', category: 'accounting', accessesBusinessData: true },
+  { id: 'canCreateAccounting', name: 'Create Transaction Accounts', description: 'Create new transaction accounts', category: 'accounting', accessesBusinessData: true },
+  { id: 'canEditAccounting', name: 'Edit Transaction Accounts', description: 'Edit existing transaction accounts', category: 'accounting', accessesBusinessData: true },
+  { id: 'canDeleteAccounting', name: 'Delete Transaction Accounts', description: 'Delete transaction accounts', category: 'accounting', accessesBusinessData: true },
   
   // Data Import
   { id: 'canImportInventory', name: 'Import Inventory Data', description: 'Bulk import products and inventory via CSV/Excel', category: 'inventory', accessesBusinessData: true },

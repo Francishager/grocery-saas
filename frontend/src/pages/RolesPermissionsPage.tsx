@@ -15,13 +15,13 @@ const PERM_LABELS: Record<string, string> = {
   canCreateProduct:'Can create products', canViewProduct:'Can view products', canEditProduct:'Can edit products', canDeleteProduct:'Can delete products',
   canCreatePurchase:'Can create purchases', canViewPurchase:'Can view purchases', canEditPurchase:'Can edit purchases', canDeletePurchase:'Can delete purchases',
   canCreatePayable:'Can create bills', canViewPayable:'Can view bills', canEditPayable:'Can edit bills', canDeletePayable:'Can delete bills',
-  canCreateExpense:'Can create expenses', canViewExpense:'Can view expenses', canEditExpense:'Can edit expenses', canDeleteExpense:'Can delete expenses',
+  canCreateExpense:'Can create expense records', canViewExpense:'Can view expense records', canEditExpense:'Can edit expense records', canDeleteExpense:'Can delete expense records',
   canCreateCustomer:'Can create customers', canViewCustomer:'Can view customers', canEditCustomer:'Can edit customers', canDeleteCustomer:'Can delete customers',
   canCreateReceivable:'Can create credit sales', canViewReceivable:'Can view receivables', canEditReceivable:'Can edit receivables', canDeleteReceivable:'Can delete receivables',
   canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
   canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaff:'Can edit staff', canDeleteStaff:'Can delete staff',
   canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
-  canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
+  canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance reports', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
   canViewSettings:'Can view settings', canEditSettings:'Can edit settings', canGiveDiscount:'Can give discounts',
   canViewReceipt:'Can view receipts', canCreateReceipt:'Can create receipts',
   canViewTax:'Can view tax', canManageTax:'Can manage tax',
@@ -33,7 +33,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries', canViewAgricultureReport:'Can view agriculture reports',
   canViewServiceBusiness:'Can view service business', canCreateServiceBusiness:'Can create service business entries', canEditServiceBusiness:'Can edit service business entries', canDeleteServiceBusiness:'Can delete service business entries', canViewServiceBusinessReport:'Can view service business reports',
   canViewCommunication:'Can view communication', canCreateCommunication:'Can create communication', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
-  canViewAccounting:'Can view accounting', canCreateAccounting:'Can create transaction accounts', canEditAccounting:'Can edit transaction accounts', canDeleteAccounting:'Can delete transaction accounts',
+  canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create transaction accounts', canEditAccounting:'Can edit transaction accounts', canDeleteAccounting:'Can delete transaction accounts',
   canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock',
   canUseCash:'Can use cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
   canImportInventory:'Can import inventory',
@@ -79,7 +79,7 @@ const PERM_GROUPS = [
   { label: 'Agriculture', prefix: 'Agriculture' },
   { label: 'Service Business', prefix: 'ServiceBusiness' },
   { label: 'Communication', prefix: 'Communication' },
-  { label: 'Accounting Access', matcher: (key: string) => ACCOUNTING_ACCESS_KEYS.includes(key) },
+  { label: 'Accounting', matcher: (key: string) => ACCOUNTING_ACCESS_KEYS.includes(key) },
   { label: 'Stock', prefix: 'Stock' },
   { label: 'Payment Methods', prefix: 'canUse' },
   { label: 'Data Import', prefix: 'Import' },
@@ -342,6 +342,11 @@ export default function RolesPermissionsPage() {
             <div className="mt-4 border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-medium">Permissions (tick to allow this staff member to do these tasks)</p>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                For accounting, choose the exact action clearly: view, create, edit, or delete for transaction accounts and expense records.
+              </p>
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Input className="h-7 w-40 text-xs" placeholder="Search permissions..." value={permSearch} onChange={e => setPermSearch(e.target.value)} />
                   <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
