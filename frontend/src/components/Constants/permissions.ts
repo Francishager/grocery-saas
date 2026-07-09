@@ -100,6 +100,7 @@ export const permissions: Permission[] = [
   { id: 'canCreateExpense', name: 'Create Expense Records', description: 'Create new expense records', category: 'expenses', accessesBusinessData: true },
   { id: 'canEditExpense', name: 'Edit Expense Records', description: 'Edit existing expense records', category: 'expenses', accessesBusinessData: true },
   { id: 'canDeleteExpense', name: 'Delete Expense Records', description: 'Delete expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canViewStaffTillSheet', name: 'View Staff Till Sheet', description: 'View staff till sheet and cash movement summary', category: 'expenses', accessesBusinessData: true },
   
   // Customers / Receivables
   { id: 'canViewCustomer', name: 'View Customers', description: 'View customers list', category: 'customers', accessesBusinessData: true },

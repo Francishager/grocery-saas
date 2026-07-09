@@ -151,7 +151,7 @@ function App() {
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport']}><AccountingPage /></FeatureGuard>} />
           <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport']}><ExpensesPage /></FeatureGuard>} />
           <Route path="accounting/transactions" element={<FeatureGuard feature="accounting"><TransactionAccountsPage /></FeatureGuard>} />
-          <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting"><StaffTillSheetPage /></FeatureGuard>} />
+          <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="inventory"><DataImporterPage /></FeatureGuard>} />
           <Route path="hr" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />

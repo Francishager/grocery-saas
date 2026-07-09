@@ -733,7 +733,7 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
 // === STAFF TILL SHEET ===
 
 // Get staff till sheet data — aggregates all cash transactions per staff member
-router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewStaffTillSheet'), requireTenant, async (req, res) => {
   try {
     const { startDate, endDate, staffId, branchId } = req.query
 

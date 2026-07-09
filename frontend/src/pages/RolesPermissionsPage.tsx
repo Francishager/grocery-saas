@@ -15,7 +15,7 @@ const PERM_LABELS: Record<string, string> = {
   canCreateProduct:'Can create products', canViewProduct:'Can view products', canEditProduct:'Can edit products', canDeleteProduct:'Can delete products',
   canCreatePurchase:'Can create purchases', canViewPurchase:'Can view purchases', canEditPurchase:'Can edit purchases', canDeletePurchase:'Can delete purchases',
   canCreatePayable:'Can create bills', canViewPayable:'Can view bills', canEditPayable:'Can edit bills', canDeletePayable:'Can delete bills',
-  canCreateExpense:'Can create expense records', canViewExpense:'Can view expense records', canEditExpense:'Can edit expense records', canDeleteExpense:'Can delete expense records',
+  canCreateExpense:'Can create expense records', canViewExpense:'Can view expense records', canEditExpense:'Can edit expense records', canDeleteExpense:'Can delete expense records', canViewStaffTillSheet:'Can view staff till sheet',
   canCreateCustomer:'Can create customers', canViewCustomer:'Can view customers', canEditCustomer:'Can edit customers', canDeleteCustomer:'Can delete customers',
   canCreateReceivable:'Can create credit sales', canViewReceivable:'Can view receivables', canEditReceivable:'Can edit receivables', canDeleteReceivable:'Can delete receivables',
   canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
@@ -41,7 +41,7 @@ const PERM_LABELS: Record<string, string> = {
 
 const ACCOUNTING_ACCESS_KEYS = [
   'canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting',
-  'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense',
+  'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense', 'canViewStaffTillSheet',
   'canViewFinancialReport', 'canTransferStock',
   'canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard',
 ]

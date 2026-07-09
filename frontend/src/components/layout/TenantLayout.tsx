@@ -239,7 +239,7 @@ const accountingSubItems = [
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport'] },
   { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: ['canViewAccounting', 'canViewFinancialReport'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
-  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: ['canViewAccounting', 'canViewFinancialReport'] },
+  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: ['canViewAccounting', 'canViewStaffTillSheet'] },
 ]
 
 const settingsSubItems = [
