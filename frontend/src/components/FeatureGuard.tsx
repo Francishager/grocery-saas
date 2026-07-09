@@ -20,7 +20,12 @@ interface FeatureGuardProps {
  */
 export function FeatureGuard({ feature, permission, children, fallback }: FeatureGuardProps) {
   const { hasFeature, loading, features } = useFeatureAccess()
-  const { hasPermission } = useJWTAuth()
+  const { hasPermission, user } = useJWTAuth()
+
+  const featureEnabled = hasFeature(feature)
+  const requiredPermissions = Array.isArray(permission) ? permission : permission ? [permission] : []
+  const hasRequiredPermission = requiredPermissions.length === 0 || requiredPermissions.some((perm) => hasPermission(perm))
+  const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
 
   // Only show loading on first load when we have no cached features yet
   if (loading && Object.keys(features).length === 0) {
@@ -31,35 +36,32 @@ export function FeatureGuard({ feature, permission, children, fallback }: Featur
     )
   }
 
-  if (hasFeature(feature)) {
-    const requiredPermissions = Array.isArray(permission) ? permission : permission ? [permission] : []
-    const hasRequiredPermission = requiredPermissions.length === 0 || requiredPermissions.some((perm) => hasPermission(perm))
-
-    if (permission && !hasRequiredPermission) {
-      return (
-        <div className="flex min-h-[60vh] items-center justify-center p-6">
-          <Card className="max-w-md text-center">
-            <CardHeader>
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
-                <Lock className="h-8 w-8 text-amber-600" />
-              </div>
-              <CardTitle className="text-xl">Permission Required</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                You do not have permission to access this page. Contact your administrator.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )
-    }
-    return <>{children}</>
+  if (!featureEnabled) {
+    if (fallback) return <>{fallback}</>
+    return <UpgradePlan feature={feature} />
   }
 
-  if (fallback) return <>{fallback}</>
+  if (permission && !hasRequiredPermission && !isOwner) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+              <Lock className="h-8 w-8 text-amber-600" />
+            </div>
+            <CardTitle className="text-xl">Permission Required</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              You do not have permission to access this page. Contact your administrator.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
-  return <UpgradePlan feature={feature} />
+  return <>{children}</>
 }
 
 /**

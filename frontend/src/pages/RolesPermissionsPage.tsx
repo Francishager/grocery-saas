@@ -42,9 +42,10 @@ const PERM_LABELS: Record<string, string> = {
 const ACCOUNTING_ACCESS_KEYS = [
   'canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting',
   'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense', 'canViewStaffTillSheet',
-  'canViewFinancialReport', 'canTransferStock',
-  'canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard',
 ]
+
+const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaff', 'canDeleteStaff']
+const EXPENSE_PERMISSION_KEYS = ['canCreateExpense', 'canViewExpense', 'canEditExpense', 'canDeleteExpense']
 
 const REPORT_PERMISSION_KEYS = [
   'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport',
@@ -60,11 +61,11 @@ const PERM_GROUPS = [
   { label: 'Products', prefix: 'Product' },
   { label: 'Purchases', prefix: 'Purchase' },
   { label: 'Payables', prefix: 'Payable' },
-  { label: 'Expenses', prefix: 'Expense' },
+  { label: 'Expenses', matcher: (key: string) => EXPENSE_PERMISSION_KEYS.includes(key) },
   { label: 'Customers', prefix: 'Customer' },
   { label: 'Receivables', prefix: 'Receivable' },
   { label: 'Suppliers', prefix: 'Supplier' },
-  { label: 'Staff', prefix: 'Staff' },
+  { label: 'Staff', matcher: (key: string) => STAFF_PERMISSION_KEYS.includes(key) },
   { label: 'Branches', prefix: 'Branch' },
   { label: 'Reports', matcher: (key: string) => REPORT_PERMISSION_KEYS.includes(key) },
   { label: 'Settings', prefix: 'Settings' },
