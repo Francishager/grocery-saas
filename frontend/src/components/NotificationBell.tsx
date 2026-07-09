@@ -7,6 +7,8 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalNotifications } from '@/db/hybrid'
 import { db } from '@/db/index'
 import { useNavigate } from 'react-router-dom'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 interface NotificationItem {
   id: string
@@ -64,8 +66,14 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false)
   const online = useOnlineStatus()
   const navigate = useNavigate()
+  const { user } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
   const bellRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const previousUnreadCountRef = useRef(0)
+  const permissionPromptedRef = useRef(false)
+  const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
+  const canUseBrowserNotifications = hasFeature('communication.notifications')
 
   // Fetch API notifications
   const fetchApiNotifications = useCallback(async (): Promise<NotificationItem[]> => {
@@ -273,6 +281,50 @@ export function NotificationBell() {
     return () => clearInterval(interval)
   }, [loadNotifications])
 
+  useEffect(() => {
+    if (unreadCount > previousUnreadCountRef.current && unreadCount > 0) {
+      playNotificationSound()
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        const latest = notifications.find((n) => !n.isRead)
+        if (latest) {
+          try {
+            new Notification(latest.title, { body: latest.message, tag: latest.id })
+          } catch {}
+        }
+      }
+    }
+    previousUnreadCountRef.current = unreadCount
+  }, [notifications, unreadCount])
+
+  const playNotificationSound = useCallback(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const AudioContextImpl = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!AudioContextImpl) return
+      const context = new AudioContextImpl()
+      const oscillator = context.createOscillator()
+      const gainNode = context.createGain()
+      oscillator.type = 'sine'
+      oscillator.frequency.setValueAtTime(880, context.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.12)
+      gainNode.gain.setValueAtTime(0.08, context.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18)
+      oscillator.connect(gainNode)
+      gainNode.connect(context.destination)
+      oscillator.start()
+      oscillator.stop(context.currentTime + 0.2)
+      setTimeout(() => context.close().catch(() => {}), 250)
+    } catch {}
+  }, [])
+
+  const requestBrowserPermission = useCallback(() => {
+    if (!isOwner || !canUseBrowserNotifications || permissionPromptedRef.current) return
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission === 'granted' || Notification.permission === 'denied') return
+    permissionPromptedRef.current = true
+    window.Notification.requestPermission().catch(() => {})
+  }, [canUseBrowserNotifications, isOwner])
+
   // Close on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -335,7 +387,10 @@ export function NotificationBell() {
     <div ref={bellRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          requestBrowserPermission()
+          setOpen(!open)
+        }}
         className="relative p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
         aria-label="Notifications"
       >
