@@ -7,7 +7,7 @@ import { useFeatureAccess } from '@/services/featureAccessService'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface FeatureGuardProps {
-  feature: string
+  feature: string | string[]
   permission?: string | string[]
   children: ReactNode
   fallback?: ReactNode
@@ -19,10 +19,9 @@ interface FeatureGuardProps {
  * Features are strictly enforced — no offline bypass.
  */
 export function FeatureGuard({ feature, permission, children, fallback }: FeatureGuardProps) {
-  const { hasFeature, loading, features } = useFeatureAccess()
+  const { hasFeature, hasAnyFeature, loading, features } = useFeatureAccess()
   const { hasPermission, user } = useJWTAuth()
-
-  const featureEnabled = hasFeature(feature)
+  const featureEnabled = Array.isArray(feature) ? hasAnyFeature(feature) : hasAnyFeature(feature)
   const requiredPermissions = Array.isArray(permission) ? permission : permission ? [permission] : []
   const hasRequiredPermission = requiredPermissions.length === 0 || requiredPermissions.some((perm) => hasPermission(perm))
   const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
@@ -113,8 +112,9 @@ export function UpgradePlan({ feature }: { feature: string }) {
  * Renders nothing (null) if the feature is disabled — useful for hiding buttons.
  */
 export function FeatureGate({ feature, children, fallback = null }: { feature: string; children: ReactNode; fallback?: ReactNode }) {
-  const { hasFeature } = useFeatureAccess()
-  if (hasFeature(feature)) return <>{children}</>
+  const { hasAnyFeature } = useFeatureAccess()
+  const allowed = Array.isArray(feature) ? hasAnyFeature(feature) : hasAnyFeature(feature)
+  if (allowed) return <>{children}</>
   return <>{fallback}</>
 }
 

@@ -155,16 +155,76 @@ class FeatureAccessService {
   // If a child feature is requested and the parent module is enabled,
   // that child is treated as accessible as part of the parent module.
   isFeatureEnabled(featureName: string): boolean {
+    // Try the exact feature name first
     const entry = this.features[featureName]
     if (entry !== undefined) return entry.enabled === true
 
+    // Try common aliases (underscore <-> hyphen) and module fallbacks
+    const aliases = this.generateFeatureAliases(featureName)
+    for (const alias of aliases) {
+      const e = this.features[alias]
+      if (e !== undefined) return e.enabled === true
+    }
+
+    // Check parent modules (feature.module -> module enabled)
     const parts = featureName.split('.')
     for (let index = parts.length - 1; index > 0; index -= 1) {
       const parentName = parts.slice(0, index).join('.')
       const parentEntry = this.features[parentName]
       if (parentEntry?.enabled) return true
+      // try alias of parent
+      const parentAliases = this.generateFeatureAliases(parentName)
+      if (parentAliases.some((a) => this.features[a]?.enabled)) return true
     }
 
+    // If the requested feature is a module (no dot) allow access when any child feature is enabled.
+    // Example: request 'service' -> allow if 'service.car_wash' or 'service.garage' is enabled.
+    if (!featureName.includes('.')) {
+      const prefix = `${featureName}.`
+      for (const [name, access] of Object.entries(this.features)) {
+        if (name.startsWith(prefix) && access.enabled) return true
+        // also try alias variants of children
+        const childAliases = this.generateFeatureAliases(name)
+        if (childAliases.some((a) => a.startsWith(prefix) && this.features[a]?.enabled)) return true
+      }
+    }
+
+    return false
+  }
+
+  // Generate common alias permutations for a feature name
+  private generateFeatureAliases(featureName: string): string[] {
+    const aliases = new Set<string>()
+    aliases.add(featureName)
+
+    // underscore <-> hyphen variants
+    aliases.add(featureName.replace(/_/g, '-'))
+    aliases.add(featureName.replace(/-/g, '_'))
+
+    // module name fallbacks: service <-> fuel_station
+    const parts = featureName.split('.')
+    if (parts.length > 0) {
+      const module = parts[0]
+      const rest = parts.slice(1).join('.')
+      if (module === 'service') {
+        const alt = ['fuel_station', 'fuel-station']
+        alt.forEach((m) => aliases.add(rest ? `${m}.${rest}` : m))
+      }
+      if (module === 'fuel_station' || module === 'fuel-station') {
+        const alt = ['service']
+        alt.forEach((m) => aliases.add(rest ? `${m}.${rest}` : m))
+      }
+    }
+
+    return Array.from(aliases)
+  }
+
+  // Check any of the provided feature names for availability
+  isAnyFeatureEnabled(featureNames: string[] | string): boolean {
+    const names = Array.isArray(featureNames) ? featureNames : [featureNames]
+    for (const name of names) {
+      if (this.isFeatureEnabled(name)) return true
+    }
     return false
   }
 
@@ -326,6 +386,10 @@ export function useFeatureAccess() {
     return featureAccessService.hasFeature(featureName)
   }
 
+  const hasAnyFeature = (featureNames: string[] | string) => {
+    return featureAccessService.isAnyFeatureEnabled(featureNames)
+  }
+
   const canAccessFeature = (featureName: string) => {
     return featureAccessService.canAccessFeature(featureName, user?.role)
   }
@@ -357,6 +421,7 @@ export function useFeatureAccess() {
     error,
     isFeatureEnabled,
     hasFeature,
+    hasAnyFeature,
     canAccessFeature,
     getFeature,
     getFeaturesByCategory,
