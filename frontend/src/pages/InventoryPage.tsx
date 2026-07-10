@@ -600,7 +600,7 @@ export default function InventoryPage() {
                   disabled
                   className="bg-muted/50"
                 />
-                <p className="text-xs text-muted-foreground">A SKU will be generated automatically from the product name when the item is saved.</p>
+                <p className="text-xs text-muted-foreground">A SKU will be generated automatically from the selected category and product name when the item is saved.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="barcode">Barcode</Label>

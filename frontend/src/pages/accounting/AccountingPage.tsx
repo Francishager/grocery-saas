@@ -323,6 +323,7 @@ export default function AccountingPage() {
         }),
       })
       if (res.ok) {
+        const createdAccount = await res.json().catch(() => null)
         toast({ title: 'Account created' })
         setShowAccountModal(false)
         setAccCode('')
@@ -331,7 +332,10 @@ export default function AccountingPage() {
         setAccDescription('')
         setAccCategory('')
         setAccBranch('')
-        fetchAccounts()
+        if (createdAccount?.id) {
+          setAccounts(prev => [createdAccount, ...prev.filter(account => account.id !== createdAccount.id)])
+        }
+        await fetchAccounts()
       } else {
         const data = await res.json()
         toast({ variant: 'destructive', title: data.error })

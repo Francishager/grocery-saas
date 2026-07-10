@@ -277,7 +277,18 @@ const slugify = (value = "") =>
 
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
 
-const buildSkuBase = (name = "") => {
+const buildSkuBase = (name = "", category = "") => {
+  const categoryValue = typeof category === "string" ? category : category?.name || category?.slug || "";
+  const categoryLetters = String(categoryValue)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  const baseCategory = categoryLetters.slice(0, 3).padEnd(3, "X") || "GEN";
+
+  if (categoryValue) {
+    return baseCategory;
+  }
+
   const slug = slugify(name) || "item";
   const letters = (slug.match(/[a-z]+/gi) || ["item"]).join("").toUpperCase();
   const firstPart = letters.slice(0, 3).padEnd(3, "X");
@@ -285,14 +296,14 @@ const buildSkuBase = (name = "") => {
   return `${firstPart}-${secondPart}`;
 };
 
-async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "product", excludeId = null, reserved = new Set()) {
-  const baseSku = buildSkuBase(name);
-  let candidate = `${baseSku}-0`;
+async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "product", category = "", excludeId = null, reserved = new Set()) {
+  const baseSku = buildSkuBase(name, category);
   let counter = 1;
+  let candidate = `${baseSku}-${String(counter).padStart(4, "0")}`;
 
   while (true) {
     if (reserved.has(candidate)) {
-      candidate = `${baseSku}-${counter}`;
+      candidate = `${baseSku}-${String(counter).padStart(4, "0")}`;
       counter += 1;
       continue;
     }
@@ -312,7 +323,7 @@ async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "pr
       return candidate;
     }
 
-    candidate = `${baseSku}-${counter}`;
+    candidate = `${baseSku}-${String(counter).padStart(4, "0")}`;
     counter += 1;
   }
 }
@@ -512,8 +523,20 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     if (!duplicateCheck.ok) {
       return res.status(409).json({ error: duplicateCheck.error });
     }
+
+    let categoryForSku = null;
+    if (categoryId) {
+      categoryForSku = await prisma.category.findFirst({
+        where: { id: categoryId, tenantId: scope.tenantId },
+        select: { id: true, name: true, slug: true },
+      });
+      if (!categoryForSku) {
+        return res.status(400).json({ error: "Category not found" });
+      }
+    }
+
     body.name = duplicateCheck.name;
-    body.sku = await resolveUniqueSku(prisma, scope.tenantId, scope.branchId, duplicateCheck.name, itemTypeValue);
+    body.sku = await resolveUniqueSku(prisma, scope.tenantId, scope.branchId, duplicateCheck.name, itemTypeValue, categoryForSku);
 
     // For service items, zero out inventory fields
     if (itemTypeValue === "service") {
@@ -607,7 +630,20 @@ router.put("/:id", authenticateToken, async (req, res) => {
       const duplicateCheck = await ensureUniqueProductName(prisma, existing.tenantId, existing.branchId || scope.branchId, normalizedName, existing.id);
       if (!duplicateCheck.ok) return res.status(409).json({ error: duplicateCheck.error });
       data.name = duplicateCheck.name;
-      data.sku = await resolveUniqueSku(prisma, existing.tenantId, existing.branchId || scope.branchId, duplicateCheck.name, existing.itemType || 'product', existing.id);
+
+      const categoryForSku = categoryId
+        ? await prisma.category.findFirst({
+            where: { id: categoryId, tenantId: existing.tenantId },
+            select: { id: true, name: true, slug: true },
+          })
+        : existing.categoryId
+          ? await prisma.category.findFirst({
+              where: { id: existing.categoryId, tenantId: existing.tenantId },
+              select: { id: true, name: true, slug: true },
+            })
+          : null;
+
+      data.sku = await resolveUniqueSku(prisma, existing.tenantId, existing.branchId || scope.branchId, duplicateCheck.name, existing.itemType || 'product', categoryForSku, existing.id);
     }
 
     // Handle itemType update
@@ -850,7 +886,7 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       if (rowErrors.length > 0) {
         errors.push({ row: rowNum, name: name || "(unnamed)", errors: rowErrors });
       } else {
-        const generatedSku = await resolveUniqueSku(prisma, scope.tenantId, scope.branchId, name, itemType, null, reservedSkus);
+        const generatedSku = await resolveUniqueSku(prisma, scope.tenantId, scope.branchId, name, itemType, categoryName, null, reservedSkus);
         validRows.push({
           name,
           price,
