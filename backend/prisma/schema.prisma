@@ -21,6 +21,7 @@ model Branch {
 
   users UserBranch[]
   products Product[]
+  accounts Account[]
   sales Sale[]
   purchases Purchase[]
   customers Customer[]
@@ -1392,6 +1393,8 @@ model Account {
   balance     Float    @default(0)
   isActive    Boolean  @default(true)
   description String?
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   journalLines JournalLine[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

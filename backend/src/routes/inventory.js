@@ -277,25 +277,22 @@ const slugify = (value = "") =>
 
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
 
-const buildSkuPrefix = (itemType = "product") => {
-  if (itemType === "service") return "SRV";
-  if (itemType === "rental") return "RNT";
-  return "PRD";
-};
-
-const buildSkuBase = (name = "", itemType = "product") => {
+const buildSkuBase = (name = "") => {
   const slug = slugify(name) || "item";
-  return `${buildSkuPrefix(itemType)}-${slug}`.toUpperCase();
+  const letters = (slug.match(/[a-z]+/gi) || ["item"]).join("").toUpperCase();
+  const firstPart = letters.slice(0, 3).padEnd(3, "X");
+  const secondPart = letters.slice(3, 5).padEnd(2, "X");
+  return `${firstPart}-${secondPart}`;
 };
 
 async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "product", excludeId = null, reserved = new Set()) {
-  const baseSku = buildSkuBase(name, itemType);
-  let candidate = baseSku;
+  const baseSku = buildSkuBase(name);
+  let candidate = `${baseSku}-0`;
   let counter = 1;
 
   while (true) {
     if (reserved.has(candidate)) {
-      candidate = `${baseSku}-${String(counter).padStart(3, "0")}`;
+      candidate = `${baseSku}-${counter}`;
       counter += 1;
       continue;
     }
@@ -315,7 +312,7 @@ async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "pr
       return candidate;
     }
 
-    candidate = `${baseSku}-${String(counter).padStart(3, "0")}`;
+    candidate = `${baseSku}-${counter}`;
     counter += 1;
   }
 }

@@ -25,7 +25,7 @@ router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"
 router.post("/accounts", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { code, name, type, subType, parentId, parentCode, parentName, description } = req.body;
+    const { code, name, type, subType, parentId, parentCode, parentName, description, branchId } = req.body;
     if (!code || !name || !type) return res.status(400).json({ error: "code, name, type required" });
 
     let resolvedParentId = parentId || null;
@@ -42,6 +42,7 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
             type,
             subType: 'category',
             description: `Category ${parentName || parentCode}`,
+            branchId: branchId || null,
           },
         });
       }
@@ -49,7 +50,7 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
     }
 
     const account = await prisma.account.create({
-      data: { tenantId, code, name, type, subType, parentId: resolvedParentId, description },
+      data: { tenantId, code, name, type, subType, parentId: resolvedParentId, description, branchId: branchId || null },
     });
     res.status(201).json(account);
   } catch (err) {
@@ -62,10 +63,10 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
 router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { name, type, subType, parentId, description, isActive } = req.body;
+    const { name, type, subType, parentId, description, isActive, branchId } = req.body;
     const account = await prisma.account.update({
       where: { id: req.params.id },
-      data: { name, type, subType, parentId, description, isActive },
+      data: { name, type, subType, parentId, description, isActive, branchId: branchId ?? undefined },
     });
     res.json(account);
   } catch (err) {

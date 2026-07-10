@@ -165,7 +165,6 @@ export default function AccountingPage() {
   const [accSubType, setAccSubType] = useState('')
   const [accDescription, setAccDescription] = useState('')
   const [accCategory, setAccCategory] = useState('')
-  const [accParentId, setAccParentId] = useState('')
   const [accBranch, setAccBranch] = useState('')
   const [accCurrency, setAccCurrency] = useState('USD')
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set())
@@ -272,7 +271,6 @@ export default function AccountingPage() {
   }
 
   const accountOptions = useMemo(() => buildAccountOptions(accounts), [accounts])
-  const parentAccountOptions = useMemo(() => buildAccountOptions(accounts, accType), [accounts, accType])
 
   useEffect(() => {
     if (user?.branchId && !hasPermission('canViewBranch')) {
@@ -303,9 +301,7 @@ export default function AccountingPage() {
     const categories = ACCOUNT_CATEGORIES[accType] || []
     const selectedCategory = categories.find(c => c.code === accCategory)
     const baseCode = selectedCategory ? parseInt(selectedCategory.code) : 1100
-    const parentAccount = accounts.find(a => a.id === accParentId)
-    const parentBaseCode = parentAccount ? Number.parseInt(parentAccount.code, 10) || baseCode : baseCode
-    let generatedCode = String(parentBaseCode + 1)
+    let generatedCode = String(baseCode + 1)
     while (accounts.some(account => account.code === generatedCode)) {
       generatedCode = String(Number(generatedCode) + 1)
     }
@@ -320,9 +316,8 @@ export default function AccountingPage() {
           type: accType,
           subType: accSubType || undefined,
           description: accDescription || undefined,
-          parentId: accParentId || undefined,
-          parentCode: accParentId ? undefined : accCategory || undefined,
-          parentName: accParentId ? undefined : selectedCategory?.name || undefined,
+          parentCode: accCategory || undefined,
+          parentName: selectedCategory?.name || undefined,
           branchId: accBranch || undefined,
           currency: accCurrency,
         }),
@@ -335,7 +330,6 @@ export default function AccountingPage() {
         setAccSubType('')
         setAccDescription('')
         setAccCategory('')
-        setAccParentId('')
         setAccBranch('')
         fetchAccounts()
       } else {
@@ -522,7 +516,7 @@ export default function AccountingPage() {
                     key={t.value}
                     onClick={() => {
                       setAccType(t.value)
-                      setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription(''); setAccParentId(''); setBranchSearch('')
+                      setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription(''); setAccCategory(''); setBranchSearch('')
                       setShowAccountDropdown(false)
                       setShowAccountModal(true)
                     }}
@@ -576,21 +570,6 @@ export default function AccountingPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Label>Parent Account</Label>
-                    <Select
-                      value={accParentId || '__top-level__'}
-                      onValueChange={(value) => setAccParentId(value === '__top-level__' ? '' : value)}
-                    >
-                      <SelectTrigger><SelectValue placeholder="Top-level account" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__top-level__">Top-level account</SelectItem>
-                        {parentAccountOptions.map(option => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
                     <Label>Account Category</Label>
                     <Select value={accCategory} onValueChange={setAccCategory}>
                       <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
@@ -601,8 +580,6 @@ export default function AccountingPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Currency</Label>
                     <Select value={accCurrency} onValueChange={setAccCurrency}>
