@@ -25,11 +25,31 @@ router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"
 router.post("/accounts", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { code, name, type, subType, parentId, description } = req.body;
+    const { code, name, type, subType, parentId, parentCode, parentName, description } = req.body;
     if (!code || !name || !type) return res.status(400).json({ error: "code, name, type required" });
 
+    let resolvedParentId = parentId || null;
+    if (!resolvedParentId && parentCode) {
+      let parentAccount = await prisma.account.findFirst({
+        where: { tenantId, code: parentCode },
+      });
+      if (!parentAccount) {
+        parentAccount = await prisma.account.create({
+          data: {
+            tenantId,
+            code: parentCode,
+            name: parentName || parentCode,
+            type,
+            subType: 'category',
+            description: `Category ${parentName || parentCode}`,
+          },
+        });
+      }
+      resolvedParentId = parentAccount.id;
+    }
+
     const account = await prisma.account.create({
-      data: { tenantId, code, name, type, subType, parentId, description },
+      data: { tenantId, code, name, type, subType, parentId: resolvedParentId, description },
     });
     res.status(201).json(account);
   } catch (err) {

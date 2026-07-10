@@ -26,6 +26,7 @@ interface Account {
   balance: number
   isActive: boolean
   parentId?: string
+  children?: Account[]
   description?: string
   branchId?: string
   branch?: { id: string; name: string } | null
@@ -123,6 +124,27 @@ const accountTypeColor: Record<string, string> = {
   expense: 'bg-orange-100 text-orange-800',
 }
 
+const buildAccountOptions = (accounts: Account[], typeFilter?: string) => {
+  const matchesType = (account: Account) => {
+    if (!typeFilter) return true
+    if (typeFilter === 'income') return account.type === 'income' || account.type === 'revenue'
+    if (typeFilter === 'expenses') return account.type === 'expenses' || account.type === 'expense'
+    return account.type === typeFilter
+  }
+
+  const flatten = (account: Account, depth = 0): Array<{ value: string; label: string }> => {
+    if (!matchesType(account)) return []
+
+    const items = [{ value: account.id, label: `${'— '.repeat(depth)}${account.code} - ${account.name}` }]
+    for (const child of account.children || []) {
+      items.push(...flatten(child, depth + 1))
+    }
+    return items
+  }
+
+  return accounts.flatMap((account) => flatten(account))
+}
+
 export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -142,9 +164,11 @@ export default function AccountingPage() {
   const [accType, setAccType] = useState('asset')
   const [accSubType, setAccSubType] = useState('')
   const [accDescription, setAccDescription] = useState('')
+  const [accCategory, setAccCategory] = useState('')
   const [accParentId, setAccParentId] = useState('')
   const [accBranch, setAccBranch] = useState('')
   const [accCurrency, setAccCurrency] = useState('USD')
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set())
   const [branchSearch, setBranchSearch] = useState('')
 
   // Journal entry form
@@ -247,6 +271,9 @@ export default function AccountingPage() {
     }
   }
 
+  const accountOptions = useMemo(() => buildAccountOptions(accounts), [accounts])
+  const parentAccountOptions = useMemo(() => buildAccountOptions(accounts, accType), [accounts, accType])
+
   useEffect(() => {
     if (user?.branchId && !hasPermission('canViewBranch')) {
       setAccBranch(user.branchId)
@@ -271,26 +298,45 @@ export default function AccountingPage() {
 
   const handleCreateAccount = async () => {
     if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
-    if (!accParentId) return toast({ variant: 'destructive', title: 'Account category required' })
+    if (!accCategory) return toast({ variant: 'destructive', title: 'Account category required' })
+
     const categories = ACCOUNT_CATEGORIES[accType] || []
-    const selectedCategory = categories.find(c => c.code === accParentId)
+    const selectedCategory = categories.find(c => c.code === accCategory)
     const baseCode = selectedCategory ? parseInt(selectedCategory.code) : 1100
-    const typeAccounts = accounts.filter(a => a.type === accType || (accType === 'income' && a.type === 'revenue') || (accType === 'expenses' && a.type === 'expense'))
-    const maxCode = typeAccounts.reduce((max, a) => {
-      const codeNum = parseInt(a.code) || 0
-      return codeNum > max && codeNum < baseCode + 100 ? codeNum : max
-    }, baseCode)
-    const generatedCode = String(maxCode + 1)
+    const parentAccount = accounts.find(a => a.id === accParentId)
+    const parentBaseCode = parentAccount ? Number.parseInt(parentAccount.code, 10) || baseCode : baseCode
+    let generatedCode = String(parentBaseCode + 1)
+    while (accounts.some(account => account.code === generatedCode)) {
+      generatedCode = String(Number(generatedCode) + 1)
+    }
+
     try {
       const res = await apiFetch('/api/accounting/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: generatedCode, name: accName, type: accType, subType: accSubType || undefined, description: accDescription || undefined, parentCode: accParentId || undefined, branchId: accBranch || undefined, currency: accCurrency }),
+        body: JSON.stringify({
+          code: generatedCode,
+          name: accName,
+          type: accType,
+          subType: accSubType || undefined,
+          description: accDescription || undefined,
+          parentId: accParentId || undefined,
+          parentCode: accParentId ? undefined : accCategory || undefined,
+          parentName: accParentId ? undefined : selectedCategory?.name || undefined,
+          branchId: accBranch || undefined,
+          currency: accCurrency,
+        }),
       })
       if (res.ok) {
-        toast({ title: 'SubAccount created' })
+        toast({ title: 'Account created' })
         setShowAccountModal(false)
-        setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription(''); setAccParentId('')
+        setAccCode('')
+        setAccName('')
+        setAccSubType('')
+        setAccDescription('')
+        setAccCategory('')
+        setAccParentId('')
+        setAccBranch('')
         fetchAccounts()
       } else {
         const data = await res.json()
@@ -530,9 +576,21 @@ export default function AccountingPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Label>Account Category</Label>
+                    <Label>Parent Account</Label>
                     <Select value={accParentId} onValueChange={setAccParentId}>
-                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Top-level account" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Top-level account</SelectItem>
+                        {parentAccountOptions.map(option => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Account Category</Label>
+                    <Select value={accCategory} onValueChange={setAccCategory}>
+                      <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                       <SelectContent>
                         {(ACCOUNT_CATEGORIES[accType] || []).map(cat => (
                           <SelectItem key={cat.code} value={cat.code}>{cat.code} - {cat.name}</SelectItem>
@@ -540,6 +598,8 @@ export default function AccountingPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Currency</Label>
                     <Select value={accCurrency} onValueChange={setAccCurrency}>
@@ -572,11 +632,12 @@ export default function AccountingPage() {
           {ACCOUNT_TYPES.map(typeDef => {
             const typeAccounts = accounts.filter(a => a.type === typeDef.value || (typeDef.value === 'income' && a.type === 'revenue') || (typeDef.value === 'expenses' && a.type === 'expense'))
             if (!typeAccounts.length) return null
+            const rootAccounts = typeAccounts.filter(a => !a.parentId)
             return (
               <div key={typeDef.value} className="space-y-2">
                 <div className="flex items-center gap-2 py-2">
                   <Badge className={accountTypeColor[typeDef.value] || 'bg-gray-100'}>{typeDef.label}</Badge>
-                  <span className="text-sm font-normal text-muted-foreground">{typeAccounts.length} accounts</span>
+                  <span className="text-sm font-normal text-muted-foreground">{rootAccounts.length} parent accounts</span>
                 </div>
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full text-sm">
@@ -590,24 +651,64 @@ export default function AccountingPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {typeAccounts.map(acc => (
-                        <tr key={acc.id} className={`border-b hover:bg-muted/50 ${acc.parentId ? 'bg-muted/20' : ''}`}>
-                          <td className="py-2 px-3 font-medium">
-                            {acc.parentId && <span className="text-muted-foreground mr-1">└</span>}
-                            {acc.name}
-                            {acc.subType && <Badge variant="outline" className="ml-2">{acc.subType}</Badge>}
-                            {!acc.isActive && <Badge variant="secondary" className="ml-2">Inactive</Badge>}
-                          </td>
-                          <td className="py-2 px-3 font-mono font-bold">{acc.code}</td>
-                          <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
-                          <td className="py-2 px-3 text-right font-mono">{formatCurrency(acc.balance)}</td>
-                          <td className="py-2 px-3">
-                            <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(acc.id)}>
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                      {rootAccounts
+                        .sort((a, b) => parseInt(a.code) - parseInt(b.code))
+                        .map(acc => {
+                          const childAccounts = (acc.children || []).sort((a, b) => parseInt(a.code) - parseInt(b.code))
+                          const isExpanded = expandedAccounts.has(acc.id)
+                          return (
+                            <React.Fragment key={acc.id}>
+                              <tr className="border-b hover:bg-muted/50">
+                                <td className="py-2 px-3 font-medium">
+                                  {childAccounts.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setExpandedAccounts(prev => {
+                                          const next = new Set(prev)
+                                          if (next.has(acc.id)) next.delete(acc.id)
+                                          else next.add(acc.id)
+                                          return next
+                                        })
+                                      }}
+                                      className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-muted/70 text-muted-foreground transition hover:bg-muted"
+                                    >
+                                      <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                    </button>
+                                  ) : <span className="inline-block h-6 w-6" />}
+                                  {acc.name}
+                                  {acc.subType && <Badge variant="outline" className="ml-2">{acc.subType}</Badge>}
+                                  {!acc.isActive && <Badge variant="secondary" className="ml-2">Inactive</Badge>}
+                                </td>
+                                <td className="py-2 px-3 font-mono font-bold">{acc.code}</td>
+                                <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
+                                <td className="py-2 px-3 text-right font-mono">{formatCurrency(acc.balance)}</td>
+                                <td className="py-2 px-3">
+                                  <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(acc.id)}>
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  </Button>
+                                </td>
+                              </tr>
+                              {isExpanded && childAccounts.map(child => (
+                                <tr key={child.id} className="border-b bg-muted/20">
+                                  <td className="py-2 px-3 pl-12 font-medium text-muted-foreground">
+                                    └ {child.name}
+                                    {child.subType && <Badge variant="outline" className="ml-2">{child.subType}</Badge>}
+                                    {!child.isActive && <Badge variant="secondary" className="ml-2">Inactive</Badge>}
+                                  </td>
+                                  <td className="py-2 px-3 font-mono font-bold">{child.code}</td>
+                                  <td className="py-2 px-3">{child.branch?.name || '—'}</td>
+                                  <td className="py-2 px-3 text-right font-mono">{formatCurrency(child.balance)}</td>
+                                  <td className="py-2 px-3">
+                                    <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(child.id)}>
+                                      <Trash2 className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          )
+                        })}
                     </tbody>
                   </table>
                 </div>
@@ -707,6 +808,17 @@ export default function AccountingPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Account</Label>
+                  <Select value={jeAccount} onValueChange={setJeAccount}>
+                    <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
+                    <SelectContent>
+                      {accountOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
