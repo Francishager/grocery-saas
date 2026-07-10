@@ -7,6 +7,7 @@ import prisma from "../db.js";
 import { authenticateToken } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 import { resolveEffectivePermissions } from "../utils/permissions.js";
+import { getTenantFeatures } from "../../middleware/featureCheck.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -24,9 +25,9 @@ function primaryBranchId(user) {
   return primary?.branchId || null;
 }
 
-function userPayload(user, userPerm) {
+function userPayload(user, userPerm, tenantFeatures = null) {
   const isPlatformUser = user.role === "saas_admin";
-  const permissions = resolveEffectivePermissions(user, userPerm);
+  const permissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
   return {
     id: user.id,
@@ -72,9 +73,10 @@ router.post("/login", async (req, res) => {
 
     // Fetch granular permissions BEFORE signing JWT so they're included in the token
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();
 
-    // Build permissions list: saas_admin gets wildcard, owner gets all, others get explicit permissions from UserPermission table
-    const jwtPermissions = resolveEffectivePermissions(user, userPerm);
+    // Build permissions list: saas_admin gets wildcard, owner gets feature-aware access, others get explicit permissions from UserPermission table
+    const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
@@ -86,7 +88,7 @@ router.post("/login", async (req, res) => {
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
 
     res.json({
-      user: userPayload(user, userPerm),
+      user: userPayload(user, userPerm, tenantFeatures),
       tokens: { accessToken, refreshToken, expiresIn: 86400, tokenType: "Bearer" },
     });
   } catch (err) {
@@ -151,9 +153,10 @@ router.post("/refresh", async (req, res) => {
     }
 
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();
 
-    // Build permissions list: saas_admin gets wildcard, owner gets all, others get explicit permissions from UserPermission table
-    const jwtPermissions = resolveEffectivePermissions(user, userPerm);
+    // Build permissions list: saas_admin gets wildcard, owner gets feature-aware access, others get explicit permissions from UserPermission table
+    const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
@@ -163,7 +166,7 @@ router.post("/refresh", async (req, res) => {
     const newRefreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({
-      user: userPayload(user, userPerm),
+      user: userPayload(user, userPerm, tenantFeatures),
       tokens: { accessToken, refreshToken: newRefreshToken, expiresIn: 86400, tokenType: "Bearer" },
     });
   } catch (err) {
@@ -184,8 +187,9 @@ router.get("/me", authenticateToken, async (req, res) => {
     });
     if (!user) return res.status(404).json({ error: "User not found" });
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();
     const { password: _, ...safe } = user;
-    res.json({ user: { ...safe, ...userPayload(user, userPerm) } });
+    res.json({ user: { ...safe, ...userPayload(user, userPerm, tenantFeatures) } });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }

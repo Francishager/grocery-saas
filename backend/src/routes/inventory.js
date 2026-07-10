@@ -41,6 +41,18 @@ const slugify = (value = "") =>
 
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
 
+export function mapImportRouteError(err) {
+  if (err?.code === 'LIMIT_REACHED') {
+    return { statusCode: 403, message: err.message || 'Product limit reached' };
+  }
+
+  if (err?.statusCode) {
+    return { statusCode: err.statusCode, message: err.message || 'Import failed' };
+  }
+
+  return { statusCode: 500, message: 'Internal server error during import' };
+}
+
 const buildSkuBase = (name = "", category = "") => {
   const categoryValue = typeof category === "string" ? category : category?.name || category?.slug || "";
   const categoryLetters = String(categoryValue)
@@ -705,9 +717,14 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       imported: created.length,
     });
   } catch (err) {
-    if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
+    const mappedError = mapImportRouteError(err);
+    if (mappedError.statusCode >= 400 && mappedError.statusCode < 500) {
+      console.warn("Import inventory request failed:", mappedError);
+      return res.status(mappedError.statusCode).json({ error: mappedError.message });
+    }
+
     console.error("Import inventory error:", err);
-    res.status(500).json({ error: "Internal server error during import" });
+    return res.status(mappedError.statusCode).json({ error: mappedError.message });
   }
 });
 

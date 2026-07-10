@@ -1,6 +1,70 @@
 // =====================================================
 // SINGLE SOURCE OF TRUTH for all permission keys
 // =====================================================
+const PERMISSION_TO_FEATURES = {
+  canCreateSale: ['sales.orders', 'sales'],
+  canViewSale: ['sales.orders', 'sales'],
+  canEditSale: ['sales.orders', 'sales'],
+  canDeleteSale: ['sales.orders', 'sales'],
+  canRefundSale: ['sales.returns', 'sales'],
+  canCreateProduct: ['inventory.products', 'inventory'],
+  canViewProduct: ['inventory.products', 'inventory'],
+  canEditProduct: ['inventory.products', 'inventory'],
+  canDeleteProduct: ['inventory.products', 'inventory'],
+  canAdjustStock: ['inventory.stock', 'inventory'],
+  canTransferStock: ['inventory.transfers', 'inventory'],
+  canCreatePurchase: ['purchases', 'inventory'],
+  canViewPurchase: ['purchases', 'inventory'],
+  canEditPurchase: ['purchases', 'inventory'],
+  canDeletePurchase: ['purchases', 'inventory'],
+  canCreatePayable: ['accounting', 'payables'],
+  canViewPayable: ['accounting', 'payables'],
+  canEditPayable: ['accounting', 'payables'],
+  canDeletePayable: ['accounting', 'payables'],
+  canCreateExpense: ['expenses', 'accounting'],
+  canViewExpense: ['expenses', 'accounting'],
+  canEditExpense: ['expenses', 'accounting'],
+  canDeleteExpense: ['expenses', 'accounting'],
+  canCreateCustomer: ['customers', 'crm'],
+  canViewCustomer: ['customers', 'crm'],
+  canEditCustomer: ['customers', 'crm'],
+  canDeleteCustomer: ['customers', 'crm'],
+  canCreateSupplier: ['suppliers', 'inventory'],
+  canViewSupplier: ['suppliers', 'inventory'],
+  canEditSupplier: ['suppliers', 'inventory'],
+  canDeleteSupplier: ['suppliers', 'inventory'],
+  canCreateStaff: ['hr', 'staff'],
+  canViewStaff: ['hr', 'staff'],
+  canEditStaff: ['hr', 'staff'],
+  canDeleteStaff: ['hr', 'staff'],
+  canCreateBranch: ['branches', 'core'],
+  canViewBranch: ['branches', 'core'],
+  canEditBranch: ['branches', 'core'],
+  canDeleteBranch: ['branches', 'core'],
+  canViewSettings: ['settings', 'core'],
+  canEditSettings: ['settings', 'core'],
+  canViewRestaurant: ['restaurant', 'restaurant.orders'],
+  canCreateRestaurant: ['restaurant', 'restaurant.orders'],
+  canEditRestaurant: ['restaurant', 'restaurant.orders'],
+  canDeleteRestaurant: ['restaurant', 'restaurant.orders'],
+  canViewManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canCreateManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canEditManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canDeleteManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canViewAgriculture: ['agriculture', 'agriculture.fields'],
+  canCreateAgriculture: ['agriculture', 'agriculture.fields'],
+  canEditAgriculture: ['agriculture', 'agriculture.fields'],
+  canDeleteAgriculture: ['agriculture', 'agriculture.fields'],
+  canViewFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canCreateFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canEditFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canDeleteFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canViewServiceBusiness: ['service', 'service.appointments'],
+  canCreateServiceBusiness: ['service', 'service.appointments'],
+  canEditServiceBusiness: ['service', 'service.appointments'],
+  canDeleteServiceBusiness: ['service', 'service.appointments'],
+};
+
 export const ALL_PERMISSION_KEYS = [
   "canViewDashboard",
   // Sales
@@ -89,16 +153,47 @@ export function normalizePermissionRecord(permissionRecord = {}) {
   return normalized;
 }
 
+function hasFeatureAccessForTenant(tenantFeatures, featureNames = []) {
+  if (!tenantFeatures || !Array.isArray(featureNames) || featureNames.length === 0) {
+    return true;
+  }
+
+  const features = tenantFeatures instanceof Set ? tenantFeatures : new Set(tenantFeatures || []);
+  const names = featureNames.filter(Boolean);
+
+  return names.some((featureName) => {
+    if (!featureName) return true;
+    if (features.has(featureName)) return true;
+
+    const parts = String(featureName).split('.');
+    for (let index = parts.length - 1; index > 0; index -= 1) {
+      const parentFeature = parts.slice(0, index).join('.');
+      if (features.has(parentFeature)) return true;
+    }
+
+    return false;
+  });
+}
+
 // =====================================================
 // Resolve the effective permissions for a user.
 // The effective set is the union of any inherited/base permissions
 // (for example from a plan template or a future override layer) plus
 // the explicit user-permission record.
 // =====================================================
-export function resolveEffectivePermissions(user, permissionRecord = null, inheritedPermissions = []) {
+export function resolveEffectivePermissions(user, permissionRecord = null, inheritedPermissions = [], tenantFeatures = null) {
   if (!user) return [];
   if (user.role === "saas_admin") return ["*"];
-  if (user.role === "owner") return [...ALL_PERMISSION_KEYS];
+  if (user.role === "owner") {
+    const granted = new Set();
+    for (const permissionKey of ALL_PERMISSION_KEYS) {
+      const mappedFeatures = PERMISSION_TO_FEATURES[permissionKey];
+      if (!mappedFeatures || hasFeatureAccessForTenant(tenantFeatures, mappedFeatures)) {
+        granted.add(permissionKey);
+      }
+    }
+    return [...granted];
+  }
 
   const granted = new Set();
 
@@ -122,9 +217,9 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
 // - owner: ALL permissions (business owner has full access)
 // - Other roles: permissions come ONLY from the UserPermission table
 // =====================================================
-export function permissionsForUser(user) {
+export function permissionsForUser(user, tenantFeatures = null) {
   if (user.role === "saas_admin") return ["*"];
-  if (user.role === "owner") return [...ALL_PERMISSION_KEYS];
+  if (user.role === "owner") return resolveEffectivePermissions(user, null, [], tenantFeatures);
   // No role gets hardcoded permissions — must be explicitly assigned
   return [];
 }

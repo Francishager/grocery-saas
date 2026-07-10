@@ -42,12 +42,15 @@ export const authenticateToken = async (req, res, next) => {
   try {
     // Resolve permissions from the single source of truth.
     // - saas_admin: wildcard "*" (bypasses all checks)
-    // - owner: full access
+    // - owner: feature-aware access based on the tenant subscription and overrides
     // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
-    const permissions = resolveEffectivePermissions(decoded, userPerm);
+    const tenantId = decoded.tenantId || decoded.tenant_id || decoded.business_id;
+    const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
+    const permissions = resolveEffectivePermissions(decoded, userPerm, [], tenantFeatures);
 
-    req.user = { ...decoded, permissions };
+    req.user = { ...decoded, permissions, tenantFeatures };
+    req.tenantFeatures = tenantFeatures;
   } catch (fetchErr) {
     console.error('Permission lookup error:', fetchErr);
     // Fall back to decoded token permissions if available
@@ -182,20 +185,16 @@ export const requirePermission = (permission) => {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
     }
-    
-    // Owner role always has full access
-    if (req.user.role === 'owner') return next();
-    
+
     const permissions = req.user.permissions || [];
-    
-    if (!permissions.includes(permission) && !permissions.includes('*')) {
-      return res.status(403).json({ 
-        message: 'Permission denied',
-        required: permission,
-      });
+    if (permissions.includes(permission) || permissions.includes('*')) {
+      return next();
     }
-    
-    next();
+
+    return res.status(403).json({ 
+      message: 'Permission denied',
+      required: permission,
+    });
   };
 };
 

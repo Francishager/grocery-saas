@@ -22,6 +22,16 @@ test('returns full permissions for owners and platform admins', () => {
   assert.deepEqual(platformPermissions, ['*']);
 });
 
+test('owner permissions respect tenant feature access', () => {
+  const allowed = resolveEffectivePermissions({ role: 'owner' }, null, [], new Set(['inventory.products', 'sales']));
+  const denied = resolveEffectivePermissions({ role: 'owner' }, null, [], new Set(['sales']));
+
+  assert.ok(allowed.includes('canCreateProduct'));
+  assert.ok(allowed.includes('canCreateSale'));
+  assert.ok(!denied.includes('canCreateProduct'));
+  assert.ok(denied.includes('canViewDashboard'));
+});
+
 test('prisma schema exposes the staff till sheet permission field', () => {
   const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
   const schema = readFileSync(schemaPath, 'utf8');
