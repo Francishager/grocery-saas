@@ -64,7 +64,7 @@ export default function DataImporterPage() {
       ['Field', 'Required?', 'Description', 'Example'],
       ['Product Name', 'Yes', 'Name of the product', 'Rice 1kg'],
       ['Category', 'No', 'Category name (must already exist)', 'Groceries'],
-      ['SKU', 'No', 'Unique stock keeping unit', 'RICE-001'],
+      ['SKU', 'No', 'Ignored — system auto-generates SKU from product name', ''],
       ['Barcode', 'No', 'Product barcode (must be unique)', '8901234567890'],
       ['Selling Price', 'Yes', 'Selling price (must be > 0)', '5000'],
       ['Cost Price', 'No', 'Purchase/cost price (>= 0)', '4000'],
@@ -184,7 +184,7 @@ export default function DataImporterPage() {
               <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Product Name</strong> — Name of the product</div>
               <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Selling Price</strong> — Must be a number greater than 0</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Category</strong> — Must match an existing category name</div>
-              <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>SKU</strong> — Must be unique within the branch</div>
+              <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>SKU</strong> — Ignored; the system auto-generates it from the product name</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Barcode</strong> — Must be unique within the branch</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Cost Price</strong> — Non-negative number</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Stock Quantity</strong> — Default: 0</div>
@@ -198,7 +198,8 @@ export default function DataImporterPage() {
           <AlertMessage severity="info" variant="standard" dismissible={false} title="Important Notes">
             <ul className="list-disc list-inside space-y-1 mt-1 text-sm">
               <li>Category names must already exist in your system. Create them first in the Inventory page if needed.</li>
-              <li>SKUs and Barcodes must be unique — duplicates (including with existing products) will be rejected.</li>
+              <li>Product names must be unique within the branch; duplicates will be rejected.</li>
+              <li>SKUs are auto-generated from the product name, and barcodes must still be unique.</li>
               <li>The entire upload is rejected if <strong>any</strong> row has an error. Fix all errors before re-uploading.</li>
               <li>For service items, stock quantity and reorder level are automatically set to 0.</li>
             </ul>

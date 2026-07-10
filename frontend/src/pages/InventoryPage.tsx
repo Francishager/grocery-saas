@@ -580,11 +580,11 @@ export default function InventoryPage() {
                 <Label htmlFor="product_id">SKU / Product ID</Label>
                 <Input
                   id="product_id"
-                  value={formData.product_id}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, product_id: e.target.value }))
-                  }
+                  value={formData.product_id || 'Auto-generated from product name'}
+                  disabled
+                  className="bg-muted/50"
                 />
+                <p className="text-xs text-muted-foreground">A SKU will be generated automatically from the product name when the item is saved.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="barcode">Barcode</Label>

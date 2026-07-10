@@ -577,10 +577,13 @@ export default function AccountingPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Parent Account</Label>
-                    <Select value={accParentId} onValueChange={setAccParentId}>
+                    <Select
+                      value={accParentId || '__top-level__'}
+                      onValueChange={(value) => setAccParentId(value === '__top-level__' ? '' : value)}
+                    >
                       <SelectTrigger><SelectValue placeholder="Top-level account" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Top-level account</SelectItem>
+                        <SelectItem value="__top-level__">Top-level account</SelectItem>
                         {parentAccountOptions.map(option => (
                           <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                         ))}

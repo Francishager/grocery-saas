@@ -275,6 +275,72 @@ const slugify = (value = "") =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
+const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
+
+const buildSkuPrefix = (itemType = "product") => {
+  if (itemType === "service") return "SRV";
+  if (itemType === "rental") return "RNT";
+  return "PRD";
+};
+
+const buildSkuBase = (name = "", itemType = "product") => {
+  const slug = slugify(name) || "item";
+  return `${buildSkuPrefix(itemType)}-${slug}`.toUpperCase();
+};
+
+async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "product", excludeId = null, reserved = new Set()) {
+  const baseSku = buildSkuBase(name, itemType);
+  let candidate = baseSku;
+  let counter = 1;
+
+  while (true) {
+    if (reserved.has(candidate)) {
+      candidate = `${baseSku}-${String(counter).padStart(3, "0")}`;
+      counter += 1;
+      continue;
+    }
+
+    const existing = await prisma.product.findFirst({
+      where: {
+        tenantId,
+        branchId,
+        sku: candidate,
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      reserved.add(candidate);
+      return candidate;
+    }
+
+    candidate = `${baseSku}-${String(counter).padStart(3, "0")}`;
+    counter += 1;
+  }
+}
+
+async function ensureUniqueProductName(prisma, tenantId, branchId, name, excludeId = null) {
+  const normalizedName = normalizeProductName(name);
+  if (!normalizedName) return { ok: false, error: "Product name is required" };
+
+  const existing = await prisma.product.findFirst({
+    where: {
+      tenantId,
+      branchId,
+      name: { equals: normalizedName, mode: "insensitive" },
+      ...(excludeId ? { NOT: { id: excludeId } } : {}),
+    },
+    select: { id: true, name: true },
+  });
+
+  if (existing) {
+    return { ok: false, error: `Product name "${normalizedName}" already exists` };
+  }
+
+  return { ok: true, name: normalizedName };
+}
+
 async function ensureTenantCategories(tenantId) {
   if (!tenantId) return;
 
@@ -405,7 +471,8 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     });
     const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
 
-    if (!body.name || !String(body.name).trim()) {
+    const normalizedName = normalizeProductName(body.name);
+    if (!normalizedName) {
       return res.status(400).json({ error: "Product name is required" });
     }
     if (body.price === undefined || body.price === null || Number(body.price) <= 0) {
@@ -415,6 +482,13 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     // Set itemType (default to product, allow rental)
     const itemTypeValue = ["service", "rental"].includes(itemType) ? itemType : "product";
     body.itemType = itemTypeValue;
+
+    const duplicateCheck = await ensureUniqueProductName(prisma, scope.tenantId, scope.branchId, normalizedName);
+    if (!duplicateCheck.ok) {
+      return res.status(409).json({ error: duplicateCheck.error });
+    }
+    body.name = duplicateCheck.name;
+    body.sku = await resolveUniqueSku(prisma, scope.tenantId, scope.branchId, duplicateCheck.name, itemTypeValue);
 
     // For service items, zero out inventory fields
     if (itemTypeValue === "service") {
@@ -476,6 +550,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
     const data = { ...body };
+
+    if (body.name !== undefined) {
+      const normalizedName = normalizeProductName(body.name);
+      if (!normalizedName) return res.status(400).json({ error: "Product name is required" });
+      const duplicateCheck = await ensureUniqueProductName(prisma, existing.tenantId, existing.branchId || scope.branchId, normalizedName, existing.id);
+      if (!duplicateCheck.ok) return res.status(409).json({ error: duplicateCheck.error });
+      data.name = duplicateCheck.name;
+      data.sku = await resolveUniqueSku(prisma, existing.tenantId, existing.branchId || scope.branchId, duplicateCheck.name, existing.itemType || 'product', existing.id);
+    }
 
     // Handle itemType update
     if (itemType === "service") {
@@ -618,18 +701,19 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
     });
     const categoryMap = new Map(existingCategories.map(c => [c.name.toLowerCase(), c.id]));
 
-    // Fetch existing SKUs and barcodes for duplicate check
+    // Fetch existing names and barcodes for duplicate check
     const existingProducts = await prisma.product.findMany({
       where: { tenantId: scope.tenantId, branchId: scope.branchId },
-      select: { sku: true, barcode: true },
+      select: { name: true, barcode: true },
     });
-    const existingSkus = new Set(existingProducts.map(p => p.sku).filter(Boolean));
+    const existingNames = new Set(existingProducts.map(p => normalizeProductName(p.name).toLowerCase()).filter(Boolean));
     const existingBarcodes = new Set(existingProducts.map(p => p.barcode).filter(Boolean));
 
     const errors = [];
     const validRows = [];
-    const seenSkus = new Set();
+    const seenNames = new Set();
     const seenBarcodes = new Set();
+    const reservedSkus = new Set();
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -637,7 +721,7 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       const rowErrors = [];
 
       // Required: name
-      const name = String(row.name || row["Product Name"] || "").trim();
+      const name = normalizeProductName(String(row.name || row["Product Name"] || ""));
       if (!name) rowErrors.push("Product Name is required");
 
       // Required: selling price
@@ -656,13 +740,12 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       const minStock = parseInt(row.minStock ?? row["Reorder Level"] ?? 10, 10);
       if (isNaN(minStock) || minStock < 0) rowErrors.push("Reorder Level must be a non-negative integer");
 
-      // Optional: SKU
-      const sku = String(row.sku || row["SKU"] || "").trim() || null;
-      if (sku) {
-        if (existingSkus.has(sku) || seenSkus.has(sku)) {
-          rowErrors.push(`SKU "${sku}" already exists in this branch`);
+      if (name) {
+        const normalizedNameKey = name.toLowerCase();
+        if (existingNames.has(normalizedNameKey) || seenNames.has(normalizedNameKey)) {
+          rowErrors.push(`Product name "${name}" already exists in this branch`);
         } else {
-          seenSkus.add(sku);
+          seenNames.add(normalizedNameKey);
         }
       }
 
@@ -701,13 +784,14 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       if (rowErrors.length > 0) {
         errors.push({ row: rowNum, name: name || "(unnamed)", errors: rowErrors });
       } else {
+        const generatedSku = await resolveUniqueSku(prisma, scope.tenantId, scope.branchId, name, itemType, null, reservedSkus);
         validRows.push({
           name,
           price,
           cost: cost != null ? cost : null,
           quantity: itemType === "service" ? 0 : quantity,
           minStock: itemType === "service" ? 0 : minStock,
-          sku,
+          sku: generatedSku,
           barcode,
           categoryId,
           baseUnit: itemType === "service" ? "Service" : baseUnit,
