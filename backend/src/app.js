@@ -37,6 +37,8 @@ import manufacturingRouter from "../routes/manufacturing.js";
 import agricultureRouter from "../routes/agriculture.js";
 import serviceRouter from "../routes/service.js";
 import referralRoutes from "./routes/referrals.js";
+import tenantVisibilityRoutes from "./routes/tenant-visibility.js";
+import onboardingRoutes from "./routes/onboarding.js";
 
 import { auditMiddleware } from "./utils/audit.js";
 
@@ -128,6 +130,7 @@ app.get("/api/health", (req, res) => {
 
 // API routes
 app.use("/api/auth", authRoutes);
+app.use("/api/onboarding", onboardingRoutes);
 app.use("/api/purchases", purchaseRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/inventory", inventoryRoutes);
@@ -145,6 +148,7 @@ app.use("/api/settings", settingsRoutes);
 
 // Platform routes (single router — handles plans, features, tenants, analytics)
 app.use("/api/platform", platformNewRouter);
+app.use("/api/platform", tenantVisibilityRoutes);
 app.use("/api/receivables", receivablesRouter);
 app.use("/api/payables", payablesRouter);
 app.use("/api/expenses", expensesRouter);

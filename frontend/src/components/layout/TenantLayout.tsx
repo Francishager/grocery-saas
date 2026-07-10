@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
 import { NotificationBell } from '@/components/NotificationBell'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import OnboardingGuideCard from '@/components/OnboardingGuideCard'
+import OnboardingGuideModal from '@/components/OnboardingGuideModal'
 
 const inventorySubItems = [
   { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
@@ -260,9 +262,11 @@ export function TenantLayout() {
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
+  const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false)
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
-  const { user, logout, hasPermission } = useJWTAuth()
+  const { user, logout, hasPermission, hasCompletedOnboarding, refreshOnboardingStatus, tokens } = useJWTAuth()
   const { theme, toggleTheme } = useTheme()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
@@ -384,6 +388,44 @@ export function TenantLayout() {
       return new Set([catId])
     })
   }
+
+  const completeOnboarding = async () => {
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
+      await fetch(`${apiBase}/api/onboarding/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokens?.accessToken || ''}`,
+        },
+      })
+    } catch {
+      // Ignore and still update local UI state
+    }
+
+    setOnboardingCompleted(true)
+    setShowOnboardingModal(false)
+    await refreshOnboardingStatus()
+  }
+
+  useEffect(() => {
+    setOnboardingCompleted(hasCompletedOnboarding)
+  }, [hasCompletedOnboarding])
+
+  useEffect(() => {
+    if (user?.id) {
+      refreshOnboardingStatus()
+    }
+  }, [user?.id, refreshOnboardingStatus])
+
+  useEffect(() => {
+    if (!user?.id) return
+    if (!onboardingCompleted) {
+      const timer = window.setTimeout(() => setShowOnboardingModal(true), 800)
+      return () => window.clearTimeout(timer)
+    }
+    setShowOnboardingModal(false)
+  }, [user?.id, onboardingCompleted])
 
   const selectReport = (reportId: string) => {
     navigate(`/tenant/reports?report=${reportId}`)
@@ -599,6 +641,10 @@ export function TenantLayout() {
               )
             )}
             {loading && <div className="px-3 py-2 text-sm text-slate-500">Loading plan features...</div>}
+            <OnboardingGuideCard
+              hasCompleted={onboardingCompleted}
+              onStatusChange={completeOnboarding}
+            />
           </nav>
         </div>
       </aside>
@@ -663,6 +709,11 @@ export function TenantLayout() {
         </header>
         <main className="overflow-x-hidden p-4 lg:p-6"><Outlet /></main>
       </div>
+      <OnboardingGuideModal
+        isOpen={showOnboardingModal}
+        onClose={completeOnboarding}
+        onComplete={completeOnboarding}
+      />
     </div>
   )
 }

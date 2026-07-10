@@ -69,6 +69,10 @@ export interface JWTAuthContextValue {
   clearError: () => void
   /** Set tokens manually */
   setTokens: (tokens: AuthTokens) => void
+  /** Onboarding status */
+  hasCompletedOnboarding: boolean
+  /** Refresh onboarding status from backend */
+  refreshOnboardingStatus: () => Promise<void>
 }
 
 const JWTAuthContext = createContext<JWTAuthContextValue | undefined>(undefined)
@@ -135,10 +139,30 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false)
 
   const isAuthenticated = !!user && !!tokens
 
   const offlineCacheKey = 'offline_auth_cache'
+
+  const refreshOnboardingStatus = useCallback(async () => {
+    if (!tokens?.accessToken) {
+      setHasCompletedOnboarding(false)
+      return
+    }
+
+    try {
+      const response = await fetch(`${resolvedApiEndpoint.replace(/\/api\/auth$/, '')}/api/onboarding/status`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setHasCompletedOnboarding(Boolean(data?.completed))
+      }
+    } catch {
+      setHasCompletedOnboarding(false)
+    }
+  }, [resolvedApiEndpoint, tokens?.accessToken])
 
   const persistAuth = (newUser: User | null, newTokens: AuthTokens | null) => {
     if (typeof window !== 'undefined') {
@@ -188,6 +212,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       setUser(userData)
       setTokens(tokenData)
       persistAuth(userData, tokenData)
+      await refreshOnboardingStatus()
       // Reset feature access service on login so stale features from previous session don't persist
       featureAccessService.reset()
       onLogin?.(userData, tokenData)
@@ -250,7 +275,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     } finally {
       setLoading(false)
     }
-  }, [resolvedApiEndpoint, onLogin, tokenStorageKey, userStorageKey])
+  }, [resolvedApiEndpoint, onLogin, tokenStorageKey, userStorageKey, refreshOnboardingStatus])
 
   const logout = useCallback(async () => {
     setLoading(true)
@@ -427,6 +452,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     }
 
     refreshUser()
+    refreshOnboardingStatus()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run once on mount
 
@@ -461,6 +487,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     canAccessBusinessData,
     clearError,
     setTokens: setTokensManually,
+    hasCompletedOnboarding,
+    refreshOnboardingStatus,
   }
 
   return (

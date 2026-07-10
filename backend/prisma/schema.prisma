@@ -337,6 +337,8 @@ model User {
   lastLogin  DateTime?
   otpCode    String?
   otpExpires DateTime?
+  hasCompletedOnboarding Boolean @default(false) // Tenant onboarding guide completion status
+  onboardingCompletedAt DateTime? // When user completed the onboarding guide
   cashAccountId String? // Assigned cash account for cash handling accountability
   cashAccount   CashAccount? @relation("UserCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
 
@@ -656,20 +658,64 @@ model ProductUnit {
 
 // Audit Log — tracks all data mutations
 model AuditLog {
+  id             String   @id @default(cuid())
+  tenantId       String   // tenant ID or "platform" for SaaS admin operations
+  targetTenantId String?  // which tenant was affected by this operation (for cross-tenant operations)
+  userId         String
+  userEmail      String
+  action         String   // create, update, delete, login, checkout, reset, suspend, enable, disable, etc.
+  model          String   // Product, Sale, Purchase, User, Plan, Tenant, Feature, etc.
+  recordId       String?  // ID of the affected record
+  changes        Json?    // { before: {...}, after: {...} } or { data: {...} }
+  ip             String?
+  statusCode     Int      @default(200) // HTTP status code
+  severity       String   @default("info") // info, warning, critical
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, model])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, severity])
+  @@index([targetTenantId]) // fast lookup of operations affecting a specific tenant
+  @@index([severity])
+  @@map("audit_logs")
+}
+
+// Track tenant usage metrics (daily snapshots)
+model TenantMetrics {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  date                DateTime @default(now())
+  activeUsers         Int      @default(0)
+  totalUsers          Int      @default(0)
+  totalProducts       Int      @default(0)
+  totalSales          Int      @default(0)
+  totalSalesAmount    Float    @default(0)
+  featuresUsed        String[] @default([]) // array of feature keys used
+  lastActivityAt      DateTime?
+  createdAt           DateTime @default(now())
+
+  @@unique([tenantId, date])
+  @@index([tenantId])
+  @@index([date])
+  @@map("tenant_metrics")
+}
+
+// Track individual tenant operations/activity
+model TenantActivityLog {
   id        String   @id @default(cuid())
   tenantId  String
   userId    String
   userEmail String
-  action    String // create, update, delete, login, checkout, etc.
-  model     String // Product, Sale, Purchase, User, etc.
-  recordId  String? // ID of the affected record
-  changes   Json? // { before: {...}, after: {...} } or { data: {...} }
-  ip        String?
+  action    String   // login, create_product, create_sale, view_report, etc.
+  model     String   // Product, Sale, User, Report, etc.
+  recordId  String?
+  details   Json?    // additional context specific to the activity
   createdAt DateTime @default(now())
 
-  @@index([tenantId, model])
   @@index([tenantId, createdAt])
-  @@map("audit_logs")
+  @@index([tenantId, action])
+  @@index([tenantId, userId])
+  @@map("tenant_activity_logs")
 }
 
 // Categories

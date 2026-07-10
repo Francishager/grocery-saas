@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
+import { auditLog } from "../utils/audit.js";
 
 const router = Router();
 
@@ -178,7 +179,22 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
     const { password } = req.body;
     if (!password || password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
     const hashed = await bcrypt.hash(password, 12);
-    await prisma.user.update({ where: { id }, data: { password: hashed } });
+    const user = await prisma.user.update({ where: { id }, data: { password: hashed } });
+
+    // Audit log: password reset - track which tenant's owner was reset
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: user?.tenantId || null,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "reset_sensitive",
+      model: "User",
+      recordId: id,
+      changes: { data: { action: "password_reset", targetTenant: user?.tenantId } },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "critical",
+    }).catch(() => {});
+
     res.json({ message: "Password reset successfully" });
   } catch (err) {
     console.error("Reset password error:", err);
@@ -294,7 +310,24 @@ router.post("/subscription/upgrade", authenticateToken, requirePlatformAdmin, as
   try {
     const { tenantId, planId } = req.body;
     if (!tenantId || !planId) return res.status(400).json({ error: "tenantId and planId required" });
+    
+    const oldTenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     await prisma.tenant.update({ where: { id: tenantId }, data: { planId, status: "active" } });
+
+    // Audit log: subscription upgrade - track which tenant was upgraded
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: tenantId,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "upgrade_sensitive",
+      model: "Subscription",
+      recordId: tenantId,
+      changes: { data: { planId, status: "active" }, oldPlanId: oldTenant?.planId },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "critical",
+    }).catch(() => {});
+
     res.json({ message: "Subscription upgraded" });
   } catch (err) {
     console.error("Upgrade error:", err);
@@ -502,6 +535,28 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       emailError = e?.message || "Email failed";
       console.warn("Provision tenant: email send failed:", emailError);
     }
+
+    // Audit log: tenant provisioning (critical SaaS admin operation)
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: tenant.id,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "create_sensitive",
+      model: "Tenant",
+      recordId: tenant.id,
+      changes: {
+        data: {
+          businessName: business.name,
+          businessType: business.businessType,
+          ownerEmail: owner.email,
+          planId: business.planId,
+          slug: tenant.slug,
+        }
+      },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "critical",
+    }).catch(() => {});
 
     res.status(201).json({
       message: emailSent ? "Tenant provisioned and owner email sent" : "Tenant provisioned, but owner email failed",
