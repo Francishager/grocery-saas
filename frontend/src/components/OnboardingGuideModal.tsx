@@ -16,15 +16,15 @@ export default function OnboardingGuideModal({
 
   const steps = [
     {
-      title: '👋 Welcome to Grocery SaaS',
-      description: 'Your complete platform for managing grocery business operations',
+      title: '👋 Welcome to jibuSales',
+      description: 'Your all-in-one business management platform',
       content: (
         <div className="space-y-4">
           <p className="text-gray-700">
-            This platform helps you manage everything from inventory to sales, reports to finances.
+            jibuSales helps you manage your business across operations, inventory, sales, reporting, and finance in one place.
           </p>
           <p className="text-gray-700">
-            Let's walk through the key features so you can get the most out of it!
+            Whether you run a retail, service, distribution, or multi-branch operation, this guide will help you get started quickly.
           </p>
         </div>
       ),
