@@ -341,6 +341,12 @@ export function TenantLayout() {
     return true
   })
   const visibleNavItems = navItems.filter((item) => {
+    // Special handling for Communication: only show if the exact 'communication' feature is enabled
+    // (not when only sub-features like 'communication.notifications' are enabled)
+    if (item.feature === 'communication') {
+      return canAccessFeature('communication') && hasRequiredPermission(item.permission)
+    }
+
     if (item.feature && !canAccessFeature(item.feature)) {
       // For parent items with sub-items, show if any sub-item is visible
       // even when the parent's own feature is not enabled (e.g. Accounting
@@ -352,6 +358,9 @@ export function TenantLayout() {
       if (item.isService && visibleServiceSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
+      // For standalone items like Communication with no sub-items, hide strictly.
+      // Communication should only appear when the 'communication' feature itself is enabled,
+      // not when only child features like 'communication.notifications' are enabled.
       return false
     }
     if (item.permission && !hasRequiredPermission(item.permission)) {
@@ -363,6 +372,7 @@ export function TenantLayout() {
       if (item.isService && visibleServiceSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
+      // For standalone items with no sub-items, hide strictly
       return false
     }
     return true

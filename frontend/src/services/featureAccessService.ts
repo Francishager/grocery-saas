@@ -170,18 +170,8 @@ class FeatureAccessService {
       if (parentAliases.some((a) => this.features[a]?.enabled)) return true
     }
 
-    // If the requested feature is a module (no dot) allow access when any child feature is enabled.
-    // Example: request 'service' -> allow if 'service.car_wash' or 'service.garage' is enabled.
-    if (!featureName.includes('.')) {
-      const prefix = `${featureName}.`
-      for (const [name, access] of Object.entries(this.features)) {
-        if (name.startsWith(prefix) && access.enabled) return true
-        // also try alias variants of children
-        const childAliases = this.generateFeatureAliases(name)
-        if (childAliases.some((a) => a.startsWith(prefix) && this.features[a]?.enabled)) return true
-      }
-    }
-
+    // Module-level features must be explicitly enabled; child features should not
+    // implicitly surface the parent module in the UI.
     return false
   }
 
