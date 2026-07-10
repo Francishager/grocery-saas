@@ -306,7 +306,6 @@ export function TenantLayout() {
     if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
   }, [location.pathname, location.search])
-  const isOwner = user?.role === 'owner'
   function hasRequiredPermission(permission?: string | string[]) {
     if (!permission) return true
     const permissions = Array.isArray(permission) ? permission : [permission]
@@ -315,10 +314,7 @@ export function TenantLayout() {
 
   function subItemVisible(item: { feature?: string | null; permission?: string | string[] }) {
     if (item.feature && !canAccessFeature(item.feature)) return false
-    if (item.permission && !hasRequiredPermission(item.permission)) {
-      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
-      return false
-    }
+    if (item.permission && !hasRequiredPermission(item.permission)) return false
     return true
   }
   const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
@@ -327,10 +323,7 @@ export function TenantLayout() {
     const parentEnabled = canAccessFeature('fuel_station')
     const subEnabled = item.feature ? canAccessFeature(item.feature) : false
     if (!parentEnabled && !subEnabled) return false
-    if (item.permission && !hasPermission(item.permission)) {
-      if (isOwner && (parentEnabled || subEnabled)) return true
-      return false
-    }
+    if (item.permission && !hasPermission(item.permission)) return false
     return true
   })
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
@@ -338,19 +331,13 @@ export function TenantLayout() {
     const parentEnabled = canAccessFeature('service')
     const subEnabled = item.feature ? canAccessFeature(item.feature) : false
     if (!parentEnabled && !subEnabled) return false
-    if (item.permission && !hasPermission(item.permission)) {
-      if (isOwner && (parentEnabled || subEnabled)) return true
-      return false
-    }
+    if (item.permission && !hasPermission(item.permission)) return false
     return true
   })
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
   const visibleReportCategories = reportCategories.filter((cat) => {
     if (cat.feature && !canAccessFeature(cat.feature)) return false
-    if (cat.permission && !hasPermission(cat.permission)) {
-      if (isOwner && cat.feature && canAccessFeature(cat.feature)) return true
-      return false
-    }
+    if (cat.permission && !hasPermission(cat.permission)) return false
     return true
   })
   const visibleNavItems = navItems.filter((item) => {
@@ -368,7 +355,6 @@ export function TenantLayout() {
       return false
     }
     if (item.permission && !hasRequiredPermission(item.permission)) {
-      if (isOwner && item.feature && canAccessFeature(item.feature)) return true
       // For parent items with sub-items, show if any sub-item is visible
       if (item.isAccounting && visibleAccountingSubItems.length > 0) return true
       if (item.isInventory && visibleInventorySubItems.length > 0) return true

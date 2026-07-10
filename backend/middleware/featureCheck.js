@@ -6,7 +6,7 @@ const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 const featureCache = new Map(); // tenantId -> { features: Set, expiresAt: number }
 const CACHE_TTL = 60_000;
 
-function hasFeatureAccess(features, featureName) {
+export function hasFeatureAccess(features, featureName) {
   if (!featureName) return false;
   if (features.has(featureName)) return true;
 
@@ -25,7 +25,7 @@ function hasFeatureAccess(features, featureName) {
  * Tenant overrides (TenantFeature) can enable/disable on top of plan features.
  * Returns a Set of enabled feature name strings.
  */
-async function getTenantFeatures(tenantId) {
+export async function getTenantFeatures(tenantId) {
   const now = Date.now();
   const cached = featureCache.get(tenantId);
   if (cached && cached.expiresAt > now) return cached.features;
@@ -90,11 +90,6 @@ export function requireFeature(featureName) {
   return async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
-    }
-
-    // Platform admins bypass feature checks
-    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
-      return next();
     }
 
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
@@ -178,7 +173,6 @@ export function requireAllFeatures(...featureNames) {
 export function requireAnyFeature(featureNames) {
   return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ message: 'Authentication required' });
-    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) return next();
 
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     if (!tenantId) return res.status(403).json({ message: 'Tenant access required', code: 'TENANT_REQUIRED' });

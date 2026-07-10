@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../src/db.js';
 import { resolveEffectivePermissions } from '../src/utils/permissions.js';
+import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -221,70 +222,29 @@ export const requireFeature = (featureName) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    // Platform admins bypass feature checks
-    if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
-      return next();
-    }
-
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     if (!tenantId) {
-      return next(); // No tenant — let other middleware handle it
+      return res.status(403).json({
+        message: 'Tenant access required',
+        code: 'TENANT_REQUIRED',
+      });
     }
 
     try {
-      // Get tenant's plan
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
-        include: { plan: true },
-      });
-
-      if (!tenant || !tenant.planId) {
-        return next(); // No plan — allow access (legacy/free tier)
-      }
-
-      // Check PlanFeature for this feature
-      const planFeature = await prisma.planFeature.findFirst({
-        where: {
-          planId: tenant.planId,
-          feature: { name: featureName },
-          enabled: true,
-        },
-        include: { feature: true },
-      });
-
-      let isEnabled = !!planFeature;
-
-      // Check TenantFeature overrides
-      const tenantFeature = await prisma.tenantFeature.findFirst({
-        where: {
-          tenantId,
-          feature: { name: featureName },
-        },
-        include: { feature: true },
-      });
-
-      if (tenantFeature) {
-        isEnabled = tenantFeature.enabled; // Override takes precedence
-      }
-
-      // Also check legacy JSON features array on plan
-      if (!isEnabled && tenant.plan?.features) {
-        const jsonFeatures = Array.isArray(tenant.plan.features) ? tenant.plan.features : [];
-        isEnabled = jsonFeatures.includes(featureName);
-      }
-
-      if (!isEnabled) {
+      const features = await getTenantFeatures(tenantId);
+      if (!hasFeatureAccess(features, featureName)) {
         return res.status(403).json({
-          message: 'Feature not available on your current plan',
+          message: 'This feature is not available on your current subscription plan.',
           feature: featureName,
-          code: 'FEATURE_DISABLED',
+          code: 'FEATURE_NOT_ENABLED',
         });
       }
 
+      req.tenantFeatures = features;
       next();
     } catch (err) {
       console.error('requireFeature error:', err);
-      next(); // On error, allow access (graceful degradation)
+      return res.status(500).json({ message: 'Failed to verify feature access' });
     }
   };
 };

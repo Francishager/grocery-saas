@@ -76,7 +76,7 @@ class FeatureAccessService {
 
     try {
       const response = await apiFetch('/api/admin/me/features')
-      
+
       if (!response.ok) {
         throw new Error('Failed to load features')
       }
@@ -85,19 +85,12 @@ class FeatureAccessService {
       this.features = this.normalizeFeatures(data.features || {})
       this.loadedTenantId = tenantId
 
-      // Cache features in localStorage for offline access
-      localStorage.setItem('cachedFeatures', JSON.stringify(this.features))
-      
       // Load usage limits
       await this.loadUsageLimits(tenantId)
-      
+
     } catch (error) {
       console.error('Failed to load features:', error)
-      // On network failure, try cached features as fallback
-      const cached = localStorage.getItem('cachedFeatures')
-      if (cached) {
-        try { this.features = JSON.parse(cached) } catch {}
-      }
+      this.features = {}
       this.loadedTenantId = null
       this.error = error instanceof Error ? error.message : 'Failed to load features'
     } finally {
@@ -264,12 +257,10 @@ class FeatureAccessService {
     // SaaS Admin can access everything
     if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
 
-    // While features are still loading, allow access (don't block the UI)
-    if (this.loading) return true
+    // Strict feature gating: access is only allowed once the tenant feature
+    // state has been loaded and the feature is explicitly enabled.
+    if (this.loading) return false
 
-    // Pure plan-based gating: if the feature is enabled for this tenant
-    // (plan + tenant overrides), it is accessible here. Fine-grained user
-    // access is controlled via permissions, not hard-coded role lists.
     return this.isFeatureEnabled(featureName)
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, AlertTriangle, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff } from 'lucide-react'
 import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
@@ -407,28 +407,6 @@ export default function DashboardPage() {
         </Card>
         )}
       </div>
-
-      {/* Low Stock Alert — only for inventory feature */}
-      {hasFeature('inventory') && hasPermission('canViewProduct') && (
-      <Card className="border-orange-200 bg-orange-50/50">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-orange-600" />
-            <CardTitle>Low Stock Alert</CardTitle>
-          </div>
-          <CardDescription>
-            {k.lowStockCount ?? 0} items need restocking
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(k.lowStockCount ?? 0) === 0 ? (
-            <p className="text-sm text-muted-foreground">All items are well stocked</p>
-          ) : (
-            <p className="text-sm text-orange-700">{k.lowStockCount} products are running low (≤ 10 units)</p>
-          )}
-        </CardContent>
-      </Card>
-      )}
     </div>
   )
 }
