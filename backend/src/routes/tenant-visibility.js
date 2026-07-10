@@ -1,6 +1,6 @@
 import express from "express";
 import prisma from "../db.js";
-import { authenticateToken, requirePlatformAdmin } from "../middleware/index.js";
+import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 
 const router = express.Router();
 
