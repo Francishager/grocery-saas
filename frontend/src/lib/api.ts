@@ -245,8 +245,8 @@ export const inventoryApi = {
     api.post<InventoryItem>('/api/inventory', { body: {
       name: data.product_name,
       price: data.unit_price,
-      cost: data.cost_price,
-      quantity: data.quantity,
+      cost: data.cost_price !== '' && data.cost_price != null ? Number(data.cost_price) : 0,
+      quantity: data.quantity !== '' && data.quantity != null ? Number(data.quantity) : 0,
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
@@ -268,8 +268,8 @@ export const inventoryApi = {
     api.put<InventoryItem>(`/api/inventory/${id}`, { body: {
       name: data.product_name,
       price: data.unit_price,
-      cost: data.cost_price,
-      quantity: data.quantity,
+      cost: data.cost_price !== '' && data.cost_price != null ? Number(data.cost_price) : 0,
+      quantity: data.quantity !== '' && data.quantity != null ? Number(data.quantity) : 0,
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,

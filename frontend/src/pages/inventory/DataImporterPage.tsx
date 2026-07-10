@@ -63,16 +63,16 @@ export default function DataImporterPage() {
     const instructions = [
       ['Field', 'Required?', 'Description', 'Example'],
       ['Product Name', 'Yes', 'Name of the product', 'Rice 1kg'],
-      ['Category', 'No', 'Category name (must already exist)', 'Groceries'],
+      ['Category', 'Yes', 'Category name (must already exist)', 'Groceries'],
       ['SKU', 'No', 'Ignored — system auto-generates SKU from product name', ''],
       ['Barcode', 'No', 'Product barcode (must be unique)', '8901234567890'],
       ['Selling Price', 'Yes', 'Selling price (must be > 0)', '5000'],
-      ['Cost Price', 'No', 'Purchase/cost price (>= 0)', '4000'],
-      ['Stock Quantity', 'No', 'Current stock (default 0)', '100'],
+      ['Cost Price', 'Yes', 'Purchase/cost price (>= 0)', '4000'],
+      ['Stock Quantity', 'Yes', 'Current stock (must be a non-negative integer)', '100'],
       ['Reorder Level', 'No', 'Minimum stock alert level (default 10)', '10'],
       ['Base Unit', 'No', 'Unit of measure (default Piece)', 'Piece'],
       ['Description', 'No', 'Product description', 'Premium quality rice'],
-      ['Item Type', 'No', 'product, service, or rental (default product)', 'product'],
+      ['Item Type', 'Yes', 'product, service, or rental', 'product'],
     ]
     const ws2 = XLSX.utils.aoa_to_sheet(instructions)
     ws2['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 40 }, { wch: 25 }]
@@ -183,15 +183,15 @@ export default function DataImporterPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Product Name</strong> — Name of the product</div>
               <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Selling Price</strong> — Must be a number greater than 0</div>
-              <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Category</strong> — Must match an existing category name</div>
+              <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Category</strong> — Must match an existing category name</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>SKU</strong> — Ignored; the system auto-generates it from the product name</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Barcode</strong> — Must be unique within the branch</div>
-              <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Cost Price</strong> — Non-negative number</div>
-              <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Stock Quantity</strong> — Default: 0</div>
+              <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Cost Price</strong> — Non-negative number</div>
+              <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Stock Quantity</strong> — Non-negative integer</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Reorder Level</strong> — Default: 10</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Base Unit</strong> — Default: Piece (e.g. KG, Bottle, Tablet)</div>
               <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Description</strong> — Product description text</div>
-              <div><Badge variant="secondary" className="mr-1">Optional</Badge> <strong>Item Type</strong> — product, service, or rental (default: product)</div>
+              <div><Badge variant="destructive" className="mr-1">Required</Badge> <strong>Item Type</strong> — product, service, or rental</div>
             </div>
           </div>
 

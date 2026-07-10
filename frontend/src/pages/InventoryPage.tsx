@@ -29,25 +29,25 @@ interface SellingUnit {
 interface FormData {
   product_id: string
   product_name: string
-  quantity: number
+  quantity: number | ''
   unit_price: number
-  cost_price: number
+  cost_price: number | ''
   low_stock_alert: number
   barcode: string
   sku: string
   categoryId: string
   branchId: string
   baseUnit: string
-  itemType: 'product'
+  itemType: 'product' | 'service' | 'rental'
   description: string
 }
 
 const initialFormData: FormData = {
   product_id: '',
   product_name: '',
-  quantity: 0,
+  quantity: '',
   unit_price: 0,
-  cost_price: 0,
+  cost_price: '',
   low_stock_alert: 5,
   barcode: '',
   sku: '',
@@ -224,6 +224,22 @@ export default function InventoryPage() {
     e.preventDefault()
     if (!formData.product_name.trim()) {
       toast({ variant: 'destructive', title: 'Product name is required' })
+      return
+    }
+    if (!formData.categoryId) {
+      toast({ variant: 'destructive', title: 'Category is required' })
+      return
+    }
+    if (formData.quantity === '' || typeof formData.quantity !== 'number' || !Number.isFinite(formData.quantity) || formData.quantity < 0) {
+      toast({ variant: 'destructive', title: 'Stock quantity is required and must be a non-negative number' })
+      return
+    }
+    if (!['product', 'service', 'rental'].includes(formData.itemType)) {
+      toast({ variant: 'destructive', title: 'Item type is required' })
+      return
+    }
+    if (formData.cost_price === '' || typeof formData.cost_price !== 'number' || !Number.isFinite(formData.cost_price) || formData.cost_price < 0) {
+      toast({ variant: 'destructive', title: 'Cost price is required and must be a non-negative number' })
       return
     }
     if (formData.unit_price <= 0) {
@@ -522,7 +538,7 @@ export default function InventoryPage() {
               {/* Item Type Toggle - removed service/rental, only product */}
               {!lockedType && (
               <div className="sm:col-span-2 space-y-2">
-                <Label>Item Type</Label>
+                <Label>Item Type <span className="text-red-500">*</span></Label>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -628,7 +644,7 @@ export default function InventoryPage() {
 
               {/* Category - shared but filtered by type */}
               <div className="space-y-2">
-                <Label>Category</Label>
+                <Label>Category <span className="text-red-500">*</span></Label>
 
                 <div className="relative" ref={categoryPickerRef}>
                   <Button
@@ -636,7 +652,7 @@ export default function InventoryPage() {
                     variant="outline"
                     role="combobox"
                     aria-expanded={categoryOpen}
-                    className="w-full justify-between"
+                    className={cn("w-full justify-between", !formData.categoryId && "border-red-500")}
                     onClick={() => setCategoryOpen((current) => !current)}
                   >
                     <span className={cn("truncate", !selectedCategory && "text-muted-foreground")}>
@@ -731,19 +747,19 @@ export default function InventoryPage() {
               {formData.itemType === 'product' && (
                 <>
               <div className="space-y-2">
-                <Label htmlFor="quantity">Quantity</Label>
+                <Label htmlFor="quantity">Quantity <span className="text-red-500">*</span></Label>
                 <Input
                   id="quantity"
                   type="number"
                   min="0"
+                  required
                   value={formData.quantity}
                   onChange={(e) =>
                     setFormData((prev) => ({
                       ...prev,
-                      quantity: parseFloat(e.target.value) || 0,
+                      quantity: e.target.value === '' ? '' : parseFloat(e.target.value),
                     }))
                   }
-                  required
                 />
               </div>
               <div className="space-y-2">
@@ -762,17 +778,18 @@ export default function InventoryPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="cost_price">Cost Price</Label>
+                <Label htmlFor="cost_price">Cost Price <span className="text-red-500">*</span></Label>
                 <Input
                   id="cost_price"
                   type="number"
                   min="0"
                   step="any"
+                  required
                   value={formData.cost_price}
                   onChange={(e) =>
                     setFormData((prev) => ({
                       ...prev,
-                      cost_price: parseFloat(e.target.value) || 0,
+                      cost_price: e.target.value === '' ? '' : parseFloat(e.target.value),
                     }))
                   }
                 />

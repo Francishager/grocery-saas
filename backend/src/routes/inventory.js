@@ -468,6 +468,34 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     });
     const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
 
+    if (!categoryId) {
+      return res.status(400).json({ error: "Category is required" });
+    }
+
+    const quantityValue = body.quantity;
+    if (quantityValue === undefined || quantityValue === null || quantityValue === "") {
+      return res.status(400).json({ error: "Stock quantity is required" });
+    }
+    const parsedQuantity = Number(quantityValue);
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
+      return res.status(400).json({ error: "Stock quantity must be a non-negative integer" });
+    }
+    body.quantity = parsedQuantity;
+
+    const costValue = body.cost;
+    if (costValue === undefined || costValue === null || costValue === "") {
+      return res.status(400).json({ error: "Cost price is required" });
+    }
+    const parsedCost = Number(costValue);
+    if (!Number.isFinite(parsedCost) || parsedCost < 0) {
+      return res.status(400).json({ error: "Cost price must be a non-negative number" });
+    }
+    body.cost = parsedCost;
+
+    if (!itemType || !["product", "service", "rental"].includes(String(itemType).toLowerCase())) {
+      return res.status(400).json({ error: "Item type is required and must be product, service, or rental" });
+    }
+
     const normalizedName = normalizeProductName(body.name);
     if (!normalizedName) {
       return res.status(400).json({ error: "Product name is required" });
@@ -547,6 +575,31 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
     const data = { ...body };
+
+    if (categoryId === undefined || categoryId === null || categoryId === "") {
+      return res.status(400).json({ error: "Category is required" });
+    }
+    if (body.quantity === undefined || body.quantity === null || body.quantity === "") {
+      return res.status(400).json({ error: "Stock quantity is required" });
+    }
+    const parsedQuantity = Number(body.quantity);
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
+      return res.status(400).json({ error: "Stock quantity must be a non-negative integer" });
+    }
+    data.quantity = parsedQuantity;
+
+    if (body.cost === undefined || body.cost === null || body.cost === "") {
+      return res.status(400).json({ error: "Cost price is required" });
+    }
+    const parsedCost = Number(body.cost);
+    if (!Number.isFinite(parsedCost) || parsedCost < 0) {
+      return res.status(400).json({ error: "Cost price must be a non-negative number" });
+    }
+    data.cost = parsedCost;
+
+    if (!itemType || !["product", "service", "rental"].includes(String(itemType).toLowerCase())) {
+      return res.status(400).json({ error: "Item type is required and must be product, service, or rental" });
+    }
 
     if (body.name !== undefined) {
       const normalizedName = normalizeProductName(body.name);
@@ -725,13 +778,25 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       const price = parseFloat(row.price || row["Selling Price"]);
       if (isNaN(price) || price <= 0) rowErrors.push("Selling Price must be a number greater than 0");
 
-      // Optional but validated: cost price
-      const cost = row.cost != null || row["Cost Price"] != null ? parseFloat(row.cost ?? row["Cost Price"]) : null;
-      if (cost != null && (isNaN(cost) || cost < 0)) rowErrors.push("Cost Price must be a non-negative number");
+      // Required: cost price
+      const costValue = row.cost ?? row["Cost Price"];
+      let cost = null;
+      if (costValue === undefined || costValue === null || String(costValue).trim() === "") {
+        rowErrors.push("Cost Price is required");
+      } else {
+        cost = parseFloat(costValue);
+        if (isNaN(cost) || cost < 0) rowErrors.push("Cost Price must be a non-negative number");
+      }
 
-      // Optional: quantity
-      const quantity = parseInt(row.quantity ?? row["Stock Quantity"] ?? 0, 10);
-      if (isNaN(quantity) || quantity < 0) rowErrors.push("Stock Quantity must be a non-negative integer");
+      // Required: quantity
+      const quantityRaw = row.quantity ?? row["Stock Quantity"];
+      let quantity = null;
+      if (quantityRaw === undefined || quantityRaw === null || String(quantityRaw).trim() === "") {
+        rowErrors.push("Stock Quantity is required");
+      } else {
+        quantity = parseInt(quantityRaw, 10);
+        if (isNaN(quantity) || quantity < 0) rowErrors.push("Stock Quantity must be a non-negative integer");
+      }
 
       // Optional: minStock
       const minStock = parseInt(row.minStock ?? row["Reorder Level"] ?? 10, 10);
@@ -756,10 +821,12 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
         }
       }
 
-      // Optional: category (match by name)
+      // Required: category (match by name)
       const categoryName = String(row.category || row["Category"] || "").trim();
       let categoryId = null;
-      if (categoryName) {
+      if (!categoryName) {
+        rowErrors.push("Category is required");
+      } else {
         categoryId = categoryMap.get(categoryName.toLowerCase());
         if (!categoryId) {
           rowErrors.push(`Category "${categoryName}" not found. Create it first in the inventory page.`);
@@ -772,9 +839,11 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       // Optional: description
       const description = String(row.description || row["Description"] || "").trim() || null;
 
-      // Optional: itemType
-      const itemType = String(row.itemType || row["Item Type"] || "product").trim().toLowerCase();
-      if (!["product", "service", "rental"].includes(itemType)) {
+      // Required: itemType
+      const itemType = String(row.itemType || row["Item Type"] || "").trim().toLowerCase();
+      if (!itemType) {
+        rowErrors.push("Item Type is required");
+      } else if (!["product", "service", "rental"].includes(itemType)) {
         rowErrors.push(`Item Type must be "product", "service", or "rental" (got "${itemType}")`);
       }
 
