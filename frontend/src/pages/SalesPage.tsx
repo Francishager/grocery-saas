@@ -80,6 +80,17 @@ export default function SalesPage() {
   }
 
   const addToCart = (item: InventoryItem, unitName?: string, conversionFactor?: number, sellingPrice?: number) => {
+    const isUncategorized = Boolean((item as any).isUncategorized || (!item.categoryId && !((item as any).category?.id) && !((item as any).category)))
+
+    if (isUncategorized) {
+      toast({
+        variant: 'destructive',
+        title: 'Item needs categorization',
+        description: 'This product cannot be added to the cart until a category is assigned in inventory.',
+      })
+      return false
+    }
+
     setCart((prev) => {
       const cartKey = unitName ? `${item.id}-${unitName}` : String(item.id)
       const existing = prev.find((c) => c.id === cartKey)
@@ -104,6 +115,8 @@ export default function SalesPage() {
         },
       ]
     })
+
+    return true
   }
 
   const updateCartQty = (id: string | number, qty: number) => {
@@ -386,8 +399,10 @@ export default function SalesPage() {
                             const result = await barcodeApi.lookup(barcodeInput.trim())
                             const products = Array.isArray(result?.products) ? result.products : []
                             if (products.length > 0) {
-                              addToCart(products[0])
-                              toast({ title: `Added: ${products[0].product_name}` })
+                              const added = addToCart(products[0])
+                              if (added) {
+                                toast({ title: `Added: ${products[0].product_name}` })
+                              }
                             } else {
                               toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${barcodeInput.trim()}` })
                             }
@@ -408,8 +423,10 @@ export default function SalesPage() {
                         const result = await barcodeApi.lookup(barcodeInput.trim())
                         const products = Array.isArray(result?.products) ? result.products : []
                         if (products.length > 0) {
-                          addToCart(products[0])
-                          toast({ title: `Added: ${products[0].product_name}` })
+                          const added = addToCart(products[0])
+                          if (added) {
+                            toast({ title: `Added: ${products[0].product_name}` })
+                          }
                         } else {
                           toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${barcodeInput.trim()}` })
                         }
@@ -433,8 +450,10 @@ export default function SalesPage() {
                         const result = await barcodeApi.lookup(code)
                         const products = Array.isArray(result?.products) ? result.products : []
                         if (products.length > 0) {
-                          addToCart(products[0])
-                          toast({ title: `Added: ${products[0].product_name}` })
+                          const added = addToCart(products[0])
+                          if (added) {
+                            toast({ title: `Added: ${products[0].product_name}` })
+                          }
                         } else {
                           toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${code}` })
                         }

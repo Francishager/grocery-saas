@@ -324,6 +324,7 @@ function mapProductToInventory(p: any): InventoryItem {
     baseUnit: p.baseUnit || 'Piece',
     units: p.units || [],
     itemType: p.itemType || 'product',
+    isUncategorized: Boolean(p.isUncategorized || (!p.categoryId && !p.category?.id && !p.category)),
     serviceCategory: p.serviceCategory || null,
     estimatedHours: p.estimatedHours || null,
     duration: p.duration || null,

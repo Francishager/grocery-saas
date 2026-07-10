@@ -32,6 +32,15 @@ test('owner permissions respect tenant feature access', () => {
   assert.ok(denied.includes('canViewDashboard'));
 });
 
+test('owners keep branch and staff permissions even without tenant features', () => {
+  const permissions = resolveEffectivePermissions({ role: 'owner' }, null, [], new Set());
+
+  assert.ok(permissions.includes('canViewBranch'));
+  assert.ok(permissions.includes('canCreateBranch'));
+  assert.ok(permissions.includes('canViewStaff'));
+  assert.ok(permissions.includes('canCreateStaff'));
+});
+
 test('prisma schema exposes the staff till sheet permission field', () => {
   const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
   const schema = readFileSync(schemaPath, 'utf8');

@@ -65,6 +65,20 @@ const PERMISSION_TO_FEATURES = {
   canDeleteServiceBusiness: ['service', 'service.appointments'],
 };
 
+const OWNER_CORE_PERMISSIONS = new Set([
+  'canViewDashboard',
+  'canViewBranch',
+  'canCreateBranch',
+  'canEditBranch',
+  'canDeleteBranch',
+  'canViewStaff',
+  'canCreateStaff',
+  'canEditStaff',
+  'canDeleteStaff',
+  'canViewSettings',
+  'canEditSettings',
+]);
+
 export const ALL_PERMISSION_KEYS = [
   "canViewDashboard",
   // Sales
@@ -187,6 +201,11 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
   if (user.role === "owner") {
     const granted = new Set();
     for (const permissionKey of ALL_PERMISSION_KEYS) {
+      if (OWNER_CORE_PERMISSIONS.has(permissionKey)) {
+        granted.add(permissionKey);
+        continue;
+      }
+
       const mappedFeatures = PERMISSION_TO_FEATURES[permissionKey];
       if (!mappedFeatures || hasFeatureAccessForTenant(tenantFeatures, mappedFeatures)) {
         granted.add(permissionKey);
