@@ -603,6 +603,7 @@ model Product {
   minStock    Int       @default(10)
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id])
+  isUncategorized Boolean @default(false)
   tenantId    String
   branchId    String?
   branch      Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)

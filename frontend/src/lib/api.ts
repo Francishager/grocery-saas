@@ -942,6 +942,7 @@ export interface InventoryItem {
   rentalPeriod?: string | null
   depositAmount?: number | null
   replacementValue?: number | null
+  isUncategorized?: boolean
 }
 
 export interface ReceiptPreview {

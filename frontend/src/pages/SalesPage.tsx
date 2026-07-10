@@ -466,11 +466,19 @@ export default function SalesPage() {
                         {productItems.map((item) => {
                           const units = (item as any).units || []
                           const baseUnit = (item as any).baseUnit || 'Piece'
+                          const isUncategorized = (item as any).isUncategorized
                           return (
-                            <div key={item.id} className="rounded-lg border p-3 hover:bg-muted transition-colors">
-                              <div className="flex items-center justify-between mb-1">
-                                <div>
-                                  <p className="font-medium">{item.product_name}</p>
+                            <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
+                              <div className="flex items-start justify-between mb-1">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium">{item.product_name}</p>
+                                    {isUncategorized && (
+                                      <span className="inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                                        Uncategorized
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-sm text-muted-foreground">
                                     {item.quantity} {baseUnit} in stock
                                   </p>
@@ -479,19 +487,26 @@ export default function SalesPage() {
                                   {formatCurrency(item.unit_price)}
                                 </p>
                               </div>
+                              {isUncategorized && (
+                                <p className="text-xs text-yellow-700 mb-2">
+                                  This product needs to be categorized before adding to cart. Edit in inventory.
+                                </p>
+                              )}
                               {units.length > 0 ? (
                                 <div className="flex flex-wrap gap-1 mt-2">
                                   <button
-                                    onClick={() => addToCart(item)}
-                                    className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                                    onClick={() => !isUncategorized && addToCart(item)}
+                                    disabled={isUncategorized}
+                                    className={`rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
                                   >
                                     {baseUnit} (1)
                                   </button>
                                   {units.map((u: any) => (
                                     <button
                                       key={u.id}
-                                      onClick={() => addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
-                                      className="rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                                      onClick={() => !isUncategorized && addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
+                                      disabled={isUncategorized}
+                                      className={`rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
                                     >
                                       {u.unitName} ({u.conversionFactor})
                                     </button>
@@ -499,10 +514,11 @@ export default function SalesPage() {
                                 </div>
                               ) : (
                                 <button
-                                  onClick={() => addToCart(item)}
-                                  className="mt-2 w-full rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                                  onClick={() => !isUncategorized && addToCart(item)}
+                                  disabled={isUncategorized}
+                                  className={`mt-2 w-full rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
                                 >
-                                  Add to Cart
+                                  {isUncategorized ? 'Needs Categorization' : 'Add to Cart'}
                                 </button>
                               )}
                             </div>
@@ -515,25 +531,41 @@ export default function SalesPage() {
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Services</p>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {serviceItems.map((item) => (
-                          <div key={item.id} className="rounded-lg border p-3 hover:bg-muted transition-colors">
-                            <div className="flex items-center justify-between mb-1">
-                              <div>
-                                <p className="font-medium">{item.product_name}</p>
-                                <p className="text-sm text-muted-foreground">Service</p>
+                        {serviceItems.map((item) => {
+                          const isUncategorized = (item as any).isUncategorized
+                          return (
+                            <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
+                              <div className="flex items-start justify-between mb-1">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium">{item.product_name}</p>
+                                    {isUncategorized && (
+                                      <span className="inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                                        Uncategorized
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-muted-foreground">Service</p>
+                                </div>
+                                <p className="font-bold text-primary">
+                                  {formatCurrency(item.unit_price)}
+                                </p>
                               </div>
-                              <p className="font-bold text-primary">
-                                {formatCurrency(item.unit_price)}
-                              </p>
+                              {isUncategorized && (
+                                <p className="text-xs text-yellow-700 mb-2">
+                                  This service needs to be categorized before adding to cart. Edit in inventory.
+                                </p>
+                              )}
+                              <button
+                                onClick={() => !isUncategorized && addToCart(item)}
+                                disabled={isUncategorized}
+                                className={`mt-2 w-full rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                              >
+                                {isUncategorized ? 'Needs Categorization' : 'Add to Cart'}
+                              </button>
                             </div>
-                            <button
-                              onClick={() => addToCart(item)}
-                              className="mt-2 w-full rounded border px-2 py-1 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
-                            >
-                              Add to Cart
-                            </button>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   )}

@@ -70,6 +70,7 @@ export default function InventoryPage() {
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [branchFilter, setBranchFilter] = useState('')
   const [formData, setFormData] = useState<FormData>(initialFormData)
+  const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false)
   const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
   const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
@@ -93,7 +94,15 @@ export default function InventoryPage() {
   const canDeleteCurrent = canDeleteProduct
   const canManageInventory = canCreateCurrent || canEditCurrent
 
-  const { paginatedItems, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(items, 10)
+  const filteredItems = useMemo(() => {
+    let result = items
+    if (showUncategorizedOnly) {
+      result = result.filter((item) => (item as any).isUncategorized)
+    }
+    return result
+  }, [items, showUncategorizedOnly])
+
+  const { paginatedItems, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(filteredItems, 10)
 
   useEffect(() => {
     if (lockedType) setItemTypeFilter(lockedType as 'all' | 'product')
@@ -522,6 +531,18 @@ export default function InventoryPage() {
             ))}
           </select>
         )}
+        <button
+          type="button"
+          onClick={() => setShowUncategorizedOnly(!showUncategorizedOnly)}
+          className={cn(
+            "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+            showUncategorizedOnly
+              ? "border-yellow-300 bg-yellow-100 text-yellow-700"
+              : "border-input bg-background text-muted-foreground hover:bg-muted"
+          )}
+        >
+          {showUncategorizedOnly ? '✓ Uncategorized Only' : 'Show Uncategorized'}
+        </button>
         <Button type="submit" variant="secondary">
           Search
         </Button>
@@ -895,6 +916,7 @@ export default function InventoryPage() {
                     <th className="pb-3 font-medium text-right">Qty</th>
                     <th className="pb-3 font-medium text-right">Cost</th>
                     <th className="pb-3 font-medium text-right">Price</th>
+                    <th className="pb-3 font-medium">Status</th>
                     <th className="pb-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
@@ -937,6 +959,13 @@ export default function InventoryPage() {
                       </td>
                       <td className="py-3 text-right">
                         {formatCurrency(item.unit_price)}
+                      </td>
+                      <td className="py-3">
+                        {(item as any).isUncategorized && (
+                          <span className="inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                            Uncategorized
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">

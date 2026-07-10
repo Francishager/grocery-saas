@@ -8,6 +8,16 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 // Platform admin roles
 const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 
+export const canUseCashTransactions = (user, hasAssignedCashAccount) => {
+  if (!user) return false;
+
+  if (PLATFORM_ROLES.includes(user.role) || user.isPlatformUser || user.is_platform_user) {
+    return true;
+  }
+
+  return Boolean(hasAssignedCashAccount);
+};
+
 /**
  * Authenticate JWT token middleware
  */
@@ -270,14 +280,6 @@ export const requireCashAccount = async (req, res, next) => {
     return next();
   }
 
-  // Block business owner accounts from performing cash transactions
-  if (req.user.role === 'owner') {
-    return res.status(403).json({
-      error: 'Business owner accounts cannot perform cash transactions. Please create a staff account to handle sales and payments.',
-      code: 'OWNER_CANNOT_TRANSACT',
-    });
-  }
-
   // Check if user has a cash account assigned
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
@@ -296,9 +298,11 @@ export const requireCashAccount = async (req, res, next) => {
     });
   }
 
-  if (!user.cashAccountId) {
+  if (!canUseCashTransactions(req.user, Boolean(user.cashAccountId))) {
     return res.status(403).json({
-      error: 'No cash account assigned. You cannot handle cash, record sales, or make payments until an administrator assigns you a cash account.',
+      error: req.user.role === 'owner'
+        ? 'No cash account assigned. Assign a cash account to this owner account before recording sales or payments.'
+        : 'No cash account assigned. You cannot handle cash, record sales, or make payments until an administrator assigns you a cash account.',
       code: 'NO_CASH_ACCOUNT',
     });
   }
@@ -349,4 +353,5 @@ export default {
   enforceTenantIsolation,
   requireCashAccount,
   checkPaymentMethodPermission,
+  canUseCashTransactions,
 };

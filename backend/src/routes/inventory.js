@@ -63,11 +63,33 @@ const DEFAULT_CATEGORIES = [
   { name: "Meat & Poultry", slug: "meat-poultry", categoryType: "product" },
   { name: "Frozen Foods", slug: "frozen-foods", categoryType: "product" },
   { name: "Household Items", slug: "household-items", categoryType: "product" },
+  { name: "Household Plastics", slug: "household-plastics", categoryType: "product" },
+  { name: "Food & Grocery", slug: "food-grocery", categoryType: "product" },
+  { name: "Cooking Oil", slug: "cooking-oil", categoryType: "product" },
+  { name: "Health & Wellness", slug: "health-wellness", categoryType: "product" },
+  { name: "Candles & Religious Items", slug: "candles-religious-items", categoryType: "product" },
+  { name: "Glassware", slug: "glassware", categoryType: "product" },
   { name: "Personal Care", slug: "personal-care", categoryType: "product" },
+  { name: "Hair Care", slug: "hair-care", categoryType: "product" },
+  { name: "Perfumes & Deodorants", slug: "perfumes-deodorants", categoryType: "product" },
+  { name: "Soaps & Body Wash", slug: "soaps-body-wash", categoryType: "product" },
+  { name: "Laundry & Fabric Care", slug: "laundry-fabric-care", categoryType: "product" },
   { name: "Baby Products", slug: "baby-products", categoryType: "product" },
   { name: "Cleaning Supplies", slug: "cleaning-supplies", categoryType: "product" },
+  { name: "Pest Control", slug: "pest-control", categoryType: "product" },
+  { name: "Oral Care", slug: "oral-care", categoryType: "product" },
+  { name: "Feminine Care", slug: "feminine-care", categoryType: "product" },
+  { name: "Paper Products", slug: "paper-products", categoryType: "product" },
+  { name: "Disposable Products", slug: "disposable-products", categoryType: "product" },
   { name: "Laundry Products", slug: "laundry-products", categoryType: "product" },
   { name: "Stationery", slug: "stationery", categoryType: "product" },
+  { name: "Stationery & Office Supplies", slug: "stationery-office-supplies", categoryType: "product" },
+  { name: "Office Supplies", slug: "office-supplies", categoryType: "product" },
+  { name: "Footwear & Clothing", slug: "footwear-clothing", categoryType: "product" },
+  { name: "Toys & Gifts", slug: "toys-gifts", categoryType: "product" },
+  { name: "Batteries & Electrical", slug: "batteries-electrical", categoryType: "product" },
+  { name: "Hardware & Security", slug: "hardware-security", categoryType: "product" },
+  { name: "Shoe Care", slug: "shoe-care", categoryType: "product" },
   { name: "Books", slug: "books", categoryType: "product" },
   { name: "Office Supplies", slug: "office-supplies", categoryType: "product" },
   { name: "Hardware", slug: "hardware", categoryType: "product" },
@@ -857,16 +879,19 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
         }
       }
 
-      // Required: category (match by name)
+      // Optional: category (match by name) — if category doesn't exist, mark as uncategorized
       const categoryName = String(row.category || row["Category"] || "").trim();
       let categoryId = null;
-      if (!categoryName) {
-        rowErrors.push("Category is required");
-      } else {
+      let isUncategorized = false;
+      if (categoryName) {
         categoryId = categoryMap.get(categoryName.toLowerCase());
         if (!categoryId) {
-          rowErrors.push(`Category "${categoryName}" not found. Create it first in the inventory page.`);
+          // Category name provided but not found — mark as uncategorized for user to fix
+          isUncategorized = true;
         }
+      } else {
+        // No category provided — mark as uncategorized
+        isUncategorized = true;
       }
 
       // Optional: baseUnit
@@ -902,6 +927,7 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
           tenantId: scope.tenantId,
           branchId: scope.branchId,
           isActive: true,
+          isUncategorized,
         });
       }
     }
