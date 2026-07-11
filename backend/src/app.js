@@ -68,15 +68,28 @@ if (missingEnvVars.length) {
   console.log("✅ All required env vars set.");
 }
 
-// DB connect
-(async () => {
+// DB connect and start server only after the database is reachable
+const startServer = async () => {
   try {
     await prisma.$connect();
     console.log("✅ Database connected");
   } catch (e) {
-    console.warn("⚠️ Database connection failed:", e.message);
+    console.error("❌ Database connection failed:", e.message);
+    process.exit(1);
   }
-})();
+
+  const HOST = process.env.HOST || "0.0.0.0";
+  const server = app.listen(Number(PORT), HOST, () => {
+    console.log(`✅ Backend running on http://${HOST}:${PORT}`);
+  });
+
+  server.on("error", (error) => {
+    console.error("❌ Server failed to start:", error);
+    process.exit(1);
+  });
+};
+
+startServer();
 
 // CORS
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN || "")
@@ -175,12 +188,6 @@ app.use("/{*path}", (req, res) => {
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
-});
-
-// Start
-const HOST = process.env.HOST || "0.0.0.0";
-app.listen(Number(PORT), HOST, () => {
-  console.log(`✅ Backend running on http://${HOST}:${PORT}`);
 });
 
 // Graceful shutdown
