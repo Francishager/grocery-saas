@@ -53,7 +53,7 @@ if (resolvedDatabaseUrl && !process.env.DATABASE_URL) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 // Serve uploaded files
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
