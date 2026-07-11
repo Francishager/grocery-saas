@@ -54,9 +54,9 @@ USER app
 # Expose port
 EXPOSE 3000
 
-# Health check (uses CJS eval which works in all contexts)
+# Health check against the actual readiness endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD wget -qO- http://localhost:3000/ || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
-# Start the application
-CMD ["./start.sh"]
+# Start the application directly with Node for Railway reliability
+CMD ["npm", "start"]
