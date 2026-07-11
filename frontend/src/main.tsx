@@ -3,9 +3,10 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { JWTAuthProvider } from './contexts/JWTAuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { getApiBaseUrl } from './lib/apiConfig'
 import './index.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
+const API_URL = getApiBaseUrl()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

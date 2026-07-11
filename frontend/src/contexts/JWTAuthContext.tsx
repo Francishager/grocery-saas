@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
 import { featureAccessService } from '@/services/featureAccessService'
 import { clearTenantData } from '@/db/index'
+import { getApiAuthEndpoint } from '@/lib/apiConfig'
 
 export interface User {
   id: string
@@ -108,7 +109,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   autoRefresh = true,
   refreshThreshold = 300, // 5 minutes before expiry
 }) => {
-  const resolvedApiEndpoint = apiEndpoint || `${import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'}/api/auth`
+  const resolvedApiEndpoint = apiEndpoint || getApiAuthEndpoint()
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(userStorageKey)
