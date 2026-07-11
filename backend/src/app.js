@@ -68,28 +68,41 @@ if (missingEnvVars.length) {
   console.log("✅ All required env vars set.");
 }
 
-// DB connect and start server only after the database is reachable
-const startServer = async () => {
+// Start HTTP server immediately so Railway health checks pass.
+// Retry DB connection in background — don't crash the container
+// if the database is temporarily unavailable.
+const HOST = process.env.HOST || "0.0.0.0";
+const server = app.listen(Number(PORT), HOST, () => {
+  console.log(`✅ Backend running on http://${HOST}:${PORT}`);
+});
+
+server.on("error", (error) => {
+  console.error("❌ Server failed to start:", error);
+  process.exit(1);
+});
+
+// Connect to database with retries
+const MAX_DB_RETRIES = 10;
+const DB_RETRY_DELAY = 5000;
+let dbRetries = 0;
+
+async function connectWithRetry() {
   try {
     await prisma.$connect();
     console.log("✅ Database connected");
+    dbRetries = 0;
   } catch (e) {
-    console.error("❌ Database connection failed:", e.message);
-    process.exit(1);
+    dbRetries++;
+    console.error(`❌ Database connection failed (attempt ${dbRetries}/${MAX_DB_RETRIES}):`, e.message);
+    if (dbRetries < MAX_DB_RETRIES) {
+      setTimeout(connectWithRetry, DB_RETRY_DELAY);
+    } else {
+      console.error("❌ Max DB retries reached. Server will continue running but DB operations may fail.");
+    }
   }
+}
 
-  const HOST = process.env.HOST || "0.0.0.0";
-  const server = app.listen(Number(PORT), HOST, () => {
-    console.log(`✅ Backend running on http://${HOST}:${PORT}`);
-  });
-
-  server.on("error", (error) => {
-    console.error("❌ Server failed to start:", error);
-    process.exit(1);
-  });
-};
-
-startServer();
+connectWithRetry();
 
 // CORS
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN || "")

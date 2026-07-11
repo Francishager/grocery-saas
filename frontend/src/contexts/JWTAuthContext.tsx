@@ -190,11 +190,17 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     setError(null)
 
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
       const response = await fetch(`${resolvedApiEndpoint}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       })
+
+      clearTimeout(timeoutId)
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
@@ -220,10 +226,12 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       return { user: userData, tokens: tokenData }
     } catch (err) {
       // Network error — try offline login with cached credentials
-      // Covers: Chrome "Failed to fetch", Firefox "NetworkError", Safari "Load failed"
+      // Covers: Chrome "Failed to fetch", Firefox "NetworkError", Safari "Load failed",
+      //         AbortError (timeout), ERR_CONNECTION_TIMED_OUT
       const isNetworkError =
         err instanceof TypeError ||
-        (err instanceof Error && /fetch|network|load|connect|offline/i.test(err.message)) ||
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && /fetch|network|load|connect|offline|abort|timeout/i.test(err.message)) ||
         !navigator.onLine
 
       if (isNetworkError) {
@@ -269,7 +277,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             // Ignore parse errors
           }
         }
-        throw new Error('You are offline. Login with a previously used account to continue.')
+        throw new Error('Unable to reach the server. Check your connection or try again later. If you have logged in before on this device, use the same email to sign in offline.')
       }
       setError(err instanceof Error ? err.message : 'Login failed')
       throw err
