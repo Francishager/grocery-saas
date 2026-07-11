@@ -9,12 +9,3 @@ healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-[[services]]
-internal_port = 3000
-external_port = 3000
-
-[services.healthcheck]
-path = "/api/health"
-interval = "30s"
-timeout = "10s"
