@@ -30,8 +30,8 @@ COPY start.sh ./
 FROM base AS runner
 WORKDIR /app
 
-# Install OpenSSL for Prisma runtime
-RUN apk add --no-cache openssl
+# Install OpenSSL and wget for Prisma runtime and health checks
+RUN apk add --no-cache openssl wget
 
 # Create non-root user
 RUN addgroup -S app && adduser -S -G app app
@@ -56,7 +56,7 @@ USER app
 
 # Health check against the actual readiness endpoint (uses PORT env var)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1
+  CMD sh -c 'wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1'
 
 # Start the application directly with Node for Railway reliability
 CMD ["npm", "start"]
