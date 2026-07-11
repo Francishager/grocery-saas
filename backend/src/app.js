@@ -72,6 +72,7 @@ if (missingEnvVars.length) {
 // Retry DB connection in background — don't crash the container
 // if the database is temporarily unavailable.
 const HOST = process.env.HOST || "0.0.0.0";
+console.log(`🔧 Starting server on PORT=${PORT} HOST=${HOST}`);
 const server = app.listen(Number(PORT), HOST, () => {
   console.log(`✅ Backend running on http://${HOST}:${PORT}`);
 });
@@ -201,6 +202,16 @@ app.use("/{*path}", (req, res) => {
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+});
+
+// Prevent crashes from unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Prevent crashes from uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
 });
 
 // Graceful shutdown

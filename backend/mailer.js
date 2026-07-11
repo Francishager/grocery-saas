@@ -27,9 +27,14 @@ if (smtpEnabled) {
   console.log("✉ Mailer: SMTP not configured, falling back to Resend");
 }
 
-const resend = new Resend(
+let resend = null;
+try {
+  resend = new Resend(
   process.env.RESEND_API_KEY || "re_XerCSLKz_5fpGtz8VNMZaYEfjRh8X9eKY"
 );
+} catch (err) {
+  console.error("⚠️ Resend client init failed:", err?.message || err);
+}
 
 async function sendViaSmtp(to, subject, html) {
   const info = await transporter.sendMail({
