@@ -596,6 +596,7 @@ model Product {
   // =====================
   sku         String?
   barcode     String?
+  batchNumber String?
   description String?
   price       Float
   cost        Float?

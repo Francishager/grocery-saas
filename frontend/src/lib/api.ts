@@ -252,6 +252,8 @@ export const inventoryApi = {
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
+      batchNumber: data.batchNumber || null,
+      expiryDate: data.expiryDate || null,
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
       baseUnit: data.baseUnit || 'Piece',
@@ -275,6 +277,8 @@ export const inventoryApi = {
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
+      batchNumber: data.batchNumber || null,
+      expiryDate: data.expiryDate || null,
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
       baseUnit: data.baseUnit || 'Piece',
@@ -319,6 +323,8 @@ function mapProductToInventory(p: any): InventoryItem {
     low_stock_alert: p.minStock ?? 10,
     barcode: p.barcode || '',
     sku: p.sku || '',
+    batchNumber: p.batchNumber || null,
+    expiryDate: p.expiryDate || null,
     categoryId: p.categoryId ? String(p.categoryId) : p.category?.id ? String(p.category.id) : '',
     categoryName: p.category?.name || null,
     branchId: p.branchId || p.branch?.id || null,
@@ -940,6 +946,8 @@ export interface InventoryItem {
   low_stock_alert: number
   barcode?: string
   sku?: string
+  batchNumber?: string | null
+  expiryDate?: string | null
   categoryId?: string
   branchId?: string | null
   branch?: BranchOption | null

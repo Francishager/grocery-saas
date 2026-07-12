@@ -264,6 +264,15 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     });
     const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
 
+    if (body.batchNumber !== undefined && body.batchNumber !== null) {
+      body.batchNumber = String(body.batchNumber).trim() || null;
+    }
+    if (body.expiryDate !== undefined && body.expiryDate !== null && body.expiryDate !== '') {
+      body.expiryDate = new Date(body.expiryDate);
+    } else {
+      body.expiryDate = null;
+    }
+
     if (!categoryId) {
       return res.status(400).json({ error: "Category is required" });
     }
@@ -383,6 +392,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
     const data = { ...body };
+
+    if (data.batchNumber !== undefined && data.batchNumber !== null) {
+      data.batchNumber = String(data.batchNumber).trim() || null;
+    }
+    if (data.expiryDate !== undefined && data.expiryDate !== null && data.expiryDate !== '') {
+      data.expiryDate = new Date(data.expiryDate);
+    } else if (data.expiryDate === '') {
+      data.expiryDate = null;
+    }
 
     // For updates, allow categoryId to be undefined (don't change it). But if provided, it must be valid.
     if (categoryId !== undefined && (categoryId === null || categoryId === "")) {

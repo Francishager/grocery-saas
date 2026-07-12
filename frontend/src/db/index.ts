@@ -5,6 +5,8 @@ export interface LocalProduct {
   name: string
   sku?: string
   barcode?: string
+  batchNumber?: string
+  expiryDate?: string
   price: number
   cost?: number
   quantity: number

@@ -220,7 +220,7 @@ export function NotificationBell() {
     return jobs
   }, [])
 
-  const addDailyReminderIfNeeded = useCallback((base: NotificationItem[]) => {
+  const addDailyReminderIfNeeded = useCallback(async (base: NotificationItem[]) => {
     if (typeof window === 'undefined') return base
 
     const now = new Date()
@@ -233,10 +233,20 @@ export function NotificationBell() {
     if (lastShown === todayKey) return base
 
     window.localStorage.setItem(storageKey, todayKey)
+
+    if (online) {
+      try {
+        const res = await apiFetch('/api/notifications/daily-sales-summary', { method: 'POST' })
+        if (res.ok) {
+          return base
+        }
+      } catch {}
+    }
+
     const reminder: NotificationItem = {
       id: `daily_reminder_${todayKey}`,
-      title: 'Daily Reminder',
-      message: 'Wrap up the day and review any pending manufacturing or operational tasks before midnight.',
+      title: 'Daily Summary',
+      message: `End-of-day wrap-up: review stock, pending work, and today’s operations before midnight.`,
       type: 'info',
       isRead: false,
       createdAt: now.toISOString(),
@@ -245,7 +255,7 @@ export function NotificationBell() {
     }
 
     return [reminder, ...base.filter((n) => n.id !== reminder.id)]
-  }, [user?.id])
+  }, [online, user?.id])
 
   // Load all notifications
   const loadNotifications = useCallback(async () => {
@@ -291,7 +301,7 @@ export function NotificationBell() {
       const merged = Array.from(mergedMap.values()).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
-      const withReminder = addDailyReminderIfNeeded(merged)
+      const withReminder = await addDailyReminderIfNeeded(merged)
 
       setNotifications(withReminder)
       setUnreadCount(withReminder.filter((n) => !n.isRead).length)

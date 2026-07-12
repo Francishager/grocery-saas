@@ -10,8 +10,13 @@ export function buildDailySalesSummaryMessage(summary = {}) {
   const totalRevenue = Number(summary.totalRevenue || 0);
   const totalDiscount = Number(summary.totalDiscount || 0);
   const totalTax = Number(summary.totalTax || 0);
+  const lowStockCount = Number(summary.lowStockCount || 0);
+  const expiringSoonCount = Number(summary.expiringSoonCount || 0);
   const currency = summary.currency || 'UGX';
-  return `Today's sales summary: ${salesCount} sales, revenue ${formatCurrency(totalRevenue, currency)}, discount ${formatCurrency(totalDiscount, currency)}, tax ${formatCurrency(totalTax, currency)}.`;
+  const inventorySentence = lowStockCount || expiringSoonCount
+    ? `Inventory watch: ${lowStockCount} low-stock item${lowStockCount === 1 ? '' : 's'} and ${expiringSoonCount} expiring soon.`
+    : 'Inventory watch: no urgent stock issues today.';
+  return `Today's sales summary: ${salesCount} sales, revenue ${formatCurrency(totalRevenue, currency)}, discount ${formatCurrency(totalDiscount, currency)}, tax ${formatCurrency(totalTax, currency)}. ${inventorySentence}`;
 }
 
 export async function createTenantNotification({ prismaClient = prisma, tenantId, userId = null, title, message, type = 'info', metadata = null, channel = 'in_app' }) {
@@ -73,6 +78,20 @@ export async function notifyOwnerOfDailySalesSummary({ prismaClient = prisma, te
     select: { id: true },
   });
   if (!owner) return null;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const existing = await prismaClient.notification.findFirst({
+    where: {
+      tenantId,
+      userId: owner.id,
+      title: 'Daily sales summary',
+      createdAt: {
+        gte: new Date(`${todayKey}T00:00:00.000Z`),
+        lt: new Date(`${todayKey}T23:59:59.999Z`),
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) return existing;
   return createTenantNotification({
     prismaClient,
     tenantId,
@@ -80,6 +99,6 @@ export async function notifyOwnerOfDailySalesSummary({ prismaClient = prisma, te
     title: 'Daily sales summary',
     message: buildDailySalesSummaryMessage(summary),
     type: 'info',
-    metadata: { summary },
+    metadata: { summary, generatedAt: new Date().toISOString(), day: todayKey },
   });
 }

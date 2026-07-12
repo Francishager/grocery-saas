@@ -35,6 +35,8 @@ interface FormData {
   low_stock_alert: number
   barcode: string
   sku: string
+  batchNumber: string
+  expiryDate: string
   categoryId: string
   branchId: string
   baseUnit: string
@@ -51,6 +53,8 @@ const initialFormData: FormData = {
   low_stock_alert: 5,
   barcode: '',
   sku: '',
+  batchNumber: '',
+  expiryDate: '',
   categoryId: '',
   branchId: '',
   baseUnit: 'Piece',
@@ -293,6 +297,8 @@ export default function InventoryPage() {
             name: formData.product_name,
             sku: formData.sku,
             barcode: formData.barcode,
+            batchNumber: formData.batchNumber || undefined,
+            expiryDate: formData.expiryDate || undefined,
             price: formData.unit_price,
             cost: formData.cost_price,
             quantity: formData.quantity,
@@ -325,6 +331,8 @@ export default function InventoryPage() {
             name: formData.product_name,
             sku: formData.sku,
             barcode: formData.barcode,
+            batchNumber: formData.batchNumber || undefined,
+            expiryDate: formData.expiryDate || undefined,
             price: formData.unit_price,
             cost: formData.cost_price,
             quantity: formData.quantity,
@@ -383,6 +391,8 @@ export default function InventoryPage() {
       low_stock_alert: item.low_stock_alert || 5,
       barcode: (item as any).barcode || '',
       sku: (item as any).sku || '',
+      batchNumber: (item as any).batchNumber || '',
+      expiryDate: (item as any).expiryDate ? String((item as any).expiryDate).slice(0, 10) : '',
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
       branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
       baseUnit: (item as any).baseUnit || 'Piece',
@@ -668,6 +678,29 @@ export default function InventoryPage() {
                 </>
               )}
 
+              {formData.itemType === 'product' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="batchNumber">Batch Number</Label>
+                    <Input
+                      id="batchNumber"
+                      value={formData.batchNumber}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, batchNumber: e.target.value }))}
+                      placeholder="e.g. BATCH-001"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expiryDate">Expiry Date</Label>
+                    <Input
+                      id="expiryDate"
+                      type="date"
+                      value={formData.expiryDate}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, expiryDate: e.target.value }))}
+                    />
+                  </div>
+                </>
+              )}
+
               {/* Category - shared but filtered by type */}
               <div className="space-y-2">
                 <Label>Category <span className="text-red-500">*</span></Label>
@@ -920,6 +953,8 @@ export default function InventoryPage() {
                     <th className="pb-3 font-medium">Category</th>
                     {canManageInventory && <th className="pb-3 font-medium">Branch</th>}
                     <th className="pb-3 font-medium text-right">Qty</th>
+                    <th className="pb-3 font-medium">Batch</th>
+                    <th className="pb-3 font-medium">Expiry</th>
                     <th className="pb-3 font-medium text-right">Cost</th>
                     <th className="pb-3 font-medium text-right">Price</th>
                     <th className="pb-3 font-medium">Status</th>
@@ -963,6 +998,8 @@ export default function InventoryPage() {
                           {item.quantity}
                         </span>
                       </td>
+                      <td className="py-3">{(item as any).batchNumber || '-'}</td>
+                      <td className="py-3">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
                       <td className="py-3 text-right">
                         {formatCurrency(item.cost_price)}
                       </td>
