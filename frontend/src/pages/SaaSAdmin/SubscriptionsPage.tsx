@@ -65,7 +65,7 @@ export const SubscriptionsPage: React.FC = () => {
     if (!selected) return
     setChanging(selected.id)
     try {
-      const body: Record<string, string> = {}
+      const body: Record<string, string | boolean> = {}
       if (selectedPlanId) body.planId = selectedPlanId
       if (subStart) body.subscriptionStart = subStart
       if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
@@ -74,6 +74,7 @@ export const SubscriptionsPage: React.FC = () => {
       if (planBillingCycle) body.billingCycle = planBillingCycle
       if (planMaxUsers) body.maxUsers = planMaxUsers
       if (planMaxProducts) body.maxProducts = planMaxProducts
+      if (autoEnd) body.autoEnd = true
       const res = await apiFetch(`/api/admin/subscriptions/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })
       if (res.ok) { fetchData(); setSelected(null) }
       else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to update subscription') }

@@ -64,16 +64,20 @@ async function updateSubscription(req, res) {
       billingCycle,
       maxUsers,
       maxProducts,
+      autoEnd,
     } = req.body;
 
-    if (!planId && !status && !subscriptionStart && !subscriptionEnd && !trialEndsAt && price === undefined && billingCycle === undefined && maxUsers === undefined && maxProducts === undefined) {
+    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && price === undefined && billingCycle === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
       return res.status(400).json({ error: "At least one subscription field is required" });
     }
 
-    const targetPlanId = planId || req.body?.currentPlanId;
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true } });
+    if (!tenant) return res.status(404).json({ error: "Subscription not found" });
 
+    const targetPlanId = planId || tenant.planId;
+    let plan;
     if (targetPlanId) {
-      const plan = await prisma.plan.findUnique({ where: { id: targetPlanId } });
+      plan = await prisma.plan.findUnique({ where: { id: targetPlanId } });
       if (!plan) return res.status(404).json({ error: "Plan not found" });
     }
 
@@ -86,9 +90,9 @@ async function updateSubscription(req, res) {
 
     if (targetPlanId) data.planId = targetPlanId;
     if (status) data.status = status;
-    if (subscriptionStart) data.subscriptionStart = new Date(subscriptionStart);
-    if (subscriptionEnd) data.subscriptionEnd = new Date(subscriptionEnd);
-    if (trialEndsAt) data.trialEndsAt = new Date(trialEndsAt);
+    if (subscriptionStart !== undefined) data.subscriptionStart = subscriptionStart ? new Date(subscriptionStart) : null;
+    if (subscriptionEnd !== undefined) data.subscriptionEnd = subscriptionEnd ? new Date(subscriptionEnd) : null;
+    if (trialEndsAt !== undefined) data.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
 
     if (price !== undefined) {
       const parsedPrice = Number(price);
@@ -98,15 +102,18 @@ async function updateSubscription(req, res) {
       planUpdateData.price = parsedPrice;
     }
 
-    if (billingCycle) {
-      if (!['monthly', 'yearly'].includes(String(billingCycle).toLowerCase())) {
+    if (billingCycle !== undefined) {
+      if (billingCycle && !['monthly', 'yearly'].includes(String(billingCycle).toLowerCase())) {
         return res.status(400).json({ error: "Billing cycle must be monthly or yearly" });
       }
-      planUpdateData.billingCycle = String(billingCycle).toLowerCase();
+      planUpdateData.billingCycle = billingCycle ? String(billingCycle).toLowerCase() : undefined;
     }
 
     if (maxUsers !== undefined) {
       const parsedMaxUsers = Number(maxUsers);
+      if (maxUsers === '' || maxUsers === null || Number.isNaN(parsedMaxUsers)) {
+        return res.status(400).json({ error: "Max users must be a positive integer" });
+      }
       if (!Number.isInteger(parsedMaxUsers) || parsedMaxUsers < 1) {
         return res.status(400).json({ error: "Max users must be a positive integer" });
       }
@@ -115,6 +122,9 @@ async function updateSubscription(req, res) {
 
     if (maxProducts !== undefined) {
       const parsedMaxProducts = Number(maxProducts);
+      if (maxProducts === '' || maxProducts === null || Number.isNaN(parsedMaxProducts)) {
+        return res.status(400).json({ error: "Max products must be a positive integer" });
+      }
       if (!Number.isInteger(parsedMaxProducts) || parsedMaxProducts < 1) {
         return res.status(400).json({ error: "Max products must be a positive integer" });
       }
@@ -125,20 +135,28 @@ async function updateSubscription(req, res) {
       await prisma.plan.update({ where: { id: targetPlanId }, data: planUpdateData });
     }
 
-    if (targetPlanId && !subscriptionEnd) {
-      const plan = await prisma.plan.findUnique({ where: { id: targetPlanId } });
-      const startDate = subscriptionStart ? new Date(subscriptionStart) : new Date();
+    const shouldAutoCalculateEndDate = autoEnd === true || autoEnd === 'true';
+    if (targetPlanId && plan && shouldAutoCalculateEndDate && subscriptionEnd === undefined) {
+      const startDate = data.subscriptionStart || tenant.subscriptionStart || new Date();
       const endDate = new Date(startDate);
-      if (plan?.billingCycle === 'yearly') {
+      if (plan.billingCycle === 'yearly') {
         endDate.setFullYear(endDate.getFullYear() + 1);
       } else {
         endDate.setMonth(endDate.getMonth() + 1);
       }
-      data.subscriptionStart = startDate;
+      data.subscriptionEnd = endDate;
+    } else if (targetPlanId && subscriptionStart !== undefined && subscriptionEnd === undefined && tenant.subscriptionEnd === null && plan) {
+      const startDate = data.subscriptionStart || tenant.subscriptionStart || new Date();
+      const endDate = new Date(startDate);
+      if (plan.billingCycle === 'yearly') {
+        endDate.setFullYear(endDate.getFullYear() + 1);
+      } else {
+        endDate.setMonth(endDate.getMonth() + 1);
+      }
       data.subscriptionEnd = endDate;
     }
 
-    const tenant = await prisma.tenant.update({
+    const updatedTenant = await prisma.tenant.update({
       where: { id: req.params.id },
       data,
       include: { plan: true },
@@ -146,7 +164,7 @@ async function updateSubscription(req, res) {
 
     res.json({
       message: "Subscription updated",
-      subscription: subscriptionPayload(tenant),
+      subscription: subscriptionPayload(updatedTenant),
     });
   } catch (err) {
     if (err?.code === "P2025") return res.status(404).json({ error: "Subscription not found" });
