@@ -7,10 +7,10 @@ import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar } f
 interface Subscription {
   id: string; status: string; startDate: string; endDate: string | null; trialEndsAt: string | null
   tenant: { id: string; name: string; status: string }
-  plan: { id: string; name: string; price: number; currency: string; billingCycle: string }
+  plan: { id: string; name: string; price: number; currency: string; billingCycle: string; maxUsers?: number; maxProducts?: number }
 }
 
-interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string }
+interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string; maxUsers?: number; maxProducts?: number }
 
 export const SubscriptionsPage: React.FC = () => {
   const [subs, setSubs] = useState<Subscription[]>([])
@@ -26,6 +26,11 @@ export const SubscriptionsPage: React.FC = () => {
   const [subEnd, setSubEnd] = useState('')
   const [trialEnd, setTrialEnd] = useState('')
   const [autoEnd, setAutoEnd] = useState(true)
+  const [selectedPlanId, setSelectedPlanId] = useState('')
+  const [planPrice, setPlanPrice] = useState('')
+  const [planBillingCycle, setPlanBillingCycle] = useState('monthly')
+  const [planMaxUsers, setPlanMaxUsers] = useState('')
+  const [planMaxProducts, setPlanMaxProducts] = useState('')
 
   const fetchData = async () => {
     setLoading(true)
@@ -49,6 +54,11 @@ export const SubscriptionsPage: React.FC = () => {
     setSubEnd(sub.endDate ? sub.endDate.split('T')[0] : '')
     setTrialEnd(sub.trialEndsAt ? sub.trialEndsAt.split('T')[0] : '')
     setAutoEnd(!sub.endDate)
+    setSelectedPlanId(sub.plan?.id || '')
+    setPlanPrice(String(sub.plan?.price || ''))
+    setPlanBillingCycle(sub.plan?.billingCycle || 'monthly')
+    setPlanMaxUsers(String(sub.plan?.maxUsers || ''))
+    setPlanMaxProducts(String(sub.plan?.maxProducts || ''))
   }
 
   const handleSave = async () => {
@@ -56,9 +66,14 @@ export const SubscriptionsPage: React.FC = () => {
     setChanging(selected.id)
     try {
       const body: Record<string, string> = {}
+      if (selectedPlanId) body.planId = selectedPlanId
       if (subStart) body.subscriptionStart = subStart
       if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
       if (trialEnd) body.trialEndsAt = trialEnd
+      if (planPrice) body.price = planPrice
+      if (planBillingCycle) body.billingCycle = planBillingCycle
+      if (planMaxUsers) body.maxUsers = planMaxUsers
+      if (planMaxProducts) body.maxProducts = planMaxProducts
       const res = await apiFetch(`/api/admin/subscriptions/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })
       if (res.ok) { fetchData(); setSelected(null) }
       else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to update subscription') }
@@ -66,16 +81,15 @@ export const SubscriptionsPage: React.FC = () => {
     setChanging(null)
   }
 
-  const handleChangePlan = async (subId: string, planId: string) => {
-    setChanging(subId)
-    try {
-      const body: Record<string, string> = { planId }
-      if (subStart) body.subscriptionStart = subStart
-      if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
-      const res = await apiFetch(`/api/admin/subscriptions/${subId}`, { method: 'PUT', body: JSON.stringify(body) })
-      if (res.ok) { fetchData(); setSelected(null) } else alert('Failed to change plan')
-    } catch { alert('Request failed') }
-    setChanging(null)
+  const handlePlanSelect = (planId: string) => {
+    const plan = plans.find((item) => item.id === planId)
+    setSelectedPlanId(planId)
+    if (plan) {
+      setPlanPrice(String(plan.price || ''))
+      setPlanBillingCycle(plan.billingCycle || 'monthly')
+      setPlanMaxUsers(String(plan.maxUsers || ''))
+      setPlanMaxProducts(String(plan.maxProducts || ''))
+    }
   }
 
   const isExpired = (endDate: string | null) => endDate && new Date(endDate) < new Date()
@@ -206,14 +220,41 @@ export const SubscriptionsPage: React.FC = () => {
             </div>
 
             <div className="border-t pt-4">
-              <label className="block text-sm font-medium mb-2">Change Plan</label>
-              <div className="space-y-2">
-                {plans.map(p => (
-                  <button key={p.id} onClick={() => handleChangePlan(selected.id, p.id)} disabled={changing === selected.id} className={`w-full flex items-center justify-between p-3 border rounded-lg hover:bg-blue-50 ${p.id === selected.plan?.id ? 'border-blue-500 bg-blue-50' : ''}`}>
-                    <span className="font-medium text-sm">{p.name}</span>
-                    <span className="text-sm text-gray-500">{fmt(p.price, p.currency)}/{p.billingCycle}</span>
-                  </button>
-                ))}
+              <label className="block text-sm font-medium mb-2">Plan Details</label>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Plan</label>
+                  <select value={selectedPlanId} onChange={(e) => handlePlanSelect(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
+                    {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Price</label>
+                    <input type="number" min="0" step="0.01" value={planPrice} onChange={(e) => setPlanPrice(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Billing Cycle</label>
+                    <select value={planBillingCycle} onChange={(e) => setPlanBillingCycle(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
+                      <option value="monthly">Monthly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Max Users</label>
+                    <input type="number" min="1" value={planMaxUsers} onChange={(e) => setPlanMaxUsers(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Max Products</label>
+                    <input type="number" min="1" value={planMaxProducts} onChange={(e) => setPlanMaxProducts(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                </div>
+                <button onClick={handleSave} disabled={changing === selected.id} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {changing === selected.id ? <Loader2 size={16} className="animate-spin" /> : <CreditCard size={16} />}
+                  Save Subscription Plan
+                </button>
               </div>
             </div>
             <button onClick={() => setSelected(null)} className="mt-4 w-full px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>

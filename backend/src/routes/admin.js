@@ -40,19 +40,40 @@ function subscriptionPayload(tenant) {
     endDate: tenant.subscriptionEnd || null,
     trialEndsAt: tenant.trialEndsAt || null,
     tenant: { id: tenant.id, name: tenant.name, status: tenant.status },
-    plan: tenant.plan ? { id: tenant.plan.id, name: tenant.plan.name, price: tenant.plan.price, currency: tenant.plan.currency || "UGX", billingCycle: tenant.plan.billingCycle || "monthly" } : null,
+    plan: tenant.plan ? {
+      id: tenant.plan.id,
+      name: tenant.plan.name,
+      price: tenant.plan.price,
+      currency: tenant.plan.currency || "UGX",
+      billingCycle: tenant.plan.billingCycle || "monthly",
+      maxUsers: tenant.plan.maxUsers || 0,
+      maxProducts: tenant.plan.maxProducts || 0,
+    } : null,
   };
 }
 
 async function updateSubscription(req, res) {
   try {
-    const { planId, status, subscriptionStart, subscriptionEnd, trialEndsAt } = req.body;
-    if (!planId && !status && !subscriptionStart && !subscriptionEnd && !trialEndsAt) {
-      return res.status(400).json({ error: "planId, status, or subscription dates required" });
+    const {
+      planId,
+      status,
+      subscriptionStart,
+      subscriptionEnd,
+      trialEndsAt,
+      price,
+      billingCycle,
+      maxUsers,
+      maxProducts,
+    } = req.body;
+
+    if (!planId && !status && !subscriptionStart && !subscriptionEnd && !trialEndsAt && price === undefined && billingCycle === undefined && maxUsers === undefined && maxProducts === undefined) {
+      return res.status(400).json({ error: "At least one subscription field is required" });
     }
 
-    if (planId) {
-      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    const targetPlanId = planId || req.body?.currentPlanId;
+
+    if (targetPlanId) {
+      const plan = await prisma.plan.findUnique({ where: { id: targetPlanId } });
       if (!plan) return res.status(404).json({ error: "Plan not found" });
     }
 
@@ -61,15 +82,51 @@ async function updateSubscription(req, res) {
     }
 
     const data = {};
-    if (planId) data.planId = planId;
+    const planUpdateData = {};
+
+    if (targetPlanId) data.planId = targetPlanId;
     if (status) data.status = status;
     if (subscriptionStart) data.subscriptionStart = new Date(subscriptionStart);
     if (subscriptionEnd) data.subscriptionEnd = new Date(subscriptionEnd);
     if (trialEndsAt) data.trialEndsAt = new Date(trialEndsAt);
 
-    // Auto-calculate end date from plan billingCycle if planId is set but no end date
-    if (planId && !subscriptionEnd) {
-      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (price !== undefined) {
+      const parsedPrice = Number(price);
+      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+        return res.status(400).json({ error: "Price must be a non-negative number" });
+      }
+      planUpdateData.price = parsedPrice;
+    }
+
+    if (billingCycle) {
+      if (!['monthly', 'yearly'].includes(String(billingCycle).toLowerCase())) {
+        return res.status(400).json({ error: "Billing cycle must be monthly or yearly" });
+      }
+      planUpdateData.billingCycle = String(billingCycle).toLowerCase();
+    }
+
+    if (maxUsers !== undefined) {
+      const parsedMaxUsers = Number(maxUsers);
+      if (!Number.isInteger(parsedMaxUsers) || parsedMaxUsers < 1) {
+        return res.status(400).json({ error: "Max users must be a positive integer" });
+      }
+      planUpdateData.maxUsers = parsedMaxUsers;
+    }
+
+    if (maxProducts !== undefined) {
+      const parsedMaxProducts = Number(maxProducts);
+      if (!Number.isInteger(parsedMaxProducts) || parsedMaxProducts < 1) {
+        return res.status(400).json({ error: "Max products must be a positive integer" });
+      }
+      planUpdateData.maxProducts = parsedMaxProducts;
+    }
+
+    if (Object.keys(planUpdateData).length > 0 && targetPlanId) {
+      await prisma.plan.update({ where: { id: targetPlanId }, data: planUpdateData });
+    }
+
+    if (targetPlanId && !subscriptionEnd) {
+      const plan = await prisma.plan.findUnique({ where: { id: targetPlanId } });
       const startDate = subscriptionStart ? new Date(subscriptionStart) : new Date();
       const endDate = new Date(startDate);
       if (plan?.billingCycle === 'yearly') {
