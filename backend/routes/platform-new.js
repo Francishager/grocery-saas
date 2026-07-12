@@ -774,6 +774,21 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
       select: { id: true, userId: true, userEmail: true, action: true, model: true, recordId: true, ip: true, createdAt: true }
     })
 
+    // Build IP map for users
+    const userIds = tenant.users.map(u => u.id)
+    const userAuditLogs = await prisma.auditLog.findMany({
+      where: { userId: { in: userIds }, ip: { not: null } },
+      select: { userId: true, ip: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      distinct: ['userId', 'ip']
+    })
+
+    const ipMap = {}
+    userAuditLogs.forEach(log => {
+      if (!ipMap[log.userId]) ipMap[log.userId] = []
+      ipMap[log.userId].push({ ip: log.ip, lastSeen: log.createdAt })
+    })
+
     // Get unique IPs from audit logs
     const uniqueIPs = [...new Set(auditLogs.map(log => log.ip).filter(Boolean))]
 
@@ -816,7 +831,11 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
         plan: tenant.plan,
         owner: tenant.owner,
         usageLimit: tenant.usageLimit,
-        users: tenant.users,
+        users: tenant.users.map((u) => ({
+          ...u,
+          name: `${u.fname || ''} ${u.lname || ''}`.trim() || u.email,
+          ips: ipMap[u.id] || [],
+        })),
         branches: branchesWithCounts,
         auditLogs,
         uniqueIPs,

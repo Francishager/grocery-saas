@@ -5,8 +5,8 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
+    "start": "node backend/src/app.js",
+    "dev": "nodemon backend/src/app.js",
     "build": "npm run build:client && npm run build:server",
     "build:client": "cd public && npm install && npm run build",
     "build:server": "npm install",

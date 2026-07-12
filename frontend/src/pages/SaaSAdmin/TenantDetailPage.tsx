@@ -70,31 +70,44 @@ export const TenantDetailPage: React.FC = () => {
       const res = await apiFetch(`/api/platform/tenants/${tenantId}/detail`)
       if (res.ok) {
         const data = await res.json()
-        setDetail(data.tenant)
+        const tenant = data?.tenant || {}
+        const normalizedTenant = {
+          ...tenant,
+          users: Array.isArray(tenant.users) ? tenant.users : [],
+          branches: Array.isArray(tenant.branches) ? tenant.branches : [],
+          auditLogs: Array.isArray(tenant.auditLogs) ? tenant.auditLogs : [],
+          uniqueIPs: Array.isArray(tenant.uniqueIPs) ? tenant.uniqueIPs : [],
+          enabledFeatures: Array.isArray(tenant.enabledFeatures) ? tenant.enabledFeatures : [],
+          allFeatures: tenant.allFeatures && typeof tenant.allFeatures === 'object' ? tenant.allFeatures : {},
+          usage: tenant.usage && typeof tenant.usage === 'object' ? tenant.usage : {},
+          usageLimit: tenant.usageLimit || null,
+          plan: tenant.plan || null,
+          owner: tenant.owner || null,
+        }
+        setDetail(normalizedTenant)
         setLimitsForm({
-          maxProducts: data.tenant.usageLimit?.maxProducts || data.tenant.plan?.maxProducts || 100,
-          maxUsers: data.tenant.usageLimit?.maxUsers || data.tenant.plan?.maxUsers || 5,
-          maxBranches: data.tenant.usageLimit?.maxBranches || 1,
-          maxCustomers: data.tenant.usageLimit?.maxCustomers || 100,
-          maxSuppliers: data.tenant.usageLimit?.maxSuppliers || 50,
+          maxProducts: normalizedTenant.usageLimit?.maxProducts || normalizedTenant.plan?.maxProducts || 100,
+          maxUsers: normalizedTenant.usageLimit?.maxUsers || normalizedTenant.plan?.maxUsers || 5,
+          maxBranches: normalizedTenant.usageLimit?.maxBranches || 1,
+          maxCustomers: normalizedTenant.usageLimit?.maxCustomers || 100,
+          maxSuppliers: normalizedTenant.usageLimit?.maxSuppliers || 50,
         })
         setInfoForm({
-          name: data.tenant.name || '',
-          email: data.tenant.email || '',
-          phone: data.tenant.phone || '',
-          address: data.tenant.address || '',
-          businessType: data.tenant.businessType || '',
-          status: data.tenant.status || 'active',
-          currency: data.tenant.currency || 'UGX',
-          timezone: data.tenant.timezone || 'Africa/Kampala',
-          taxRate: data.tenant.taxRate || 0,
-          taxEnabled: data.tenant.taxEnabled || false,
-          taxId: data.tenant.taxId || '',
+          name: normalizedTenant.name || '',
+          email: normalizedTenant.email || '',
+          phone: normalizedTenant.phone || '',
+          address: normalizedTenant.address || '',
+          businessType: normalizedTenant.businessType || '',
+          status: normalizedTenant.status || 'active',
+          currency: normalizedTenant.currency || 'UGX',
+          timezone: normalizedTenant.timezone || 'Africa/Kampala',
+          taxRate: normalizedTenant.taxRate || 0,
+          taxEnabled: normalizedTenant.taxEnabled || false,
+          taxId: normalizedTenant.taxId || '',
         })
-        // Build feature override state from allFeatures
         const overrides: Record<string, boolean> = {}
-        Object.entries(data.tenant.allFeatures).forEach(([name, info]: [string, any]) => {
-          if (info.source === 'override') overrides[name] = info.enabled
+        Object.entries(normalizedTenant.allFeatures).forEach(([name, info]: [string, any]) => {
+          if (info?.source === 'override') overrides[name] = Boolean(info?.enabled)
         })
         setFeatureOverrides(overrides)
       } else {
@@ -360,7 +373,7 @@ export const TenantDetailPage: React.FC = () => {
           <div className="bg-white rounded-lg border p-6">
             <h2 className="text-lg font-semibold mb-4">Usage Summary</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              {Object.entries(detail.usage).map(([key, u]) => (
+              {Object.entries(detail.usage || {}).map(([key, u]) => (
                 <div key={key} className="border rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium capitalize">{key}</span>
@@ -376,11 +389,11 @@ export const TenantDetailPage: React.FC = () => {
           </div>
 
           {/* Unique IPs */}
-          {detail.uniqueIPs.length > 0 && (
+          {(detail.uniqueIPs || []).length > 0 && (
             <div className="bg-white rounded-lg border p-6">
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2"><Server size={18} className="text-gray-400" /> Unique IPs Accessing This Business</h2>
               <div className="flex flex-wrap gap-2">
-                {detail.uniqueIPs.map(ip => (
+                {(detail.uniqueIPs || []).map(ip => (
                   <span key={ip} className="px-3 py-1.5 bg-gray-100 rounded-lg text-sm font-mono">{ip}</span>
                 ))}
               </div>
@@ -397,14 +410,14 @@ export const TenantDetailPage: React.FC = () => {
                 <h2 className="text-lg font-semibold">Feature Access</h2>
                 <p className="text-sm text-gray-500">Features enabled via plan or manual override</p>
               </div>
-              <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium">{detail.enabledFeatures.length} enabled</span>
+              <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium">{(detail.enabledFeatures || []).length} enabled</span>
             </div>
 
             {/* Enabled features summary */}
             <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Enabled Features ({detail.enabledFeatures.length})</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Enabled Features ({(detail.enabledFeatures || []).length})</h3>
               <div className="flex flex-wrap gap-1.5">
-                {detail.enabledFeatures.map(f => (
+                {(detail.enabledFeatures || []).map(f => (
                   <span key={f.name} className={`px-2 py-1 rounded text-xs ${f.source === 'override' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
                     {f.displayName || f.name}
                     {f.source === 'override' && ' (override)'}
@@ -418,7 +431,7 @@ export const TenantDetailPage: React.FC = () => {
               <h3 className="text-sm font-medium text-gray-700 mb-3">All Features (Toggle to override plan defaults)</h3>
               <div className="max-h-96 overflow-y-auto space-y-4">
                 {Object.entries(
-                  Object.entries(detail.allFeatures).reduce<Record<string, Array<[string, { enabled: boolean; source: string; displayName: string; category: string }]>>>((groups, [name, info]) => {
+                  Object.entries(detail.allFeatures || {}).reduce<Record<string, Array<[string, { enabled: boolean; source: string; displayName: string; category: string }]>>>((groups, [name, info]) => {
                     const cat = info.category || 'other'
                     groups[cat] = groups[cat] || []
                     groups[cat].push([name, info])
@@ -463,7 +476,7 @@ export const TenantDetailPage: React.FC = () => {
 
             {/* Current usage vs limits */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-              {Object.entries(detail.usage).map(([key, u]) => (
+              {Object.entries(detail.usage || {}).map(([key, u]) => (
                 <div key={key} className="border rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium capitalize">{key}</span>
@@ -502,7 +515,7 @@ export const TenantDetailPage: React.FC = () => {
             <div className="p-4 border-b flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold flex items-center gap-2"><Package size={18} className="text-gray-400" /> Branches</h2>
-                <p className="text-sm text-gray-500">{detail.branches.length} branch(es) &middot; Limit: {detail.usageLimit?.maxBranches || 1}</p>
+                <p className="text-sm text-gray-500">{(detail.branches || []).length} branch(es) &middot; Limit: {detail.usageLimit?.maxBranches || 1}</p>
               </div>
               <div className="flex items-center gap-2">
                 {detail.usage && (
@@ -512,7 +525,7 @@ export const TenantDetailPage: React.FC = () => {
                 )}
               </div>
             </div>
-            {detail.branches.length === 0 ? (
+            {(detail.branches || []).length === 0 ? (
               <div className="text-center py-12">
                 <Package className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-500">No branches created yet</p>
@@ -531,7 +544,7 @@ export const TenantDetailPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {detail.branches.map(b => (
+                  {(detail.branches || []).map(b => (
                     <tr key={b.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -574,31 +587,37 @@ export const TenantDetailPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {detail.users.map(u => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="text-sm font-medium">{u.name || `${u.fname} ${u.lname}`.trim() || u.email}</div>
-                      <div className="text-xs text-gray-500">{u.email}</div>
-                      {u.phone && <div className="text-xs text-gray-400">{u.phone}</div>}
-                    </td>
-                    <td className="px-4 py-3"><span className="px-2 py-1 bg-gray-100 rounded text-xs capitalize">{u.role.replace('_', ' ')}</span></td>
-                    <td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-medium ${u.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{u.isActive ? 'Active' : 'Inactive'}</span></td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{fmtDateTime(u.lastLogin)}</td>
-                    <td className="px-4 py-3">
-                      {u.ips.length > 0 ? (
-                        <div className="space-y-1">
-                          {u.ips.map((ipInfo, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <span className="text-xs font-mono px-2 py-0.5 bg-gray-100 rounded">{ipInfo.ip}</span>
-                              <span className="text-xs text-gray-400">{fmtDateTime(ipInfo.lastSeen)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : <span className="text-xs text-gray-400">No IP data</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(u.createdAt)}</td>
-                  </tr>
-                ))}
+                {Array.isArray(detail.users) && detail.users.length > 0 ? detail.users.map(u => {
+                  const safeIps = Array.isArray(u?.ips) ? u.ips : []
+                  const userName = u?.name || `${u?.fname || ''} ${u?.lname || ''}`.trim() || u?.email || 'Unknown user'
+                  return (
+                    <tr key={u?.id || userName} className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium">{userName}</div>
+                        <div className="text-xs text-gray-500">{u?.email || '-'}</div>
+                        {u?.phone && <div className="text-xs text-gray-400">{u.phone}</div>}
+                      </td>
+                      <td className="px-4 py-3"><span className="px-2 py-1 bg-gray-100 rounded text-xs capitalize">{(u?.role || 'user').replace('_', ' ')}</span></td>
+                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-medium ${u?.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{u?.isActive ? 'Active' : 'Inactive'}</span></td>
+                      <td className="px-4 py-3 text-sm text-gray-500">{fmtDateTime(u?.lastLogin || null)}</td>
+                      <td className="px-4 py-3">
+                        {safeIps.length > 0 ? (
+                          <div className="space-y-1">
+                            {safeIps.map((ipInfo, i) => (
+                              <div key={`${u?.id || userName}-${i}`} className="flex items-center gap-2">
+                                <span className="text-xs font-mono px-2 py-0.5 bg-gray-100 rounded">{ipInfo?.ip || 'Unknown IP'}</span>
+                                <span className="text-xs text-gray-400">{fmtDateTime(ipInfo?.lastSeen || null)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <span className="text-xs text-gray-400">No IP data</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(u?.createdAt || null)}</td>
+                    </tr>
+                  )
+                }) : (
+                  <tr><td colSpan={6} className="text-center py-8 text-gray-500">No users found</td></tr>
+                )}
               </tbody>
             </table>
             </div>
@@ -625,9 +644,9 @@ export const TenantDetailPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {detail.auditLogs.length === 0 ? (
+                {(detail.auditLogs || []).length === 0 ? (
                   <tr><td colSpan={5} className="text-center py-8 text-gray-500">No activity recorded</td></tr>
-                ) : detail.auditLogs.map(log => (
+                ) : (detail.auditLogs || []).map(log => (
                   <tr key={log.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm">{log.userEmail || '-'}</td>
                     <td className="px-4 py-3"><span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">{log.action}</span></td>
