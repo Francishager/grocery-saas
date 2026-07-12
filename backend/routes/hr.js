@@ -7,7 +7,7 @@ import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils
 const router = Router();
 
 // List employees
-router.get("/", authenticateToken, requirePermission("canViewStaff"), requireFeature("hr"), async (req, res) => {
+router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const employees = await prisma.employee.findMany({
@@ -22,7 +22,7 @@ router.get("/", authenticateToken, requirePermission("canViewStaff"), requireFea
 });
 
 // Create employee
-router.post("/", authenticateToken, requirePermission("canCreateStaff"), requireFeature("hr"), async (req, res) => {
+router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { firstName, lastName, email, phone, position, department, salary, payFrequency, hireDate, branchId, address } = req.body;
@@ -51,7 +51,7 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), require
 });
 
 // Update employee
-router.put("/:id", authenticateToken, requirePermission("canEditStaff"), requireFeature("hr"), async (req, res) => {
+router.put("/:id", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const { firstName, lastName, email, phone, position, department, salary, payFrequency, branchId, address, status, terminationDate } = req.body;
     const emp = await prisma.employee.update({
@@ -70,7 +70,7 @@ router.put("/:id", authenticateToken, requirePermission("canEditStaff"), require
 });
 
 // Delete employee
-router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), requireFeature("hr"), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), async (req, res) => {
   try {
     await prisma.employee.delete({ where: { id: req.params.id } });
     res.json({ message: "Employee deleted" });
@@ -80,7 +80,7 @@ router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), re
 });
 
 // Attendance
-router.get("/:id/attendance", authenticateToken, requirePermission("canViewStaff"), requireFeature("hr"), async (req, res) => {
+router.get("/:id/attendance", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
   try {
     const records = await prisma.attendance.findMany({
       where: { employeeId: req.params.id },
@@ -93,7 +93,7 @@ router.get("/:id/attendance", authenticateToken, requirePermission("canViewStaff
   }
 });
 
-router.post("/:id/attendance", authenticateToken, requirePermission("canEditStaff"), requireFeature("hr"), async (req, res) => {
+router.post("/:id/attendance", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const { date, checkIn, checkOut, status, notes } = req.body;
     const tenantId = req.user.tenantId || req.user.tenant_id;
@@ -116,7 +116,7 @@ router.post("/:id/attendance", authenticateToken, requirePermission("canEditStaf
 });
 
 // Leave requests
-router.get("/leave-requests", authenticateToken, requirePermission("canViewStaff"), requireFeature("hr"), async (req, res) => {
+router.get("/leave-requests", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const leaves = await prisma.leaveRequest.findMany({
@@ -130,7 +130,7 @@ router.get("/leave-requests", authenticateToken, requirePermission("canViewStaff
   }
 });
 
-router.post("/:id/leave", authenticateToken, requirePermission("canCreateStaff"), requireFeature("hr"), async (req, res) => {
+router.post("/:id/leave", authenticateToken, requirePermission("canCreateStaff"), async (req, res) => {
   try {
     const { leaveType, startDate, endDate, days, reason } = req.body;
     const tenantId = req.user.tenantId || req.user.tenant_id;
@@ -151,7 +151,7 @@ router.post("/:id/leave", authenticateToken, requirePermission("canCreateStaff")
   }
 });
 
-router.put("/leave-requests/:id", authenticateToken, requirePermission("canEditStaff"), requireFeature("hr"), async (req, res) => {
+router.put("/leave-requests/:id", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const { status } = req.body;
     const leave = await prisma.leaveRequest.update({
@@ -169,7 +169,7 @@ router.put("/leave-requests/:id", authenticateToken, requirePermission("canEditS
 });
 
 // Payroll
-router.get("/payroll", authenticateToken, requirePermission("canViewStaff"), requireFeature("hr"), async (req, res) => {
+router.get("/payroll", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { period } = req.query;
@@ -186,7 +186,7 @@ router.get("/payroll", authenticateToken, requirePermission("canViewStaff"), req
   }
 });
 
-router.post("/payroll/run", authenticateToken, requirePermission("canEditStaff"), requireFeature("hr"), async (req, res) => {
+router.post("/payroll/run", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { period, deductions = 0, bonus = 0 } = req.body;
@@ -225,7 +225,7 @@ router.post("/payroll/run", authenticateToken, requirePermission("canEditStaff")
   }
 });
 
-router.put("/payroll/:id/pay", authenticateToken, requirePermission("canEditStaff"), requireFeature("hr"), async (req, res) => {
+router.put("/payroll/:id/pay", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
   try {
     const rec = await prisma.payrollRecord.update({
       where: { id: req.params.id },

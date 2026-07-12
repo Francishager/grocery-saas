@@ -42,6 +42,8 @@ export default function SalesPage() {
   const [scannerFailed, setScannerFailed] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const ITEMS_PER_PAGE = 20
   const { toast } = useToast()
   const online = useOnlineStatus()
 
@@ -76,6 +78,7 @@ export default function SalesPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
+    setCurrentPage(1)  // Reset to first page when searching
     loadInventory()
   }
 
@@ -336,8 +339,14 @@ export default function SalesPage() {
     item.product_name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  // Pagination calculation
+  const totalPages = Math.ceil(filteredInventory.length / ITEMS_PER_PAGE)
+  const pageStartIdx = (currentPage - 1) * ITEMS_PER_PAGE
+  const pageEndIdx = pageStartIdx + ITEMS_PER_PAGE
+  const paginatedInventory = filteredInventory.slice(pageStartIdx, pageEndIdx)
+
   // Separate items by type for display
-  const sellableItems = filteredInventory.filter((item) => (item as any).itemType !== 'rental')
+  const sellableItems = paginatedInventory.filter((item) => (item as any).itemType !== 'rental')
   const serviceItems = sellableItems.filter((item) => (item as any).itemType === 'service')
   const productItems = sellableItems.filter((item) => (item as any).itemType !== 'service')
 
@@ -588,6 +597,47 @@ export default function SalesPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+              {/* Pagination Controls */}
+              {filteredInventory.length > ITEMS_PER_PAGE && (
+                <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                  <p className="text-xs text-muted-foreground">
+                    Showing {pageStartIdx + 1} to {Math.min(pageStartIdx + ITEMS_PER_PAGE, filteredInventory.length)} of {filteredInventory.length} items
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-2 py-1 rounded text-sm ${
+                            currentPage === page
+                              ? 'bg-primary text-primary-foreground'
+                              : 'border hover:bg-muted'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>

@@ -384,8 +384,9 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
     const data = { ...body };
 
-    if (categoryId === undefined || categoryId === null || categoryId === "") {
-      return res.status(400).json({ error: "Category is required" });
+    // For updates, allow categoryId to be undefined (don't change it). But if provided, it must be valid.
+    if (categoryId !== undefined && (categoryId === null || categoryId === "")) {
+      return res.status(400).json({ error: "Category cannot be empty if provided" });
     }
     if (body.quantity === undefined || body.quantity === null || body.quantity === "") {
       return res.status(400).json({ error: "Stock quantity is required" });
