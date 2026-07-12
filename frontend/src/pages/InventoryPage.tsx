@@ -102,6 +102,11 @@ export default function InventoryPage() {
     return result
   }, [items, showUncategorizedOnly])
 
+  const categoryNameById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category.name])),
+    [categories]
+  )
+
   const { paginatedItems, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(filteredItems, 10)
 
   useEffect(() => {
@@ -381,7 +386,7 @@ export default function InventoryPage() {
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
       branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
       baseUnit: (item as any).baseUnit || 'Piece',
-      itemType: 'product',
+      itemType: item.itemType || 'product',
       description: (item as any).description || '',
     })
     // Load selling units for this product
@@ -912,6 +917,7 @@ export default function InventoryPage() {
                     {!lockedType && <th className="pb-3 font-medium">Type</th>}
                     <th className="pb-3 font-medium">SKU</th>
                     <th className="pb-3 font-medium">Name</th>
+                    <th className="pb-3 font-medium">Category</th>
                     {canManageInventory && <th className="pb-3 font-medium">Branch</th>}
                     <th className="pb-3 font-medium text-right">Qty</th>
                     <th className="pb-3 font-medium text-right">Cost</th>
@@ -938,6 +944,9 @@ export default function InventoryPage() {
                       )}
                       <td className="py-3">{item.product_id || '-'}</td>
                       <td className="py-3 font-medium">{item.product_name}</td>
+                      <td className="py-3 text-sm text-muted-foreground">
+                        {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
+                      </td>
                       {canManageInventory && (
                         <td className="py-3 text-sm text-muted-foreground">
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}

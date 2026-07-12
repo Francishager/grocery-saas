@@ -454,6 +454,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
         if (!category) return res.status(400).json({ error: "Category not found" });
       }
       data.categoryId = categoryId || null;
+      data.isUncategorized = categoryId ? false : true;
     }
 
     if (branchId !== undefined) {

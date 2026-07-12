@@ -320,6 +320,7 @@ function mapProductToInventory(p: any): InventoryItem {
     barcode: p.barcode || '',
     sku: p.sku || '',
     categoryId: p.categoryId ? String(p.categoryId) : p.category?.id ? String(p.category.id) : '',
+    categoryName: p.category?.name || null,
     branchId: p.branchId || p.branch?.id || null,
     branch: p.branch || null,
     updated_at: p.updatedAt || p.createdAt,
@@ -933,6 +934,7 @@ export interface InventoryItem {
   categoryId?: string
   branchId?: string | null
   branch?: BranchOption | null
+  categoryName?: string | null
   updated_at: string
   baseUnit?: string
   units?: any[]
