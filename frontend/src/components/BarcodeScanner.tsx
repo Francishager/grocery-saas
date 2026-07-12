@@ -10,8 +10,12 @@ interface BarcodeScannerProps {
   placeholder?: string
 }
 
-const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
 const SCAN_TIMEOUT_MS = 30000
+
+const isDeviceMobile = () => {
+  if (typeof window === 'undefined' || typeof window.navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(window.navigator.userAgent) || window.matchMedia('(max-width: 768px)').matches
+}
 
 /**
  * Unified barcode scanner — auto-detects the best method:
@@ -27,6 +31,7 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
   const [timedOut, setTimedOut] = useState(false)
   const [scanning, setScanning] = useState(false)
   const scannerRef = useRef<any>(null)
+  const [mobileDevice, setMobileDevice] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -79,10 +84,10 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       scannerRef.current = scanner
 
       await scanner.start(
-        { facingMode: 'environment' },
-        { fps: 15, qrbox: { width: 280, height: 160 }, aspectRatio: 1.5 },
+        { facingMode: mobileDevice ? 'environment' : 'user' },
+        { fps: 12, qrbox: { width: 280, height: 160 }, aspectRatio: 1.5 },
         (decodedText: string) => {
-          onScan(decodedText)
+          onScan(decodedText.trim())
           stopCamera()
         },
         () => {}
@@ -102,16 +107,20 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       setScanning(false)
       onFail?.()
     }
-  }, [onScan, stopCamera])
+  }, [mobileDevice, onScan, stopCamera])
 
-  // Auto-focus input for USB scanner; auto-start camera on mobile
+  // Auto-focus input for USB scanner; auto-start camera on mobile and touch devices
   useEffect(() => {
+    setMobileDevice(isDeviceMobile())
     if (inputRef.current) inputRef.current.focus()
-    if (isMobile) {
+
+    const canUseCamera = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+    if (canUseCamera && (isDeviceMobile() || window.innerWidth < 768)) {
       startCamera()
     }
-    return () => { stopCamera() }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => { void stopCamera() }
+  }, [startCamera, stopCamera])
 
   return (
     <div className="space-y-3">
@@ -126,8 +135,8 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
         )}
       </div>
 
-      {/* Manual input — only shown when camera failed or timed out */}
-      {(timedOut || cameraError) && (
+      {/* Manual input — always available as a fallback for keyboard/USB scanners and camera issues */}
+      {(timedOut || cameraError || mobileDevice) && (
         <div className="flex gap-2">
           <Input
             ref={inputRef}

@@ -267,6 +267,7 @@ export function TenantLayout() {
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
   const { user, logout, hasPermission, hasCompletedOnboarding, refreshOnboardingStatus, tokens } = useJWTAuth()
+  const onboardingStorageKey = user?.id ? `jibu_sales_onboarding_seen_${user.id}` : 'jibu_sales_onboarding_seen_guest'
   const { theme, toggleTheme } = useTheme()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
@@ -403,9 +404,19 @@ export function TenantLayout() {
       // Ignore and still update local UI state
     }
 
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(onboardingStorageKey, 'completed')
+    }
     setOnboardingCompleted(true)
     setShowOnboardingModal(false)
     await refreshOnboardingStatus()
+  }
+
+  const dismissOnboarding = () => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(onboardingStorageKey, 'dismissed')
+    }
+    setShowOnboardingModal(false)
   }
 
   useEffect(() => {
@@ -420,12 +431,29 @@ export function TenantLayout() {
 
   useEffect(() => {
     if (!user?.id) return
-    if (!onboardingCompleted) {
-      const timer = window.setTimeout(() => setShowOnboardingModal(true), 800)
-      return () => window.clearTimeout(timer)
+
+    const seen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
+    if (onboardingCompleted || seen === 'completed' || seen === 'dismissed') {
+      setShowOnboardingModal(false)
+      return
     }
-    setShowOnboardingModal(false)
-  }, [user?.id, onboardingCompleted])
+
+    const timer = window.setTimeout(() => {
+      const latestSeen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
+      if (!onboardingCompleted && latestSeen !== 'completed' && latestSeen !== 'dismissed') {
+        setShowOnboardingModal(true)
+      }
+    }, 800)
+    return () => window.clearTimeout(timer)
+  }, [user?.id, onboardingCompleted, onboardingStorageKey])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const seen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
+    if (seen === 'dismissed') {
+      setShowOnboardingModal(false)
+    }
+  }, [user?.id, onboardingStorageKey])
 
   const selectReport = (reportId: string) => {
     navigate(`/tenant/reports?report=${reportId}`)
@@ -711,7 +739,7 @@ export function TenantLayout() {
       </div>
       <OnboardingGuideModal
         isOpen={showOnboardingModal}
-        onClose={completeOnboarding}
+        onClose={dismissOnboarding}
         onComplete={completeOnboarding}
       />
     </div>

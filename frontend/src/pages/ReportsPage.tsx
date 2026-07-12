@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
@@ -366,6 +366,33 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'fuelMeterReadings', label: 'Meter Readings Report', apiFn: reportsApiV2.fuelMeterReadings, renderType: 'table',
         columns: [textCol('pump', 'Pump'), numberCol('openingReading', 'Opening'), numberCol('closingReading', 'Closing'), numberCol('litresSold', 'Litres Sold'), currencyCol('amount', 'Amount'), dateCol('readingDate', 'Date')]
+      },
+    ]
+  },
+  {
+    id: 'manufacturing', label: 'Manufacturing Reports', icon: Factory, permission: 'canViewManufacturingReport', feature: 'manufacturing.reports',
+    items: [
+      { id: 'mfgProductionSummary', label: 'Production Summary', apiFn: reportsApiV2.manufacturingSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'count', label: 'Production Orders', format: 'number' },
+          { key: 'completedCount', label: 'Completed', format: 'number' },
+          { key: 'totalQuantity', label: 'Units Planned', format: 'number' },
+          { key: 'totalCost', label: 'Total Cost', format: 'currency' },
+          { key: 'wasteQty', label: 'Waste Qty', format: 'number' },
+          { key: 'recipeCount', label: 'Recipes', format: 'number' },
+        ]
+      },
+      { id: 'mfgByProduct', label: 'Production by Product', apiFn: reportsApiV2.manufacturingByProduct, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('orders', 'Orders'), numberCol('quantity', 'Qty'), currencyCol('totalCost', 'Total Cost'), numberCol('completed', 'Completed')]
+      },
+      { id: 'mfgWasteReport', label: 'Waste Report', apiFn: reportsApiV2.manufacturingWaste, renderType: 'table',
+        columns: [textCol('orderNo', 'Order'), textCol('product', 'Product'), numberCol('quantity', 'Qty'), currencyCol('totalCost', 'Cost'), textCol('reason', 'Reason')]
+      },
+      { id: 'mfgCostAnalysis', label: 'Production Cost Analysis', apiFn: reportsApiV2.manufacturingCostAnalysis, renderType: 'table',
+        columns: [textCol('orderNo', 'Order'), textCol('product', 'Product'), numberCol('quantity', 'Qty'), currencyCol('totalCost', 'Cost'), numberCol('wasteQty', 'Waste Qty'), currencyCol('wasteCost', 'Waste Cost')]
+      },
+      { id: 'mfgBOMReport', label: 'BOM / Recipe Report', apiFn: reportsApiV2.manufacturingBom, renderType: 'table',
+        columns: [textCol('name', 'Recipe'), textCol('product', 'Product'), textCol('yield', 'Yield'), numberCol('ingredientCount', 'Ingredients'), numberCol('ingredientCost', 'Ingredient Qty')]
       },
     ]
   },

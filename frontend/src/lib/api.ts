@@ -581,6 +581,8 @@ export const reportsApiV2 = {
   suppliersPurchases: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/purchases', { params }),
   suppliersPayables: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/payables', { params }),
   suppliersBalance: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/balance', { params }),
+  suppliersStatement: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/statement', { params }),
+  decisionSupport: (params?: ReportParams) => api.get<any>('/api/reports/decision-support', { params }),
 
   // Receivables Reports
   receivablesOutstanding: (params?: ReportParams) => api.get<any>('/api/reports/receivables/outstanding', { params }),
@@ -631,6 +633,13 @@ export const reportsApiV2 = {
   fuelLubricantSales: (params?: ReportParams) => api.get<any>('/api/reports/fuel/lubricant-sales', { params }),
   fuelCarWashIncome: (params?: ReportParams) => api.get<any>('/api/reports/fuel/car-wash-income', { params }),
   fuelMeterReadings: (params?: ReportParams) => api.get<any>('/api/reports/fuel/meter-readings', { params }),
+
+  // Manufacturing Reports
+  manufacturingSummary: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/summary', { params }),
+  manufacturingByProduct: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/by-product', { params }),
+  manufacturingWaste: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/waste', { params }),
+  manufacturingCostAnalysis: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/cost-analysis', { params }),
+  manufacturingBom: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/bom', { params }),
 }
 
 // Admin endpoints

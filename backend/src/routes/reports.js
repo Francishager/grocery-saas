@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
+import { buildDecisionSupportSummary, buildSupplierStatementData } from "../utils/reportingHelpers.js";
 
 const router = Router();
 
@@ -287,6 +288,90 @@ router.get("/sales/returns", authenticateToken, async (req, res) => {
     const sales = await prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), include: { items: { include: { product: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } });
     const data = sales.map((sale) => ({ receiptNo: sale.receiptNo, status: sale.status, total: sale.total, paymentMethod: sale.paymentMethod }));
     res.json({ data, summary: { count: data.length, totalRefunded: data.reduce((a, x) => a + x.total, 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// ==================== MANUFACTURING REPORTS ====================
+router.get("/manufacturing/summary", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req));
+    const [orders, waste, recipes] = await Promise.all([
+      prisma.productionOrder.findMany({ where, include: { product: true } }),
+      prisma.productionWaste.findMany({ where, include: { product: true } }),
+      prisma.recipe.findMany({ where, include: { product: true, ingredients: true } }),
+    ]);
+
+    const summary = {
+      count: orders.length,
+      completedCount: orders.filter((o) => o.status === "completed").length,
+      inProgressCount: orders.filter((o) => o.status === "in_progress").length,
+      totalQuantity: orders.reduce((sum, order) => sum + Number(order.quantity || 0), 0),
+      totalCost: orders.reduce((sum, order) => sum + Number(order.totalCost || 0), 0),
+      wasteQty: waste.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      wasteCost: waste.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
+      recipeCount: recipes.length,
+    };
+
+    res.json({ data: [{ ...summary }], summary });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/manufacturing/by-product", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const orders = await prisma.productionOrder.findMany({ where: scopedWhere(s, df(req)), include: { product: true } });
+    const grouped = Object.values(orders.reduce((acc, order) => {
+      const key = order.product?.name || "Unknown";
+      if (!acc[key]) acc[key] = { product: key, orders: 0, quantity: 0, totalCost: 0, completed: 0 };
+      acc[key].orders += 1;
+      acc[key].quantity += Number(order.quantity || 0);
+      acc[key].totalCost += Number(order.totalCost || 0);
+      if (order.status === "completed") acc[key].completed += 1;
+      return acc;
+    }, {}));
+    res.json({ data: grouped.sort((a, b) => b.totalCost - a.totalCost) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/manufacturing/waste", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const waste = await prisma.productionWaste.findMany({ where: scopedWhere(s, df(req)), include: { productionOrder: true, product: true } });
+    const data = waste.map((item) => ({ orderNo: item.productionOrder?.orderNo || "—", product: item.product?.name || "Unspecified", quantity: item.quantity, totalCost: item.totalCost, reason: item.reason || "—", date: item.createdAt }));
+    res.json({ data, summary: { count: data.length, totalWasteQty: data.reduce((sum, item) => sum + Number(item.quantity || 0), 0), totalWasteCost: data.reduce((sum, item) => sum + Number(item.totalCost || 0), 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/manufacturing/cost-analysis", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const orders = await prisma.productionOrder.findMany({ where: scopedWhere(s, df(req)), include: { product: true, recipe: true, wasteRecords: true } });
+    const data = orders.map((order) => ({
+      orderNo: order.orderNo,
+      product: order.product?.name || "Unknown",
+      quantity: order.quantity,
+      totalCost: order.totalCost,
+      wasteQty: order.wasteQty || 0,
+      wasteCost: order.wasteRecords.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
+      recipe: order.recipe?.name || "—",
+    }));
+    res.json({ data, summary: { count: data.length, totalCost: data.reduce((sum, item) => sum + Number(item.totalCost || 0), 0), totalWasteCost: data.reduce((sum, item) => sum + Number(item.wasteCost || 0), 0) } });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/manufacturing/bom", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const recipes = await prisma.recipe.findMany({ where: scopedWhere(s, df(req)), include: { product: true, ingredients: { include: { product: true } } } });
+    const data = recipes.map((recipe) => ({
+      name: recipe.name,
+      product: recipe.product?.name || "Unknown",
+      yield: recipe.yield || "—",
+      ingredientCount: recipe.ingredients.length,
+      ingredientCost: recipe.ingredients.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+    }));
+    res.json({ data, summary: { count: data.length } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -654,6 +739,64 @@ router.get("/suppliers/balance", authenticateToken, async (req, res) => {
     const suppliers = await prisma.supplier.findMany({ where: scopedWhere(s, { balance: { not: 0 } }), orderBy: { balance: "desc" } });
     res.json({ data: suppliers, summary: { count: suppliers.length, totalBalance: suppliers.reduce((a, sup) => a + sup.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/suppliers/statement", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { supplierId } = req.query;
+
+    if (!supplierId) {
+      return res.status(400).json({ error: "supplierId is required" });
+    }
+
+    const [supplier, purchases, payments] = await Promise.all([
+      prisma.supplier.findFirst({ where: scopedWhere(s, { id: supplierId }) }),
+      prisma.supplierPurchase.findMany({
+        where: scopedWhere(s, { supplierId }),
+        include: { supplier: true, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
+        orderBy: { createdAt: "desc" }
+      }),
+      prisma.supplierPayment.findMany({
+        where: scopedWhere(s, { supplierId }),
+        include: { supplier: true, purchase: { select: { id: true, refNo: true } } },
+        orderBy: { createdAt: "desc" }
+      })
+    ]);
+
+    if (!supplier) {
+      return res.status(404).json({ error: "Supplier not found" });
+    }
+
+    res.json(buildSupplierStatementData(supplier, purchases, payments));
+  } catch (err) {
+    handleBranchError(res, err);
+  }
+});
+
+router.get("/decision-support", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const [sales, purchases, products, expenses, suppliers] = await Promise.all([
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
+      prisma.supplierPurchase.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
+      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, minStock: true, expiryDate: true } }),
+      prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), select: { amount: true } }),
+      prisma.supplier.findMany({ where: scopedWhere(s), select: { balance: true } })
+    ]);
+
+    const summary = buildDecisionSupportSummary({
+      sales,
+      purchases,
+      products,
+      expenses,
+      suppliers,
+    });
+
+    res.json({ data: summary, summary });
+  } catch (err) {
+    handleBranchError(res, err);
+  }
 });
 
 // ==================== RECEIVABLES REPORTS ====================

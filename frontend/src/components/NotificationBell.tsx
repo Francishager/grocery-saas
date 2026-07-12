@@ -220,6 +220,33 @@ export function NotificationBell() {
     return jobs
   }, [])
 
+  const addDailyReminderIfNeeded = useCallback((base: NotificationItem[]) => {
+    if (typeof window === 'undefined') return base
+
+    const now = new Date()
+    const isReminderWindow = now.getHours() === 23 && now.getMinutes() >= 55
+    if (!isReminderWindow) return base
+
+    const storageKey = user?.id ? `jibu_daily_reminder_${user.id}` : 'jibu_daily_reminder_guest'
+    const todayKey = now.toISOString().slice(0, 10)
+    const lastShown = window.localStorage.getItem(storageKey)
+    if (lastShown === todayKey) return base
+
+    window.localStorage.setItem(storageKey, todayKey)
+    const reminder: NotificationItem = {
+      id: `daily_reminder_${todayKey}`,
+      title: 'Daily Reminder',
+      message: 'Wrap up the day and review any pending manufacturing or operational tasks before midnight.',
+      type: 'info',
+      isRead: false,
+      createdAt: now.toISOString(),
+      link: '/tenant/dashboard',
+      source: 'local',
+    }
+
+    return [reminder, ...base.filter((n) => n.id !== reminder.id)]
+  }, [user?.id])
+
   // Load all notifications
   const loadNotifications = useCallback(async () => {
     setLoading(true)
@@ -264,15 +291,16 @@ export function NotificationBell() {
       const merged = Array.from(mergedMap.values()).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
+      const withReminder = addDailyReminderIfNeeded(merged)
 
-      setNotifications(merged)
-      setUnreadCount(merged.filter(n => !n.isRead).length)
+      setNotifications(withReminder)
+      setUnreadCount(withReminder.filter((n) => !n.isRead).length)
     } catch {
       // ignore
     } finally {
       setLoading(false)
     }
-  }, [online, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications])
+  }, [online, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
 
   // Initial load + polling
   useEffect(() => {

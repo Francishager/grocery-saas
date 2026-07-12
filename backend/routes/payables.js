@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
+import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -29,6 +30,36 @@ const withUser = (record) => {
 }
 
 // === SUPPLIERS ===
+
+router.get('/suppliers/:id/statement', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    const [supplier, purchases, payments] = await Promise.all([
+      prisma.supplier.findFirst({ where: scopedWhere(scope, { id }) }),
+      prisma.supplierPurchase.findMany({
+        where: scopedWhere(scope, { supplierId: id }),
+        include: { supplier: true, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.supplierPayment.findMany({
+        where: scopedWhere(scope, { supplierId: id }),
+        include: { supplier: true, purchase: { select: { id: true, refNo: true } } },
+        orderBy: { createdAt: 'desc' }
+      })
+    ])
+
+    if (!supplier) {
+      return res.status(404).json({ error: 'Supplier not found' })
+    }
+
+    res.json(buildSupplierStatementData(supplier, purchases, payments))
+  } catch (error) {
+    console.error('Get supplier statement error:', error)
+    handleBranchError(res, error, 'Failed to fetch supplier statement')
+  }
+})
 
 // Get all suppliers for tenant
 router.get('/suppliers', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {

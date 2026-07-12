@@ -15,7 +15,14 @@ export default function OnboardingGuideCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { tokens } = useJWTAuth();
+  const { tokens, user } = useJWTAuth();
+  const onboardingStorageKey = user?.id ? `jibu_sales_onboarding_seen_${user.id}` : 'jibu_sales_onboarding_seen_guest';
+
+  const persistOnboardingState = (state: 'completed' | 'dismissed') => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(onboardingStorageKey, state);
+    }
+  };
 
   const handleComplete = async () => {
     try {
@@ -29,12 +36,16 @@ export default function OnboardingGuideCard({
         },
       });
       if (response.ok) {
+        persistOnboardingState('completed');
         onStatusChange?.();
       }
     } catch (err) {
       console.error('Error completing onboarding:', err);
+      persistOnboardingState('completed');
+      onStatusChange?.();
     } finally {
       setIsLoading(false);
+      setIsModalOpen(false);
     }
   };
 
@@ -50,11 +61,19 @@ export default function OnboardingGuideCard({
         },
       });
       if (response.ok) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(onboardingStorageKey);
+        }
         onStatusChange?.();
         setIsModalOpen(true);
       }
     } catch (err) {
       console.error('Error resetting onboarding:', err);
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(onboardingStorageKey);
+      }
+      onStatusChange?.();
+      setIsModalOpen(true);
     } finally {
       setIsLoading(false);
     }
