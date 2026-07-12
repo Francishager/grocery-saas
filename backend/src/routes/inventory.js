@@ -53,7 +53,7 @@ export function mapImportRouteError(err) {
   return { statusCode: 500, message: 'Internal server error during import' };
 }
 
-const buildSkuBase = (name = "", category = "") => {
+export const buildSkuBase = (name = "", category = "") => {
   const categoryValue = typeof category === "string" ? category : category?.name || category?.slug || "";
   const categoryLetters = String(categoryValue)
     .trim()
@@ -72,14 +72,20 @@ const buildSkuBase = (name = "", category = "") => {
   return `${firstPart}-${secondPart}`;
 };
 
-async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "product", category = "", excludeId = null, reserved = new Set()) {
+const getDynamicSkuDateToken = (date = new Date()) => {
+  const value = new Date(date);
+  return value.toISOString().slice(2, 10).replace(/-/g, "");
+};
+
+export async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "product", category = "", excludeId = null, reserved = new Set()) {
   const baseSku = buildSkuBase(name, category);
+  const dateToken = getDynamicSkuDateToken();
   let counter = 1;
-  let candidate = `${baseSku}-${String(counter).padStart(4, "0")}`;
 
   while (true) {
+    const candidate = `${baseSku}-${dateToken}-${String(counter).padStart(4, "0")}`;
+
     if (reserved.has(candidate)) {
-      candidate = `${baseSku}-${String(counter).padStart(4, "0")}`;
       counter += 1;
       continue;
     }
@@ -99,7 +105,6 @@ async function resolveUniqueSku(prisma, tenantId, branchId, name, itemType = "pr
       return candidate;
     }
 
-    candidate = `${baseSku}-${String(counter).padStart(4, "0")}`;
     counter += 1;
   }
 }
