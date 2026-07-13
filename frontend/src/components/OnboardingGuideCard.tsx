@@ -36,12 +36,10 @@ export default function OnboardingGuideCard({
         },
       });
       if (response.ok) {
-        persistOnboardingState('completed');
         onStatusChange?.();
       }
     } catch (err) {
       console.error('Error completing onboarding:', err);
-      persistOnboardingState('completed');
       onStatusChange?.();
     } finally {
       setIsLoading(false);

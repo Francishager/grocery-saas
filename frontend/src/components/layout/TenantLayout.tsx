@@ -404,9 +404,6 @@ export function TenantLayout() {
       // Ignore and still update local UI state
     }
 
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(onboardingStorageKey, 'completed')
-    }
     setOnboardingCompleted(true)
     setShowOnboardingModal(false)
     await refreshOnboardingStatus()
@@ -429,8 +426,8 @@ export function TenantLayout() {
   useEffect(() => {
     if (!user?.id) return
 
-    const seen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
-    if (onboardingCompleted || seen === 'completed') {
+    // Show guide on every login/reload until the user completes it via the backend
+    if (onboardingCompleted) {
       setShowOnboardingModal(false)
       return
     }
@@ -439,7 +436,7 @@ export function TenantLayout() {
       setShowOnboardingModal(true)
     }, 800)
     return () => window.clearTimeout(timer)
-  }, [user?.id, onboardingCompleted, onboardingStorageKey])
+  }, [user?.id, onboardingCompleted])
 
   const selectReport = (reportId: string) => {
     navigate(`/tenant/reports?report=${reportId}`)
