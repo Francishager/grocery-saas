@@ -58,5 +58,5 @@ USER app
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
   CMD sh -c 'wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1'
 
-# Start the application directly with Node for Railway reliability
-CMD ["npm", "start"]
+# Start the application — sync schema first, then start server
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npm start"]
