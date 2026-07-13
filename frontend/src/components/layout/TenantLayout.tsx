@@ -10,6 +10,7 @@ import { NotificationBell } from '@/components/NotificationBell'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import OnboardingGuideCard from '@/components/OnboardingGuideCard'
 import OnboardingGuideModal from '@/components/OnboardingGuideModal'
+import UserGuideMenu from '@/components/UserGuideMenu'
 
 const inventorySubItems = [
   { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
@@ -656,6 +657,7 @@ export function TenantLayout() {
               hasCompleted={onboardingCompleted}
               onStatusChange={completeOnboarding}
             />
+            <UserGuideMenu />
           </nav>
         </div>
       </aside>
