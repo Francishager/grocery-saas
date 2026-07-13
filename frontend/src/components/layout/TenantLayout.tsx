@@ -413,9 +413,6 @@ export function TenantLayout() {
   }
 
   const dismissOnboarding = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(onboardingStorageKey, 'dismissed')
-    }
     setShowOnboardingModal(false)
   }
 
@@ -433,27 +430,19 @@ export function TenantLayout() {
     if (!user?.id) return
 
     const seen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
-    if (onboardingCompleted || seen === 'completed' || seen === 'dismissed') {
+    if (onboardingCompleted || seen === 'completed') {
       setShowOnboardingModal(false)
       return
     }
 
     const timer = window.setTimeout(() => {
       const latestSeen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
-      if (!onboardingCompleted && latestSeen !== 'completed' && latestSeen !== 'dismissed') {
+      if (!onboardingCompleted && latestSeen !== 'completed') {
         setShowOnboardingModal(true)
       }
     }, 800)
     return () => window.clearTimeout(timer)
   }, [user?.id, onboardingCompleted, onboardingStorageKey])
-
-  useEffect(() => {
-    if (!user?.id) return
-    const seen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
-    if (seen === 'dismissed') {
-      setShowOnboardingModal(false)
-    }
-  }, [user?.id, onboardingStorageKey])
 
   const selectReport = (reportId: string) => {
     navigate(`/tenant/reports?report=${reportId}`)

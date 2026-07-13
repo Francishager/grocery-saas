@@ -14,7 +14,11 @@ const SCAN_TIMEOUT_MS = 30000
 
 const isDeviceMobile = () => {
   if (typeof window === 'undefined' || typeof window.navigator === 'undefined') return false
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(window.navigator.userAgent) || window.matchMedia('(max-width: 768px)').matches
+  const ua = window.navigator.userAgent
+  const isMobileUa = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
+  const isTouch = 'maxTouchPoints' in navigator ? navigator.maxTouchPoints > 0 : 'ontouchstart' in window
+  const isSmallScreen = window.matchMedia('(max-width: 768px)').matches
+  return isMobileUa || isTouch || isSmallScreen
 }
 
 /**
@@ -139,7 +143,7 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
     if (inputRef.current) inputRef.current.focus()
 
     const canUseCamera = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
-    if (canUseCamera && (deviceIsMobile || window.innerWidth < 768)) {
+    if (canUseCamera && (deviceIsMobile || window.innerWidth < 768 || ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0))) {
       startCamera(deviceIsMobile)
     }
 
@@ -173,7 +177,7 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className="flex-1"
-          autoFocus
+          autoFocus={!cameraActive}
         />
         <Button onClick={handleManualSubmit} size="sm">
           Search
