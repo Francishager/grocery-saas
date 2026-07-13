@@ -34,6 +34,8 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
   const [mobileDevice, setMobileDevice] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scannerBufferRef = useRef('')
+  const lastScanKeyTimeRef = useRef<number | null>(null)
 
   // USB/Bluetooth keyboard-wedge scanners type fast and end with Enter
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -43,6 +45,27 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       setManualCode('')
     }
   }, [manualCode, onScan])
+
+  const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
+    const now = Date.now()
+    if (lastScanKeyTimeRef.current && now - lastScanKeyTimeRef.current > 100) {
+      scannerBufferRef.current = ''
+    }
+    lastScanKeyTimeRef.current = now
+
+    if (e.key === 'Enter') {
+      const buffer = scannerBufferRef.current.trim()
+      if (buffer) {
+        e.preventDefault()
+        onScan(buffer)
+        scannerBufferRef.current = ''
+      }
+      return
+    }
+    if (e.key.length === 1) {
+      scannerBufferRef.current += e.key
+    }
+  }, [onScan])
 
   const handleManualSubmit = () => {
     if (manualCode.trim()) {
@@ -67,12 +90,10 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
     }
   }, [])
 
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (useEnvironment = mobileDevice) => {
     try {
       setCameraError('')
       setTimedOut(false)
-      setCameraActive(true)
-      setScanning(true)
 
       const { Html5Qrcode } = await import('html5-qrcode')
 
@@ -84,7 +105,7 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       scannerRef.current = scanner
 
       await scanner.start(
-        { facingMode: mobileDevice ? 'environment' : 'user' },
+        { facingMode: useEnvironment ? 'environment' : 'user' },
         { fps: 12, qrbox: { width: 280, height: 160 }, aspectRatio: 1.5 },
         (decodedText: string) => {
           onScan(decodedText.trim())
@@ -93,7 +114,9 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
         () => {}
       )
 
-      // Set timeout — if no scan within 30s, show try again
+      setCameraActive(true)
+      setScanning(true)
+
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
       timeoutRef.current = setTimeout(() => {
         setTimedOut(true)
@@ -111,16 +134,22 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
 
   // Auto-focus input for USB scanner; auto-start camera on mobile and touch devices
   useEffect(() => {
-    setMobileDevice(isDeviceMobile())
+    const deviceIsMobile = isDeviceMobile()
+    setMobileDevice(deviceIsMobile)
     if (inputRef.current) inputRef.current.focus()
 
     const canUseCamera = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
-    if (canUseCamera && (isDeviceMobile() || window.innerWidth < 768)) {
-      startCamera()
+    if (canUseCamera && (deviceIsMobile || window.innerWidth < 768)) {
+      startCamera(deviceIsMobile)
     }
 
-    return () => { void stopCamera() }
-  }, [startCamera, stopCamera])
+    window.addEventListener('keydown', handleGlobalKeyDown)
+
+    return () => {
+      void stopCamera()
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+    }
+  }, [startCamera, stopCamera, handleGlobalKeyDown])
 
   return (
     <div className="space-y-3">
@@ -135,23 +164,24 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
         )}
       </div>
 
-      {/* Manual input — always available as a fallback for keyboard/USB scanners and camera issues */}
-      {(timedOut || cameraError || mobileDevice) && (
-        <div className="flex gap-2">
-          <Input
-            ref={inputRef}
-            value={manualCode}
-            onChange={(e) => setManualCode(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            className="flex-1"
-            autoFocus
-          />
-          <Button onClick={handleManualSubmit} size="sm">
-            Search
-          </Button>
-        </div>
-      )}
+          {/* Manual input — always available for keyboard/USB scanners and as a fallback for camera issues */}
+      <div className="flex gap-2">
+        <Input
+          ref={inputRef}
+          value={manualCode}
+          onChange={(e) => setManualCode(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className="flex-1"
+          autoFocus
+        />
+        <Button onClick={handleManualSubmit} size="sm">
+          Search
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        USB/Bluetooth scanners are supported automatically when this field is focused.
+      </p>
 
       {/* Camera scanner — auto-starts on mobile, button on desktop */}
       <div className="space-y-2">
