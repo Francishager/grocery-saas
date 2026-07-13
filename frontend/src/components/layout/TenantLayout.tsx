@@ -436,10 +436,7 @@ export function TenantLayout() {
     }
 
     const timer = window.setTimeout(() => {
-      const latestSeen = typeof window !== 'undefined' ? window.localStorage.getItem(onboardingStorageKey) : null
-      if (!onboardingCompleted && latestSeen !== 'completed') {
-        setShowOnboardingModal(true)
-      }
+      setShowOnboardingModal(true)
     }, 800)
     return () => window.clearTimeout(timer)
   }, [user?.id, onboardingCompleted, onboardingStorageKey])

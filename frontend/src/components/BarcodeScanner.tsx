@@ -21,6 +21,21 @@ const isDeviceMobile = () => {
   return isMobileUa || isTouch || isSmallScreen
 }
 
+const selectCameraDeviceId = async (preferredBack = true) => {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return null
+
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  const videoInputs = devices.filter((device) => device.kind === 'videoinput')
+  if (!videoInputs.length) return null
+
+  if (preferredBack) {
+    const backCamera = videoInputs.find((device) => /back|environment|rear/i.test(device.label))
+    if (backCamera) return backCamera.deviceId
+  }
+
+  return videoInputs[0].deviceId
+}
+
 /**
  * Unified barcode scanner — auto-detects the best method:
  * - Keyboard input always active (catches USB/Bluetooth keyboard-wedge scanners)
@@ -108,8 +123,13 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       const scanner = new Html5Qrcode('barcode-camera-view')
       scannerRef.current = scanner
 
+      const deviceId = await selectCameraDeviceId(useEnvironment)
+      const cameraConfig = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { facingMode: useEnvironment ? 'environment' : 'user' }
+
       await scanner.start(
-        { facingMode: useEnvironment ? 'environment' : 'user' },
+        cameraConfig,
         { fps: 12, qrbox: { width: 280, height: 160 }, aspectRatio: 1.5 },
         (decodedText: string) => {
           onScan(decodedText.trim())
