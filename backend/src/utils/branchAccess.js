@@ -117,8 +117,16 @@ export function ensureSameBranch(record, scope, label = "Record") {
 }
 
 export function handleBranchError(res, error, fallback = "Internal server error") {
+  // Log the error for server-side diagnosis
+  try {
+    console.error('Branch access error:', error && (error.stack || error));
+  } catch (logErr) {
+    // ignore logging errors
+  }
+
   if (error?.statusCode) {
     return res.status(error.statusCode).json({ error: error.message });
   }
+  // In production we still return a generic message, but we've logged details server-side
   return res.status(500).json({ error: fallback });
 }
