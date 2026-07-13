@@ -202,7 +202,13 @@ router.get("/", authenticateToken, async (req, res) => {
     const total = await prisma.product.count({ where });
     res.json({ products, total, page: Number(page), limit: Number(limit) });
   } catch (err) {
-    console.error("List inventory error:", err);
+    // Log full error and request context for debugging 500s
+    try {
+      console.error("List inventory error:", err && (err.stack || err));
+      console.error("Request query:", req.query, "user:", req.user?.id || null);
+    } catch (logErr) {
+      console.error("Failed to log inventory list error context", logErr);
+    }
     handleBranchError(res, err);
   }
 });
@@ -371,7 +377,13 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     res.status(201).json({ message: "Product created", product });
   } catch (err) {
     if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
-    console.error("Create product error:", err);
+    // Log error and incoming body to help diagnose 500s when saving products
+    try {
+      console.error("Create product error:", err && (err.stack || err));
+      console.error("Request body:", req.body, "user:", req.user?.id || null);
+    } catch (logErr) {
+      console.error("Failed to log create product error context", logErr);
+    }
     if (err?.code === "P2002") return res.status(409).json({ error: "SKU or barcode already exists in this branch" });
     handleBranchError(res, err);
   }
