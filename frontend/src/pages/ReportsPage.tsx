@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory,
+  TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
 import { reportsApiV2, type ReportParams } from '@/lib/api'
@@ -44,6 +45,8 @@ const currencyCol = (key: string, label: string) => ({ key, label, format: 'curr
 const numberCol = (key: string, label: string) => ({ key, label, format: 'number' as const })
 const dateCol = (key: string, label: string) => ({ key, label, format: 'date' as const })
 const textCol = (key: string, label: string) => ({ key, label, format: 'text' as const })
+
+const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
 const CATEGORIES: ReportCategory[] = [
   {
@@ -396,6 +399,12 @@ const CATEGORIES: ReportCategory[] = [
       },
     ]
   },
+  {
+    id: 'analysis', label: 'Business Analysis', icon: BarChart3, permission: 'canViewFinancialReport',
+    items: [
+      { id: 'executiveSummary', label: 'Executive Summary & Insights', apiFn: reportsApiV2.executiveSummary, renderType: 'table' as any },
+    ]
+  },
 ]
 
 const ALL_REPORTS = CATEGORIES.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label })))
@@ -633,34 +642,97 @@ function formatNumber(value: number) {
 
 function PnLReport({ data }: { data: any }) {
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const hasComparison = !!data.previous;
+  const fmtChange = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+
   const rows = [
-    { label: 'Revenue', value: data.revenue, bold: true },
-    { label: 'Cost of Goods Sold (COGS)', value: -data.cogs },
-    { label: 'Gross Profit', value: data.grossProfit, bold: true, highlight: true },
-    { label: 'Operating Expenses', value: -data.expenses },
-    { label: 'Net Profit', value: data.netProfit, bold: true, highlight: true },
+    { label: 'Revenue', value: data.revenue, bold: true, prev: data.previous?.revenue, change: data.changes?.revenue },
+    { label: 'Cost of Goods Sold (COGS)', value: -data.cogs, prev: data.previous ? -data.previous.cogs : undefined, change: data.changes?.cogs },
+    { label: 'Gross Profit', value: data.grossProfit, bold: true, highlight: true, prev: data.previous?.grossProfit, change: data.changes?.grossProfit },
+    { label: 'Operating Expenses', value: -data.expenses, prev: data.previous ? -data.previous.expenses : undefined, change: data.changes?.expenses },
+    { label: 'Net Profit', value: data.netProfit, bold: true, highlight: true, prev: data.previous?.netProfit, change: data.changes?.netProfit },
   ]
+
   return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="space-y-3">
-          {rows.map((r, i) => (
-            <div key={i} className={cn('flex items-center justify-between rounded-lg p-3', r.bold ? 'bg-muted/50 font-bold' : '')}>
-              <span>{r.label}</span>
-              <span className={cn(r.highlight && r.value >= 0 ? 'text-green-600' : r.highlight && r.value < 0 ? 'text-red-600' : '')}>
-                {formatCurrency(r.value || 0)}
-              </span>
-            </div>
-          ))}
-          <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-            <span>Additional Info</span>
+    <div className="space-y-4">
+      {hasComparison && data.periods && (
+        <div className="flex flex-wrap gap-4 text-sm">
+          <div className="rounded-lg bg-blue-50 px-4 py-2">
+            <span className="text-muted-foreground">Current: </span>
+            <span className="font-semibold">{data.periods.current?.from ? `${new Date(data.periods.current.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(data.periods.current.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</span>
           </div>
-          <div className="flex justify-between p-3 text-sm"><span>Total Discount</span><span>{formatCurrency(data.totalDiscount || 0)}</span></div>
-          <div className="flex justify-between p-3 text-sm"><span>Total Tax</span><span>{formatCurrency(data.totalTax || 0)}</span></div>
-          <div className="flex justify-between p-3 text-sm"><span>Sales Count</span><span>{data.salesCount || 0}</span></div>
+          <div className="rounded-lg bg-gray-100 px-4 py-2">
+            <span className="text-muted-foreground">Previous: </span>
+            <span className="font-semibold">{data.periods.previous?.from ? `${new Date(data.periods.previous.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(data.periods.previous.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</span>
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+      <Card>
+        <CardContent className="p-6">
+          <div className="space-y-3">
+            {rows.map((r, i) => (
+              <div key={i} className={cn('flex items-center justify-between rounded-lg p-3', r.bold ? 'bg-muted/50 font-bold' : '')}>
+                <div className="flex flex-col">
+                  <span>{r.label}</span>
+                  {hasComparison && r.prev !== undefined && (
+                    <span className="text-xs font-normal text-muted-foreground">Prev: {formatCurrency(r.prev || 0)}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {hasComparison && r.change !== undefined && (
+                    <span className={cn('text-xs font-normal', r.change >= 0 ? 'text-green-600' : 'text-red-600')}>
+                      {fmtChange(r.change)}
+                    </span>
+                  )}
+                  <span className={cn(r.highlight && r.value >= 0 ? 'text-green-600' : r.highlight && r.value < 0 ? 'text-red-600' : '')}>
+                    {formatCurrency(r.value || 0)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {/* Margins */}
+            {data.grossMargin !== undefined && (
+              <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm">
+                <span className="text-muted-foreground">Gross Margin</span>
+                <span className="font-semibold">{data.grossMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.grossMargin?.toFixed(1)}%)` : ''}</span>
+              </div>
+            )}
+            {data.netMargin !== undefined && (
+              <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm">
+                <span className="text-muted-foreground">Net Margin</span>
+                <span className="font-semibold">{data.netMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.netMargin?.toFixed(1)}%)` : ''}</span>
+              </div>
+            )}
+            <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
+              <span>Additional Info</span>
+            </div>
+            <div className="flex justify-between p-3 text-sm"><span>Total Discount</span><span>{formatCurrency(data.totalDiscount || 0)}</span></div>
+            <div className="flex justify-between p-3 text-sm"><span>Total Tax</span><span>{formatCurrency(data.totalTax || 0)}</span></div>
+            <div className="flex justify-between p-3 text-sm"><span>Sales Count</span><span>{data.salesCount || 0}</span></div>
+          </div>
+        </CardContent>
+      </Card>
+      {/* Auto-commentary */}
+      {data.commentary && data.commentary.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              Analysis & Commentary
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {data.commentary.map((c: string, i: number) => (
+              <div key={i} className="flex items-start gap-2 rounded-lg border-l-4 border-l-blue-500 bg-blue-50/50 p-3">
+                <Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" />
+                <p className="text-sm">{c}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
   )
 }
 
@@ -762,6 +834,264 @@ function AgingReport({ data }: { data: any }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+function ExecutiveSummaryReport({ data }: { data: any }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const { comparisons, insights, topGrowers, topDecliners, categoryAnalysis, branchAnalysis, paymentMethodAnalysis, snapshot, periods } = data
+
+  const insightIcon = (icon: string) => {
+    switch (icon) {
+      case 'trend-up': return <TrendingUp className="h-4 w-4" />
+      case 'trend-down': return <TrendingDown className="h-4 w-4" />
+      case 'alert': return <AlertTriangle className="h-4 w-4" />
+      case 'clock': return <Clock className="h-4 w-4" />
+      default: return <Info className="h-4 w-4" />
+    }
+  }
+
+  const insightColor = (type: string) => {
+    switch (type) {
+      case 'positive': return 'border-l-green-500 bg-green-50/50'
+      case 'negative': return 'border-l-red-500 bg-red-50/50'
+      case 'warning': return 'border-l-amber-500 bg-amber-50/50'
+      default: return 'border-l-blue-500 bg-blue-50/50'
+    }
+  }
+
+  const fmtPeriod = (p: any) => {
+    if (!p?.from) return ''
+    return `${new Date(p.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(p.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+  }
+
+  const categoryChartData = (categoryAnalysis || []).slice(0, 8).map((c: any) => ({
+    name: c.category,
+    current: c.currentRevenue,
+    previous: c.previousRevenue,
+  }))
+
+  const payChartData = (paymentMethodAnalysis || []).map((p: any) => ({
+    name: p.method.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+    value: p.total,
+    share: p.share,
+  }))
+
+  return (
+    <div className="space-y-6">
+      {/* Period labels */}
+      <div className="flex flex-wrap gap-4 text-sm">
+        <div className="rounded-lg bg-blue-50 px-4 py-2">
+          <span className="text-muted-foreground">Current: </span>
+          <span className="font-semibold">{fmtPeriod(periods?.current)}</span>
+        </div>
+        <div className="rounded-lg bg-gray-100 px-4 py-2">
+          <span className="text-muted-foreground">Previous: </span>
+          <span className="font-semibold">{fmtPeriod(periods?.previous)}</span>
+        </div>
+      </div>
+
+      {/* Comparison Cards */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {(comparisons || []).map((c: any, i: number) => (
+          <Card key={i} className={cn('border-l-4', c.change >= 0 ? 'border-l-green-500' : 'border-l-red-500')}>
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">{c.metric}</p>
+              <p className="mt-1 text-xl font-bold">
+                {c.format === 'currency' ? formatCurrency(c.current) : new Intl.NumberFormat('en-US').format(c.current)}
+              </p>
+              <div className="mt-1 flex items-center gap-1 text-xs">
+                {c.change >= 0 ? (
+                  <ArrowUpRight className="h-3 w-3 text-green-600" />
+                ) : (
+                  <ArrowDownRight className="h-3 w-3 text-red-600" />
+                )}
+                <span className={c.change >= 0 ? 'text-green-600' : 'text-red-600'}>
+                  {c.change >= 0 ? '+' : ''}{c.change.toFixed(1)}%
+                </span>
+                <span className="text-muted-foreground">vs prev</span>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Prev: {c.format === 'currency' ? formatCurrency(c.previous) : new Intl.NumberFormat('en-US').format(c.previous)}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Auto-Generated Insights */}
+      {insights && insights.length > 0 && (
+        <div>
+          <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <Lightbulb className="h-5 w-5 text-amber-500" />
+            Insights & Analysis
+          </h3>
+          <div className="space-y-2">
+            {insights.map((ins: any, i: number) => (
+              <div key={i} className={cn('flex items-start gap-3 rounded-lg border-l-4 p-3', insightColor(ins.type))}>
+                <div className="mt-0.5 shrink-0">{insightIcon(ins.icon)}</div>
+                <div>
+                  <p className="font-medium text-sm">{ins.title}</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">{ins.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Key Drivers: Top Growers & Decliners */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {topGrowers && topGrowers.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingUp className="h-4 w-4 text-green-600" />
+                Top Growing Products
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {topGrowers.map((p: any, i: number) => (
+                <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium text-sm">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.category} · {p.currentQty} sold (was {p.previousQty})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-sm text-green-600">+{formatCurrency(p.revenueChange)}</p>
+                    <p className="text-xs text-muted-foreground">{formatCurrency(p.currentRevenue)}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+        {topDecliners && topDecliners.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingDown className="h-4 w-4 text-red-600" />
+                Top Declining Products
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {topDecliners.map((p: any, i: number) => (
+                <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium text-sm">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.category} · {p.currentQty} sold (was {p.previousQty})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-sm text-red-600">{formatCurrency(p.revenueChange)}</p>
+                    <p className="text-xs text-muted-foreground">{formatCurrency(p.currentRevenue)}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Category & Branch Analysis */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {categoryChartData.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Category Performance (Current vs Previous)</CardTitle></CardHeader>
+            <CardContent className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={categoryChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-12} textAnchor="end" height={70} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Bar dataKey="previous" fill="#94a3b8" radius={[3, 3, 0, 0]} name="Previous" />
+                  <Bar dataKey="current" fill="#2563eb" radius={[3, 3, 0, 0]} name="Current" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+        {branchAnalysis && branchAnalysis.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Branch Performance</CardTitle></CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {branchAnalysis.map((b: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="font-medium text-sm">{b.branch}</p>
+                      <p className="text-xs text-muted-foreground">{b.salesCount} sales</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-sm">{formatCurrency(b.currentRevenue)}</p>
+                      <p className={cn('text-xs', b.change >= 0 ? 'text-green-600' : 'text-red-600')}>
+                        {b.change >= 0 ? '+' : ''}{b.change.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Payment Method Mix & Operational Snapshot */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {payChartData.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Payment Method Mix</CardTitle></CardHeader>
+            <CardContent className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={payChartData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                    {payChartData.map((_: any, idx: number) => (
+                      <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+        {snapshot && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Operational Snapshot</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Gross Margin</p>
+                <p className="font-bold">{snapshot.grossMargin?.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Net Margin</p>
+                <p className="font-bold">{snapshot.netMargin?.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Cash on Hand</p>
+                <p className="font-bold">{formatCurrency(snapshot.cashOnHand)}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Receivables</p>
+                <p className="font-bold">{formatCurrency(snapshot.receivablesOutstanding)}</p>
+                <p className="text-xs text-muted-foreground">{snapshot.receivablesCount} customers</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Products</p>
+                <p className="font-bold">{snapshot.productCount}</p>
+                {snapshot.lowStockCount > 0 && <p className="text-xs text-amber-600">{snapshot.lowStockCount} low stock</p>}
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Expiring Soon</p>
+                <p className="font-bold">{snapshot.expiringCount}</p>
+                <p className="text-xs text-muted-foreground">within 60 days</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )
@@ -932,7 +1262,8 @@ export default function ReportsPage() {
                         ))}
                       </div>
                     )}
-                    {currentReport.renderType === 'table' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'summary' && (
                       <>
                         {currentReport.id === 'salesSummary' ? (

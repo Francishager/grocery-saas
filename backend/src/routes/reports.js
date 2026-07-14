@@ -506,22 +506,117 @@ router.get("/inventory/slow-moving", authenticateToken, async (req, res) => {
 router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, expensesAgg, salesCount, salesWithItems] = await Promise.all([
-      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, discount: true, tax: true } }),
-      prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
-      prisma.sale.count({ where: scopedWhere(s, df(req)) }),
-      prisma.sale.findMany({
-        where: scopedWhere(s, df(req)),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
-      }),
+    const { from, to } = req.query;
+
+    // Determine current and previous period
+    let curStart, curEnd, prevStart, prevEnd;
+    if (from && to) {
+      curStart = new Date(from);
+      curEnd = new Date(to + "T23:59:59");
+      const duration = curEnd - curStart;
+      prevEnd = new Date(curStart.getTime() - 1);
+      prevStart = new Date(prevEnd.getTime() - duration);
+    } else {
+      const now = new Date();
+      curStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      curEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      prevEnd = curStart;
+    }
+
+    const curWhere = scopedWhere(s, { createdAt: { gte: curStart, lt: curEnd } });
+    const prevWhere = scopedWhere(s, { createdAt: { gte: prevStart, lt: prevEnd } });
+    const curExpWhere = scopedWhere(s, { date: { gte: curStart, lt: curEnd } });
+    const prevExpWhere = scopedWhere(s, { date: { gte: prevStart, lt: prevEnd } });
+
+    const [salesAgg, expensesAgg, salesCount, salesWithItems,
+           prevSalesAgg, prevExpensesAgg, prevSalesCount, prevSalesWithItems] = await Promise.all([
+      prisma.sale.aggregate({ where: curWhere, _sum: { total: true, discount: true, tax: true } }),
+      prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
+      prisma.sale.count({ where: curWhere }),
+      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, product: { select: { cost: true } } } } } }),
+      prisma.sale.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true } }),
+      prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
+      prisma.sale.count({ where: prevWhere }),
+      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, product: { select: { cost: true } } } } } }),
     ]);
+
     const revenue = salesAgg._sum.total || 0;
     const cogs = salesWithItems.reduce((sum, sale) =>
-      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
     const expenses = expensesAgg._sum.amount || 0;
     const grossProfit = revenue - cogs;
     const netProfit = grossProfit - expenses;
-    res.json({ revenue, cogs, grossProfit, expenses, netProfit, totalDiscount: salesAgg._sum.discount || 0, totalTax: salesAgg._sum.tax || 0, salesCount });
+
+    // Previous period
+    const prevRevenue = prevSalesAgg._sum.total || 0;
+    const prevCogs = prevSalesWithItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const prevExpenses = prevExpensesAgg._sum.amount || 0;
+    const prevGrossProfit = prevRevenue - prevCogs;
+    const prevNetProfit = prevGrossProfit - prevExpenses;
+
+    const pct = (cur, prev) => prev !== 0 ? ((cur - prev) / Math.abs(prev) * 100) : (cur > 0 ? 100 : 0);
+
+    // Margins
+    const grossMargin = revenue > 0 ? (grossProfit / revenue * 100) : 0;
+    const netMargin = revenue > 0 ? (netProfit / revenue * 100) : 0;
+    const prevGrossMargin = prevRevenue > 0 ? (prevGrossProfit / prevRevenue * 100) : 0;
+    const prevNetMargin = prevRevenue > 0 ? (prevNetProfit / prevRevenue * 100) : 0;
+
+    // Auto-commentary
+    const commentary = [];
+    if (prevRevenue > 0) {
+      const revChange = pct(revenue, prevRevenue);
+      if (revChange > 10) commentary.push(`Revenue grew ${revChange.toFixed(1)}% vs previous period.`);
+      else if (revChange < -10) commentary.push(`Revenue declined ${revChange.toFixed(1)}% vs previous period.`);
+    }
+    if (prevCogs !== 0) {
+      const cogsChange = pct(cogs, prevCogs);
+      const revChange = pct(revenue, prevRevenue);
+      if (cogsChange > revChange && cogsChange > 5) {
+        commentary.push(`COGS increased faster than revenue (${cogsChange.toFixed(1)}% vs ${revChange.toFixed(1)}%), squeezing gross margins.`);
+      } else if (cogsChange < revChange && cogsChange < 0) {
+        commentary.push(`COGS decreased while revenue grew, improving gross margins.`);
+      }
+    }
+    if (prevExpenses !== 0) {
+      const expChange = pct(expenses, prevExpenses);
+      if (expChange > 20) commentary.push(`Operating expenses surged ${expChange.toFixed(1)}% — review cost control.`);
+      else if (expChange < -15) commentary.push(`Operating expenses reduced by ${Math.abs(expChange).toFixed(1)}% — good cost discipline.`);
+    }
+    if (prevNetProfit !== 0) {
+      const profitChange = pct(netProfit, prevNetProfit);
+      if (profitChange > 15) commentary.push(`Net profit improved ${profitChange.toFixed(1)}%.`);
+      else if (profitChange < -15) commentary.push(`Net profit dropped ${profitChange.toFixed(1)}% — investigate causes.`);
+    }
+    const marginShift = netMargin - prevNetMargin;
+    if (Math.abs(marginShift) > 2) {
+      commentary.push(`Net margin ${marginShift > 0 ? 'improved' : 'contracted'} by ${Math.abs(marginShift).toFixed(1)}pp.`);
+    }
+
+    res.json({
+      revenue, cogs, grossProfit, expenses, netProfit,
+      totalDiscount: salesAgg._sum.discount || 0, totalTax: salesAgg._sum.tax || 0, salesCount,
+      grossMargin, netMargin,
+      previous: {
+        revenue: prevRevenue, cogs: prevCogs, grossProfit: prevGrossProfit,
+        expenses: prevExpenses, netProfit: prevNetProfit, salesCount: prevSalesCount,
+        grossMargin: prevGrossMargin, netMargin: prevNetMargin,
+      },
+      changes: {
+        revenue: pct(revenue, prevRevenue),
+        cogs: pct(cogs, prevCogs),
+        grossProfit: pct(grossProfit, prevGrossProfit),
+        expenses: pct(expenses, prevExpenses),
+        netProfit: pct(netProfit, prevNetProfit),
+      },
+      commentary,
+      periods: {
+        current: { from: curStart, to: curEnd },
+        previous: { from: prevStart, to: prevEnd },
+      },
+    });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -1580,5 +1675,337 @@ router.get("/fuel/meter-readings", authenticateToken, async (req, res) => {
     res.json({ data });
   } catch (err) { handleBranchError(res, err); }
 });
+
+// ==================== BUSINESS ANALYSIS & INSIGHTS ====================
+router.get("/analysis/executive-summary", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { from, to } = req.query;
+
+    // Determine current and previous period
+    let curStart, curEnd, prevStart, prevEnd;
+    if (from && to) {
+      curStart = new Date(from);
+      curEnd = new Date(to + "T23:59:59");
+      const duration = curEnd - curStart;
+      prevEnd = new Date(curStart.getTime() - 1);
+      prevStart = new Date(prevEnd.getTime() - duration);
+    } else {
+      const now = new Date();
+      curStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      curEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      prevEnd = curStart;
+    }
+
+    const curWhere = scopedWhere(s, { createdAt: { gte: curStart, lt: curEnd } });
+    const prevWhere = scopedWhere(s, { createdAt: { gte: prevStart, lt: prevEnd } });
+    const curExpWhere = scopedWhere(s, { date: { gte: curStart, lt: curEnd } });
+    const prevExpWhere = scopedWhere(s, { date: { gte: prevStart, lt: prevEnd } });
+
+    const [
+      curSalesAgg, prevSalesAgg, curExpAgg, prevExpAgg,
+      curSalesItems, prevSalesItems, curSalesFull, prevSalesFull,
+      curPurchasesAgg, prevPurchasesAgg,
+      products, lowStockProducts, expiringProducts,
+      customers, curReceivables, curCashAccounts,
+    ] = await Promise.all([
+      prisma.sale.aggregate({ where: curWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
+      prisma.sale.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
+      prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
+      prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
+      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, productId: true, total: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      prisma.sale.findMany({ where: curWhere, include: { items: { include: { product: { select: { name: true, category: { select: { name: true } } } } }, branch: { select: { name: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" }, take: 50 } }),
+      prisma.sale.findMany({ where: prevWhere, include: { items: { include: { product: { select: { name: true } } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 50 } }),
+      prisma.purchase.aggregate({ where: curWhere, _sum: { total: true } }),
+      prisma.purchase.aggregate({ where: prevWhere, _sum: { total: true } }),
+      prisma.product.count({ where: scopedWhere(s, { isActive: { not: false } }) }),
+      prisma.product.count({ where: scopedWhere(s, { isActive: { not: false }, quantity: { lte: 10 } }) }),
+      prisma.product.count({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null, lte: new Date(Date.now() + 60 * 86400000) } }) }),
+      prisma.customer.count({ where: scopedWhere(s) }),
+      prisma.customer.aggregate({ where: scopedWhere(s, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
+      prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
+    ]);
+
+    // Calculate COGS
+    const curCogs = curSalesItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const prevCogs = prevSalesItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
+
+    // Core metrics
+    const curRevenue = curSalesAgg._sum.total || 0;
+    const prevRevenue = prevSalesAgg._sum.total || 0;
+    const curExpenses = curExpAgg._sum.amount || 0;
+    const prevExpenses = prevExpAgg._sum.amount || 0;
+    const curGrossProfit = curRevenue - curCogs;
+    const prevGrossProfit = prevRevenue - prevCogs;
+    const curNetProfit = curGrossProfit - curExpenses;
+    const prevNetProfit = prevGrossProfit - prevExpenses;
+    const curSalesCount = curSalesAgg._count || 0;
+    const prevSalesCount = prevSalesAgg._count || 0;
+    const curAvgSale = curSalesCount > 0 ? curRevenue / curSalesCount : 0;
+    const prevAvgSale = prevSalesCount > 0 ? prevRevenue / prevSalesCount : 0;
+
+    // Helper: percentage change
+    const pct = (cur, prev) => prev !== 0 ? ((cur - prev) / Math.abs(prev) * 100) : (cur > 0 ? 100 : 0);
+    const fmtPct = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+
+    // Build comparison cards
+    const comparisons = [
+      { metric: 'Revenue', current: curRevenue, previous: prevRevenue, change: pct(curRevenue, prevRevenue), format: 'currency' },
+      { metric: 'COGS', current: curCogs, previous: prevCogs, change: pct(curCogs, prevCogs), format: 'currency' },
+      { metric: 'Gross Profit', current: curGrossProfit, previous: prevGrossProfit, change: pct(curGrossProfit, prevGrossProfit), format: 'currency' },
+      { metric: 'Operating Expenses', current: curExpenses, previous: prevExpenses, change: pct(curExpenses, prevExpenses), format: 'currency' },
+      { metric: 'Net Profit', current: curNetProfit, previous: prevNetProfit, change: pct(curNetProfit, prevNetProfit), format: 'currency' },
+      { metric: 'Sales Count', current: curSalesCount, previous: prevSalesCount, change: pct(curSalesCount, prevSalesCount), format: 'number' },
+      { metric: 'Avg Sale Value', current: curAvgSale, previous: prevAvgSale, change: pct(curAvgSale, prevAvgSale), format: 'currency' },
+      { metric: 'Purchases', current: curPurchasesAgg._sum.total || 0, previous: prevPurchasesAgg._sum.total || 0, change: pct(curPurchasesAgg._sum.total || 0, prevPurchasesAgg._sum.total || 0), format: 'currency' },
+    ];
+
+    // Product-level driver analysis (what drove the revenue change)
+    const curProductMap = {};
+    curSalesItems.forEach(sale => {
+      sale.items.forEach(item => {
+        const name = item.product?.name || 'Unknown';
+        const cat = item.product?.category?.name || 'Uncategorized';
+        if (!curProductMap[item.productId]) curProductMap[item.productId] = { name, category: cat, revenue: 0, qty: 0, cogs: 0 };
+        curProductMap[item.productId].revenue += item.total || 0;
+        curProductMap[item.productId].qty += item.quantity || 0;
+        curProductMap[item.productId].cogs += (item.product?.cost || 0) * item.quantity;
+      });
+    });
+    const prevProductMap = {};
+    prevSalesItems.forEach(sale => {
+      sale.items.forEach(item => {
+        const name = item.product?.name || 'Unknown';
+        const cat = item.product?.category?.name || 'Uncategorized';
+        if (!prevProductMap[item.productId]) prevProductMap[item.productId] = { name, category: cat, revenue: 0, qty: 0, cogs: 0 };
+        prevProductMap[item.productId].revenue += item.total || 0;
+        prevProductMap[item.productId].qty += item.quantity || 0;
+        prevProductMap[item.productId].cogs += (item.product?.cost || 0) * item.quantity;
+      });
+    });
+
+    const allProductIds = new Set([...Object.keys(curProductMap), ...Object.keys(prevProductMap)]);
+    const productDrivers = [];
+    allProductIds.forEach(id => {
+      const cur = curProductMap[id] || { name: 'Unknown', category: '—', revenue: 0, qty: 0, cogs: 0 };
+      const prev = prevProductMap[id] || { name: cur.name, category: cur.category, revenue: 0, qty: 0, cogs: 0 };
+      const revChange = cur.revenue - prev.revenue;
+      productDrivers.push({
+        name: cur.name,
+        category: cur.category,
+        currentRevenue: cur.revenue,
+        previousRevenue: prev.revenue,
+        revenueChange: revChange,
+        currentQty: cur.qty,
+        previousQty: prev.qty,
+        qtyChange: cur.qty - prev.qty,
+        currentProfit: cur.revenue - cur.cogs,
+        previousProfit: prev.revenue - prev.cogs,
+      });
+    });
+
+    // Top growers and decliners
+    const topGrowers = productDrivers
+      .filter(d => d.revenueChange > 0)
+      .sort((a, b) => b.revenueChange - a.revenueChange)
+      .slice(0, 5);
+    const topDecliners = productDrivers
+      .filter(d => d.revenueChange < 0)
+      .sort((a, b) => a.revenueChange - b.revenueChange)
+      .slice(0, 5);
+
+    // Category analysis
+    const curCatMap = {};
+    const prevCatMap = {};
+    productDrivers.forEach(d => {
+      if (!curCatMap[d.category]) curCatMap[d.category] = { revenue: 0, profit: 0, qty: 0 };
+      if (!prevCatMap[d.category]) prevCatMap[d.category] = { revenue: 0, profit: 0, qty: 0 };
+      curCatMap[d.category].revenue += d.currentRevenue;
+      curCatMap[d.category].profit += d.currentProfit;
+      curCatMap[d.category].qty += d.currentQty;
+      prevCatMap[d.category].revenue += d.previousRevenue;
+      prevCatMap[d.category].profit += d.previousProfit;
+      prevCatMap[d.category].qty += d.previousQty;
+    });
+    const categoryAnalysis = Object.keys(curCatMap).map(cat => ({
+      category: cat,
+      currentRevenue: curCatMap[cat].revenue,
+      previousRevenue: prevCatMap[cat]?.revenue || 0,
+      change: pct(curCatMap[cat].revenue, prevCatMap[cat]?.revenue || 0),
+      currentProfit: curCatMap[cat].profit,
+      currentQty: curCatMap[cat].qty,
+    })).sort((a, b) => b.currentRevenue - a.currentRevenue);
+
+    // Branch analysis
+    const curBranchMap = {};
+    const prevBranchMap = {};
+    curSalesFull.forEach(sale => {
+      const name = sale.branch?.name || 'Main';
+      if (!curBranchMap[name]) curBranchMap[name] = { revenue: 0, count: 0 };
+      curBranchMap[name].revenue += sale.total;
+      curBranchMap[name].count += 1;
+    });
+    prevSalesFull.forEach(sale => {
+      const name = sale.branch?.name || 'Main';
+      if (!prevBranchMap[name]) prevBranchMap[name] = { revenue: 0, count: 0 };
+      prevBranchMap[name].revenue += sale.total;
+      prevBranchMap[name].count += 1;
+    });
+    const branchAnalysis = Object.keys(curBranchMap).map(name => ({
+      branch: name,
+      currentRevenue: curBranchMap[name].revenue,
+      previousRevenue: prevBranchMap[name]?.revenue || 0,
+      change: pct(curBranchMap[name].revenue, prevBranchMap[name]?.revenue || 0),
+      salesCount: curBranchMap[name].count,
+    })).sort((a, b) => b.currentRevenue - a.currentRevenue);
+
+    // Payment method analysis
+    const curPayMap = {};
+    curSalesFull.forEach(sale => {
+      const m = sale.paymentMethod || 'cash';
+      if (!curPayMap[m]) curPayMap[m] = { total: 0, count: 0 };
+      curPayMap[m].total += sale.total;
+      curPayMap[m].count += 1;
+    });
+    const paymentMethodAnalysis = Object.keys(curPayMap).map(m => ({
+      method: m,
+      total: curPayMap[m].total,
+      count: curPayMap[m].count,
+      share: curRevenue > 0 ? (curPayMap[m].total / curRevenue * 100) : 0,
+    })).sort((a, b) => b.total - a.total);
+
+    // Generate auto-insights (the "why" and "how")
+    const insights = [];
+    const revChangePct = pct(curRevenue, prevRevenue);
+    const profitChangePct = pct(curNetProfit, prevNetProfit);
+    const expChangePct = pct(curExpenses, prevExpenses);
+    const marginChange = (curRevenue > 0 ? curNetProfit / curRevenue * 100 : 0) - (prevRevenue > 0 ? prevNetProfit / prevRevenue * 100 : 0);
+
+    // Revenue insight
+    if (prevRevenue > 0) {
+      if (revChangePct > 10) {
+        insights.push({ type: 'positive', icon: 'trend-up', title: 'Revenue Growth', text: `Revenue grew ${fmtPct(revChangePct)} compared to the previous period. ${topGrowers.length > 0 ? `Top contributor: ${topGrowers[0].name} (+${fmtCurrency(topGrowers[0].revenueChange)}).` : ''}` });
+      } else if (revChangePct < -10) {
+        insights.push({ type: 'negative', icon: 'trend-down', title: 'Revenue Decline', text: `Revenue dropped ${fmtPct(revChangePct)} compared to the previous period. ${topDecliners.length > 0 ? `Biggest decline: ${topDecliners[0].name} (${fmtCurrency(topDecliners[0].revenueChange)}).` : 'Investigate market conditions or stock availability.'}` });
+      } else {
+        insights.push({ type: 'neutral', icon: 'info', title: 'Revenue Stable', text: `Revenue changed by ${fmtPct(revChangePct)} — relatively stable period-over-period.` });
+      }
+    }
+
+    // Profitability insight
+    if (prevNetProfit !== 0) {
+      if (profitChangePct > 15) {
+        insights.push({ type: 'positive', icon: 'trend-up', title: 'Profitability Improvement', text: `Net profit increased ${fmtPct(profitChangePct)}. ${expChangePct < 0 ? `Expenses were reduced by ${fmtPct(Math.abs(expChangePct))}, contributing to better margins.` : curCogs < prevCogs ? `Lower COGS (by ${fmtCurrency(prevCogs - curCogs)}) improved gross margins.` : 'Revenue growth outpaced cost increases.'}` });
+      } else if (profitChangePct < -15) {
+        const reasons = [];
+        if (expChangePct > 10) reasons.push(`expenses rose ${fmtPct(expChangePct)}`);
+        if (curCogs > prevCogs && pct(curCogs, prevCogs) > revChangePct) reasons.push(`COGS grew faster than revenue`);
+        insights.push({ type: 'negative', icon: 'trend-down', title: 'Profitability Concern', text: `Net profit declined ${fmtPct(profitChangePct)}. ${reasons.length ? `Key factor(s): ${reasons.join(', ')}.` : 'Review pricing strategy and cost control.'}` });
+      }
+    }
+
+    // Margin insight
+    if (Math.abs(marginChange) > 2) {
+      insights.push({
+        type: marginChange > 0 ? 'positive' : 'negative',
+        icon: marginChange > 0 ? 'trend-up' : 'trend-down',
+        title: 'Profit Margin Shift',
+        text: `Net profit margin ${marginChange > 0 ? 'improved' : 'contracted'} by ${Math.abs(marginChange).toFixed(1)}pp (from ${(prevRevenue > 0 ? prevNetProfit / prevRevenue * 100 : 0).toFixed(1)}% to ${(curRevenue > 0 ? curNetProfit / curRevenue * 100 : 0).toFixed(1)}%).`,
+      });
+    }
+
+    // Expense insight
+    if (expChangePct > 20) {
+      insights.push({ type: 'warning', icon: 'alert', title: 'Expense Surge', text: `Operating expenses jumped ${fmtPct(expChangePct)} (${fmtCurrency(prevExpenses)} → ${fmtCurrency(curExpenses)}). Review expense categories for cost-saving opportunities.` });
+    } else if (expChangePct < -15) {
+      insights.push({ type: 'positive', icon: 'trend-down', title: 'Expense Reduction', text: `Operating expenses decreased by ${fmtPct(Math.abs(expChangePct))}. Good cost discipline maintained.` });
+    }
+
+    // Inventory alerts
+    if (lowStockProducts > 0) {
+      insights.push({ type: 'warning', icon: 'alert', title: 'Low Stock Alert', text: `${lowStockProducts} product(s) are at or below minimum stock level. Reorder soon to avoid stockouts.` });
+    }
+    if (expiringProducts > 0) {
+      insights.push({ type: 'warning', icon: 'clock', title: 'Expiry Warning', text: `${expiringProducts} product(s) expire within 60 days. Consider promotions to clear stock before expiry.` });
+    }
+
+    // Avg sale insight
+    if (prevAvgSale > 0 && Math.abs(pct(curAvgSale, prevAvgSale)) > 10) {
+      const dir = curAvgSale > prevAvgSale ? 'increased' : 'decreased';
+      insights.push({
+        type: curAvgSale > prevAvgSale ? 'positive' : 'negative',
+        icon: curAvgSale > prevAvgSale ? 'trend-up' : 'trend-down',
+        title: 'Average Transaction Value',
+        text: `Average sale ${dir} from ${fmtCurrency(prevAvgSale)} to ${fmtCurrency(curAvgSale)} (${fmtPct(pct(curAvgSale, prevAvgSale))}). ${curAvgSale > prevAvgSale ? 'Customers are spending more per visit.' : 'Consider upselling strategies or bundle offers.'}`,
+      });
+    }
+
+    // Discount insight
+    const curDiscount = curSalesAgg._sum.discount || 0;
+    const prevDiscount = prevSalesAgg._sum.discount || 0;
+    const curDiscRate = curRevenue > 0 ? (curDiscount / curRevenue * 100) : 0;
+    const prevDiscRate = prevRevenue > 0 ? (prevDiscount / prevRevenue * 100) : 0;
+    if (Math.abs(curDiscRate - prevDiscRate) > 2) {
+      insights.push({
+        type: curDiscRate > prevDiscRate ? 'warning' : 'positive',
+        icon: curDiscRate > prevDiscRate ? 'alert' : 'trend-up',
+        title: 'Discount Rate Change',
+        text: `Discount rate ${curDiscRate > prevDiscRate ? 'increased' : 'decreased'} from ${prevDiscRate.toFixed(1)}% to ${curDiscRate.toFixed(1)}% of revenue. ${curDiscRate > prevDiscRate ? 'Higher discounts may be eroding margins.' : 'Better pricing discipline is protecting margins.'}`,
+      });
+    }
+
+    // Category driver insight
+    if (categoryAnalysis.length > 0) {
+      const topCat = categoryAnalysis[0];
+      if (topCat.change > 20) {
+        insights.push({ type: 'positive', icon: 'trend-up', title: 'Category Performance', text: `${topCat.category} is your top revenue category (${fmtCurrency(topCat.currentRevenue)}) and grew ${fmtPct(topCat.change)} period-over-period.` });
+      } else if (topCat.change < -15) {
+        insights.push({ type: 'warning', icon: 'trend-down', title: 'Category Concern', text: `Your top category ${topCat.category} declined ${fmtPct(topCat.change)}. Investigate demand, pricing, or competition in this segment.` });
+      }
+    }
+
+    // Operational snapshot
+    const snapshot = {
+      productCount: products,
+      lowStockCount: lowStockProducts,
+      expiringCount: expiringProducts,
+      customerCount: customers,
+      receivablesOutstanding: curReceivables._sum.balance || 0,
+      receivablesCount: curReceivables._count,
+      cashOnHand: curCashAccounts._sum.balance || 0,
+      curDiscount,
+      curTax: curSalesAgg._sum.tax || 0,
+      grossMargin: curRevenue > 0 ? (curGrossProfit / curRevenue * 100) : 0,
+      netMargin: curRevenue > 0 ? (curNetProfit / curRevenue * 100) : 0,
+    };
+
+    res.json({
+      comparisons,
+      insights,
+      topGrowers,
+      topDecliners,
+      categoryAnalysis,
+      branchAnalysis,
+      paymentMethodAnalysis,
+      snapshot,
+      periods: {
+        current: { from: curStart, to: curEnd },
+        previous: { from: prevStart, to: prevEnd },
+      },
+    });
+  } catch (err) {
+    console.error("Executive summary error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+// Helper for currency formatting in insights
+function fmtCurrency(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'UGX', minimumFractionDigits: 0 }).format(value || 0);
+}
 
 export default router;

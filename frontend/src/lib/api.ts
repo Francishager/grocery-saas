@@ -649,6 +649,9 @@ export const reportsApiV2 = {
   manufacturingWaste: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/waste', { params }),
   manufacturingCostAnalysis: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/cost-analysis', { params }),
   manufacturingBom: (params?: ReportParams) => api.get<any>('/api/reports/manufacturing/bom', { params }),
+
+  // Business Analysis
+  executiveSummary: (params?: ReportParams) => api.get<any>('/api/reports/analysis/executive-summary', { params }),
 }
 
 // Admin endpoints
