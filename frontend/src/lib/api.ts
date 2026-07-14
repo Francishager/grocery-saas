@@ -1278,3 +1278,46 @@ export const referralApi = {
   adminAll: (page = 1, limit = 20) =>
     api.get<{ referrals: Referral[]; pagination: { page: number; limit: number; total: number; pages: number } }>('/api/referrals/admin/all', { params: { page, limit } }),
 }
+
+// User Guide Steps
+export interface UserGuideStep {
+  id: string;
+  category: string;
+  stepNumber: number;
+  title: string;
+  description: string;
+  imageUrl: string | null;
+  imagePublicId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const userGuideApi = {
+  list: (category?: string) =>
+    api.get<UserGuideStep[]>('/api/user-guide', { params: { category } }),
+
+  grouped: () =>
+    api.get<Record<string, UserGuideStep[]>>('/api/user-guide/grouped'),
+
+  create: (data: { category: string; stepNumber?: number; title: string; description: string }) =>
+    api.post<{ message: string; step: UserGuideStep }>('/api/user-guide', { body: data }),
+
+  update: (id: string, data: Partial<{ category: string; stepNumber: number; title: string; description: string; imageUrl: string | null; imagePublicId: string | null }>) =>
+    api.put<{ message: string; step: UserGuideStep }>(`/api/user-guide/${id}`, { body: data }),
+
+  delete: (id: string) =>
+    api.delete<{ message: string }>(`/api/user-guide/${id}`),
+
+  uploadImage: (id: string, file: File) => {
+    const formData = new FormData()
+    formData.append('image', file)
+    return fetch(`${API_URL}/api/user-guide/${id}/image`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+      body: formData,
+    }).then(r => r.json())
+  },
+
+  reorder: (category: string, steps: { id: string; stepNumber: number }[]) =>
+    api.put<{ message: string }>(`/api/user-guide/reorder/${category}`, { body: { steps } }),
+}

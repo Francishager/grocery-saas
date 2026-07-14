@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HelpCircle, ChevronDown, ChevronRight, X, Search } from 'lucide-react';
+import { userGuideApi, type UserGuideStep } from '@/lib/api';
 
 interface GuideSection {
   id: string;
@@ -163,7 +164,7 @@ const guideSections: GuideSection[] = [
     icon: '👥',
     description: 'Manage your team and permissions',
     topics: [
-      { label: 'Add Staff', detail: 'Invite team members by email. They receive an OTP to set their password.' },
+      { label: 'Add Staff', detail: 'Create staff team member accounts and share their login credentials. Staff members will log in using their email address and a one-time password (OTP), then set their own password during the account activation process.' },
       { label: 'Roles', detail: 'Assign roles: Owner, Manager, Accountant, Attendant. Each role has different permissions.' },
       { label: 'Granular Permissions', detail: 'Customize what each staff member can do: view, create, edit, delete per module.' },
       { label: 'Branch Assignment', detail: 'Assign staff to specific branches. They only see data for their assigned branch.' },
@@ -224,14 +225,42 @@ export default function UserGuideMenu() {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [apiSections, setApiSections] = useState<GuideSection[] | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    userGuideApi.grouped().then((data) => {
+      if (!mounted || !data || Object.keys(data).length === 0) return;
+      const sections: GuideSection[] = Object.entries(data).map(([category, steps]) => {
+        const staticInfo = guideSections.find((s) => s.id === category);
+        return {
+          id: category,
+          title: staticInfo?.title || category.charAt(0).toUpperCase() + category.slice(1),
+          icon: staticInfo?.icon || '📋',
+          description: staticInfo?.description || '',
+          topics: steps
+            .sort((a, b) => a.stepNumber - b.stepNumber)
+            .map((s: UserGuideStep) => ({
+              label: s.title,
+              detail: s.description,
+              imageUrl: s.imageUrl || undefined,
+            })),
+        };
+      });
+      setApiSections(sections);
+    }).catch(() => {});
+    return () => { mounted = false };
+  }, []);
+
+  const activeSections = apiSections || guideSections;
 
   const filteredSections = searchQuery
-    ? guideSections.filter(
+    ? activeSections.filter(
         (s) =>
           s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
           s.topics.some((t) => t.label.toLowerCase().includes(searchQuery.toLowerCase()) || t.detail.toLowerCase().includes(searchQuery.toLowerCase()))
       )
-    : guideSections;
+    : activeSections;
 
   const toggleSection = (id: string) => {
     setExpandedSection(expandedSection === id ? null : id);
@@ -320,9 +349,12 @@ export default function UserGuideMenu() {
                       {section.topics.map((topic, idx) => (
                         <div key={idx} className="flex gap-3">
                           <div className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5" />
-                          <div>
+                          <div className="flex-1">
                             <p className="font-medium text-sm text-gray-900">{topic.label}</p>
                             <p className="text-sm text-gray-600">{topic.detail}</p>
+                            {(topic as any).imageUrl && (
+                              <img src={(topic as any).imageUrl} alt={topic.label} className="mt-2 rounded-lg border border-gray-200 max-w-md w-full" />
+                            )}
                           </div>
                         </div>
                       ))}
@@ -334,7 +366,7 @@ export default function UserGuideMenu() {
 
             {/* Footer */}
             <div className="bg-gray-50 border-t border-gray-200 px-6 py-3 flex items-center justify-between">
-              <span className="text-sm text-gray-500">{filteredSections.length} sections</span>
+              <span className="text-sm text-gray-500">{filteredSections.length} sections{apiSections && ' (managed)'}</span>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition text-sm font-medium"

@@ -2542,3 +2542,22 @@ model TaxPayment {
   @@index([tenantId, branchId])
   @@map("tax_payments")
 }
+
+// =====================================================
+// USER GUIDE STEPS — SaaS admin manages step-by-step guides with images
+// =====================================================
+
+model UserGuideStep {
+  id          String   @id @default(cuid())
+  category    String   // e.g. "sales", "inventory", "branches", "staff"
+  stepNumber  Int      // order within category
+  title       String
+  description String
+  imageUrl    String?  // Cloudinary URL
+  imagePublicId String? // Cloudinary public_id for deletion
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category, stepNumber])
+  @@map("user_guide_steps")
+}

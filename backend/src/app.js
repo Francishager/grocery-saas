@@ -39,6 +39,7 @@ import serviceRouter from "../routes/service.js";
 import referralRoutes from "./routes/referrals.js";
 import tenantVisibilityRoutes from "./routes/tenant-visibility.js";
 import onboardingRoutes from "./routes/onboarding.js";
+import userGuideRoutes from "./routes/user-guide.js";
 
 import { auditMiddleware } from "./utils/audit.js";
 
@@ -192,6 +193,7 @@ app.use("/api/manufacturing", manufacturingRouter);
 app.use("/api/agriculture", agricultureRouter);
 app.use("/api/service", serviceRouter);
 app.use("/api/referrals", referralRoutes);
+app.use("/api/user-guide", userGuideRoutes);
 
 // 404
 app.use("/{*path}", (req, res) => {

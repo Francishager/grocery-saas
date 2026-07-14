@@ -61,6 +61,7 @@ import InvitationsList from '@/pages/SaaSAdmin/InvitationsList'
 import TenantDetailPage from '@/pages/SaaSAdmin/TenantDetailPage'
 import PlatformAuditPage from '@/pages/SaaSAdmin/PlatformAuditPage'
 import ReferralDashboard from '@/pages/SaaSAdmin/ReferralDashboard'
+import UserGuidePage from '@/pages/SaaSAdmin/UserGuidePage'
  
 // Public Route — redirects logged-in users to their dashboard
 function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children: React.ReactNode; redirectTo?: string }) {
@@ -126,6 +127,7 @@ function App() {
           <Route path="businesses/:tenantId" element={<TenantDetailPage />} />
           <Route path="audit" element={<PlatformAuditPage />} />
           <Route path="referrals" element={<ReferralDashboard />} />
+          <Route path="user-guide" element={<UserGuidePage />} />
         </Route>
  
         {/* ========== Tenant (Business) Routes — /tenant/* ========== */}
