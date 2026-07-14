@@ -322,7 +322,7 @@ router.get("/", authenticateToken, requirePermission("canViewSale"), async (req,
       if (from) where.createdAt.gte = new Date(from);
       if (to) where.createdAt.lte = new Date(to);
     }
-    const sales = await prisma.sale.findMany({ where, include: { items: true, branch: true, user: { select: { id: true, fname: true, lname: true } } }, orderBy: { createdAt: "desc" }, skip: (Number(page) - 1) * Number(limit), take: Number(limit) });
+    const sales = await prisma.sale.findMany({ where, include: { items: { include: { product: { select: { id: true, name: true } } } }, branch: true, user: { select: { id: true, fname: true, lname: true } } }, orderBy: { createdAt: "desc" }, skip: (Number(page) - 1) * Number(limit), take: Number(limit) });
     const count = await prisma.sale.count({ where });
     res.json({ sales, total: count, page: Number(page), limit: Number(limit) });
   } catch (err) {

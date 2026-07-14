@@ -7,7 +7,7 @@ interface GuideSection {
   title: string;
   icon: string;
   description: string;
-  topics: { label: string; detail: string }[];
+  topics: { label: string; detail: string; imageUrl?: string }[];
 }
 
 const guideSections: GuideSection[] = [
@@ -232,9 +232,10 @@ export default function UserGuideMenu() {
     let mounted = true;
     userGuideApi.grouped().then((data) => {
       if (!mounted || !data || Object.keys(data).length === 0) return;
-      const sections: GuideSection[] = Object.entries(data).map(([category, steps]) => {
+      const apiCategoryMap = new Map<string, GuideSection>();
+      Object.entries(data).forEach(([category, steps]) => {
         const staticInfo = guideSections.find((s) => s.id === category);
-        return {
+        apiCategoryMap.set(category, {
           id: category,
           title: staticInfo?.title || category.charAt(0).toUpperCase() + category.slice(1),
           icon: staticInfo?.icon || '📋',
@@ -246,9 +247,32 @@ export default function UserGuideMenu() {
               detail: s.description,
               imageUrl: s.imageUrl || undefined,
             })),
-        };
+        });
       });
-      setApiSections(sections);
+      // Merge: for each static section, if API has data for that category, merge topics (API first, then static); otherwise keep static as-is
+      const merged: GuideSection[] = guideSections.map((staticSection) => {
+        const apiSection = apiCategoryMap.get(staticSection.id);
+        if (apiSection) {
+          // Combine API topics with static topics (API first, then any static topics not duplicated)
+          const apiLabels = new Set(apiSection.topics.map((t) => t.label.toLowerCase()));
+          const extraStatic = staticSection.topics.filter(
+            (t) => !apiLabels.has(t.label.toLowerCase())
+          );
+          return {
+            ...staticSection,
+            topics: [...apiSection.topics, ...extraStatic],
+          };
+        }
+        return staticSection;
+      });
+      // Also add any API categories that don't exist in static sections
+      const staticIds = new Set(guideSections.map((s) => s.id));
+      apiCategoryMap.forEach((apiSection) => {
+        if (!staticIds.has(apiSection.id)) {
+          merged.push(apiSection);
+        }
+      });
+      setApiSections(merged);
     }).catch(() => {});
     return () => { mounted = false };
   }, []);
@@ -380,8 +404,8 @@ export default function UserGuideMenu() {
                               <div className="flex-1 min-w-0">
                                 <p className="font-medium text-sm text-gray-900">{topic.label}</p>
                                 <p className="text-sm text-gray-600">{topic.detail}</p>
-                                {(topic as any).imageUrl && (
-                                  <img src={(topic as any).imageUrl} alt={topic.label} className="mt-2 rounded-lg border border-gray-200 w-full max-w-2xl" />
+                                {topic.imageUrl && (
+                                  <img src={topic.imageUrl} alt={topic.label} className="mt-2 rounded-lg border border-gray-200 w-full max-w-2xl" />
                                 )}
                               </div>
                             </div>
