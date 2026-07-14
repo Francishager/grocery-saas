@@ -2,7 +2,7 @@ import { Router } from "express";
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
-import { notifyOwnerOfDailySalesSummary } from "../src/utils/notifications.js";
+import { notifyOwnerOfDailySalesSummary, notifyOwnerOfExpiringProducts } from "../src/utils/notifications.js";
 
 const router = Router();
 
@@ -106,7 +106,7 @@ router.post("/daily-sales-summary", authenticateToken, async (req, res) => {
     const expiringSoonCount = products.filter((product) => {
       if (!product.expiryDate) return false;
       const expiryDate = new Date(product.expiryDate);
-      return expiryDate <= new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      return expiryDate <= new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
     }).length;
     const summary = {
       salesCount: count,
@@ -125,6 +125,24 @@ router.post("/daily-sales-summary", authenticateToken, async (req, res) => {
 });
 
 // Send broadcast (SMS/Email template — actual sending would need provider integration)
+router.post("/expiry-alert", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const products = await prisma.product.findMany({
+      where: { tenantId, isActive: { not: false }, expiryDate: { not: null } },
+      select: { id: true, name: true, quantity: true, expiryDate: true },
+    });
+    const notification = await notifyOwnerOfExpiringProducts({ tenantId, products });
+    res.json({
+      message: notification ? 'Expiry alert notification sent' : 'No products expiring soon',
+      notification,
+      expiringCount: notification ? notification.metadata?.expiringCount || 0 : 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send expiry alert' });
+  }
+});
+
 router.post("/broadcast", authenticateToken, requirePermission("canCreateCommunication"), requireFeature("communication"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;

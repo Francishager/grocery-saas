@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/api'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalBranches } from '@/db/hybrid'
 import { useToast } from '@/hooks/use-toast'
-import { Users, Search, Wallet, TrendingUp, TrendingDown, ChevronDown, ChevronRight, Info } from 'lucide-react'
+import { Users, Search, Wallet, TrendingUp, TrendingDown, ChevronDown, ChevronRight, Info, Receipt } from 'lucide-react'
 
 interface CashTransaction {
   id: string
@@ -54,6 +54,9 @@ export default function StaffTillSheetPage() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [expandedStaff, setExpandedStaff] = useState<string | null>(null)
+  const [expandedRef, setExpandedRef] = useState<string | null>(null)
+  const [refDetails, setRefDetails] = useState<Record<string, any>>({})
+  const [loadingRef, setLoadingRef] = useState<string | null>(null)
 
   const fetchTillSheets = async () => {
     try {
@@ -123,6 +126,110 @@ export default function StaffTillSheetPage() {
     if (['sale', 'receipt', 'income'].includes(type)) return 'text-green-600'
     if (['expense', 'payment', 'transfer'].includes(type)) return 'text-red-600'
     return ''
+  }
+
+  const fetchRefDetails = async (txn: CashTransaction) => {
+    if (refDetails[txn.id]) {
+      setExpandedRef(expandedRef === txn.id ? null : txn.id)
+      return
+    }
+    setLoadingRef(txn.id)
+    try {
+      let endpoint = ''
+      if (txn.type === 'sale' && txn.reference) {
+        endpoint = `/api/sales?search=${encodeURIComponent(txn.reference)}`
+      } else if (txn.type === 'expense') {
+        endpoint = `/api/expenses?search=${encodeURIComponent(txn.reference || txn.description || '')}`
+      } else if (txn.type === 'receipt') {
+        endpoint = `/api/customer-payments?reference=${encodeURIComponent(txn.reference || '')}`
+      } else if (txn.type === 'payment') {
+        endpoint = `/api/supplier-payments?reference=${encodeURIComponent(txn.reference || '')}`
+      }
+      if (endpoint) {
+        const res = await apiFetch(endpoint)
+        if (res.ok) {
+          const data = await res.json()
+          setRefDetails(prev => ({ ...prev, [txn.id]: data }))
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingRef(null)
+      setExpandedRef(expandedRef === txn.id ? null : txn.id)
+    }
+  }
+
+  const renderRefDetails = (txn: CashTransaction) => {
+    if (expandedRef !== txn.id) return null
+    const details = refDetails[txn.id]
+    if (loadingRef === txn.id) {
+      return (
+        <tr><td colSpan={7} className="py-2 px-3 bg-muted/20 text-xs text-muted-foreground italic">Loading details...</td></tr>
+      )
+    }
+    if (!details) {
+      return (
+        <tr><td colSpan={7} className="py-2 px-3 bg-muted/20 text-xs text-muted-foreground italic">No additional details available for this reference.</td></tr>
+      )
+    }
+    // Sale details
+    if (txn.type === 'sale' && details.sales) {
+      const sale = details.sales.find((s: any) => s.receiptNo === txn.reference || s.id === txn.reference)
+      if (sale) {
+        return (
+          <tr><td colSpan={7} className="py-3 px-3 bg-muted/20">
+            <div className="flex flex-wrap gap-4 text-xs">
+              <div><span className="text-muted-foreground">Receipt:</span> <span className="font-mono font-semibold">{sale.receiptNo}</span></div>
+              <div><span className="text-muted-foreground">Date:</span> {new Date(sale.createdAt).toLocaleString()}</div>
+              <div><span className="text-muted-foreground">Payment:</span> {sale.paymentMethod}</div>
+              <div><span className="text-muted-foreground">Subtotal:</span> {fmt(sale.subtotal)}</div>
+              <div><span className="text-muted-foreground">Discount:</span> {fmt(sale.discount)}</div>
+              <div><span className="text-muted-foreground">Tax:</span> {fmt(sale.tax)}</div>
+              <div><span className="text-muted-foreground">Total:</span> <span className="font-semibold">{fmt(sale.total)}</span></div>
+              {sale.branch?.name && <div><span className="text-muted-foreground">Branch:</span> {sale.branch.name}</div>}
+              {sale.items && sale.items.length > 0 && (
+                <div className="w-full mt-1">
+                  <span className="text-muted-foreground">Items:</span>
+                  <div className="mt-1 space-y-0.5">
+                    {sale.items.map((item: any, idx: number) => (
+                      <div key={idx} className="flex gap-2">
+                        <span className="font-medium">{item.product?.name || item.productName || 'Unknown'}</span>
+                        <span className="text-muted-foreground">×{item.quantity}</span>
+                        <span className="font-mono">@{fmt(item.price)}</span>
+                        <span className="font-mono font-semibold">= {fmt(item.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </td></tr>
+        )
+      }
+    }
+    // Expense details
+    if (txn.type === 'expense' && details.expenses) {
+      const expense = details.expenses.find((e: any) => e.id === txn.reference || e.description === txn.description)
+      if (expense) {
+        return (
+          <tr><td colSpan={7} className="py-3 px-3 bg-muted/20">
+            <div className="flex flex-wrap gap-4 text-xs">
+              <div><span className="text-muted-foreground">Category:</span> <span className="font-semibold">{expense.category}</span></div>
+              <div><span className="text-muted-foreground">Amount:</span> <span className="font-semibold">{fmt(expense.amount)}</span></div>
+              <div><span className="text-muted-foreground">Date:</span> {new Date(expense.date).toLocaleDateString()}</div>
+              <div><span className="text-muted-foreground">Payment:</span> {expense.paymentMethod || 'cash'}</div>
+              {expense.notes && <div><span className="text-muted-foreground">Notes:</span> {expense.notes}</div>}
+              {expense.branch?.name && <div><span className="text-muted-foreground">Branch:</span> {expense.branch.name}</div>}
+            </div>
+          </td></tr>
+        )
+      }
+    }
+    // Generic fallback
+    return (
+      <tr><td colSpan={7} className="py-2 px-3 bg-muted/20 text-xs text-muted-foreground italic">No additional details available for this reference.</td></tr>
+    )
   }
 
   return (
@@ -283,19 +390,33 @@ export default function StaffTillSheetPage() {
                         </thead>
                         <tbody>
                           {till.transactions.map(txn => (
-                            <tr key={txn.id} className="border-b hover:bg-muted/30">
+                            <React.Fragment key={txn.id}>
+                            <tr className="border-b hover:bg-muted/30">
                               <td className="py-2 px-3 whitespace-nowrap">{new Date(txn.createdAt).toLocaleString()}</td>
                               <td className="py-2 px-3">
                                 <Badge variant="secondary" className="text-xs">{txnTypeLabel(txn.type)}</Badge>
                               </td>
                               <td className="py-2 px-3">{txn.description || '—'}</td>
                               <td className="py-2 px-3">{txn.account?.name || '—'}</td>
-                              <td className="py-2 px-3 font-mono">{txn.reference || '—'}</td>
+                              <td className="py-2 px-3 font-mono">
+                                {txn.reference ? (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); fetchRefDetails(txn) }}
+                                    className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 font-mono"
+                                  >
+                                    <Receipt className="h-3 w-3" />
+                                    {txn.reference}
+                                    {expandedRef === txn.id ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                  </button>
+                                ) : '—'}
+                              </td>
                               <td className={`py-2 px-3 text-right font-mono font-semibold ${txnTypeColor(txn.type)}`}>
                                 {['sale', 'receipt', 'income'].includes(txn.type) ? '+' : '-'}{fmt(txn.amount)}
                               </td>
                               <td className="py-2 px-3 text-right font-mono">{fmt(txn.balanceAfter)}</td>
                             </tr>
+                            {renderRefDetails(txn)}
+                            </React.Fragment>
                           ))}
                           {till.transactions.length === 0 && (
                             <tr><td colSpan={7} className="text-center py-4 text-muted-foreground">No transactions in this period</td></tr>

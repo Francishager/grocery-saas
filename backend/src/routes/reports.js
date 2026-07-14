@@ -106,13 +106,17 @@ router.get("/expenses", authenticateToken, async (req, res) => {
 router.get("/profit", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, purchasesAgg, expensesAgg] = await Promise.all([
+    const [salesAgg, expensesAgg, salesWithItems] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
-      prisma.purchase.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
+      prisma.sale.findMany({
+        where: scopedWhere(s, df(req)),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
     ]);
     const revenue = salesAgg._sum.total || 0;
-    const cogs = purchasesAgg._sum.total || 0;
+    const cogs = salesWithItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
     const expenses = expensesAgg._sum.amount || 0;
     res.json({ revenue, cogs, grossProfit: revenue - cogs, expenses, netProfit: revenue - cogs - expenses });
   } catch (err) { console.error("Profit report error:", err); handleBranchError(res, err); }
@@ -452,7 +456,7 @@ router.get("/inventory/expiry", authenticateToken, async (req, res) => {
     const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { expiryDate: "asc" } });
     const now = new Date();
     const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, expiryDate: p.expiryDate, daysUntilExpiry: Math.floor((new Date(p.expiryDate) - now) / 86400000), isExpired: new Date(p.expiryDate) < now }));
-    res.json({ data, summary: { count: data.length, expired: data.filter((p) => p.isExpired).length, expiringSoon: data.filter((p) => !p.isExpired && p.daysUntilExpiry <= 30).length } });
+    res.json({ data, summary: { count: data.length, expired: data.filter((p) => p.isExpired).length, expiringSoon: data.filter((p) => !p.isExpired && p.daysUntilExpiry <= 60).length } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -502,14 +506,18 @@ router.get("/inventory/slow-moving", authenticateToken, async (req, res) => {
 router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, purchasesAgg, expensesAgg, salesCount] = await Promise.all([
+    const [salesAgg, expensesAgg, salesCount, salesWithItems] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, discount: true, tax: true } }),
-      prisma.purchase.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
       prisma.sale.count({ where: scopedWhere(s, df(req)) }),
+      prisma.sale.findMany({
+        where: scopedWhere(s, df(req)),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
     ]);
     const revenue = salesAgg._sum.total || 0;
-    const cogs = purchasesAgg._sum.total || 0;
+    const cogs = salesWithItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
     const expenses = expensesAgg._sum.amount || 0;
     const grossProfit = revenue - cogs;
     const netProfit = grossProfit - expenses;
@@ -558,23 +566,29 @@ router.get("/financial/cash-flow", authenticateToken, async (req, res) => {
 router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, purchasesAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts] = await Promise.all([
+    const [salesAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts, salesWithItems] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
-      prisma.purchase.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
-      prisma.product.aggregate({ where: scopedWhere(s, { isActive: { not: false } }), _sum: { quantity: true } }),
+      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
       prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
       prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
       prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
+      prisma.sale.findMany({
+        where: scopedWhere(s, df(req)),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
     ]);
+    const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
+    const cogs = salesWithItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
     res.json({
       accounts: [
         { account: "Cash & Bank", debit: cashAccounts._sum.balance || 0, credit: 0 },
         { account: "Accounts Receivable", debit: customerBalances._sum.balance || 0, credit: 0 },
-        { account: "Inventory", debit: products._sum.quantity || 0, credit: 0 },
+        { account: "Inventory", debit: inventoryValue, credit: 0 },
         { account: "Accounts Payable", debit: 0, credit: supplierBalances._sum.balance || 0 },
         { account: "Sales Revenue", debit: 0, credit: salesAgg._sum.total || 0 },
-        { account: "Cost of Goods Sold", debit: purchasesAgg._sum.total || 0, credit: 0 },
+        { account: "Cost of Goods Sold", debit: cogs, credit: 0 },
         { account: "Operating Expenses", debit: expensesAgg._sum.amount || 0, credit: 0 },
       ],
     });
@@ -584,17 +598,22 @@ router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
 router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [cashAccounts, customerBalances, products, supplierBalances, salesAgg, purchasesAgg, expensesAgg] = await Promise.all([
+    const [cashAccounts, customerBalances, products, supplierBalances, salesAgg, expensesAgg, salesWithItems] = await Promise.all([
       prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
       prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
-      prisma.product.aggregate({ where: scopedWhere(s, { isActive: { not: false } }), _sum: { quantity: true } }),
+      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
       prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
       prisma.sale.aggregate({ where: scopedWhere(s), _sum: { total: true } }),
-      prisma.purchase.aggregate({ where: scopedWhere(s), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s), _sum: { amount: true } }),
+      prisma.sale.findMany({
+        where: scopedWhere(s),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
     ]);
-    const inventoryValue = products._sum.quantity || 0;
-    const retainedEarnings = (salesAgg._sum.total || 0) - (purchasesAgg._sum.total || 0) - (expensesAgg._sum.amount || 0);
+    const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
+    const cogs = salesWithItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const retainedEarnings = (salesAgg._sum.total || 0) - cogs - (expensesAgg._sum.amount || 0);
     const totalAssets = (cashAccounts._sum.balance || 0) + (customerBalances._sum.balance || 0) + inventoryValue;
     const totalLiabilities = supplierBalances._sum.balance || 0;
     res.json({
@@ -777,13 +796,20 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
 router.get("/decision-support", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [sales, purchases, products, expenses, suppliers] = await Promise.all([
+    const [sales, purchases, products, expenses, suppliers, salesWithItems] = await Promise.all([
       prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
       prisma.supplierPurchase.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, minStock: true, expiryDate: true } }),
       prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), select: { amount: true } }),
-      prisma.supplier.findMany({ where: scopedWhere(s), select: { balance: true } })
+      prisma.supplier.findMany({ where: scopedWhere(s), select: { balance: true } }),
+      prisma.sale.findMany({
+        where: scopedWhere(s, df(req)),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
     ]);
+
+    const cogs = salesWithItems.reduce((sum, sale) =>
+      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
 
     const summary = buildDecisionSupportSummary({
       sales,
@@ -791,6 +817,7 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
       products,
       expenses,
       suppliers,
+      cogs,
     });
 
     res.json({ data: summary, summary });

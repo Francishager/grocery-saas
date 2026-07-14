@@ -13,15 +13,20 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    const [salesThisMonth, salesLastMonth, purchasesThisMonth, expensesThisMonth, products, lowStockProducts, customers, receivables] = await Promise.all([
+    const [salesThisMonth, salesLastMonth, purchasesThisMonth, expensesThisMonth, products, lowStockProducts, expiringProducts, customers, receivables, salesWithItemsThisMonth] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true, tax: true, discount: true }, _count: true }),
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
       prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: startOfMonth } }), _sum: { amount: true } }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
+      prisma.product.count({ where: scopedWhere(scope, { isActive: true, expiryDate: { not: null, lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000) } }) }),
       prisma.customer.count({ where: scopedWhere(scope) }),
       prisma.customer.aggregate({ where: scopedWhere(scope, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
+      prisma.sale.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
     ]);
 
     const revenueThisMonth = salesThisMonth._sum.total || 0;
@@ -29,7 +34,9 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const revenueChange = revenueLastMonth ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1) : 0;
     const totalExpenses = expensesThisMonth._sum.amount || 0;
     const totalPurchases = purchasesThisMonth._sum.total || 0;
-    const grossProfit = revenueThisMonth - totalPurchases;
+    const cogs = salesWithItemsThisMonth.reduce((sum, sale) =>
+      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const grossProfit = revenueThisMonth - cogs;
     const netProfit = grossProfit - totalExpenses;
 
     res.json({
@@ -40,10 +47,12 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       totalDiscount: salesThisMonth._sum.discount || 0,
       purchases: totalPurchases,
       expenses: totalExpenses,
+      cogs,
       grossProfit,
       netProfit,
       productCount: products,
       lowStockCount: lowStockProducts,
+      expiringCount: expiringProducts,
       customerCount: customers,
       receivablesOutstanding: receivables._sum.balance || 0,
       receivablesCount: receivables._count,
@@ -97,13 +106,17 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       labels.push(start.toLocaleString("default", { month: "short" }));
 
-      const [saleAgg, purchAgg, expAgg] = await Promise.all([
+      const [saleAgg, expAgg, salesWithItems] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
-        prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: start, lt: end } }), _sum: { amount: true } }),
+        prisma.sale.findMany({
+          where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
+          select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        }),
       ]);
       const rev = saleAgg._sum.total || 0;
-      const cogs = purchAgg._sum.total || 0;
+      const cogs = salesWithItems.reduce((sum, sale) =>
+        sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
       const exp = expAgg._sum.amount || 0;
       grossProfit.push(rev - cogs);
       netProfit.push(rev - cogs - exp);

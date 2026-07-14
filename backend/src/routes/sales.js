@@ -72,6 +72,7 @@ async function checkedSaleItems(items, scope) {
       unitName,
       conversionFactor,
       itemType: product.itemType || "product",
+      productName: product.name,
       total: Math.max(0, lineTotal - totalDiscount),
     };
   });
@@ -136,7 +137,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           notes,
-          items: { create: saleItems.map(({ baseQty, itemType, ...rest }) => rest) },
+          items: { create: saleItems.map(({ baseQty, itemType, productName, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
       });
@@ -181,7 +182,11 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       tenantId: scope.tenantId,
       sale,
       user: await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null),
-      productNames: saleItems.map((item) => item.product?.name || item.productId),
+      itemDetails: saleItems.map((item) => ({
+        name: item.productName || item.productId,
+        price: item.price,
+      })),
+      branchName: sale.branch?.name || null,
     });
 
     res.status(201).json({ message: "Sale recorded", sale });
@@ -247,7 +252,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           amountPaid: amountPaid != null ? Number(amountPaid) : null,
           changeGiven: changeGiven != null ? Number(changeGiven) : null,
-          items: { create: saleItems.map(({ baseQty, itemType, ...rest }) => rest) },
+          items: { create: saleItems.map(({ baseQty, itemType, productName, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
       });
@@ -292,7 +297,11 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       tenantId: scope.tenantId,
       sale,
       user: await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null),
-      productNames: saleItems.map((item) => item.product?.name || item.productId),
+      itemDetails: saleItems.map((item) => ({
+        name: item.productName || item.productId,
+        price: item.price,
+      })),
+      branchName: sale.branch?.name || null,
     });
 
     res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale });

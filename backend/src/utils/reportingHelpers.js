@@ -35,18 +35,19 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
   };
 }
 
-export function buildDecisionSupportSummary({ sales = [], purchases = [], products = [], expenses = [], suppliers = [] }) {
+export function buildDecisionSupportSummary({ sales = [], purchases = [], products = [], expenses = [], suppliers = [], cogs = null }) {
   const salesTotal = Array.isArray(sales) ? sales.reduce((sum, item) => sum + Number(item?.total || 0), 0) : 0;
   const purchasesTotal = Array.isArray(purchases) ? purchases.reduce((sum, item) => sum + Number(item?.total || 0), 0) : 0;
   const expensesTotal = Array.isArray(expenses) ? expenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0) : 0;
   const supplierBalanceTotal = Array.isArray(suppliers) ? suppliers.reduce((sum, item) => sum + Number(item?.balance || 0), 0) : 0;
+  const actualCogs = cogs != null ? cogs : purchasesTotal;
 
   const now = new Date();
   const expiringSoonProducts = (Array.isArray(products) ? products : []).filter((product) => {
     const expiryDate = product?.expiryDate ? new Date(product.expiryDate) : null;
     if (!expiryDate || Number.isNaN(expiryDate.getTime())) return false;
     const diffDays = Math.floor((expiryDate.getTime() - now.getTime()) / 86400000);
-    return diffDays <= 30;
+    return diffDays <= 60;
   }).length;
 
   const lowStockProducts = (Array.isArray(products) ? products : []).filter((product) => {
@@ -56,8 +57,9 @@ export function buildDecisionSupportSummary({ sales = [], purchases = [], produc
   }).length;
 
   return {
-    grossProfit: salesTotal - purchasesTotal,
-    netProfit: salesTotal - purchasesTotal - expensesTotal,
+    grossProfit: salesTotal - actualCogs,
+    netProfit: salesTotal - actualCogs - expensesTotal,
+    cogs: actualCogs,
     lowStockProducts,
     expiringSoonProducts,
     supplierBalanceTotal,

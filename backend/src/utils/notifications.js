@@ -34,22 +34,32 @@ export async function createTenantNotification({ prismaClient = prisma, tenantId
   });
 }
 
-export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale, user, productNames = [] }) {
+export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale, user, productNames = [], branchName = null, itemDetails = [] }) {
   if (!tenantId) return null;
   const owner = await prismaClient.user.findFirst({
     where: { tenantId, role: 'owner' },
     select: { id: true },
   });
   if (!owner) return null;
-  const summary = productNames.length ? `New sale of ${productNames.join(', ')}.` : 'A new sale was recorded.';
+  const currency = sale?.currency || 'UGX';
+  let summary;
+  if (itemDetails.length) {
+    const itemLines = itemDetails.map(i => `${i.name} (${formatCurrency(i.price, currency)})`).join(', ');
+    summary = `New sale: ${itemLines}.`;
+  } else if (productNames.length) {
+    summary = `New sale of ${productNames.join(', ')}.`;
+  } else {
+    summary = 'A new sale was recorded.';
+  }
+  const branchInfo = branchName ? ` Branch: ${branchName}.` : '';
   return createTenantNotification({
     prismaClient,
     tenantId,
     userId: owner.id,
     title: 'New sale recorded',
-    message: `${summary} Total ${formatCurrency(sale?.total || 0, sale?.currency || 'UGX')}.`,
+    message: `${summary} Total ${formatCurrency(sale?.total || 0, currency)}.${branchInfo}`,
     type: 'success',
-    metadata: { saleId: sale?.id, receiptNo: sale?.receiptNo, userId: user?.id },
+    metadata: { saleId: sale?.id, receiptNo: sale?.receiptNo, userId: user?.id, branchName, itemDetails },
   });
 }
 
@@ -68,6 +78,36 @@ export async function notifyOwnerOfLowStock({ prismaClient = prisma, tenantId, p
     message: `${product.name} is running low. Current stock: ${product.quantity} ${product.baseUnit || 'units'} (min: ${product.minStock || 0}).`,
     type: 'warning',
     metadata: { productId: product.id, quantity: product.quantity, minStock: product.minStock },
+  });
+}
+
+export async function notifyOwnerOfExpiringProducts({ prismaClient = prisma, tenantId, products = [] }) {
+  if (!tenantId || !products.length) return null;
+  const owner = await prismaClient.user.findFirst({
+    where: { tenantId, role: 'owner' },
+    select: { id: true },
+  });
+  if (!owner) return null;
+  const now = new Date();
+  const twoMonthsFromNow = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
+  const expiring = products.filter((p) => {
+    if (!p.expiryDate) return false;
+    const exp = new Date(p.expiryDate);
+    return exp > now && exp <= twoMonthsFromNow;
+  });
+  if (!expiring.length) return null;
+  const itemList = expiring.map(p => {
+    const days = Math.floor((new Date(p.expiryDate) - now) / 86400000);
+    return `${p.name} (${days} day${days === 1 ? '' : 's'} left, qty: ${p.quantity})`;
+  }).join('; ');
+  return createTenantNotification({
+    prismaClient,
+    tenantId,
+    userId: owner.id,
+    title: 'Products expiring soon',
+    message: `${expiring.length} product${expiring.length === 1 ? '' : 's'} expiring within 2 months: ${itemList}.`,
+    type: 'warning',
+    metadata: { expiringCount: expiring.length, productIds: expiring.map(p => p.id) },
   });
 }
 
