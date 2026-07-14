@@ -266,10 +266,22 @@ function StepModal({
   const [stepNumber, setStepNumber] = useState(step?.stepNumber || 1)
   const [title, setTitle] = useState(step?.title || '')
   const [description, setDescription] = useState(step?.description || '')
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(step?.imageUrl || null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const allCategories = [...new Set([...categories, ...existingCategories])].sort()
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImageFile(file)
+    const reader = new FileReader()
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string)
+    reader.readAsDataURL(file)
+  }
 
   async function handleSave() {
     if (!category || !title || !description) {
@@ -279,13 +291,20 @@ function StepModal({
     setSaving(true)
     setError('')
     try {
+      let savedStep: UserGuideStep
       if (step) {
         const result = await userGuideApi.update(step.id, { category, stepNumber, title, description })
-        onSaved(result.step, false)
+        savedStep = result.step
       } else {
         const result = await userGuideApi.create({ category, stepNumber, title, description })
-        onSaved(result.step, true)
+        savedStep = result.step
       }
+      // Upload image if one was selected
+      if (imageFile) {
+        const uploadResult = await userGuideApi.uploadImage(savedStep.id, imageFile)
+        if (uploadResult.step) savedStep = uploadResult.step
+      }
+      onSaved(savedStep, !step)
     } catch (err) {
       console.error('Save failed:', err)
       setError('Failed to save step')
@@ -350,6 +369,41 @@ function StepModal({
               rows={4}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Step Image</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            {imagePreview ? (
+              <div className="relative inline-block">
+                <img src={imagePreview} alt="Preview" className="h-32 w-32 object-cover rounded-lg border" />
+                <button
+                  type="button"
+                  onClick={() => { setImageFile(null); setImagePreview(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                  className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="h-32 w-32 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center hover:border-blue-500 hover:bg-blue-50 transition"
+              >
+                <Upload className="h-6 w-6 text-gray-400 mb-1" />
+                <span className="text-xs text-gray-500">Upload Image</span>
+              </button>
+            )}
+            {imagePreview && !imageFile && step?.imageUrl && (
+              <p className="text-xs text-gray-400 mt-1">Current image. Select a new file to replace.</p>
+            )}
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
