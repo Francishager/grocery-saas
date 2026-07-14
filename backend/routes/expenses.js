@@ -417,7 +417,7 @@ router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpens
         // Mobile money helpers (reuse existing columns)
         phoneNumber: account.type === 'mobile_money' ? account.accountNumber : null,
         mobileMoneyName: account.type === 'mobile_money' ? account.accountHolder : null,
-        network: null,
+        network: account.type === 'mobile_money' ? account.branchName : null,
       }
     })
 
@@ -431,26 +431,30 @@ router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpens
 // Create cash account
 router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
-    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId } = req.body
+    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
+
+    // Map frontend mobile money fields to schema columns
+    const resolvedAccountNumber = accountNumber || phoneNumber || null
+    const resolvedAccountHolder = accountHolder || mobileMoneyName || null
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'Account name is required' })
     }
-    if (!type || !['cash', 'mobile_money', 'bank', 'card'].includes(type)) {
-      return res.status(400).json({ error: 'Valid account type is required (cash, mobile_money, bank, card)' })
+    if (!type || !['cash', 'mobile_money', 'bank', 'card', 'safe'].includes(type)) {
+      return res.status(400).json({ error: 'Valid account type is required (cash, mobile_money, bank, safe, card)' })
     }
     // Bank accounts require bank name and account number
     if (type === 'bank') {
       if (!bankName || !String(bankName).trim()) {
         return res.status(400).json({ error: 'Bank name is required for bank accounts' })
       }
-      if (!accountNumber || !String(accountNumber).trim()) {
+      if (!resolvedAccountNumber || !String(resolvedAccountNumber).trim()) {
         return res.status(400).json({ error: 'Account number is required for bank accounts' })
       }
     }
     // Mobile money requires phone number (accountNumber)
     if (type === 'mobile_money') {
-      if (!accountNumber || !String(accountNumber).trim()) {
+      if (!resolvedAccountNumber || !String(resolvedAccountNumber).trim()) {
         return res.status(400).json({ error: 'Phone number is required for mobile money accounts' })
       }
     }
@@ -475,11 +479,11 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExp
         name,
         type,
         currency,
-        accountNumber: accountNumber || null,
+        accountNumber: resolvedAccountNumber,
         bankName: type === 'bank' ? bankName : null,
-        accountHolder: accountHolder || null,
-        branchName: type === 'bank' ? (branchName || null) : null,
-        balance: balanceValue
+        accountHolder: resolvedAccountHolder,
+        branchName: type === 'bank' ? (branchName || null) : (type === 'mobile_money' ? (network || null) : null),
+        balance: balanceValue,
       }
     })
 
@@ -509,24 +513,28 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExp
 router.put('/cash-accounts/:id', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
-    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive } = req.body
+    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
+
+    // Map frontend mobile money fields to schema columns
+    const resolvedAccountNumber = accountNumber || phoneNumber || null
+    const resolvedAccountHolder = accountHolder || mobileMoneyName || null
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'Account name is required' })
     }
-    if (!type || !['cash', 'mobile_money', 'bank', 'card'].includes(type)) {
-      return res.status(400).json({ error: 'Valid account type is required (cash, mobile_money, bank, card)' })
+    if (!type || !['cash', 'mobile_money', 'bank', 'card', 'safe'].includes(type)) {
+      return res.status(400).json({ error: 'Valid account type is required (cash, mobile_money, bank, safe, card)' })
     }
     if (type === 'bank') {
       if (!bankName || !String(bankName).trim()) {
         return res.status(400).json({ error: 'Bank name is required for bank accounts' })
       }
-      if (!accountNumber || !String(accountNumber).trim()) {
+      if (!resolvedAccountNumber || !String(resolvedAccountNumber).trim()) {
         return res.status(400).json({ error: 'Account number is required for bank accounts' })
       }
     }
     if (type === 'mobile_money') {
-      if (!accountNumber || !String(accountNumber).trim()) {
+      if (!resolvedAccountNumber || !String(resolvedAccountNumber).trim()) {
         return res.status(400).json({ error: 'Phone number is required for mobile money accounts' })
       }
     }
@@ -559,10 +567,10 @@ router.put('/cash-accounts/:id', authenticateToken, requirePermission('canCreate
         name,
         type,
         currency,
-        accountNumber: accountNumber || null,
+        accountNumber: resolvedAccountNumber,
         bankName: type === 'bank' ? bankName : null,
-        accountHolder: accountHolder || null,
-        branchName: type === 'bank' ? (branchName || null) : null,
+        accountHolder: resolvedAccountHolder,
+        branchName: type === 'bank' ? (branchName || null) : (type === 'mobile_money' ? (network || null) : null),
         balance: balanceValue,
         ...(typeof isActive === 'boolean' ? { isActive } : {}),
       }
