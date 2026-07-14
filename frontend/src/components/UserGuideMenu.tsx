@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HelpCircle, ChevronDown, ChevronRight, X, Search } from 'lucide-react';
+import { HelpCircle, ChevronDown, ChevronRight, X, Search, Minimize2, Maximize2 } from 'lucide-react';
 import { userGuideApi, type UserGuideStep } from '@/lib/api';
 
 interface GuideSection {
@@ -224,6 +224,7 @@ const guideSections: GuideSection[] = [
 export default function UserGuideMenu() {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [apiSections, setApiSections] = useState<GuideSection[] | null>(null);
 
@@ -287,93 +288,122 @@ export default function UserGuideMenu() {
         </button>
       </div>
 
-      {/* Full guide modal */}
+      {/* Full guide — slide-in panel from right */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-50">
+          {/* Backdrop */}
+          {!isMinimized && (
+            <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setIsModalOpen(false)} />
+          )}
+
+          {/* Panel */}
+          <div
+            className={`absolute right-0 top-0 h-full bg-white shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
+              isMinimized
+                ? 'w-full sm:w-[420px] max-h-[60px] bottom-0 top-auto rounded-t-lg'
+                : 'w-full sm:w-[680px] lg:w-[850px]'
+            }`}
+          >
             {/* Header */}
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <HelpCircle className="w-6 h-6" />
-                <div>
-                  <h2 className="text-2xl font-bold">JibuSales User Guide</h2>
-                  <p className="text-sm text-indigo-100">Everything you need to know about each feature</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-white hover:bg-white/20 rounded-full p-2 transition"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Search */}
-            <div className="bg-gray-50 border-b border-gray-200 px-6 py-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search features..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-400"
-                />
-              </div>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-2">
-              {filteredSections.length === 0 && (
-                <p className="text-center text-gray-500 py-8">No results found for "{searchQuery}"</p>
-              )}
-              {filteredSections.map((section) => (
-                <div key={section.id} className="border border-gray-200 rounded-lg overflow-hidden">
-                  <button
-                    onClick={() => toggleSection(section.id)}
-                    className="w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition text-left"
-                  >
-                    <span className="text-2xl">{section.icon}</span>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900">{section.title}</h3>
-                      <p className="text-sm text-gray-500">{section.description}</p>
-                    </div>
-                    {expandedSection === section.id ? (
-                      <ChevronDown className="w-5 h-5 text-gray-400" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-gray-400" />
-                    )}
-                  </button>
-                  {expandedSection === section.id && (
-                    <div className="border-t border-gray-200 bg-gray-50 p-4 space-y-3">
-                      {section.topics.map((topic, idx) => (
-                        <div key={idx} className="flex gap-3">
-                          <div className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5" />
-                          <div className="flex-1">
-                            <p className="font-medium text-sm text-gray-900">{topic.label}</p>
-                            <p className="text-sm text-gray-600">{topic.detail}</p>
-                            {(topic as any).imageUrl && (
-                              <img src={(topic as any).imageUrl} alt={topic.label} className="mt-2 rounded-lg border border-gray-200 max-w-md w-full" />
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-5 py-4 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <HelpCircle className="w-5 h-5 flex-shrink-0" />
+                <div className="min-w-0">
+                  <h2 className="text-lg font-bold truncate">JibuSales User Guide</h2>
+                  {!isMinimized && (
+                    <p className="text-xs text-indigo-100 truncate">Everything you need to know about each feature</p>
                   )}
                 </div>
-              ))}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => setIsMinimized(!isMinimized)}
+                  className="text-white hover:bg-white/20 rounded-full p-2 transition"
+                  title={isMinimized ? 'Expand' : 'Minimize'}
+                >
+                  {isMinimized ? <Maximize2 className="w-5 h-5" /> : <Minimize2 className="w-5 h-5" />}
+                </button>
+                <button
+                  onClick={() => { setIsModalOpen(false); setIsMinimized(false); }}
+                  className="text-white hover:bg-white/20 rounded-full p-2 transition"
+                  title="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            {/* Footer */}
-            <div className="bg-gray-50 border-t border-gray-200 px-6 py-3 flex items-center justify-between">
-              <span className="text-sm text-gray-500">{filteredSections.length} sections{apiSections && ' (managed)'}</span>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition text-sm font-medium"
-              >
-                Close
-              </button>
-            </div>
+            {/* Search + Content (hidden when minimized) */}
+            {!isMinimized && (
+              <>
+                {/* Search */}
+                <div className="bg-gray-50 border-b border-gray-200 px-5 py-3 flex-shrink-0">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search features..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-2">
+                  {filteredSections.length === 0 && (
+                    <p className="text-center text-gray-500 py-8">No results found for "{searchQuery}"</p>
+                  )}
+                  {filteredSections.map((section) => (
+                    <div key={section.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => toggleSection(section.id)}
+                        className="w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition text-left"
+                      >
+                        <span className="text-2xl flex-shrink-0">{section.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-gray-900">{section.title}</h3>
+                          <p className="text-sm text-gray-500 truncate">{section.description}</p>
+                        </div>
+                        {expandedSection === section.id ? (
+                          <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                        )}
+                      </button>
+                      {expandedSection === section.id && (
+                        <div className="border-t border-gray-200 bg-gray-50 p-4 space-y-3">
+                          {section.topics.map((topic, idx) => (
+                            <div key={idx} className="flex gap-3">
+                              <div className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5" />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm text-gray-900">{topic.label}</p>
+                                <p className="text-sm text-gray-600">{topic.detail}</p>
+                                {(topic as any).imageUrl && (
+                                  <img src={(topic as any).imageUrl} alt={topic.label} className="mt-2 rounded-lg border border-gray-200 w-full max-w-2xl" />
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer */}
+                <div className="bg-gray-50 border-t border-gray-200 px-5 py-3 flex items-center justify-between flex-shrink-0">
+                  <span className="text-sm text-gray-500">{filteredSections.length} sections{apiSections && ' (managed)'}</span>
+                  <button
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition text-sm font-medium"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
