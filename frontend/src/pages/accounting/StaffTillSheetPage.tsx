@@ -189,18 +189,27 @@ export default function StaffTillSheetPage() {
               <div><span className="text-muted-foreground">Total:</span> <span className="font-semibold">{fmt(sale.total)}</span></div>
               {sale.branch?.name && <div><span className="text-muted-foreground">Branch:</span> {sale.branch.name}</div>}
               {sale.items && sale.items.length > 0 && (
-                <div className="w-full mt-1">
-                  <span className="text-muted-foreground">Items:</span>
-                  <div className="mt-1 space-y-0.5">
-                    {sale.items.map((item: any, idx: number) => (
-                      <div key={idx} className="flex gap-2">
-                        <span className="font-medium">{item.product?.name || item.productName || 'Unknown'}</span>
-                        <span className="text-muted-foreground">×{item.quantity}</span>
-                        <span className="font-mono">@{fmt(item.price)}</span>
-                        <span className="font-mono font-semibold">= {fmt(item.total)}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="w-full mt-2">
+                  <table className="w-full text-xs border border-gray-200 rounded">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="text-left py-1 px-2 font-medium text-gray-600">Item</th>
+                        <th className="text-right py-1 px-2 font-medium text-gray-600">Qty</th>
+                        <th className="text-right py-1 px-2 font-medium text-gray-600">Price</th>
+                        <th className="text-right py-1 px-2 font-medium text-gray-600">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {sale.items.map((item: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="py-1 px-2 font-medium">{item.product?.name || item.productName || 'Unknown'}</td>
+                          <td className="py-1 px-2 text-right text-muted-foreground">{item.quantity}</td>
+                          <td className="py-1 px-2 text-right font-mono">{fmt(item.price)}</td>
+                          <td className="py-1 px-2 text-right font-mono font-semibold">{fmt(item.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
