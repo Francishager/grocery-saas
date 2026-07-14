@@ -288,7 +288,7 @@ export default function UserGuideMenu() {
         </button>
       </div>
 
-      {/* Full guide — slide-in panel from right */}
+      {/* Full guide — slide-in panel from left */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50">
           {/* Backdrop */}
@@ -298,7 +298,7 @@ export default function UserGuideMenu() {
 
           {/* Panel */}
           <div
-            className={`absolute right-0 top-0 h-full bg-white shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
+            className={`absolute left-0 top-0 h-full bg-white shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
               isMinimized
                 ? 'w-full sm:w-[420px] max-h-[60px] bottom-0 top-auto rounded-t-lg'
                 : 'w-full sm:w-[680px] lg:w-[850px]'
