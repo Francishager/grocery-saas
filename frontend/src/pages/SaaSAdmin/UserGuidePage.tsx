@@ -3,17 +3,34 @@ import { userGuideApi, type UserGuideStep } from '@/lib/api'
 import { Plus, Trash2, Upload, X, Image as ImageIcon, ChevronDown, ChevronRight, Pencil, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const CATEGORIES = [
-  'dashboard', 'inventory', 'sales', 'accounting', 'receivables', 'payables',
-  'reports', 'fuel', 'restaurant', 'manufacturing', 'agriculture', 'service',
-  'staff', 'branches', 'settings', 'subscription', 'offline',
-]
+const CATEGORY_INFO: Record<string, { label: string; icon: string; description: string }> = {
+  dashboard:      { label: 'Dashboard',           icon: '📊', description: 'Your business command center' },
+  inventory:      { label: 'Inventory Management', icon: '📦', description: 'Track products, services, and rentals' },
+  sales:          { label: 'Sales Management',    icon: '💰', description: 'Record and track transactions' },
+  accounting:     { label: 'Accounting',          icon: '🧮', description: 'Financial management and bookkeeping' },
+  receivables:    { label: 'Receivables',         icon: '🧾', description: 'Track money owed to you' },
+  payables:       { label: 'Payables',            icon: '📄', description: 'Track money you owe suppliers' },
+  reports:        { label: 'Reports & Analytics', icon: '📈', description: 'Understand your business performance' },
+  fuel:           { label: 'Fuel Station',       icon: '⛽', description: 'Manage fuel pump operations' },
+  restaurant:     { label: 'Restaurant',          icon: '🍽️', description: 'Manage restaurant operations' },
+  manufacturing:  { label: 'Manufacturing',      icon: '🏭', description: 'Track production processes' },
+  agriculture:    { label: 'Agriculture',         icon: '🌾', description: 'Manage farm operations' },
+  service:        { label: 'Service Management',  icon: '🔧', description: 'Track service appointments and work orders' },
+  staff:          { label: 'Staff & Roles',       icon: '👥', description: 'Manage your team and permissions' },
+  branches:       { label: 'Branches',            icon: '🏢', description: 'Multi-location management' },
+  settings:       { label: 'Settings',            icon: '⚙️', description: 'Configure your platform' },
+  subscription:   { label: 'Subscription & Plans', icon: '💎', description: 'Manage your subscription' },
+  offline:        { label: 'Offline Mode',        icon: '📴', description: 'Work without internet' },
+}
+
+const CATEGORIES = Object.keys(CATEGORY_INFO)
 
 export default function UserGuidePage() {
   const [steps, setSteps] = useState<UserGuideStep[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [addModalCategory, setAddModalCategory] = useState<string>('')
   const [editingStep, setEditingStep] = useState<UserGuideStep | null>(null)
   const [uploadingId, setUploadingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -39,7 +56,12 @@ export default function UserGuidePage() {
     return acc
   }, {})
 
-  const sortedCategories = Object.keys(grouped).sort()
+  const sortedCategories = CATEGORIES
+
+  function getNextStepNumber(category: string) {
+    const existing = grouped[category] || []
+    return existing.length > 0 ? Math.max(...existing.map(s => s.stepNumber)) + 1 : 1
+  }
 
   function handleFileSelect(id: string) {
     setPendingUploadId(id)
@@ -96,7 +118,7 @@ export default function UserGuidePage() {
           <p className="text-sm text-muted-foreground mt-1">Manage step-by-step guides with images for tenant users</p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => { setAddModalCategory(''); setShowAddModal(true) }}
           className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
         >
           <Plus className="h-4 w-4" />
@@ -123,7 +145,10 @@ export default function UserGuidePage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {sortedCategories.map(cat => (
+          {sortedCategories.map(cat => {
+            const catSteps = grouped[cat] || []
+            const info = CATEGORY_INFO[cat]
+            return (
             <div key={cat} className="rounded-lg border border-gray-200 overflow-hidden">
               <button
                 onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)}
@@ -135,16 +160,37 @@ export default function UserGuidePage() {
                   ) : (
                     <ChevronRight className="h-5 w-5 text-gray-400" />
                   )}
-                  <span className="font-semibold capitalize">{cat}</span>
+                  {info && <span className="text-xl">{info.icon}</span>}
+                  <div>
+                    <span className="font-semibold">{info?.label || cat}</span>
+                    {info && <p className="text-xs text-gray-500">{info.description}</p>}
+                  </div>
                   <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">
-                    {grouped[cat].length} step{grouped[cat].length !== 1 ? 's' : ''}
+                    {catSteps.length} step{catSteps.length !== 1 ? 's' : ''}
                   </span>
                 </div>
               </button>
 
               {expandedCategory === cat && (
                 <div className="border-t border-gray-200 divide-y divide-gray-100">
-                  {grouped[cat]
+                  {/* Add step button inside expanded section */}
+                  <div className="p-3 bg-gray-50/50 border-b border-gray-100">
+                    <button
+                      onClick={() => { setAddModalCategory(cat); setShowAddModal(true) }}
+                      className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add step to {info?.label || cat}
+                    </button>
+                  </div>
+
+                  {catSteps.length === 0 && (
+                    <div className="p-6 text-center text-sm text-gray-400">
+                      No steps yet. Click "Add step" above to create the first one.
+                    </div>
+                  )}
+
+                  {catSteps
                     .sort((a, b) => a.stepNumber - b.stepNumber)
                     .map(step => (
                       <div key={step.id} className="flex items-start gap-4 p-4 hover:bg-gray-50/50">
@@ -224,7 +270,8 @@ export default function UserGuidePage() {
                 </div>
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -233,7 +280,9 @@ export default function UserGuidePage() {
           step={editingStep}
           categories={CATEGORIES}
           existingCategories={sortedCategories}
-          onClose={() => { setShowAddModal(false); setEditingStep(null) }}
+          defaultCategory={addModalCategory}
+          defaultStepNumber={addModalCategory ? getNextStepNumber(addModalCategory) : 1}
+          onClose={() => { setShowAddModal(false); setEditingStep(null); setAddModalCategory('') }}
           onSaved={(step, isNew) => {
             if (isNew) {
               setSteps(prev => [...prev, step])
@@ -242,6 +291,7 @@ export default function UserGuidePage() {
             }
             setShowAddModal(false)
             setEditingStep(null)
+            setAddModalCategory('')
           }}
         />
       )}
@@ -253,17 +303,21 @@ function StepModal({
   step,
   categories,
   existingCategories,
+  defaultCategory = '',
+  defaultStepNumber = 1,
   onClose,
   onSaved,
 }: {
   step: UserGuideStep | null
   categories: string[]
   existingCategories: string[]
+  defaultCategory?: string
+  defaultStepNumber?: number
   onClose: () => void
   onSaved: (step: UserGuideStep, isNew: boolean) => void
 }) {
-  const [category, setCategory] = useState(step?.category || '')
-  const [stepNumber, setStepNumber] = useState(step?.stepNumber || 1)
+  const [category, setCategory] = useState(step?.category || defaultCategory || '')
+  const [stepNumber, setStepNumber] = useState(step?.stepNumber || defaultStepNumber)
   const [title, setTitle] = useState(step?.title || '')
   const [description, setDescription] = useState(step?.description || '')
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -325,17 +379,19 @@ function StepModal({
 
         <div className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-            <input
-              list="guide-categories"
+            <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+            <select
               value={category}
               onChange={e => setCategory(e.target.value)}
-              placeholder="e.g. dashboard, inventory, sales"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-            <datalist id="guide-categories">
-              {allCategories.map(c => <option key={c} value={c} />)}
-            </datalist>
+            >
+              <option value="">Select a section...</option>
+              {allCategories.map(c => (
+                <option key={c} value={c}>
+                  {CATEGORY_INFO[c] ? `${CATEGORY_INFO[c].icon} ${CATEGORY_INFO[c].label}` : c}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
