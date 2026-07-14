@@ -628,17 +628,28 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, purchases, expenses, customerPayments, supplierPayments] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       prisma.purchase.findMany({ where: scopedWhere(s, df(req)), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), select: { id: true, category: true, amount: true, date: true }, orderBy: { date: "desc" } }),
       prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       prisma.supplierPayment.findMany({ where: scopedWhere(s, df(req)), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
     ]);
     const entries = [
-      ...sales.map((x) => ({ date: x.createdAt, account: "Sales Revenue", description: `Sale ${x.receiptNo}`, debit: 0, credit: x.total })),
-      ...purchases.map((x) => ({ date: x.createdAt, account: "Cost of Goods Sold", description: `Purchase ${x.refNo || ""}`, debit: x.total, credit: 0 })),
+      // Sales: credit Sales Revenue, debit COGS (perpetual inventory)
+      ...sales.flatMap((x) => {
+        const cogs = x.items.reduce((sum, item) => sum + (item.product?.cost || 0) * item.quantity, 0);
+        return [
+          { date: x.createdAt, account: "Sales Revenue", description: `Sale ${x.receiptNo}`, debit: 0, credit: x.total },
+          { date: x.createdAt, account: "Cost of Goods Sold", description: `Sale ${x.receiptNo}`, debit: cogs, credit: 0 },
+        ];
+      }),
+      // Purchases: debit Inventory (asset, not COGS)
+      ...purchases.map((x) => ({ date: x.createdAt, account: "Inventory", description: `Purchase ${x.refNo || ""}`, debit: x.total, credit: 0 })),
+      // Expenses: debit expense category
       ...expenses.map((x) => ({ date: x.date, account: x.category, description: "Expense", debit: x.amount, credit: 0 })),
+      // Customer payments: debit Cash
       ...customerPayments.map((x) => ({ date: x.createdAt, account: "Cash", description: "Customer Payment", debit: x.amount, credit: 0 })),
+      // Supplier payments: credit Accounts Payable
       ...supplierPayments.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: "Supplier Payment", debit: 0, credit: x.amount })),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
     res.json({ data: entries });

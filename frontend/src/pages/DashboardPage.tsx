@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff } from 'lucide-react'
-import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData } from '@/lib/api'
+import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown } from 'lucide-react'
+import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData, type DailyPerformanceData } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const [profitLoss, setProfitLoss] = useState<ProfitLossData | null>(null)
   const [topProducts, setTopProducts] = useState<TopProduct[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodData[]>([])
+  const [dailyPerf, setDailyPerf] = useState<DailyPerformanceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [isOfflineData, setIsOfflineData] = useState(false)
   const { toast } = useToast()
@@ -56,18 +57,20 @@ export default function DashboardPage() {
     }
 
     try {
-      const [k, sc, pl, tp, pm] = await Promise.all([
+      const [k, sc, pl, tp, pm, dp] = await Promise.all([
         dashboardApi.getKpis(),
         dashboardApi.getSalesChart(),
         dashboardApi.getProfitLoss(),
         dashboardApi.getTopProducts(),
         dashboardApi.getPaymentMethods(),
+        dashboardApi.getDailyPerformance(),
       ])
       setKpis(k)
       setSalesChart(sc)
       setProfitLoss(pl)
       setTopProducts(tp as any || [])
       setPaymentMethods(pm as any || [])
+      setDailyPerf(dp as any || null)
       setIsOfflineData(false)
     } catch (error: any) {
       // API failed — fall back to local data
@@ -295,6 +298,61 @@ export default function DashboardPage() {
         </Card>
         )}
       </div>
+
+      {/* Daily Performance Chart */}
+      {hasFeature('sales') && hasPermission('canViewSale') && dailyPerf && (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-blue-500" /> Daily Performance</CardTitle>
+              <CardDescription>Revenue & profit per day — {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</CardDescription>
+            </div>
+            {dailyPerf.summary.bestDay && (
+              <div className="flex gap-4 text-xs">
+                <div className="flex items-center gap-1 text-green-600">
+                  <Award className="h-3 w-3" />
+                  Best: Day {dailyPerf.summary.bestDay.day} ({formatCurrency(dailyPerf.summary.bestDay.revenue)})
+                </div>
+                {dailyPerf.summary.worstDay && (
+                  <div className="flex items-center gap-1 text-red-500">
+                    <TrendDown className="h-3 w-3" />
+                    Low: Day {dailyPerf.summary.worstDay.day} ({formatCurrency(dailyPerf.summary.worstDay.revenue)})
+                  </div>
+                )}
+                <div className="text-muted-foreground">Avg: {formatCurrency(dailyPerf.summary.avgDailyRevenue)}</div>
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={dailyPerf.data}>
+              <defs>
+                <linearGradient id="colorRevBar" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0.4} />
+                </linearGradient>
+                <linearGradient id="colorProfitBar" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#16a34a" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#16a34a" stopOpacity={0.4} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip
+                formatter={(value: number, name: string) => [formatCurrency(value), name === 'revenue' ? 'Revenue' : name === 'profit' ? 'Net Profit' : name]}
+                labelFormatter={(label) => `Day ${label}`}
+                contentStyle={{ borderRadius: 8, fontSize: 13 }}
+              />
+              <Bar dataKey="revenue" fill="url(#colorRevBar)" radius={[3, 3, 0, 0]} name="revenue" />
+              <Bar dataKey="profit" fill="url(#colorProfitBar)" radius={[3, 3, 0, 0]} name="profit" />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+      )}
 
       {/* Charts Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">

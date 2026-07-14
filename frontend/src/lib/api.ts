@@ -228,6 +228,9 @@ export const dashboardApi = {
 
   getPaymentMethods: () =>
     api.get<PaymentMethodData[]>('/api/dashboard/payment-methods'),
+
+  getDailyPerformance: () =>
+    api.get<DailyPerformanceData>('/api/dashboard/daily-performance'),
 }
 
 // Inventory endpoints
@@ -933,6 +936,17 @@ export interface PaymentMethodData {
   method: string
   total: number
   count: number
+}
+
+export interface DailyPerformanceData {
+  data: { day: number; label: string; revenue: number; cogs: number; expenses: number; profit: number; salesCount: number }[]
+  summary: {
+    bestDay: { day: number; revenue: number } | null
+    worstDay: { day: number; revenue: number } | null
+    avgDailyRevenue: number
+    daysElapsed: number
+    daysInMonth: number
+  }
 }
 
 export interface InventoryItem {

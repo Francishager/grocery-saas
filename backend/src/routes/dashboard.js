@@ -128,6 +128,87 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
   }
 });
 
+// Daily performance within current month
+router.get("/daily-performance", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const [sales, expenses, salesWithItems] = await Promise.all([
+      prisma.sale.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
+        select: { total: true, createdAt: true, items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.expense.findMany({
+        where: scopedWhere(scope, { date: { gte: startOfMonth, lt: endOfMonth } }),
+        select: { amount: true, date: true },
+        orderBy: { date: "asc" },
+      }),
+      prisma.sale.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
+        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+      }),
+    ]);
+
+    // Build a map of day -> data
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayMap = {};
+    for (let d = 1; d <= daysInMonth; d++) {
+      dayMap[d] = { day: d, label: `${d}`, revenue: 0, cogs: 0, expenses: 0, profit: 0, salesCount: 0 };
+    }
+
+    // Aggregate sales by day
+    sales.forEach((sale) => {
+      const day = new Date(sale.createdAt).getDate();
+      if (dayMap[day]) {
+        dayMap[day].revenue += sale.total || 0;
+        dayMap[day].salesCount += 1;
+        const saleCogs = sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0);
+        dayMap[day].cogs += saleCogs;
+      }
+    });
+
+    // Aggregate expenses by day
+    expenses.forEach((exp) => {
+      const day = new Date(exp.date).getDate();
+      if (dayMap[day]) {
+        dayMap[day].expenses += exp.amount || 0;
+      }
+    });
+
+    // Calculate profit per day and build array (only up to today)
+    const data = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const entry = dayMap[d];
+      entry.profit = entry.revenue - entry.cogs - entry.expenses;
+      data.push(entry);
+    }
+
+    // Summary stats
+    const bestDay = data.reduce((best, d) => d.revenue > best.revenue ? d : best, { day: 0, revenue: 0 });
+    const worstDay = data.reduce((worst, d) => d.salesCount > 0 && (worst.day === 0 || d.revenue < worst.revenue) ? d : worst, { day: 0, revenue: 0 });
+    const avgRevenue = data.reduce((sum, d) => sum + d.revenue, 0) / now.getDate();
+
+    res.json({
+      data,
+      summary: {
+        bestDay: bestDay.day ? { day: bestDay.day, revenue: bestDay.revenue } : null,
+        worstDay: worstDay.day ? { day: worstDay.day, revenue: worstDay.revenue } : null,
+        avgDailyRevenue: Math.round(avgRevenue * 100) / 100,
+        daysElapsed: now.getDate(),
+        daysInMonth,
+      },
+    });
+  } catch (err) {
+    console.error("Daily performance error:", err);
+    handleBranchError(res, err);
+  }
+});
+
 // Top selling products
 router.get("/top-products", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
