@@ -1008,7 +1008,7 @@ export default function SalesPage() {
 
       {/* Quick Edit Dialog — edit barcode & prices inline from sales */}
       <Dialog open={!!quickEditItem} onOpenChange={(open) => { if (!open) setQuickEditItem(null) }}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto z-[100]">
           <DialogHeader>
             <DialogTitle>Quick Edit: {quickEditItem?.product_name}</DialogTitle>
             <DialogDescription>Update item name, category, barcode, or prices. Other fields remain unchanged.</DialogDescription>
@@ -1041,7 +1041,7 @@ export default function SalesPage() {
                 </Button>
 
                 {categoryOpen && (
-                  <div className="absolute left-0 right-0 z-50 mt-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg">
+                  <div className="absolute left-0 right-0 z-[110] mt-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg">
                     <div className="relative mb-2">
                       <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
