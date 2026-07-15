@@ -715,4 +715,57 @@ router.get("/me/profile", authenticateToken, async (req, res) => {
   }
 });
 
+// Re-seed default categories for all existing tenants
+router.post("/reseed-categories", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { getDefaultCategoryDefinitionsForBusinessType } = await import("../utils/categoryDefaults.js");
+
+    const tenants = await prisma.tenant.findMany({
+      select: { id: true, name: true, businessType: true },
+    });
+
+    const results = [];
+    let totalCreated = 0;
+
+    for (const tenant of tenants) {
+      const definitions = getDefaultCategoryDefinitionsForBusinessType(tenant.businessType || "other");
+      let created = 0;
+
+      for (const cat of definitions) {
+        const existing = await prisma.category.findUnique({
+          where: {
+            tenantId_slug: {
+              tenantId: tenant.id,
+              slug: cat.slug,
+            },
+          },
+        });
+        if (!existing) {
+          await prisma.category.create({
+            data: {
+              name: cat.name,
+              slug: cat.slug,
+              categoryType: cat.categoryType || "product",
+              tenantId: tenant.id,
+            },
+          });
+          created++;
+        }
+      }
+
+      results.push({ tenant: tenant.name, businessType: tenant.businessType || "other", added: created });
+      totalCreated += created;
+    }
+
+    res.json({
+      message: `Re-seeded categories for ${tenants.length} tenants. ${totalCreated} new categories added.`,
+      results,
+      totalCreated,
+    });
+  } catch (err) {
+    console.error("Re-seed categories error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
