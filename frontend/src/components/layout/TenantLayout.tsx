@@ -720,7 +720,7 @@ export function TenantLayout() {
             </div>
           </div>
         </header>
-        <main className="overflow-x-clip p-4 lg:p-6"><Outlet /></main>
+        <main className="p-4 lg:p-6"><Outlet /></main>
       </div>
       <OnboardingGuideModal
         isOpen={showOnboardingModal}
