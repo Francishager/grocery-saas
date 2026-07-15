@@ -1,13 +1,12 @@
- import { useEffect, useState } from 'react'
-import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X } from 'lucide-react'
+ import { useEffect, useState, useRef, useMemo } from 'react'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown } from 'lucide-react'
 import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, categoriesApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import BarcodeScanner from '@/components/BarcodeScanner'
@@ -44,10 +43,13 @@ export default function SalesPage() {
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [salesLoading, setSalesLoading] = useState(false)
   const [quickEditItem, setQuickEditItem] = useState<InventoryItem | null>(null)
-  const [quickEditForm, setQuickEditForm] = useState({ name: '', barcode: '', cost_price: '', unit_price: '', categoryId: '' })
+  const [quickEditForm, setQuickEditForm] = useState({ name: '', barcode: '', cost_price: '', unit_price: '', categoryId: '', expiryDate: '' })
   const [quickEditSaving, setQuickEditSaving] = useState(false)
   const [showQuickEditScanner, setShowQuickEditScanner] = useState(false)
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categoryQuery, setCategoryQuery] = useState('')
+  const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const [showScanner, setShowScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -61,6 +63,22 @@ export default function SalesPage() {
     loadInventory()
     loadRecentSales()
     loadTaxConfig()
+  }, [])
+
+  const filteredCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLowerCase()
+    if (!query) return categories
+    return categories.filter((c) => c.name.toLowerCase().includes(query))
+  }, [categories, categoryQuery])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(e.target as Node)) {
+        setCategoryOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   const loadInventory = async () => {
@@ -364,6 +382,7 @@ export default function SalesPage() {
       cost_price: String(item.cost_price ?? ''),
       unit_price: String(item.unit_price ?? ''),
       categoryId: (item as any).categoryId || '',
+      expiryDate: (item as any).expiryDate ? new Date((item as any).expiryDate).toISOString().split('T')[0] : '',
     })
     setShowQuickEditScanner(false)
     // Load categories if not already loaded
@@ -384,6 +403,7 @@ export default function SalesPage() {
         cost_price: quickEditForm.cost_price !== '' ? Number(quickEditForm.cost_price) : 0,
         unit_price: quickEditForm.unit_price !== '' ? Number(quickEditForm.unit_price) : 0,
         categoryId: quickEditForm.categoryId || null,
+        expiryDate: quickEditForm.expiryDate || null,
         itemType,
       } as any)
       toast({ title: 'Item updated', description: quickEditItem.product_name })
@@ -988,7 +1008,7 @@ export default function SalesPage() {
 
       {/* Quick Edit Dialog — edit barcode & prices inline from sales */}
       <Dialog open={!!quickEditItem} onOpenChange={(open) => { if (!open) setQuickEditItem(null) }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Quick Edit: {quickEditItem?.product_name}</DialogTitle>
             <DialogDescription>Update item name, category, barcode, or prices. Other fields remain unchanged.</DialogDescription>
@@ -1005,19 +1025,67 @@ export default function SalesPage() {
             </div>
             <div>
               <Label>Category</Label>
-              <Select
-                value={quickEditForm.categoryId}
-                onValueChange={(value) => setQuickEditForm({ ...quickEditForm, categoryId: value })}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="relative" ref={categoryPickerRef}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={categoryOpen}
+                  className="w-full justify-between mt-1"
+                  onClick={() => setCategoryOpen((current) => !current)}
+                >
+                  <span className={cn("truncate", !quickEditForm.categoryId && "text-muted-foreground")}>
+                    {categories.find((c) => c.id === quickEditForm.categoryId)?.name || "Select category"}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                </Button>
+
+                {categoryOpen && (
+                  <div className="absolute left-0 right-0 z-50 mt-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg">
+                    <div className="relative mb-2">
+                      <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        autoFocus
+                        value={categoryQuery}
+                        onChange={(e) => setCategoryQuery(e.target.value)}
+                        placeholder="Search category..."
+                        className="pl-8"
+                      />
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto pr-1">
+                      {filteredCategories.length === 0 ? (
+                        <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                          {categories.length === 0 ? 'No categories available' : 'No category found'}
+                        </div>
+                      ) : (
+                        filteredCategories.map((category) => {
+                          const categoryId = String(category.id)
+                          const isSelected = quickEditForm.categoryId === categoryId
+                          return (
+                            <button
+                              key={categoryId}
+                              type="button"
+                              className={cn(
+                                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
+                                isSelected && "bg-muted font-medium"
+                              )}
+                              onClick={() => {
+                                setQuickEditForm((prev) => ({ ...prev, categoryId }))
+                                setCategoryQuery('')
+                                setCategoryOpen(false)
+                              }}
+                            >
+                              <Check className={cn("h-4 w-4", isSelected ? "opacity-100" : "opacity-0")} />
+                              <span className="truncate">{category.name}</span>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <Label>Barcode</Label>
@@ -1070,6 +1138,15 @@ export default function SalesPage() {
                 value={quickEditForm.unit_price}
                 onChange={(e) => setQuickEditForm({ ...quickEditForm, unit_price: e.target.value })}
                 placeholder="0.00"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Expiry Date</Label>
+              <Input
+                type="date"
+                value={quickEditForm.expiryDate}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, expiryDate: e.target.value })}
                 className="mt-1"
               />
             </div>
