@@ -83,6 +83,7 @@ export default function InventoryPage() {
   const { tab: urlTab } = useParams()
   const lockedType = urlTab === 'products' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
+  const formRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
   const online = useOnlineStatus()
@@ -405,6 +406,7 @@ export default function InventoryPage() {
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
   const openNewForm = () => {
@@ -419,6 +421,7 @@ export default function InventoryPage() {
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
   const closeForm = () => {
@@ -565,7 +568,7 @@ export default function InventoryPage() {
 
       {/* Add/Edit Form */}
       {showForm && (
-        <Card>
+        <Card ref={formRef as any}>
           <CardHeader>
             <CardTitle>{editingItem ? 'Edit Item' : 'Add New Item'}</CardTitle>
           </CardHeader>
