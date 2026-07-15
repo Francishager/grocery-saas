@@ -22,6 +22,8 @@ export default function DataImporterPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [parsedCount, setParsedCount] = useState(0)
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null)
+  const BATCH_SIZE = 500
 
   const TEMPLATE_HEADERS = [
     'Product Name',
@@ -102,6 +104,7 @@ export default function DataImporterPage() {
     setUploading(true)
     setValidationErrors([])
     setSuccessMsg(null)
+    setImportProgress(null)
 
     try {
       const data = await selectedFile.arrayBuffer()
@@ -117,34 +120,63 @@ export default function DataImporterPage() {
 
       setParsedCount(jsonRows.length)
 
-      const res = await apiFetch('/api/inventory/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: jsonRows }),
-      })
+      // Split into batches to avoid HTTP 413 (payload too large) from reverse proxies
+      const totalBatches = Math.ceil(jsonRows.length / BATCH_SIZE)
+      const allErrors: ValidationError[] = []
+      let totalImported = 0
+      let failedBatches = 0
 
-      const result = await res.json()
+      for (let i = 0; i < totalBatches; i++) {
+        const batchRows = jsonRows.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE)
+        setImportProgress({ current: i + 1, total: totalBatches })
 
-      if (!res.ok) {
-        if (result.validationErrors) {
-          setValidationErrors(result.validationErrors)
-          toast({
-            variant: 'destructive',
-            title: `Validation failed: ${result.errorCount} row(s) with errors`,
-            description: `${result.validCount} row(s) were valid but import was rejected. Fix the errors and re-upload.`,
+        try {
+          const res = await apiFetch('/api/inventory/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows: batchRows }),
           })
-        } else {
-          toast({ variant: 'destructive', title: result.error || 'Import failed' })
+
+          const result = await res.json()
+
+          if (!res.ok) {
+            if (result.validationErrors) {
+              allErrors.push(...result.validationErrors)
+            } else {
+              failedBatches++
+              toast({ variant: 'destructive', title: `Batch ${i + 1} failed: ${result.error || 'Import failed'}` })
+            }
+          } else {
+            totalImported += result.imported || 0
+          }
+        } catch (batchErr) {
+          failedBatches++
+          console.error(`Batch ${i + 1} error:`, batchErr)
         }
-        setUploading(false)
-        return
       }
 
-      setSuccessMsg(result.message)
-      toast({ title: result.message })
-      setSelectedFile(null)
-      setParsedCount(0)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      setImportProgress(null)
+
+      if (allErrors.length > 0) {
+        setValidationErrors(allErrors)
+        toast({
+          variant: 'destructive',
+          title: `${allErrors.length} row(s) with errors`,
+          description: `${totalImported} row(s) were imported successfully. Fix the errors and re-upload the failed rows.`,
+        })
+      }
+
+      if (totalImported > 0) {
+        const msg = `Successfully imported ${totalImported} product${totalImported !== 1 ? 's' : ''}${failedBatches > 0 ? ` (${failedBatches} batch(es) failed)` : ''}`
+        setSuccessMsg(msg)
+        toast({ title: msg })
+      }
+
+      if (totalImported > 0 && allErrors.length === 0 && failedBatches === 0) {
+        setSelectedFile(null)
+        setParsedCount(0)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      }
     } catch (err) {
       console.error('Import error:', err)
       toast({ variant: 'destructive', title: 'Failed to process file. Please try again.' })
@@ -252,6 +284,21 @@ export default function DataImporterPage() {
               {uploading ? 'Importing...' : 'Upload & Import'}
             </Button>
           </div>
+
+          {importProgress && (
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">Importing batch {importProgress.current} of {importProgress.total}</span>
+                <span className="text-muted-foreground">{Math.round((importProgress.current / importProgress.total) * 100)}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {selectedFile && !uploading && (
             <p className="text-sm text-muted-foreground">

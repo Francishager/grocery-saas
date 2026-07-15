@@ -128,7 +128,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Audit logging middleware (captures all mutating requests)
 app.use("/api", auditMiddleware());
