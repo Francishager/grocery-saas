@@ -576,32 +576,31 @@ export default function SalesPage() {
                             <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
                               <div className="flex items-start justify-between gap-2 mb-1">
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="font-medium truncate" title={item.product_name}>{item.product_name}</p>
-                                    {isUncategorized && (
-                                      <span className="shrink-0 px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
-                                        Uncategorized
-                                      </span>
-                                    )}
-                                  </div>
+                                  <p className="font-medium truncate" title={item.product_name}>{item.product_name}</p>
                                   <p className="text-sm text-muted-foreground">
                                     {item.quantity} {baseUnit} in stock
                                   </p>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <p className="font-bold text-primary whitespace-nowrap">
-                                    {formatCurrency(item.unit_price)}
-                                  </p>
-                                  {canEditItem(item) && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
-                                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
-                                      title="Quick edit barcode & prices"
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
+                                {isUncategorized && (
+                                  <span className="shrink-0 px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                                    Uncategorized
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between gap-2 mt-1">
+                                <p className="font-bold text-primary whitespace-nowrap">
+                                  {formatCurrency(item.unit_price)}
+                                </p>
+                                {canEditItem(item) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
+                                    className="shrink-0 rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
+                                    title="Quick edit barcode & prices"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 inline mr-1" />
+                                    Edit
+                                  </button>
+                                )}
                               </div>
                               {isUncategorized && (
                                 <p className="text-xs text-yellow-700 mb-2">
@@ -653,30 +652,29 @@ export default function SalesPage() {
                             <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
                               <div className="flex items-start justify-between gap-2 mb-1">
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="font-medium truncate" title={item.product_name}>{item.product_name}</p>
-                                    {isUncategorized && (
-                                      <span className="shrink-0 px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
-                                        Uncategorized
-                                      </span>
-                                    )}
-                                  </div>
+                                  <p className="font-medium truncate" title={item.product_name}>{item.product_name}</p>
                                   <p className="text-sm text-muted-foreground">Service</p>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <p className="font-bold text-primary whitespace-nowrap">
-                                    {formatCurrency(item.unit_price)}
-                                  </p>
-                                  {canEditItem(item) && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
-                                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
-                                      title="Quick edit price"
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
+                                {isUncategorized && (
+                                  <span className="shrink-0 px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                                    Uncategorized
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between gap-2 mt-1">
+                                <p className="font-bold text-primary whitespace-nowrap">
+                                  {formatCurrency(item.unit_price)}
+                                </p>
+                                {canEditItem(item) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
+                                    className="shrink-0 rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
+                                    title="Quick edit price"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 inline mr-1" />
+                                    Edit
+                                  </button>
+                                )}
                               </div>
                               {isUncategorized && (
                                 <p className="text-xs text-yellow-700 mb-2">
