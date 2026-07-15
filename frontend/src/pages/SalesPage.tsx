@@ -1,11 +1,12 @@
  import { useEffect, useState } from 'react'
 import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X } from 'lucide-react'
-import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, type InventoryItem, type CartItem } from '@/lib/api'
+import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, categoriesApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -43,9 +44,10 @@ export default function SalesPage() {
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [salesLoading, setSalesLoading] = useState(false)
   const [quickEditItem, setQuickEditItem] = useState<InventoryItem | null>(null)
-  const [quickEditForm, setQuickEditForm] = useState({ barcode: '', cost_price: '', unit_price: '' })
+  const [quickEditForm, setQuickEditForm] = useState({ name: '', barcode: '', cost_price: '', unit_price: '', categoryId: '' })
   const [quickEditSaving, setQuickEditSaving] = useState(false)
   const [showQuickEditScanner, setShowQuickEditScanner] = useState(false)
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
   const [showScanner, setShowScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -357,11 +359,17 @@ export default function SalesPage() {
   const openQuickEdit = (item: InventoryItem) => {
     setQuickEditItem(item)
     setQuickEditForm({
+      name: item.product_name || '',
       barcode: (item as any).barcode || '',
       cost_price: String(item.cost_price ?? ''),
       unit_price: String(item.unit_price ?? ''),
+      categoryId: (item as any).categoryId || '',
     })
     setShowQuickEditScanner(false)
+    // Load categories if not already loaded
+    if (categories.length === 0) {
+      categoriesApi.list().then((data: any) => setCategories(Array.isArray(data) ? data : [])).catch(() => {})
+    }
   }
 
   const handleQuickEditSave = async () => {
@@ -371,9 +379,11 @@ export default function SalesPage() {
       const itemType = (quickEditItem as any).itemType || 'product'
       await inventoryApi.update(String(quickEditItem.id), {
         ...quickEditItem,
+        product_name: quickEditForm.name,
         barcode: quickEditForm.barcode || null,
         cost_price: quickEditForm.cost_price !== '' ? Number(quickEditForm.cost_price) : 0,
         unit_price: quickEditForm.unit_price !== '' ? Number(quickEditForm.unit_price) : 0,
+        categoryId: quickEditForm.categoryId || null,
         itemType,
       } as any)
       toast({ title: 'Item updated', description: quickEditItem.product_name })
@@ -981,9 +991,34 @@ export default function SalesPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Quick Edit: {quickEditItem?.product_name}</DialogTitle>
-            <DialogDescription>Update barcode, cost price, or selling price. Other fields remain unchanged.</DialogDescription>
+            <DialogDescription>Update item name, category, barcode, or prices. Other fields remain unchanged.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div>
+              <Label>Item Name</Label>
+              <Input
+                value={quickEditForm.name}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, name: e.target.value })}
+                placeholder="Item name"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Category</Label>
+              <Select
+                value={quickEditForm.categoryId}
+                onValueChange={(value) => setQuickEditForm({ ...quickEditForm, categoryId: value })}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <Label>Barcode</Label>
               <div className="flex gap-2 mt-1">
