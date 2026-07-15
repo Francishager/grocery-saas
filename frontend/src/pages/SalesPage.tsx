@@ -1,11 +1,14 @@
  import { useEffect, useState } from 'react'
-import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff } from 'lucide-react'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X } from 'lucide-react'
 import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
 import { BluetoothThermalPrinter, ThermalPrinter, isBluetoothSupported, isSerialSupported } from '@/lib/thermalPrinter'
@@ -25,6 +28,7 @@ interface RecentSale {
 }
 
 export default function SalesPage() {
+  const { hasPermission } = useJWTAuth()
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
@@ -38,6 +42,10 @@ export default function SalesPage() {
   const [processing, setProcessing] = useState(false)
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [salesLoading, setSalesLoading] = useState(false)
+  const [quickEditItem, setQuickEditItem] = useState<InventoryItem | null>(null)
+  const [quickEditForm, setQuickEditForm] = useState({ barcode: '', cost_price: '', unit_price: '' })
+  const [quickEditSaving, setQuickEditSaving] = useState(false)
+  const [showQuickEditScanner, setShowQuickEditScanner] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
@@ -339,6 +347,45 @@ export default function SalesPage() {
     item.product_name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const canEditItem = (item: InventoryItem) => {
+    const itemType = (item as any).itemType || 'product'
+    if (itemType === 'service') return hasPermission('canEditService')
+    if (itemType === 'rental') return hasPermission('canEditRental')
+    return hasPermission('canEditProduct')
+  }
+
+  const openQuickEdit = (item: InventoryItem) => {
+    setQuickEditItem(item)
+    setQuickEditForm({
+      barcode: (item as any).barcode || '',
+      cost_price: String(item.cost_price ?? ''),
+      unit_price: String(item.unit_price ?? ''),
+    })
+    setShowQuickEditScanner(false)
+  }
+
+  const handleQuickEditSave = async () => {
+    if (!quickEditItem) return
+    setQuickEditSaving(true)
+    try {
+      const itemType = (quickEditItem as any).itemType || 'product'
+      await inventoryApi.update(String(quickEditItem.id), {
+        ...quickEditItem,
+        barcode: quickEditForm.barcode || null,
+        cost_price: quickEditForm.cost_price !== '' ? Number(quickEditForm.cost_price) : 0,
+        unit_price: quickEditForm.unit_price !== '' ? Number(quickEditForm.unit_price) : 0,
+        itemType,
+      } as any)
+      toast({ title: 'Item updated', description: quickEditItem.product_name })
+      setQuickEditItem(null)
+      loadInventory()
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Update failed', description: error.message })
+    } finally {
+      setQuickEditSaving(false)
+    }
+  }
+
   // Pagination calculation
   const totalPages = Math.ceil(filteredInventory.length / ITEMS_PER_PAGE)
   const pageStartIdx = (currentPage - 1) * ITEMS_PER_PAGE
@@ -511,9 +558,20 @@ export default function SalesPage() {
                                     {item.quantity} {baseUnit} in stock
                                   </p>
                                 </div>
-                                <p className="font-bold text-primary">
-                                  {formatCurrency(item.unit_price)}
-                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-primary">
+                                    {formatCurrency(item.unit_price)}
+                                  </p>
+                                  {canEditItem(item) && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
+                                      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
+                                      title="Quick edit barcode & prices"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                               {isUncategorized && (
                                 <p className="text-xs text-yellow-700 mb-2">
@@ -575,9 +633,20 @@ export default function SalesPage() {
                                   </div>
                                   <p className="text-sm text-muted-foreground">Service</p>
                                 </div>
-                                <p className="font-bold text-primary">
-                                  {formatCurrency(item.unit_price)}
-                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-primary">
+                                    {formatCurrency(item.unit_price)}
+                                  </p>
+                                  {canEditItem(item) && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
+                                      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
+                                      title="Quick edit price"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                               {isUncategorized && (
                                 <p className="text-xs text-yellow-700 mb-2">
@@ -906,6 +975,78 @@ export default function SalesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Quick Edit Dialog — edit barcode & prices inline from sales */}
+      <Dialog open={!!quickEditItem} onOpenChange={(open) => { if (!open) setQuickEditItem(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quick Edit: {quickEditItem?.product_name}</DialogTitle>
+            <DialogDescription>Update barcode, cost price, or selling price. Other fields remain unchanged.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Barcode</Label>
+              <div className="flex gap-2 mt-1">
+                <Input
+                  value={quickEditForm.barcode}
+                  onChange={(e) => setQuickEditForm({ ...quickEditForm, barcode: e.target.value })}
+                  placeholder="Scan or enter barcode"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowQuickEditScanner(!showQuickEditScanner)}
+                >
+                  <ScanBarcode className="h-4 w-4" />
+                </Button>
+              </div>
+              {showQuickEditScanner && (
+                <div className="mt-2">
+                  <BarcodeScanner
+                    onScan={(code) => {
+                      setQuickEditForm((prev) => ({ ...prev, barcode: code }))
+                      setShowQuickEditScanner(false)
+                      toast({ title: 'Barcode captured', description: code })
+                    }}
+                    onClose={() => setShowQuickEditScanner(false)}
+                    placeholder="Scan barcode for this item..."
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <Label>Cost Price</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={quickEditForm.cost_price}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, cost_price: e.target.value })}
+                placeholder="0.00"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Selling Price</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={quickEditForm.unit_price}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, unit_price: e.target.value })}
+                placeholder="0.00"
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickEditItem(null)}>Cancel</Button>
+            <Button onClick={handleQuickEditSave} disabled={quickEditSaving}>
+              {quickEditSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
