@@ -744,8 +744,8 @@ export default function SalesPage() {
         </div>
 
         {/* Cart */}
-        <div>
-          <Card className="sticky top-20">
+        <div className="lg:self-start">
+          <Card className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <ShoppingCart className="h-5 w-5" />
