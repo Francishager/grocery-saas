@@ -87,6 +87,12 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
   }, [manualCode, onScan])
 
   const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
+    // Skip if the user is typing in an input/textarea — those have their own Enter handler
+    const target = e.target as HTMLElement | null
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return
+    }
+
     const now = Date.now()
     if (lastScanKeyTimeRef.current && now - lastScanKeyTimeRef.current > 100) {
       scannerBufferRef.current = ''
@@ -270,6 +276,9 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
     setMobileDevice(deviceIsMobile)
     if (inputRef.current) inputRef.current.focus()
 
+    // Always attach global keydown for keyboard-wedge scanners (USB/Bluetooth)
+    window.addEventListener('keydown', handleGlobalKeyDownRef.current)
+
     const canUseCamera = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
     if (canUseCamera && (deviceIsMobile || window.innerWidth < 768 || ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0))) {
       // Small delay to let the DOM element mount before html5-qrcode attaches
@@ -278,11 +287,11 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       }, 100)
       return () => {
         clearTimeout(timer)
+        window.removeEventListener('keydown', handleGlobalKeyDownRef.current)
         void stopCameraRef.current()
       }
     }
 
-    window.addEventListener('keydown', handleGlobalKeyDownRef.current)
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDownRef.current)
       void stopCameraRef.current()
