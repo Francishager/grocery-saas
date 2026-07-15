@@ -236,7 +236,7 @@ export const dashboardApi = {
 // Inventory endpoints
 export const inventoryApi = {
   list: async (q?: string, branchId?: string, itemType?: string) => {
-    const data = await api.get<any>('/api/inventory', { params: { search: q, branchId, itemType } })
+    const data = await api.get<any>('/api/inventory', { params: { search: q, branchId, itemType, limit: 1000000 } })
     const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
     return products.map(mapProductToInventory)
   },
@@ -382,7 +382,7 @@ export const salesApi = {
     const mappedParams: Record<string, string | number | boolean | undefined> = {}
     if (params?.start) mappedParams.from = params.start
     if (params?.end) mappedParams.to = params.end
-    const data = await api.get<any>('/api/sales', { params: mappedParams })
+    const data = await api.get<any>('/api/sales', { params: { ...mappedParams, limit: 1000000 } })
     return Array.isArray(data?.sales) ? data.sales : Array.isArray(data) ? data : []
   },
 
@@ -418,7 +418,7 @@ export const purchasesApi = {
     const mappedParams: Record<string, string | number | boolean | undefined> = {}
     if (params?.start) mappedParams.from = params.start
     if (params?.end) mappedParams.to = params.end
-    const data = await api.get<any>('/api/purchases', { params: mappedParams })
+    const data = await api.get<any>('/api/purchases', { params: { ...mappedParams, limit: 1000000 } })
     return Array.isArray(data?.purchases) ? data.purchases : Array.isArray(data) ? data : []
   },
 
