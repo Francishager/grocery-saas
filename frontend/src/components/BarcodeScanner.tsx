@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Camera, ScanBarcode, X, RefreshCw } from 'lucide-react'
+import { Camera, ScanBarcode, X, RefreshCw, Zap, ZapOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -10,7 +10,7 @@ interface BarcodeScannerProps {
   placeholder?: string
 }
 
-const SCAN_TIMEOUT_MS = 30000
+const SCAN_TIMEOUT_MS = 60000
 
 const isDeviceMobile = () => {
   if (typeof window === 'undefined' || typeof window.navigator === 'undefined') return false
@@ -29,11 +29,29 @@ const selectCameraDeviceId = async (preferredBack = true) => {
   if (!videoInputs.length) return null
 
   if (preferredBack) {
-    const backCamera = videoInputs.find((device) => /back|environment|rear/i.test(device.label))
-    if (backCamera) return backCamera.deviceId
+    // Prefer back camera with highest resolution
+    const backCameras = videoInputs.filter((device) => /back|environment|rear/i.test(device.label))
+    if (backCameras.length > 0) {
+      // If multiple back cameras, prefer one labeled with 'tele' or 'wide' for better focus
+      const tele = backCameras.find((d) => /tele|wide|pro/i.test(d.label))
+      return (tele || backCameras[0]).deviceId
+    }
   }
 
   return videoInputs[0].deviceId
+}
+
+// Adaptive scan area based on screen size — larger area = easier to scan
+const getQrBox = () => {
+  const w = window.innerWidth
+  const h = window.innerHeight
+  if (w < 480) {
+    return { width: Math.floor(w * 0.85), height: Math.floor(Math.min(h * 0.35, 220)) }
+  } else if (w < 768) {
+    return { width: Math.floor(w * 0.75), height: 200 }
+  } else {
+    return { width: 320, height: 200 }
+  }
 }
 
 /**
@@ -49,7 +67,10 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
   const [cameraError, setCameraError] = useState('')
   const [timedOut, setTimedOut] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [torchOn, setTorchOn] = useState(false)
+  const [torchSupported, setTorchSupported] = useState(false)
   const scannerRef = useRef<any>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const [mobileDevice, setMobileDevice] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -101,13 +122,39 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
         scannerRef.current = null
       }
     } catch {}
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
     setCameraActive(false)
     setScanning(false)
+    setTorchOn(false)
+    setTorchSupported(false)
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
       timeoutRef.current = null
     }
   }, [])
+
+  // Toggle torch/flashlight
+  const toggleTorch = useCallback(async () => {
+    if (!streamRef.current) return
+    const track = streamRef.current.getVideoTracks()[0]
+    if (!track) return
+    try {
+      const capabilities = track.getCapabilities?.() as any
+      if (!capabilities?.torch) {
+        setTorchSupported(false)
+        return
+      }
+      setTorchSupported(true)
+      const newTorchState = !torchOn
+      await track.applyConstraints({ advanced: [{ torch: newTorchState }] as any })
+      setTorchOn(newTorchState)
+    } catch {
+      setTorchSupported(false)
+    }
+  }, [torchOn])
 
   const startCamera = useCallback(async (useEnvironment = mobileDevice) => {
     try {
@@ -120,23 +167,73 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
         scannerRef.current.stop().catch(() => {})
       }
 
-      const scanner = new Html5Qrcode('barcode-camera-view')
+      const scanner = new Html5Qrcode('barcode-camera-view', { 
+        verbose: false,
+        useBarCodeDetectorIfSupported: true,
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      })
       scannerRef.current = scanner
 
       const deviceId = await selectCameraDeviceId(useEnvironment)
+
+      // High-resolution constraints for sharp, blur-free scanning
       const cameraConfig = deviceId
-        ? { deviceId: { exact: deviceId } }
-        : { facingMode: useEnvironment ? 'environment' : 'user' }
+        ? { 
+            deviceId: { exact: deviceId },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            focusMode: 'continuous',
+            exposureMode: 'continuous',
+            focusDistance: { ideal: 0.3 },
+          }
+        : { 
+            facingMode: useEnvironment ? 'environment' : 'user',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            focusMode: 'continuous',
+            exposureMode: 'continuous',
+          }
+
+      const qrbox = getQrBox()
 
       await scanner.start(
         cameraConfig,
-        { fps: 12, qrbox: { width: 280, height: 160 }, aspectRatio: 1.5 },
+        {
+          fps: 20,
+          qrbox,
+          aspectRatio: 1.7778,
+          disableFlip: false,
+          videoConstraints: cameraConfig,
+        },
         (decodedText: string) => {
           onScan(decodedText.trim())
           stopCamera()
         },
         () => {}
       )
+
+      // Grab the stream to check torch support
+      const videoEl = document.getElementById('barcode-camera-view')?.querySelector('video')
+      if (videoEl) {
+        const stream = (videoEl as HTMLVideoElement).srcObject as MediaStream
+        if (stream) {
+          streamRef.current = stream
+          const track = stream.getVideoTracks()[0]
+          if (track) {
+            const caps = track.getCapabilities?.() as any
+            if (caps?.torch) setTorchSupported(true)
+            // Apply focus constraints for sharpness
+            try {
+              await track.applyConstraints({
+                advanced: [{
+                  focusMode: 'continuous',
+                  exposureMode: 'continuous',
+                }] as any,
+              })
+            } catch {}
+          }
+        }
+      }
 
       setCameraActive(true)
       setScanning(true)
@@ -210,9 +307,9 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       {/* Camera scanner — auto-starts on mobile, button on desktop */}
       <div className="space-y-2">
         <div className="relative w-full rounded-lg overflow-hidden border bg-black"
-          style={{ minHeight: cameraActive || timedOut ? '280px' : '0' }}
+          style={{ minHeight: cameraActive || timedOut ? '300px' : '0' }}
         >
-          <div id="barcode-camera-view" className="w-full" style={{ minHeight: '280px' }} />
+          <div id="barcode-camera-view" className="w-full" style={{ minHeight: '300px' }} />
 
           {/* Scanning indicator overlay */}
           {scanning && (
@@ -229,12 +326,23 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
             </div>
           )}
 
+          {/* Torch button — top-right corner when camera active */}
+          {cameraActive && torchSupported && (
+            <button
+              onClick={toggleTorch}
+              className="absolute top-3 right-3 z-10 rounded-full bg-black/70 p-2 text-white hover:bg-black/90 transition-colors"
+              title={torchOn ? 'Turn off flashlight' : 'Turn on flashlight'}
+            >
+              {torchOn ? <ZapOff className="h-5 w-5" /> : <Zap className="h-5 w-5" />}
+            </button>
+          )}
+
           {/* Timeout overlay */}
           {timedOut && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 gap-3">
               <p className="text-sm text-white font-medium">No barcode detected</p>
-              <p className="text-xs text-slate-300">Make sure the barcode is clearly visible</p>
-              <Button onClick={startCamera} variant="outline" size="sm" className="bg-white text-black hover:bg-slate-100">
+              <p className="text-xs text-slate-300">Make sure the barcode is clearly visible and well-lit</p>
+              <Button onClick={() => startCamera()} variant="outline" size="sm" className="bg-white text-black hover:bg-slate-100">
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Try Again
               </Button>
@@ -247,16 +355,23 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
         )}
 
         {!cameraActive && !timedOut && (
-          <Button onClick={startCamera} variant="outline" className="w-full" size="sm">
+          <Button onClick={() => startCamera()} variant="outline" className="w-full" size="sm">
             <Camera className="h-4 w-4 mr-2" />
             Start Camera Scanner
           </Button>
         )}
         {cameraActive && !timedOut && (
-          <Button onClick={stopCamera} variant="outline" className="w-full" size="sm">
-            <Camera className="h-4 w-4 mr-2" />
-            Stop Camera
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={stopCamera} variant="outline" className="flex-1" size="sm">
+              <Camera className="h-4 w-4 mr-2" />
+              Stop Camera
+            </Button>
+            {torchSupported && (
+              <Button onClick={toggleTorch} variant={torchOn ? 'default' : 'outline'} size="sm" title="Toggle flashlight">
+                {torchOn ? <ZapOff className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -264,8 +379,17 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
       <style>{`
         @keyframes scanLine {
           0% { transform: translateY(0); }
-          50% { transform: translateY(260px); }
+          50% { transform: translateY(280px); }
           100% { transform: translateY(0); }
+        }
+        #barcode-camera-view video {
+          object-fit: cover !important;
+          width: 100% !important;
+          height: 100% !important;
+          filter: contrast(1.1) brightness(1.05);
+        }
+        #barcode-camera-view > div {
+          border: none !important;
         }
       `}</style>
     </div>
