@@ -732,26 +732,22 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       }
     }
 
-    if (errors.length > 0) {
-      return res.status(400).json({
-        error: "Validation failed",
-        validationErrors: errors,
-        validCount: validRows.length,
-        errorCount: errors.length,
-      });
-    }
-
     // Check usage limit
     await checkUsageLimit(scope.tenantId, 'products');
 
-    // Bulk create
-    const created = await prisma.$transaction(
-      validRows.map(data => prisma.product.create({ data }))
-    );
+    // Bulk create — skip rows with errors, import the rest
+    let created = [];
+    if (validRows.length > 0) {
+      created = await prisma.$transaction(
+        validRows.map(data => prisma.product.create({ data }))
+      );
+    }
 
     res.status(201).json({
-      message: `Successfully imported ${created.length} product${created.length !== 1 ? 's' : ''}`,
+      message: `Successfully imported ${created.length} product${created.length !== 1 ? 's' : ''}${errors.length > 0 ? `, skipped ${errors.length} duplicate/error row${errors.length !== 1 ? 's' : ''}` : ''}`,
       imported: created.length,
+      skipped: errors.length,
+      skippedRows: errors,
     });
   } catch (err) {
     const mappedError = mapImportRouteError(err);

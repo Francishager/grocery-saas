@@ -124,6 +124,7 @@ export default function DataImporterPage() {
       const totalBatches = Math.ceil(jsonRows.length / BATCH_SIZE)
       const allErrors: ValidationError[] = []
       let totalImported = 0
+      let totalSkipped = 0
       let failedBatches = 0
 
       for (let i = 0; i < totalBatches; i++) {
@@ -139,15 +140,20 @@ export default function DataImporterPage() {
 
           const result = await res.json()
 
-          if (!res.ok) {
-            if (result.validationErrors) {
-              allErrors.push(...result.validationErrors)
-            } else {
-              failedBatches++
-              toast({ variant: 'destructive', title: `Batch ${i + 1} failed: ${result.error || 'Import failed'}` })
-            }
+          if (res.status === 403) {
+            // Usage limit reached — stop importing
+            failedBatches++
+            toast({ variant: 'destructive', title: result.error || 'Product limit reached' })
+            break
+          } else if (!res.ok) {
+            failedBatches++
+            toast({ variant: 'destructive', title: `Batch ${i + 1} failed: ${result.error || 'Import failed'}` })
           } else {
             totalImported += result.imported || 0
+            totalSkipped += result.skipped || 0
+            if (result.skippedRows && result.skippedRows.length > 0) {
+              allErrors.push(...result.skippedRows)
+            }
           }
         } catch (batchErr) {
           failedBatches++
@@ -159,20 +165,17 @@ export default function DataImporterPage() {
 
       if (allErrors.length > 0) {
         setValidationErrors(allErrors)
-        toast({
-          variant: 'destructive',
-          title: `${allErrors.length} row(s) with errors`,
-          description: `${totalImported} row(s) were imported successfully. Fix the errors and re-upload the failed rows.`,
-        })
       }
 
       if (totalImported > 0) {
-        const msg = `Successfully imported ${totalImported} product${totalImported !== 1 ? 's' : ''}${failedBatches > 0 ? ` (${failedBatches} batch(es) failed)` : ''}`
+        const skipInfo = totalSkipped > 0 ? `, skipped ${totalSkipped} duplicate row${totalSkipped !== 1 ? 's' : ''}` : ''
+        const failInfo = failedBatches > 0 ? ` (${failedBatches} batch(es) failed)` : ''
+        const msg = `Successfully imported ${totalImported} product${totalImported !== 1 ? 's' : ''}${skipInfo}${failInfo}`
         setSuccessMsg(msg)
         toast({ title: msg })
       }
 
-      if (totalImported > 0 && allErrors.length === 0 && failedBatches === 0) {
+      if (totalImported > 0 && failedBatches === 0) {
         setSelectedFile(null)
         setParsedCount(0)
         if (fileInputRef.current) fileInputRef.current.value = ''
@@ -206,8 +209,7 @@ export default function DataImporterPage() {
             <li><strong>Fill in your inventory data</strong> — one product per row, following the column headers exactly.</li>
             <li><strong>Save the file</strong> as <code>.xlsx</code>, <code>.xls</code>, or <code>.csv</code>.</li>
             <li><strong>Upload the filled file</strong> using the upload button on this page.</li>
-            <li>If any rows have errors, the system will <strong>reject the entire upload</strong> and show you exactly which rows and fields need fixing.</li>
-            <li>Fix the errors in your file and re-upload. All rows must be valid for the import to succeed.</li>
+            <li>If any rows have errors or duplicates, the system will <strong>skip those rows</strong> and import the rest. Skipped rows are listed for your reference.</li>
           </ol>
 
           <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
@@ -230,9 +232,9 @@ export default function DataImporterPage() {
           <AlertMessage severity="info" variant="standard" dismissible={false} title="Important Notes">
             <ul className="list-disc list-inside space-y-1 mt-1 text-sm">
               <li>Category names must already exist in your system. Create them first in the Inventory page if needed.</li>
-              <li>Product names must be unique within the branch; duplicates will be rejected.</li>
+              <li>Product names must be unique within the branch. Duplicate rows are <strong>skipped</strong> — the rest are still imported.</li>
               <li>SKUs are auto-generated from the selected category and product name, and barcodes must still be unique.</li>
-              <li>The entire upload is rejected if <strong>any</strong> row has an error. Fix all errors before re-uploading.</li>
+              <li>Rows with duplicate names or barcodes (already in the system or within the same file) are skipped and listed below for your reference.</li>
               <li>For service items, stock quantity and reorder level are automatically set to 0.</li>
             </ul>
           </AlertMessage>
@@ -316,18 +318,18 @@ export default function DataImporterPage() {
         </AlertMessage>
       )}
 
-      {/* Validation Errors */}
+      {/* Skipped Rows */}
       {validationErrors.length > 0 && (
-        <Card className="border-red-200">
+        <Card className="border-amber-200">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-600">
+            <CardTitle className="flex items-center gap-2 text-amber-600">
               <AlertCircle className="h-5 w-5" />
-              Validation Errors ({validationErrors.length} row{validationErrors.length !== 1 ? 's' : ''})
+              Skipped Rows ({validationErrors.length} row{validationErrors.length !== 1 ? 's' : ''})
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              The upload was rejected because the following rows have errors. Fix them in your Excel file and re-upload.
+              These rows were skipped during import (duplicates or validation errors). The remaining rows were imported successfully.
             </p>
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {validationErrors.map((ve, idx) => (
