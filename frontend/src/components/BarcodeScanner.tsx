@@ -253,7 +253,18 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
     }
   }, [mobileDevice, onScan, stopCamera])
 
-  // Auto-focus input for USB scanner; auto-start camera on mobile and touch devices
+  // Use refs to avoid re-triggering the effect when callback identities change
+  const startCameraRef = useRef(startCamera)
+  const stopCameraRef = useRef(stopCamera)
+  const handleGlobalKeyDownRef = useRef(handleGlobalKeyDown)
+  
+  useEffect(() => {
+    startCameraRef.current = startCamera
+    stopCameraRef.current = stopCamera
+    handleGlobalKeyDownRef.current = handleGlobalKeyDown
+  })
+
+  // Auto-focus input for USB scanner; auto-start camera on mobile — runs ONCE on mount
   useEffect(() => {
     const deviceIsMobile = isDeviceMobile()
     setMobileDevice(deviceIsMobile)
@@ -261,16 +272,22 @@ export default function BarcodeScanner({ onScan, onClose, onFail, placeholder = 
 
     const canUseCamera = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
     if (canUseCamera && (deviceIsMobile || window.innerWidth < 768 || ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0))) {
-      startCamera(deviceIsMobile)
+      // Small delay to let the DOM element mount before html5-qrcode attaches
+      const timer = setTimeout(() => {
+        startCameraRef.current(deviceIsMobile)
+      }, 100)
+      return () => {
+        clearTimeout(timer)
+        void stopCameraRef.current()
+      }
     }
 
-    window.addEventListener('keydown', handleGlobalKeyDown)
-
+    window.addEventListener('keydown', handleGlobalKeyDownRef.current)
     return () => {
-      void stopCamera()
-      window.removeEventListener('keydown', handleGlobalKeyDown)
+      window.removeEventListener('keydown', handleGlobalKeyDownRef.current)
+      void stopCameraRef.current()
     }
-  }, [startCamera, stopCamera, handleGlobalKeyDown])
+  }, [])
 
   return (
     <div className="space-y-3">
