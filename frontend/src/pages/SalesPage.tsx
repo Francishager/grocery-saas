@@ -436,7 +436,7 @@ export default function SalesPage() {
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
         {/* Inventory List */}
         <div className="lg:col-span-2">
           <Card>

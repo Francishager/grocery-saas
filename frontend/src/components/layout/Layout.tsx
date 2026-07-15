@@ -122,7 +122,7 @@ export function Layout() {
             )}
           </div>
         </header>
-        <main className="overflow-x-hidden p-4 lg:p-6"><Outlet /></main>
+        <main className="overflow-x-clip p-4 lg:p-6"><Outlet /></main>
       </div>
     </div>
   )
