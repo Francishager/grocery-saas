@@ -632,7 +632,7 @@ export default function ManufacturingPage() {
       </Dialog>
 
       <Dialog open={showWasteModal} onOpenChange={setShowWasteModal}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Record Production Waste</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Production Order</Label>
@@ -658,7 +658,7 @@ export default function ManufacturingPage() {
       </Dialog>
 
       <Dialog open={showQcModal} onOpenChange={setShowQcModal}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Quality Check</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Production Order</Label>
@@ -696,7 +696,7 @@ export default function ManufacturingPage() {
       </Dialog>
 
       <Dialog open={showBatchModal} onOpenChange={setShowBatchModal}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Production Batch</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Production Order</Label>
