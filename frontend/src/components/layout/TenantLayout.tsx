@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -42,6 +42,9 @@ const serviceSubItems = [
   { to: '/tenant/service/appointments', label: 'Appointments', icon: CalendarClock, permission: 'canViewServiceBusiness', feature: 'service' },
   { to: '/tenant/service/work-orders', label: 'Work Orders', icon: ClipboardList, permission: 'canViewServiceBusiness', feature: 'service' },
   { to: '/tenant/service/contracts', label: 'Contracts', icon: FileText, permission: 'canViewServiceBusiness', feature: 'service' },
+  { to: '/tenant/service/technicians', label: 'Technicians', icon: UserCog, permission: 'canViewServiceBusiness', feature: 'service' },
+  { to: '/tenant/service/job-cards', label: 'Job Cards', icon: ClipboardCheck, permission: 'canViewServiceBusiness', feature: 'service' },
+  { to: '/tenant/service/feedback', label: 'Feedback', icon: Star, permission: 'canViewServiceBusiness', feature: 'service' },
   { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: 'canViewServiceBusiness', feature: 'fuel_station.car_wash' },
   { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: 'canViewServiceBusiness', feature: 'fuel_station.garage' },
 ]
@@ -234,6 +237,9 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'svcByStatus', label: 'Work Orders by Status' },
       { id: 'svcRevenueReport', label: 'Service Revenue Report' },
       { id: 'svcContractReport', label: 'Active Contracts Report' },
+      { id: 'svcFeedbackReport', label: 'Customer Feedback Report' },
+      { id: 'svcJobCardReport', label: 'Job Card Summary' },
+      { id: 'svcContractUtilization', label: 'Contract Utilization' },
     ],
   },
 ]

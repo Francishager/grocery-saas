@@ -286,6 +286,69 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'servicesTop', label: 'Top Services', apiFn: reportsApiV2.servicesTop, renderType: 'table',
         columns: [textCol('service', 'Service'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
       },
+      { id: 'svcAppointments', label: 'Appointment Analytics', apiFn: reportsApiV2.svcAppointments, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Appointments', format: 'number' },
+          { key: 'scheduled', label: 'Scheduled', format: 'number' },
+          { key: 'confirmed', label: 'Confirmed', format: 'number' },
+          { key: 'inProgress', label: 'In Progress', format: 'number' },
+          { key: 'completed', label: 'Completed', format: 'number' },
+          { key: 'cancelled', label: 'Cancelled', format: 'number' },
+          { key: 'noShow', label: 'No Show', format: 'number' },
+          { key: 'completedRevenue', label: 'Completed Revenue', format: 'currency' },
+        ]
+      },
+      { id: 'svcTechnicians', label: 'Technician Performance', apiFn: reportsApiV2.svcTechnicians, renderType: 'table',
+        columns: [textCol('name', 'Name'), textCol('role', 'Role'), numberCol('rating', 'Rating'), numberCol('totalJobs', 'Total Jobs'), numberCol('completedJobs', 'Completed'), numberCol('jobCards', 'Job Cards'), textCol('availability', 'Availability'), currencyCol('hourlyRate', 'Hourly Rate')]
+      },
+      { id: 'svcContracts', label: 'Contract Utilization', apiFn: reportsApiV2.svcContracts, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Contracts', format: 'number' },
+          { key: 'active', label: 'Active', format: 'number' },
+          { key: 'expired', label: 'Expired', format: 'number' },
+          { key: 'terminated', label: 'Terminated', format: 'number' },
+          { key: 'pendingRenewal', label: 'Pending Renewal', format: 'number' },
+          { key: 'activeValue', label: 'Active Contract Value', format: 'currency' },
+        ]
+      },
+      { id: 'svcFeedback', label: 'Customer Feedback Report', apiFn: reportsApiV2.svcFeedback, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Reviews', format: 'number' },
+          { key: 'avgRating', label: 'Avg Rating', format: 'number' },
+          { key: 'avgServiceQuality', label: 'Avg Service Quality', format: 'number' },
+          { key: 'avgTimeliness', label: 'Avg Timeliness', format: 'number' },
+          { key: 'avgProfessionalism', label: 'Avg Professionalism', format: 'number' },
+          { key: 'avgValueForMoney', label: 'Avg Value for Money', format: 'number' },
+          { key: 'recommendRate', label: 'Recommend Rate (%)', format: 'number' },
+        ]
+      },
+      { id: 'svcJobCards', label: 'Job Card Summary', apiFn: reportsApiV2.svcJobCards, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Job Cards', format: 'number' },
+          { key: 'pending', label: 'Pending', format: 'number' },
+          { key: 'inProgress', label: 'In Progress', format: 'number' },
+          { key: 'onHold', label: 'On Hold', format: 'number' },
+          { key: 'completed', label: 'Completed', format: 'number' },
+          { key: 'cancelled', label: 'Cancelled', format: 'number' },
+          { key: 'laborCost', label: 'Labor Cost', format: 'currency' },
+          { key: 'partsCost', label: 'Parts Cost', format: 'currency' },
+          { key: 'totalCost', label: 'Total Cost', format: 'currency' },
+        ]
+      },
+      { id: 'svcWorkOrders', label: 'Work Order Summary', apiFn: reportsApiV2.svcWorkOrders, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Work Orders', format: 'number' },
+          { key: 'open', label: 'Open', format: 'number' },
+          { key: 'inProgress', label: 'In Progress', format: 'number' },
+          { key: 'onHold', label: 'On Hold', format: 'number' },
+          { key: 'completed', label: 'Completed', format: 'number' },
+          { key: 'cancelled', label: 'Cancelled', format: 'number' },
+          { key: 'estimatedCost', label: 'Estimated Cost', format: 'currency' },
+          { key: 'actualCost', label: 'Actual Cost', format: 'currency' },
+          { key: 'laborCost', label: 'Labor Cost', format: 'currency' },
+          { key: 'partsCost', label: 'Parts Cost', format: 'currency' },
+        ]
+      },
     ]
   },
   {

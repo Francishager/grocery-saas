@@ -1300,6 +1300,108 @@ router.get("/services/top", authenticateToken, async (req, res) => {
   } catch (err) { handleBranchError(res, err); }
 });
 
+// ==================== SERVICE BUSINESS REPORTS ====================
+router.get("/service-business/appointments", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req, "scheduledDate"));
+    const [total, scheduled, confirmed, inProgress, completed, cancelled, noShow] = await Promise.all([
+      prisma.appointment.count({ where }),
+      prisma.appointment.count({ where: { ...where, status: "scheduled" } }),
+      prisma.appointment.count({ where: { ...where, status: "confirmed" } }),
+      prisma.appointment.count({ where: { ...where, status: "in_progress" } }),
+      prisma.appointment.count({ where: { ...where, status: "completed" } }),
+      prisma.appointment.count({ where: { ...where, status: "cancelled" } }),
+      prisma.appointment.count({ where: { ...where, status: "no_show" } }),
+    ]);
+    const revenueAgg = await prisma.appointment.aggregate({ where: { ...where, status: "completed" }, _sum: { actualPrice: true, price: true } });
+    res.json({ total, scheduled, confirmed, inProgress, completed, cancelled, noShow, completedRevenue: revenueAgg._sum.actualPrice || revenueAgg._sum.price || 0 });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/service-business/technicians", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s);
+    const techs = await prisma.serviceTechnician.findMany({ where, include: { _count: { select: { jobCards: true } } } });
+    const data = techs.map(t => ({ id: t.id, name: t.name, role: t.role, rating: t.rating, totalJobs: t.totalJobs, completedJobs: t.completedJobs, jobCards: t._count.jobCards, availability: t.availability, hourlyRate: t.hourlyRate }));
+    res.json({ data });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/service-business/contracts", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req, "startDate"));
+    const [total, active, expired, terminated, pendingRenewal] = await Promise.all([
+      prisma.serviceContract.count({ where }),
+      prisma.serviceContract.count({ where: { ...where, status: "active" } }),
+      prisma.serviceContract.count({ where: { ...where, status: "expired" } }),
+      prisma.serviceContract.count({ where: { ...where, status: "terminated" } }),
+      prisma.serviceContract.count({ where: { ...where, status: "pending_renewal" } }),
+    ]);
+    const valueAgg = await prisma.serviceContract.aggregate({ where: { ...where, status: "active" }, _sum: { value: true } });
+    res.json({ total, active, expired, terminated, pendingRenewal, activeValue: valueAgg._sum.value || 0 });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/service-business/feedback", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req, "createdAt"));
+    const [total, avgAgg] = await Promise.all([
+      prisma.serviceFeedback.count({ where }),
+      prisma.serviceFeedback.aggregate({ where, _avg: { rating: true, serviceQuality: true, timeliness: true, professionalism: true, valueForMoney: true } }),
+    ]);
+    const ratingDist = await Promise.all([1, 2, 3, 4, 5].map(r => prisma.serviceFeedback.count({ where: { ...where, rating: r } })));
+    const recommendCount = await prisma.serviceFeedback.count({ where: { ...where, wouldRecommend: true } });
+    res.json({
+      total,
+      avgRating: avgAgg._avg.rating || 0,
+      avgServiceQuality: avgAgg._avg.serviceQuality || 0,
+      avgTimeliness: avgAgg._avg.timeliness || 0,
+      avgProfessionalism: avgAgg._avg.professionalism || 0,
+      avgValueForMoney: avgAgg._avg.valueForMoney || 0,
+      ratingDist: { 1: ratingDist[0], 2: ratingDist[1], 3: ratingDist[2], 4: ratingDist[3], 5: ratingDist[4] },
+      recommendRate: total > 0 ? (recommendCount / total) * 100 : 0,
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/service-business/job-cards", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req, "createdAt"));
+    const [total, pending, inProgress, onHold, completed, cancelled] = await Promise.all([
+      prisma.serviceJobCard.count({ where }),
+      prisma.serviceJobCard.count({ where: { ...where, status: "pending" } }),
+      prisma.serviceJobCard.count({ where: { ...where, status: "in_progress" } }),
+      prisma.serviceJobCard.count({ where: { ...where, status: "on_hold" } }),
+      prisma.serviceJobCard.count({ where: { ...where, status: "completed" } }),
+      prisma.serviceJobCard.count({ where: { ...where, status: "cancelled" } }),
+    ]);
+    const costAgg = await prisma.serviceJobCard.aggregate({ where: { ...where, status: "completed" }, _sum: { laborCost: true, partsCost: true, totalCost: true } });
+    res.json({ total, pending, inProgress, onHold, completed, cancelled, laborCost: costAgg._sum.laborCost || 0, partsCost: costAgg._sum.partsCost || 0, totalCost: costAgg._sum.totalCost || 0 });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+router.get("/service-business/work-orders", authenticateToken, async (req,res) => {
+  try {
+    const s = await getScope(req);
+    const where = scopedWhere(s, df(req, "createdAt"));
+    const [total, open, inProgress, onHold, completed, cancelled] = await Promise.all([
+      prisma.workOrder.count({ where }),
+      prisma.workOrder.count({ where: { ...where, status: "open" } }),
+      prisma.workOrder.count({ where: { ...where, status: "in_progress" } }),
+      prisma.workOrder.count({ where: { ...where, status: "on_hold" } }),
+      prisma.workOrder.count({ where: { ...where, status: "completed" } }),
+      prisma.workOrder.count({ where: { ...where, status: "cancelled" } }),
+    ]);
+    const costAgg = await prisma.workOrder.aggregate({ where: { ...where, status: "completed" }, _sum: { estimatedCost: true, actualCost: true, laborCost: true, partsCost: true } });
+    res.json({ total, open, inProgress, onHold, completed, cancelled, estimatedCost: costAgg._sum.estimatedCost || 0, actualCost: costAgg._sum.actualCost || 0, laborCost: costAgg._sum.laborCost || 0, partsCost: costAgg._sum.partsCost || 0 });
+  } catch (err) { handleBranchError(res, err); }
+});
+
 // ==================== RENTAL REPORTS ====================
 router.get("/rentals/summary", authenticateToken, async (req, res) => {
   try {

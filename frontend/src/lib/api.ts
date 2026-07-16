@@ -621,6 +621,14 @@ export const reportsApiV2 = {
   servicesByBranch: (params?: ReportParams) => api.get<any>('/api/reports/services/by-branch', { params }),
   servicesTop: (params?: ReportParams) => api.get<any>('/api/reports/services/top', { params }),
 
+  // Service Business Reports
+  svcAppointments: (params?: ReportParams) => api.get<any>('/api/reports/service-business/appointments', { params }),
+  svcTechnicians: (params?: ReportParams) => api.get<any>('/api/reports/service-business/technicians', { params }),
+  svcContracts: (params?: ReportParams) => api.get<any>('/api/reports/service-business/contracts', { params }),
+  svcFeedback: (params?: ReportParams) => api.get<any>('/api/reports/service-business/feedback', { params }),
+  svcJobCards: (params?: ReportParams) => api.get<any>('/api/reports/service-business/job-cards', { params }),
+  svcWorkOrders: (params?: ReportParams) => api.get<any>('/api/reports/service-business/work-orders', { params }),
+
   // Rental Reports
   rentalsSummary: (params?: ReportParams) => api.get<any>('/api/reports/rentals/summary', { params }),
   rentalsList: (params?: ReportParams) => api.get<any>('/api/reports/rentals/list', { params }),

@@ -56,6 +56,9 @@ model Branch {
   appointments       Appointment[]
   workOrders         WorkOrder[]
   serviceContracts   ServiceContract[]
+  serviceJobCards    ServiceJobCard[]
+  serviceFeedback    ServiceFeedback[]
+  serviceTechnicians ServiceTechnician[]
   assets             Asset[]
   fuelCards          FuelCard[]
   fuelCardTransactions FuelCardTransaction[]
@@ -194,6 +197,9 @@ model Tenant {
   appointments      Appointment[]
   workOrders        WorkOrder[]
   serviceContracts  ServiceContract[]
+  serviceJobCards   ServiceJobCard[]
+  serviceFeedback   ServiceFeedback[]
+  serviceTechnicians ServiceTechnician[]
 
   // =====================
   // ASSETS
@@ -371,6 +377,9 @@ model User {
   fuelShiftReports  FuelShiftReport[]
   productionOrders  ProductionOrder[]
   qualityChecks     QualityCheck[]
+  serviceTechnicianProfiles ServiceTechnician[]
+  appointmentTechnician Appointment[] @relation("AppointmentTechnician")
+  workOrderTechnician   WorkOrder[]   @relation("WorkOrderTechnician")
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -867,6 +876,7 @@ model Customer {
   appointments Appointment[]
   workOrders   WorkOrder[]
   serviceContracts ServiceContract[]
+  serviceFeedback ServiceFeedback[]
   fuelCards        FuelCard[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
@@ -2450,21 +2460,33 @@ model Appointment {
   customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerName String
   customerPhone String?
+  customerEmail String?
   productId   String?  // service item
   product     Product? @relation(fields: [productId], references: [id])
   technicianId String? // assigned user/staff
+  technician  User?    @relation("AppointmentTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
   title       String
   description String?
   scheduledDate DateTime
   scheduledTime String  // "09:30"
+  endTime     String?   // "10:30"
   duration    String?   // "1 hour", "30 min"
   status      String   @default("scheduled") // scheduled, confirmed, in_progress, completed, cancelled, no_show
   price       Float    @default(0)
+  actualPrice Float    @default(0) // final price after completion
   notes       String?
+  reminderSent Boolean @default(false) // SMS/email reminder sent
+  completedAt DateTime?
+  cancelledReason String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  jobCards    ServiceJobCard[]
+  feedback    ServiceFeedback[]
+
   @@index([tenantId, scheduledDate])
+  @@index([tenantId, technicianId])
+  @@index([tenantId, status])
   @@map("appointments")
 }
 
@@ -2479,23 +2501,35 @@ model WorkOrder {
   customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerName String
   customerPhone String?
+  customerEmail String?
   productId   String?  // service item
   product     Product? @relation(fields: [productId], references: [id])
   technicianId String?
+  technician  User?    @relation("WorkOrderTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
   title       String
   description String?
   status      String   @default("open") // open, in_progress, on_hold, completed, cancelled
   priority    String   @default("normal") // low, normal, high, urgent
+  serviceCategory String? // e.g., "repair", "installation", "maintenance", "consultation"
   estimatedCost Float  @default(0)
   actualCost  Float    @default(0)
+  laborCost   Float    @default(0)
+  partsCost   Float    @default(0)
   startDate   DateTime?
   endDate     DateTime?
+  diagnostics String?  // technician diagnosis notes
+  warrantyInfo String? // warranty details for the work done
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  jobCards    ServiceJobCard[]
+  feedback    ServiceFeedback[]
+
   @@unique([tenantId, orderNo])
   @@index([tenantId, branchId])
+  @@index([tenantId, technicianId])
+  @@index([tenantId, status])
   @@map("work_orders")
 }
 
@@ -2510,17 +2544,25 @@ model ServiceContract {
   customer    Customer @relation(fields: [customerId], references: [id])
   title       String
   description String?
+  serviceCategory String? // e.g., "maintenance", "consulting", "cleaning", "IT support"
   startDate   DateTime
   endDate     DateTime?
+  renewalDate DateTime? // auto-renewal date if applicable
+  autoRenew   Boolean  @default(false)
+  nextBillingDate DateTime? // upcoming billing date
   value       Float    @default(0)
   billingCycle String  @default("monthly") // one_time, monthly, quarterly, yearly
-  status      String   @default("active") // active, expired, terminated, cancelled
+  discountPercent Float @default(0) // loyalty discount
+  status      String   @default("active") // active, expired, terminated, cancelled, pending_renewal
   terms       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  feedback    ServiceFeedback[]
+
   @@unique([tenantId, contractNo])
   @@index([tenantId, branchId])
+  @@index([tenantId, status])
   @@map("service_contracts")
 }
 
@@ -2557,6 +2599,131 @@ model GarageService {
 
   @@index([tenantId, branchId])
   @@map("garage_services")
+}
+
+// =====================================================
+// SERVICE TECHNICIANS (staff profiles with skills & ratings)
+// =====================================================
+
+model ServiceTechnician {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  userId      String?  // linked system user (optional)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name        String
+  email       String?
+  phone       String?
+  role        String   @default("technician") // technician, specialist, senior_technician, supervisor
+  skills      String[] @default([]) // e.g., ["electrical", "plumbing", "HVAC", "hair styling"]
+  specializations String[] @default([]) // e.g., ["bridal makeup", "color treatment", "engine repair"]
+  hourlyRate  Float    @default(0)
+  availability String  @default("full_time") // full_time, part_time, on_call, unavailable
+  rating      Float    @default(0) // average rating from feedback
+  totalJobs   Int      @default(0)
+  completedJobs Int    @default(0)
+  isActive    Boolean  @default(true)
+  hireDate    DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  jobCards    ServiceJobCard[]
+
+  @@index([tenantId, branchId])
+  @@index([tenantId, isActive])
+  @@map("service_technicians")
+}
+
+// =====================================================
+// SERVICE JOB CARDS (detailed work tracking with time & parts)
+// =====================================================
+
+model ServiceJobCard {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  cardNo      String
+  appointmentId String?
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  workOrderId  String?
+  workOrder    WorkOrder?   @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  technicianId String?
+  technician  ServiceTechnician? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  customerName String
+  customerPhone String?
+  serviceTitle String
+  serviceDescription String?
+  status      String   @default("pending") // pending, in_progress, on_hold, completed, cancelled
+  priority    String   @default("normal") // low, normal, high, urgent
+  // Time tracking
+  scheduledStart DateTime?
+  scheduledEnd   DateTime?
+  actualStart    DateTime?
+  actualEnd      DateTime?
+  laborHours   Float    @default(0)
+  // Cost tracking
+  laborCost    Float    @default(0)
+  partsCost    Float    @default(0)
+  totalCost    Float    @default(0)
+  // Parts used (JSON array: [{ name, quantity, unitCost, totalCost }])
+  partsUsed    Json?
+  // Quality & completion
+  qualityCheckPassed Boolean @default(false)
+  qualityNotes String?
+  completionNotes String?
+  customerSignature String? // base64 or URL
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, cardNo])
+  @@index([tenantId, branchId])
+  @@index([tenantId, technicianId])
+  @@index([tenantId, status])
+  @@map("service_job_cards")
+}
+
+// =====================================================
+// SERVICE FEEDBACK (customer ratings & reviews)
+// =====================================================
+
+model ServiceFeedback {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  appointmentId String?
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  workOrderId  String?
+  workOrder    WorkOrder?   @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  contractId   String?
+  contract     ServiceContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName String
+  customerPhone String?
+  rating       Int      @default(5) // 1-5 stars
+  serviceQuality Int   @default(5) // 1-5
+  timeliness   Int      @default(5) // 1-5
+  professionalism Int  @default(5) // 1-5
+  valueForMoney Int    @default(5) // 1-5
+  comment      String?
+  wouldRecommend Boolean @default(true)
+  status       String   @default("published") // published, hidden, flagged
+  response     String?  // business response to feedback
+  respondedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, branchId])
+  @@index([tenantId, rating])
+  @@index([tenantId, createdAt])
+  @@map("service_feedback")
 }
 
 // =====================================================
