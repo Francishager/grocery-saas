@@ -177,6 +177,8 @@ model Tenant {
   // =====================
   productionOrders  ProductionOrder[]
   productionWaste   ProductionWaste[]
+  qualityChecks     QualityCheck[]
+  productionBatches ProductionBatch[]
 
   // =====================
   // AGRICULTURE
@@ -368,6 +370,7 @@ model User {
   tips              Tip[]
   fuelShiftReports  FuelShiftReport[]
   productionOrders  ProductionOrder[]
+  qualityChecks     QualityCheck[]
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -632,6 +635,7 @@ model Product {
   recipes               Recipe[]
   productionOrders      ProductionOrder[]
   productionWaste       ProductionWaste[]
+  productionBatches     ProductionBatch[]
   harvests              Harvest[]
   appointmentProducts   Appointment[]
   workOrderProducts     WorkOrder[]
@@ -2240,13 +2244,27 @@ model ProductionOrder {
   product       Product  @relation(fields: [productId], references: [id])
   recipeId      String?  // linked BOM/Recipe
   recipe        Recipe?  @relation(fields: [recipeId], references: [id])
-  quantity      Float    @default(0) // units to produce
-  unitCost      Float    @default(0) // cost per unit
-  totalCost     Float    @default(0)
+  quantity      Float    @default(0) // units to produce (planned)
+  actualQuantity Float   @default(0) // actual units produced
+  unitCost      Float    @default(0) // material cost per unit
+  laborCost     Float    @default(0) // labor cost total
+  overheadCost  Float    @default(0) // overhead cost total
+  standardCost  Float    @default(0) // expected total cost (BOM-based)
+  actualCost    Float    @default(0) // actual total cost (material + labor + overhead + waste)
+  totalCost     Float    @default(0) // legacy field — kept for backward compat
   wasteQty      Float    @default(0)
+  expectedYield Float    @default(0) // expected output quantity
+  actualYield   Float    @default(0) // actual output quantity
+  batchNumber   String?  // production batch/lot number
+  qualityStatus String   @default("pending") // pending, passed, failed, rework
+  qualityNotes  String?
+  qualityCheckedBy String?
+  qualityCheckedAt DateTime?
   status        String   @default("pending") // pending, in_progress, completed, cancelled
   startDate     DateTime?
   endDate       DateTime?
+  plannedStartDate DateTime? // scheduled start
+  plannedEndDate   DateTime? // scheduled end
   userId        String
   user          User     @relation(fields: [userId], references: [id])
   notes         String?
@@ -2254,9 +2272,13 @@ model ProductionOrder {
   updatedAt     DateTime @updatedAt
 
   wasteRecords  ProductionWaste[]
+  qualityChecks QualityCheck[]
+  batches       ProductionBatch[]
 
   @@unique([tenantId, orderNo])
   @@index([tenantId, branchId])
+  @@index([tenantId, status])
+  @@index([tenantId, qualityStatus])
   @@map("production_orders")
 }
 
@@ -2276,6 +2298,50 @@ model ProductionWaste {
 
   @@index([tenantId, productionOrderId])
   @@map("production_waste")
+}
+
+model QualityCheck {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  checkType       String   // incoming_material, in_process, final_inspection
+  status          String   @default("pending") // pending, passed, failed, rework
+  checkedBy       String?
+  checkedAt       DateTime?
+  notes           String?
+  defectQty       Float    @default(0)
+  defectDescription String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, productionOrderId])
+  @@index([tenantId, status])
+  @@map("quality_checks")
+}
+
+model ProductionBatch {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id])
+  batchNumber     String
+  quantity        Float    @default(0)
+  manufacturedDate DateTime @default(now())
+  expiryDate      DateTime?
+  status          String   @default("active") // active, quarantined, recalled, expired
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  @@unique([tenantId, batchNumber])
+  @@index([tenantId, productionOrderId])
+  @@index([tenantId, status])
+  @@map("production_batches")
 }
 
 // =====================================================

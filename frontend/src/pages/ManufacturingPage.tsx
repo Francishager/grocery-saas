@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Factory, Plus, Trash2, Beaker, AlertTriangle } from 'lucide-react'
+import { Factory, Plus, Trash2, Beaker, AlertTriangle, ClipboardCheck, Package, TrendingDown } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 interface ProductionOrder {
@@ -17,14 +17,54 @@ interface ProductionOrder {
   product: { id: string; name: string }
   recipe?: { id: string; name: string } | null
   quantity: number
+  actualQuantity?: number
   unitCost: number
+  laborCost?: number
+  overheadCost?: number
+  standardCost?: number
+  actualCost?: number
   totalCost: number
   wasteQty: number
+  expectedYield?: number
+  actualYield?: number
+  batchNumber?: string | null
+  qualityStatus?: string
+  qualityNotes?: string | null
   status: string
   startDate: string | null
   endDate: string | null
+  plannedStartDate?: string | null
+  plannedEndDate?: string | null
   user: { id: string; fname?: string; lname?: string }
   notes: string | null
+  qualityChecks?: QualityCheck[]
+  batches?: ProductionBatch[]
+}
+
+interface QualityCheck {
+  id: string
+  productionOrderId: string
+  checkType: string
+  status: string
+  checkedBy?: string | null
+  checkedAt?: string | null
+  notes?: string | null
+  defectQty?: number
+  defectDescription?: string | null
+  createdAt: string
+  user?: { fname?: string; lname?: string; email?: string } | null
+}
+
+interface ProductionBatch {
+  id: string
+  productionOrderId: string
+  batchNumber: string
+  quantity: number
+  manufacturedDate: string
+  expiryDate?: string | null
+  status: string
+  notes?: string | null
+  product?: { id: string; name: string } | null
 }
 
 interface BOM {
@@ -58,24 +98,47 @@ const statusColors: Record<string, string> = {
   cancelled: 'bg-red-100 text-red-700',
 }
 
+const qcStatusColors: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-700',
+  passed: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+  rework: 'bg-orange-100 text-orange-700',
+}
+
+const batchStatusColors: Record<string, string> = {
+  active: 'bg-green-100 text-green-700',
+  quarantined: 'bg-orange-100 text-orange-700',
+  recalled: 'bg-red-100 text-red-700',
+  expired: 'bg-gray-100 text-gray-700',
+}
+
 export default function ManufacturingPage() {
   const [tab, setTab] = useState('orders')
   const [orders, setOrders] = useState<ProductionOrder[]>([])
   const [boms, setBoms] = useState<BOM[]>([])
   const [waste, setWaste] = useState<WasteRecord[]>([])
+  const [qualityChecks, setQualityChecks] = useState<QualityCheck[]>([])
+  const [batches, setBatches] = useState<ProductionBatch[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
   const [showOrderModal, setShowOrderModal] = useState(false)
   const [showWasteModal, setShowWasteModal] = useState(false)
   const [showBomModal, setShowBomModal] = useState(false)
-  const [orderForm, setOrderForm] = useState({ orderNo: '', productId: '', recipeId: '', quantity: 1, unitCost: 0, notes: '' })
+  const [showQcModal, setShowQcModal] = useState(false)
+  const [showBatchModal, setShowBatchModal] = useState(false)
+  const [showCompleteModal, setShowCompleteModal] = useState(false)
+  const [completingOrder, setCompletingOrder] = useState<ProductionOrder | null>(null)
+  const [orderForm, setOrderForm] = useState({ orderNo: '', productId: '', recipeId: '', quantity: 1, unitCost: 0, laborCost: 0, overheadCost: 0, batchNumber: '', expectedYield: 0, plannedStartDate: '', plannedEndDate: '', notes: '' })
   const [wasteForm, setWasteForm] = useState({ productionOrderId: '', productId: '', quantity: 1, unitCost: 0, reason: '' })
   const [bomForm, setBomForm] = useState({ productId: '', name: '', yield: '', notes: '' })
   const [bomIngredients, setBomIngredients] = useState<IngredientRow[]>([{ productId: '', quantity: 1, unit: 'Piece' }])
+  const [qcForm, setQcForm] = useState({ productionOrderId: '', checkType: 'final_inspection', status: 'pending', notes: '', defectQty: 0, defectDescription: '' })
+  const [batchForm, setBatchForm] = useState({ productionOrderId: '', productId: '', batchNumber: '', quantity: 0, manufacturedDate: '', expiryDate: '', notes: '' })
+  const [completeForm, setCompleteForm] = useState({ actualQuantity: 0, actualYield: 0, laborCost: 0, overheadCost: 0, qualityStatus: 'pending', qualityNotes: '', batchNumber: '' })
   const { toast } = useToast()
 
   const resetOrderForm = useCallback(() => {
-    setOrderForm({ orderNo: '', productId: '', recipeId: '', quantity: 1, unitCost: 0, notes: '' })
+    setOrderForm({ orderNo: '', productId: '', recipeId: '', quantity: 1, unitCost: 0, laborCost: 0, overheadCost: 0, batchNumber: '', expectedYield: 0, plannedStartDate: '', plannedEndDate: '', notes: '' })
   }, [])
 
   const resetWasteForm = useCallback(() => {
@@ -90,16 +153,20 @@ export default function ManufacturingPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [o, b, w, p] = await Promise.all([
+      const [o, b, w, p, qc, bt] = await Promise.all([
         apiFetch('/api/manufacturing/orders').then((r) => r.json()).catch(() => []),
         apiFetch('/api/manufacturing/bom').then((r) => r.json()).catch(() => []),
         apiFetch('/api/manufacturing/waste').then((r) => r.json()).catch(() => []),
-        apiFetch('/api/inventory?limit=100').then((r) => r.json()).catch(() => []),
+        apiFetch('/api/inventory?limit=1000000').then((r) => r.json()).catch(() => []),
+        apiFetch('/api/manufacturing/quality-checks').then((r) => r.json()).catch(() => []),
+        apiFetch('/api/manufacturing/batches').then((r) => r.json()).catch(() => []),
       ])
       setOrders(Array.isArray(o) ? o : [])
       setBoms(Array.isArray(b) ? b : [])
       setWaste(Array.isArray(w) ? w : [])
       setProducts(Array.isArray(p) ? p : p?.products || [])
+      setQualityChecks(Array.isArray(qc) ? qc : [])
+      setBatches(Array.isArray(bt) ? bt : [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -145,6 +212,78 @@ export default function ManufacturingPage() {
       body: JSON.stringify({ status }),
     })
     await loadData()
+  }
+
+  const openCompleteModal = (order: ProductionOrder) => {
+    setCompletingOrder(order)
+    setCompleteForm({
+      actualQuantity: order.quantity,
+      actualYield: order.expectedYield || order.quantity,
+      laborCost: order.laborCost || 0,
+      overheadCost: order.overheadCost || 0,
+      qualityStatus: 'pending',
+      qualityNotes: '',
+      batchNumber: order.batchNumber || '',
+    })
+    setShowCompleteModal(true)
+  }
+
+  const completeOrder = async () => {
+    if (!completingOrder) return
+    try {
+      await apiFetch(`/api/manufacturing/orders/${completingOrder.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'completed',
+          ...completeForm,
+        }),
+      })
+      setShowCompleteModal(false)
+      setCompletingOrder(null)
+      await loadData()
+      toast({ title: 'Production completed', description: 'Stock has been updated and batch recorded.' })
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to complete order' })
+    }
+  }
+
+  const createQualityCheck = async () => {
+    if (!qcForm.productionOrderId) {
+      toast({ variant: 'destructive', title: 'Select a production order' })
+      return
+    }
+    try {
+      await apiFetch('/api/manufacturing/quality-checks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(qcForm),
+      })
+      setShowQcModal(false)
+      setQcForm({ productionOrderId: '', checkType: 'final_inspection', status: 'pending', notes: '', defectQty: 0, defectDescription: '' })
+      await loadData()
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to create quality check' })
+    }
+  }
+
+  const createBatch = async () => {
+    if (!batchForm.productionOrderId || !batchForm.batchNumber.trim()) {
+      toast({ variant: 'destructive', title: 'Production order and batch number are required' })
+      return
+    }
+    try {
+      await apiFetch('/api/manufacturing/batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchForm),
+      })
+      setShowBatchModal(false)
+      setBatchForm({ productionOrderId: '', productId: '', batchNumber: '', quantity: 0, manufacturedDate: '', expiryDate: '', notes: '' })
+      await loadData()
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to create batch' })
+    }
   }
 
   const createWaste = async () => {
@@ -212,6 +351,9 @@ export default function ManufacturingPage() {
 
   const totalWasteCost = waste.reduce((s, w) => s + (Number(w.totalCost) || 0), 0)
   const completedOrders = orders.filter((o) => o.status === 'completed').length
+  const inProgressOrders = orders.filter((o) => o.status === 'in_progress').length
+  const pendingQcChecks = qualityChecks.filter((qc) => qc.status === 'pending').length
+  const activeBatches = batches.filter((b) => b.status === 'active').length
   const filteredBoms = orderForm.productId ? boms.filter((bom) => bom.product?.id === orderForm.productId) : boms
   const getProductName = (product: Product | null | undefined) => product?.name || 'Unknown product'
   const getOrderProductName = (order: ProductionOrder) => order.product?.name || 'Unknown product'
@@ -219,6 +361,12 @@ export default function ManufacturingPage() {
   const getWasteProductName = (record: WasteRecord) => record.product?.name || '—'
   const getBomProductName = (bom: BOM) => bom.product?.name || 'Unknown product'
   const getIngredientName = (ingredient: BOM['ingredients'][number]) => ingredient.product?.name || 'Unspecified ingredient'
+  const costVariance = (order: ProductionOrder) => {
+    const std = Number(order.standardCost || 0)
+    const actual = Number(order.actualCost || order.totalCost || 0)
+    if (!std) return null
+    return actual - std
+  }
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -239,6 +387,8 @@ export default function ManufacturingPage() {
           <TabsTrigger value="orders"><Factory className="mr-1 h-4 w-4" /> Production Orders</TabsTrigger>
           <TabsTrigger value="bom"><Beaker className="mr-1 h-4 w-4" /> BOM</TabsTrigger>
           <TabsTrigger value="waste"><AlertTriangle className="mr-1 h-4 w-4" /> Waste</TabsTrigger>
+          <TabsTrigger value="qc"><ClipboardCheck className="mr-1 h-4 w-4" /> Quality Checks</TabsTrigger>
+          <TabsTrigger value="batches"><Package className="mr-1 h-4 w-4" /> Batches</TabsTrigger>
         </TabsList>
 
         <TabsContent value="orders" className="space-y-4">
@@ -250,24 +400,30 @@ export default function ManufacturingPage() {
             {orders.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">No production orders yet. Create one to get the workflow started.</div>
             ) : (
-              <table className="w-full text-sm min-w-[700px]">
-                <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Product</th><th className="p-2 text-left">Recipe</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
+              <table className="w-full text-sm min-w-[900px]">
+                <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Product</th><th className="p-2 text-left">Recipe</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Std Cost</th><th className="p-2 text-right">Actual Cost</th><th className="p-2 text-right">Variance</th><th className="p-2 text-left">QC</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
                 <tbody>
-                  {orders.map((o) => (
+                  {orders.map((o) => {
+                    const variance = costVariance(o)
+                    return (
                     <tr key={o.id} className="border-t">
                       <td className="p-2 font-medium">{o.orderNo}</td>
                       <td className="p-2">{getOrderProductName(o)}</td>
                       <td className="p-2">{getRecipeName(o)}</td>
-                      <td className="p-2 text-right">{o.quantity}</td>
-                      <td className="p-2 text-right">{Number(o.totalCost || 0).toFixed(0)}</td>
+                      <td className="p-2 text-right">{o.quantity}{o.actualQuantity ? `/${o.actualQuantity}` : ''}</td>
+                      <td className="p-2 text-right">{Number(o.standardCost || 0).toFixed(0)}</td>
+                      <td className="p-2 text-right">{Number(o.actualCost || o.totalCost || 0).toFixed(0)}</td>
+                      <td className="p-2 text-right">{variance === null ? '—' : <span className={variance > 0 ? 'text-red-500' : 'text-green-600'}>{variance > 0 ? '+' : ''}{variance.toFixed(0)}</span>}</td>
+                      <td className="p-2"><Badge className={qcStatusColors[o.qualityStatus || 'pending'] || qcStatusColors.pending}>{o.qualityStatus || 'pending'}</Badge></td>
                       <td className="p-2"><Badge className={statusColors[o.status] || statusColors.pending}>{o.status}</Badge></td>
                       <td className="p-2 space-x-1">
                         {o.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateOrderStatus(o.id, 'in_progress')}>Start</Button>}
-                        {o.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => updateOrderStatus(o.id, 'completed')}>Complete</Button>}
+                        {o.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => openCompleteModal(o)}>Complete</Button>}
                         <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteOrder(o.id)}><Trash2 className="h-3 w-3" /></Button>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             )}
@@ -324,6 +480,58 @@ export default function ManufacturingPage() {
             )}
           </div>
         </TabsContent>
+
+        <TabsContent value="qc" className="space-y-4">
+          <Button onClick={() => setShowQcModal(true)}><Plus className="mr-1 h-4 w-4" /> New Quality Check</Button>
+          <div className="rounded-md border overflow-x-auto">
+            {qualityChecks.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">No quality checks recorded yet.</div>
+            ) : (
+              <table className="w-full text-sm min-w-[800px]">
+                <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Order</th><th className="p-2 text-left">Product</th><th className="p-2 text-left">Check Type</th><th className="p-2 text-left">Status</th><th className="p-2 text-right">Defects</th><th className="p-2 text-left">Notes</th></tr></thead>
+                <tbody>
+                  {qualityChecks.map((qc) => (
+                    <tr key={qc.id} className="border-t">
+                      <td className="p-2">{new Date(qc.createdAt).toLocaleDateString()}</td>
+                      <td className="p-2">{qc.productionOrder?.orderNo || '—'}</td>
+                      <td className="p-2">{qc.productionOrder?.product?.name || '—'}</td>
+                      <td className="p-2">{qc.checkType.replace(/_/g, ' ')}</td>
+                      <td className="p-2"><Badge className={qcStatusColors[qc.status] || qcStatusColors.pending}>{qc.status}</Badge></td>
+                      <td className="p-2 text-right">{qc.defectQty || 0}</td>
+                      <td className="p-2 max-w-[200px] truncate">{qc.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="batches" className="space-y-4">
+          <Button onClick={() => setShowBatchModal(true)}><Plus className="mr-1 h-4 w-4" /> New Batch</Button>
+          <div className="rounded-md border overflow-x-auto">
+            {batches.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">No batches recorded yet. Track production lots and expiry dates here.</div>
+            ) : (
+              <table className="w-full text-sm min-w-[800px]">
+                <thead className="bg-muted"><tr><th className="p-2 text-left">Batch No</th><th className="p-2 text-left">Product</th><th className="p-2 text-right">Qty</th><th className="p-2 text-left">Mfg Date</th><th className="p-2 text-left">Expiry</th><th className="p-2 text-left">Status</th><th className="p-2 text-left">Notes</th></tr></thead>
+                <tbody>
+                  {batches.map((b) => (
+                    <tr key={b.id} className="border-t">
+                      <td className="p-2 font-medium">{b.batchNumber}</td>
+                      <td className="p-2">{b.product?.name || b.productionOrder?.product?.name || '—'}</td>
+                      <td className="p-2 text-right">{b.quantity}</td>
+                      <td className="p-2">{new Date(b.manufacturedDate).toLocaleDateString()}</td>
+                      <td className="p-2">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : '—'}</td>
+                      <td className="p-2"><Badge className={batchStatusColors[b.status] || batchStatusColors.active}>{b.status}</Badge></td>
+                      <td className="p-2 max-w-[200px] truncate">{b.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
 
       <Dialog open={showOrderModal} onOpenChange={setShowOrderModal}>
@@ -345,8 +553,22 @@ export default function ManufacturingPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Quantity</Label><Input type="number" value={orderForm.quantity} onChange={(e) => setOrderForm({ ...orderForm, quantity: +e.target.value })} /></div>
-            <div><Label>Unit Cost</Label><Input type="number" value={orderForm.unitCost} onChange={(e) => setOrderForm({ ...orderForm, unitCost: +e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Quantity</Label><Input type="number" value={orderForm.quantity} onChange={(e) => setOrderForm({ ...orderForm, quantity: +e.target.value })} /></div>
+              <div><Label>Expected Yield</Label><Input type="number" value={orderForm.expectedYield} onChange={(e) => setOrderForm({ ...orderForm, expectedYield: +e.target.value })} placeholder="Same as qty" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Unit Material Cost</Label><Input type="number" value={orderForm.unitCost} onChange={(e) => setOrderForm({ ...orderForm, unitCost: +e.target.value })} /></div>
+              <div><Label>Batch Number</Label><Input value={orderForm.batchNumber} onChange={(e) => setOrderForm({ ...orderForm, batchNumber: e.target.value })} placeholder="BATCH-001" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Labor Cost</Label><Input type="number" value={orderForm.laborCost} onChange={(e) => setOrderForm({ ...orderForm, laborCost: +e.target.value })} /></div>
+              <div><Label>Overhead Cost</Label><Input type="number" value={orderForm.overheadCost} onChange={(e) => setOrderForm({ ...orderForm, overheadCost: +e.target.value })} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Planned Start Date</Label><Input type="date" value={orderForm.plannedStartDate} onChange={(e) => setOrderForm({ ...orderForm, plannedStartDate: e.target.value })} /></div>
+              <div><Label>Planned End Date</Label><Input type="date" value={orderForm.plannedEndDate} onChange={(e) => setOrderForm({ ...orderForm, plannedEndDate: e.target.value })} /></div>
+            </div>
             <div><Label>Notes</Label><Input value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} /></div>
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
@@ -432,6 +654,99 @@ export default function ManufacturingPage() {
             <div><Label>Reason</Label><Input value={wasteForm.reason} onChange={(e) => setWasteForm({ ...wasteForm, reason: e.target.value })} /></div>
           </div>
           <DialogFooter><Button onClick={createWaste}>Record Waste</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showQcModal} onOpenChange={setShowQcModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Quality Check</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Production Order</Label>
+              <Select value={qcForm.productionOrderId} onValueChange={(value) => setQcForm({ ...qcForm, productionOrderId: value })}>
+                <SelectTrigger><SelectValue placeholder="Select order" /></SelectTrigger><SelectContent>
+                  {orders.map((o) => <SelectItem key={o.id} value={o.id}>{o.orderNo} - {o.product.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Check Type</Label>
+              <Select value={qcForm.checkType} onValueChange={(value) => setQcForm({ ...qcForm, checkType: value })}>
+                <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                  <SelectItem value="incoming_material">Incoming Material</SelectItem>
+                  <SelectItem value="in_process">In-Process</SelectItem>
+                  <SelectItem value="final_inspection">Final Inspection</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Status</Label>
+              <Select value={qcForm.status} onValueChange={(value) => setQcForm({ ...qcForm, status: value })}>
+                <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="passed">Passed</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="rework">Rework</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Defect Quantity</Label><Input type="number" value={qcForm.defectQty} onChange={(e) => setQcForm({ ...qcForm, defectQty: +e.target.value })} /></div>
+            <div><Label>Defect Description</Label><Input value={qcForm.defectDescription} onChange={(e) => setQcForm({ ...qcForm, defectDescription: e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={qcForm.notes} onChange={(e) => setQcForm({ ...qcForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createQualityCheck}>Save Check</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showBatchModal} onOpenChange={setShowBatchModal}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Production Batch</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Production Order</Label>
+              <Select value={batchForm.productionOrderId} onValueChange={(value) => setBatchForm({ ...batchForm, productionOrderId: value })}>
+                <SelectTrigger><SelectValue placeholder="Select order" /></SelectTrigger><SelectContent>
+                  {orders.map((o) => <SelectItem key={o.id} value={o.id}>{o.orderNo} - {o.product.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Batch Number</Label><Input value={batchForm.batchNumber} onChange={(e) => setBatchForm({ ...batchForm, batchNumber: e.target.value })} placeholder="BATCH-001" /></div>
+            <div><Label>Quantity</Label><Input type="number" value={batchForm.quantity} onChange={(e) => setBatchForm({ ...batchForm, quantity: +e.target.value })} /></div>
+            <div><Label>Manufactured Date</Label><Input type="date" value={batchForm.manufacturedDate} onChange={(e) => setBatchForm({ ...batchForm, manufacturedDate: e.target.value })} /></div>
+            <div><Label>Expiry Date</Label><Input type="date" value={batchForm.expiryDate} onChange={(e) => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></div>
+            <div><Label>Notes</Label><Input value={batchForm.notes} onChange={(e) => setBatchForm({ ...batchForm, notes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={createBatch}>Save Batch</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCompleteModal} onOpenChange={setShowCompleteModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Complete Production Order</DialogTitle></DialogHeader>
+          {completingOrder && (
+            <div className="text-sm text-muted-foreground mb-2">
+              Order <span className="font-medium">{completingOrder.orderNo}</span> — {completingOrder.product.name}
+            </div>
+          )}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Actual Quantity Produced</Label><Input type="number" value={completeForm.actualQuantity} onChange={(e) => setCompleteForm({ ...completeForm, actualQuantity: +e.target.value })} /></div>
+              <div><Label>Actual Yield</Label><Input type="number" value={completeForm.actualYield} onChange={(e) => setCompleteForm({ ...completeForm, actualYield: +e.target.value })} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Labor Cost</Label><Input type="number" value={completeForm.laborCost} onChange={(e) => setCompleteForm({ ...completeForm, laborCost: +e.target.value })} /></div>
+              <div><Label>Overhead Cost</Label><Input type="number" value={completeForm.overheadCost} onChange={(e) => setCompleteForm({ ...completeForm, overheadCost: +e.target.value })} /></div>
+            </div>
+            <div><Label>Batch Number</Label><Input value={completeForm.batchNumber} onChange={(e) => setCompleteForm({ ...completeForm, batchNumber: e.target.value })} placeholder="BATCH-001" /></div>
+            <div><Label>Quality Status</Label>
+              <Select value={completeForm.qualityStatus} onValueChange={(value) => setCompleteForm({ ...completeForm, qualityStatus: value })}>
+                <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="passed">Passed</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="rework">Rework</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Quality Notes</Label><Input value={completeForm.qualityNotes} onChange={(e) => setCompleteForm({ ...completeForm, qualityNotes: e.target.value })} /></div>
+          </div>
+          <DialogFooter><Button onClick={completeOrder}>Complete Order</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

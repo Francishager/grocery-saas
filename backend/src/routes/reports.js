@@ -311,7 +311,16 @@ router.get("/manufacturing/summary", authenticateToken, async (req, res) => {
       completedCount: orders.filter((o) => o.status === "completed").length,
       inProgressCount: orders.filter((o) => o.status === "in_progress").length,
       totalQuantity: orders.reduce((sum, order) => sum + Number(order.quantity || 0), 0),
-      totalCost: orders.reduce((sum, order) => sum + Number(order.totalCost || 0), 0),
+      actualQuantity: orders.reduce((sum, order) => sum + Number(order.actualQuantity || 0), 0),
+      totalStandardCost: orders.reduce((sum, order) => sum + Number(order.standardCost || 0), 0),
+      totalActualCost: orders.reduce((sum, order) => sum + Number(order.actualCost || order.totalCost || 0), 0),
+      totalLaborCost: orders.reduce((sum, order) => sum + Number(order.laborCost || 0), 0),
+      totalOverheadCost: orders.reduce((sum, order) => sum + Number(order.overheadCost || 0), 0),
+      costVariance: orders.reduce((sum, order) => sum + (Number(order.actualCost || order.totalCost || 0) - Number(order.standardCost || 0)), 0),
+      totalExpectedYield: orders.reduce((sum, order) => sum + Number(order.expectedYield || 0), 0),
+      totalActualYield: orders.reduce((sum, order) => sum + Number(order.actualYield || 0), 0),
+      passedQc: orders.filter((o) => o.qualityStatus === "passed").length,
+      failedQc: orders.filter((o) => o.qualityStatus === "failed").length,
       wasteQty: waste.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
       wasteCost: waste.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
       recipeCount: recipes.length,
@@ -327,11 +336,17 @@ router.get("/manufacturing/by-product", authenticateToken, async (req, res) => {
     const orders = await prisma.productionOrder.findMany({ where: scopedWhere(s, df(req)), include: { product: true } });
     const grouped = Object.values(orders.reduce((acc, order) => {
       const key = order.product?.name || "Unknown";
-      if (!acc[key]) acc[key] = { product: key, orders: 0, quantity: 0, totalCost: 0, completed: 0 };
+      if (!acc[key]) acc[key] = { product: key, orders: 0, quantity: 0, actualQuantity: 0, totalCost: 0, standardCost: 0, actualCost: 0, costVariance: 0, completed: 0, passedQc: 0, failedQc: 0 };
       acc[key].orders += 1;
       acc[key].quantity += Number(order.quantity || 0);
+      acc[key].actualQuantity += Number(order.actualQuantity || 0);
       acc[key].totalCost += Number(order.totalCost || 0);
+      acc[key].standardCost += Number(order.standardCost || 0);
+      acc[key].actualCost += Number(order.actualCost || order.totalCost || 0);
+      acc[key].costVariance += Number(order.actualCost || order.totalCost || 0) - Number(order.standardCost || 0);
       if (order.status === "completed") acc[key].completed += 1;
+      if (order.qualityStatus === "passed") acc[key].passedQc += 1;
+      if (order.qualityStatus === "failed") acc[key].failedQc += 1;
       return acc;
     }, {}));
     res.json({ data: grouped.sort((a, b) => b.totalCost - a.totalCost) });
@@ -355,12 +370,34 @@ router.get("/manufacturing/cost-analysis", authenticateToken, async (req, res) =
       orderNo: order.orderNo,
       product: order.product?.name || "Unknown",
       quantity: order.quantity,
+      actualQuantity: order.actualQuantity || 0,
+      standardCost: Number(order.standardCost || 0),
+      actualCost: Number(order.actualCost || order.totalCost || 0),
+      costVariance: Number(order.actualCost || order.totalCost || 0) - Number(order.standardCost || 0),
+      laborCost: Number(order.laborCost || 0),
+      overheadCost: Number(order.overheadCost || 0),
       totalCost: order.totalCost,
       wasteQty: order.wasteQty || 0,
       wasteCost: order.wasteRecords.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
+      expectedYield: Number(order.expectedYield || 0),
+      actualYield: Number(order.actualYield || 0),
+      yieldVariance: Number(order.actualYield || 0) - Number(order.expectedYield || 0),
+      qualityStatus: order.qualityStatus || "pending",
+      batchNumber: order.batchNumber || "—",
       recipe: order.recipe?.name || "—",
     }));
-    res.json({ data, summary: { count: data.length, totalCost: data.reduce((sum, item) => sum + Number(item.totalCost || 0), 0), totalWasteCost: data.reduce((sum, item) => sum + Number(item.wasteCost || 0), 0) } });
+    res.json({ data, summary: {
+      count: data.length,
+      totalCost: data.reduce((sum, item) => sum + Number(item.totalCost || 0), 0),
+      totalStandardCost: data.reduce((sum, item) => sum + item.standardCost, 0),
+      totalActualCost: data.reduce((sum, item) => sum + item.actualCost, 0),
+      totalCostVariance: data.reduce((sum, item) => sum + item.costVariance, 0),
+      totalLaborCost: data.reduce((sum, item) => sum + item.laborCost, 0),
+      totalOverheadCost: data.reduce((sum, item) => sum + item.overheadCost, 0),
+      totalWasteCost: data.reduce((sum, item) => sum + Number(item.wasteCost || 0), 0),
+      passedQc: data.filter((item) => item.qualityStatus === "passed").length,
+      failedQc: data.filter((item) => item.qualityStatus === "failed").length,
+    } });
   } catch (err) { handleBranchError(res, err); }
 });
 
