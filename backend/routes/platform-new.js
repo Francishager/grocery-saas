@@ -966,26 +966,27 @@ router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async 
     if (email !== undefined && !email.trim()) return res.status(400).json({ error: 'Business email cannot be empty' })
     if (currency !== undefined && !currency.trim()) return res.status(400).json({ error: 'Currency cannot be empty' })
     if (timezone !== undefined && !timezone.trim()) return res.status(400).json({ error: 'Timezone cannot be empty' })
-    if (status !== undefined && !['active', 'suspended', 'trial', 'inactive'].includes(status)) return res.status(400).json({ error: 'Invalid status value' })
+    if (status !== undefined && !['active', 'suspended', 'trial', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid status value' })
 
     const data = {}
     if (name !== undefined) data.name = name
     if (email !== undefined) data.email = email
-    if (phone !== undefined) data.phone = phone
-    if (address !== undefined) data.address = address
-    if (businessType !== undefined) data.businessType = businessType
+    if (phone !== undefined) data.phone = phone?.trim() || null
+    if (address !== undefined) data.address = address?.trim() || null
+    if (businessType !== undefined) data.businessType = businessType?.trim() || null
     if (status !== undefined) data.status = status
     if (currency !== undefined) data.currency = currency
     if (timezone !== undefined) data.timezone = timezone
     if (taxRate !== undefined) data.taxRate = taxRate
     if (taxEnabled !== undefined) data.taxEnabled = taxEnabled
-    if (taxId !== undefined) data.taxId = taxId
+    if (taxId !== undefined) data.taxId = taxId?.trim() || null
 
     const tenant = await prisma.tenant.update({ where: { id: tenantId }, data })
     res.json({ message: 'Tenant updated', tenant })
   } catch (error) {
     console.error('Update tenant error:', error)
-    res.status(500).json({ error: 'Failed to update tenant' })
+    const msg = error?.code === 'P2002' ? 'A tenant with this email already exists' : error?.message || 'Failed to update tenant'
+    res.status(500).json({ error: msg })
   }
 })
 

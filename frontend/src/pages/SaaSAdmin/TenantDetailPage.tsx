@@ -147,8 +147,15 @@ export const TenantDetailPage: React.FC = () => {
         method: 'PUT', body: JSON.stringify(infoForm)
       })
       if (res.ok) { setEditInfo(false); fetchDetail() }
-      else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to save') }
-    } catch { alert('Request failed') }
+      else {
+        const d = await res.json().catch(() => ({}))
+        console.error('Save tenant info failed:', res.status, d)
+        alert(d.error || d.message || `Failed to save (HTTP ${res.status})`)
+      }
+    } catch (err) {
+      console.error('Save tenant info request error:', err)
+      alert('Request failed — please check your connection')
+    }
     setSavingInfo(false)
   }
 
