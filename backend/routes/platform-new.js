@@ -580,13 +580,20 @@ router.put('/tenants/:tenantId/limits', authenticateToken, requirePlatformAdmin,
       }
     })
 
+    // Ensure the Tenant's usageLimitId points to this UsageLimit record
+    // (the detail query includes usageLimit via usageLimitId, not tenantId)
+    await prisma.tenant.updateMany({
+      where: { id: tenantId, usageLimitId: null },
+      data: { usageLimitId: usageLimit.id }
+    })
+
     res.json({
       message: 'Usage limits updated successfully',
       usageLimit
     })
   } catch (error) {
     console.error('Update usage limits error:', error)
-    res.status(500).json({ error: 'Failed to update usage limits' })
+    res.status(500).json({ error: error?.message || 'Failed to update usage limits' })
   }
 })
 

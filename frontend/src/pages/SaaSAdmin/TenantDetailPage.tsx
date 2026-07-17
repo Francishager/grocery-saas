@@ -130,8 +130,15 @@ export const TenantDetailPage: React.FC = () => {
         method: 'PUT', body: JSON.stringify(limitsForm)
       })
       if (res.ok) { fetchDetail() }
-      else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to save limits') }
-    } catch { alert('Request failed') }
+      else {
+        const d = await res.json().catch(() => ({}))
+        console.error('Save limits failed:', res.status, d)
+        alert(d.error || d.message || `Failed to save limits (HTTP ${res.status})`)
+      }
+    } catch (err) {
+      console.error('Save limits request error:', err)
+      alert('Request failed — please check your connection')
+    }
     setSavingLimits(false)
   }
 
