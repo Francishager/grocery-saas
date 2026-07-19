@@ -21,7 +21,7 @@ class ApiError extends Error {
   }
 }
 
-function getAuthToken(): string | null {
+export function getAuthToken(): string | null {
   const stored = localStorage.getItem('auth_tokens')
   if (stored) {
     try { return JSON.parse(stored).accessToken } catch { return null }

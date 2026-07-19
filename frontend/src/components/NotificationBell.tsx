@@ -9,12 +9,13 @@ import { db } from '@/db/index'
 import { useNavigate } from 'react-router-dom'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { usePushNotifications } from '@/lib/usePushNotifications'
 
 interface NotificationItem {
   id: string
   title: string
   message: string
-  type: 'info' | 'success' | 'warning' | 'error'
+  type: 'info' | 'success' | 'warning' | 'error' | 'low_stock' | 'out_of_stock' | 'overdue_rental' | 'overdue_payable' | 'leave_request'
   isRead: boolean
   createdAt: string
   channel?: string
@@ -74,6 +75,16 @@ export function NotificationBell() {
   const permissionPromptedRef = useRef(false)
   const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
   const canUseBrowserNotifications = hasFeature('communication.notifications')
+
+  // FCM push notifications
+  const { permission: pushPermission, registerToken, foregroundNotifications, dismissNotification } = usePushNotifications()
+
+  // Auto-register FCM token when user is present and permission is granted
+  useEffect(() => {
+    if (user && pushPermission === 'granted') {
+      registerToken()
+    }
+  }, [user, pushPermission, registerToken])
 
   // Fetch API notifications
   const fetchApiNotifications = useCallback(async (): Promise<NotificationItem[]> => {
@@ -419,7 +430,18 @@ export function NotificationBell() {
   }
 
   const maxVisible = 8
-  const visible = notifications.slice(0, maxVisible)
+  const pushNotifs: NotificationItem[] = foregroundNotifications.map((n) => ({
+    id: n.id,
+    title: n.title,
+    message: n.body,
+    type: 'info',
+    isRead: false,
+    createdAt: new Date(n.timestamp).toISOString(),
+    link: n.data?.url,
+    source: 'local',
+  }))
+  const allNotifications = [...pushNotifs, ...notifications]
+  const visible = allNotifications.slice(0, maxVisible)
 
   return (
     <div ref={bellRef} className="relative">
@@ -554,7 +576,7 @@ export function NotificationBell() {
                 onClick={() => { navigate('/tenant/communication'); setOpen(false) }}
                 className="w-full text-sm text-primary hover:underline text-center"
               >
-                View all notifications ({notifications.length})
+                View all notifications ({allNotifications.length})
               </button>
             </div>
           )}

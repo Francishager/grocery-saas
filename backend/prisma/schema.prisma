@@ -153,6 +153,7 @@ model Tenant {
   payrollRecords   PayrollRecord[]
   stockTransfers   StockTransfer[]
   notifications    Notification[]
+  pushTokens       PushToken[]
   integrations     IntegrationConfig[]
   restaurantTables     RestaurantTable[]
   restaurantOrders     RestaurantOrder[]
@@ -372,6 +373,7 @@ model User {
   journalEntries    JournalEntry[]
   stockTransfers    StockTransfer[]
   notifications     Notification[]
+  pushTokens        PushToken[]
   restaurantOrders  RestaurantOrder[]
   tips              Tip[]
   fuelShiftReports  FuelShiftReport[]
@@ -2793,4 +2795,25 @@ model UserGuideStep {
 
   @@index([category, stepNumber])
   @@map("user_guide_steps")
+}
+
+// =====================================================
+// PUSH NOTIFICATION TOKENS (FCM)
+// =====================================================
+
+model PushToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  platform  String   @default("web") // web, android, ios
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tenantId])
+  @@map("push_tokens")
 }
