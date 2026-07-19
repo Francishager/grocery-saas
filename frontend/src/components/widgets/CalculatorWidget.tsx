@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { History, X, Delete } from 'lucide-react'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { loadWidgetDataFromFirestore, subscribeToWidgetData, createDebouncedSaver } from '@/lib/widgetSync'
 
 interface HistoryEntry {
   expression: string
@@ -7,7 +9,7 @@ interface HistoryEntry {
   timestamp: number
 }
 
-function loadHistory(): HistoryEntry[] {
+function loadHistoryLS(): HistoryEntry[] {
   try {
     const raw = localStorage.getItem('calc_history')
     if (raw) return JSON.parse(raw)
@@ -15,32 +17,61 @@ function loadHistory(): HistoryEntry[] {
   return []
 }
 
-function saveHistory(history: HistoryEntry[]) {
+function saveHistoryLS(history: HistoryEntry[]) {
   try {
     localStorage.setItem('calc_history', JSON.stringify(history))
   } catch {}
 }
 
 export function CalculatorWidget() {
+  const { user } = useJWTAuth()
+  const userId = user?.id || 'guest'
   const [display, setDisplay] = useState('0')
   const [expression, setExpression] = useState('')
   const [previousValue, setPreviousValue] = useState<number | null>(null)
   const [operator, setOperator] = useState<string | null>(null)
   const [waitingForOperand, setWaitingForOperand] = useState(false)
-  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory)
+  const [history, setHistory] = useState<HistoryEntry[]>(loadHistoryLS)
   const [showHistory, setShowHistory] = useState(false)
   const [justCalculated, setJustCalculated] = useState(false)
   const inputRef = useRef<HTMLDivElement>(null)
+  const firestoreSaverRef = useRef<((data: Record<string, unknown>) => void) | null>(null)
+  const isRemoteUpdateRef = useRef(false)
 
-  // Keep only last 2 history entries
+  // Setup Firestore debounced saver
   useEffect(() => {
-    if (history.length > 2) {
-      const trimmed = history.slice(0, 2)
-      setHistory(trimmed)
-      saveHistory(trimmed)
-    } else {
-      saveHistory(history)
+    firestoreSaverRef.current = createDebouncedSaver(userId, 'calc_history', 800)
+  }, [userId])
+
+  // Load from Firestore on mount + subscribe to remote changes
+  useEffect(() => {
+    let unsub: (() => void) | null = null
+    ;(async () => {
+      const remote = await loadWidgetDataFromFirestore<{ history: HistoryEntry[] }>(userId, 'calc_history')
+      if (remote?.history) {
+        isRemoteUpdateRef.current = true
+        setHistory(remote.history.slice(0, 2))
+        saveHistoryLS(remote.history.slice(0, 2))
+      }
+      unsub = subscribeToWidgetData<{ history: HistoryEntry[] }>(userId, 'calc_history', (data) => {
+        if (data?.history) {
+          isRemoteUpdateRef.current = true
+          setHistory(data.history.slice(0, 2))
+          saveHistoryLS(data.history.slice(0, 2))
+        }
+      })
+    })()
+    return () => { if (unsub) unsub() }
+  }, [userId])
+
+  // Keep only last 2 history entries + sync
+  useEffect(() => {
+    const trimmed = history.slice(0, 2)
+    saveHistoryLS(trimmed)
+    if (!isRemoteUpdateRef.current && firestoreSaverRef.current) {
+      firestoreSaverRef.current({ history: trimmed })
     }
+    isRemoteUpdateRef.current = false
   }, [history])
 
   const calculate = useCallback((a: number, b: number, op: string): number => {
@@ -197,7 +228,7 @@ export function CalculatorWidget() {
 
   const clearHistory = () => {
     setHistory([])
-    saveHistory([])
+    saveHistoryLS([])
   }
 
   const btnBase = "flex items-center justify-center text-lg font-medium rounded-lg transition-all active:scale-95 select-none cursor-pointer"

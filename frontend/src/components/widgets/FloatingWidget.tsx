@@ -143,6 +143,7 @@ export function FloatingWidget({
         width: pos.minimized ? 'auto' : pos.width,
         height: pos.minimized ? 'auto' : pos.height,
         zIndex: 9999,
+        touchAction: 'none',
       }}
       className="select-none"
     >
@@ -157,6 +158,8 @@ export function FloatingWidget({
           style={{
             background: `linear-gradient(135deg, ${accentColor}, ${accentColor}dd)`,
             opacity: isDragging ? 0.9 : 1,
+            touchAction: 'none',
+            userSelect: 'none',
           }}
         >
           <div className="flex items-center gap-2 text-white">
@@ -191,6 +194,7 @@ export function FloatingWidget({
               className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
               style={{
                 background: 'linear-gradient(135deg, transparent 50%, rgba(0,0,0,0.15) 50%)',
+                touchAction: 'none',
               }}
             />
           </div>

@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getMessaging, getToken, onMessage } from 'firebase/messaging'
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, where, orderBy, getDocs, writeBatch } from 'firebase/firestore'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
@@ -12,10 +13,16 @@ const firebaseConfig = {
 
 let app: ReturnType<typeof initializeApp> | null = null
 let messaging: ReturnType<typeof getMessaging> | null = null
+let db: ReturnType<typeof getFirestore> | null = null
 
 function getFirebaseApp() {
   if (!app) app = initializeApp(firebaseConfig)
   return app
+}
+
+export function getFirestoreDb() {
+  if (!db) db = getFirestore(getFirebaseApp())
+  return db
 }
 
 export function getFirebaseMessaging() {

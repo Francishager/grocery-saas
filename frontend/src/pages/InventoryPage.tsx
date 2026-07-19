@@ -465,9 +465,9 @@ export default function InventoryPage() {
   }, [branches])
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
             {urlTab === 'products' ? 'Products' :
@@ -947,7 +947,7 @@ export default function InventoryPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[800px] hidden md:table">
                 <thead>
                   <tr className="border-b text-left">
                     {!lockedType && <th className="pb-3 font-medium">Type</th>}
@@ -1043,6 +1043,67 @@ export default function InventoryPage() {
                   })}
                 </tbody>
               </table>
+
+              {/* Mobile card layout */}
+              <div className="md:hidden space-y-3">
+                {paginatedItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{item.product_name}</p>
+                        <p className="text-xs text-muted-foreground">{item.product_id || '-'}</p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        {canEditCurrent && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditForm(item)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDeleteCurrent && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(item.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Category: </span>
+                        {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
+                      </div>
+                      {canManageInventory && (
+                        <div>
+                          <span className="text-muted-foreground">Branch: </span>
+                          {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground">Qty: </span>
+                        <span className={item.quantity <= item.low_stock_alert ? 'text-orange-600 font-bold' : ''}>
+                          {item.quantity}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Price: </span>
+                        {formatCurrency(item.unit_price)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Cost: </span>
+                        {formatCurrency(item.cost_price)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Expiry: </span>
+                        {(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}
+                      </div>
+                    </div>
+                    {(item as any).isUncategorized && (
+                      <span className="inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                        Uncategorized
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <Pagination

@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Firestore security rules for JibuSales
+// Only authenticated users can access their own widget data
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Widget data (sticky notes, calculator history)
+    // Each user can only read/write their own widget documents
+    match /widgets/{userId}/{type}/{docId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Default: deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
