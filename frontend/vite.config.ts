@@ -11,7 +11,10 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       VitePWA({
+        strategies: 'injectManifest',
         registerType: 'autoUpdate',
+        srcDir: 'src',
+        filename: 'sw.ts',
         includeAssets: ['favicon.ico', 'img/jibusales_logo.png'],
         manifest: {
           name: 'jibuSales',
@@ -38,20 +41,9 @@ export default defineConfig(({ mode }) => {
             },
           ],
         },
-        workbox: {
+        injectManifest: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-          runtimeCaching: [
-            {
-              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'google-fonts',
-                expiration: { maxEntries: 10, maxAgeSeconds: 604800 },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-          ],
         },
         devOptions: {
           enabled: isDev,

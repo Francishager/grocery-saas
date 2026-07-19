@@ -13,6 +13,7 @@ interface TaskItem {
 
 interface StickyNote {
   id: string
+  title: string
   content: string
   mode: NoteMode
   tasks: TaskItem[]
@@ -38,6 +39,7 @@ function loadNotesLS(): StickyNote[] {
       const parsed = JSON.parse(raw)
       return parsed.map((n: any) => ({
         ...n,
+        title: n.title || '',
         mode: n.mode || 'plain',
         tasks: n.tasks || [],
       }))
@@ -55,6 +57,7 @@ function saveNotesLS(notes: StickyNote[]) {
 function makeNote(partial?: Partial<StickyNote>): StickyNote {
   return {
     id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    title: '',
     content: '',
     mode: 'plain',
     tasks: [],
@@ -88,6 +91,7 @@ export function StickyNoteWidget() {
         isRemoteUpdateRef.current = true
         const migrated = remote.notes.map((n: any) => ({
           ...n,
+          title: n.title || '',
           mode: n.mode || 'plain',
           tasks: n.tasks || [],
         }))
@@ -99,6 +103,7 @@ export function StickyNoteWidget() {
           isRemoteUpdateRef.current = true
           const migrated = data.notes.map((n: any) => ({
             ...n,
+            title: n.title || '',
             mode: n.mode || 'plain',
             tasks: n.tasks || [],
           }))
@@ -142,6 +147,11 @@ export function StickyNoteWidget() {
   const updateContent = (content: string) => {
     if (!activeNote) return
     updateNote(activeNote.id, { content })
+  }
+
+  const updateTitle = (title: string) => {
+    if (!activeNote) return
+    updateNote(activeNote.id, { title })
   }
 
   // Auto-numbering: handle Enter key in numbered mode
@@ -315,9 +325,10 @@ export function StickyNoteWidget() {
         <div className="flex gap-1 px-2 pt-2 pb-1 overflow-x-auto no-drag" style={{ background: colorObj.bg }}>
           {sortedNotes.map((n) => {
             const nc = COLORS.find((c) => c.name === n.color) || COLORS[0]
-            const label = n.mode === 'tasks'
+            const label = n.title || (n.mode === 'tasks'
               ? `${n.tasks.filter(t => t.done).length}/${n.tasks.length} done`
-              : (n.content.slice(0, 12) || 'New note')
+              : (n.content.slice(0, 12) || 'Untitled'))
+            const showEllipsis = !n.title && n.content.length > 12
             return (
               <button
                 key={n.id}
@@ -333,7 +344,7 @@ export function StickyNoteWidget() {
               >
                 {n.pinned && '📌 '}
                 {label}
-                {n.content.length > 12 ? '…' : ''}
+                {showEllipsis ? '…' : ''}
               </button>
             )
           })}
@@ -396,6 +407,23 @@ export function StickyNoteWidget() {
             />
           ))}
         </div>
+      </div>
+
+      {/* Title input */}
+      <div className="px-3 pt-1 pb-0 no-drag" style={{ background: colorObj.bg }}>
+        <input
+          type="text"
+          value={activeNote?.title || ''}
+          onChange={(e) => updateTitle(e.target.value)}
+          placeholder="Title"
+          className="w-full bg-transparent outline-none border-none font-bold"
+          style={{
+            color: '#1c1917',
+            fontFamily: "'Caveat', cursive",
+            fontSize: '22px',
+            fontWeight: 700,
+          }}
+        />
       </div>
 
       {/* Note content — mode dependent */}
