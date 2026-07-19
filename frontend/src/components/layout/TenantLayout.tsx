@@ -7,6 +7,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
 import { NotificationBell } from '@/components/NotificationBell'
+import { WidgetLauncher } from '@/components/widgets/WidgetLauncher'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import OnboardingGuideCard from '@/components/OnboardingGuideCard'
 import OnboardingGuideModal from '@/components/OnboardingGuideModal'
@@ -684,6 +685,7 @@ export function TenantLayout() {
             {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
           </button>
           <NotificationBell />
+          <WidgetLauncher />
           <div className="group relative">
             <button
               type="button"
