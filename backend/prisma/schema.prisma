@@ -245,6 +245,12 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // =====================
+  // WIDGET DATA
+  // =====================
+  stickyNotes       StickyNote[]
+  calculatorHistory CalculatorHistory[]
+
   @@map("tenants")
 }
 
@@ -388,6 +394,8 @@ model User {
   // =========================
   branches UserBranch[]
   permissions UserPermission[]
+  stickyNotes StickyNote[]
+  calculatorHistory CalculatorHistory[]
 
   @@map("users")
 }
@@ -2816,4 +2824,46 @@ model PushToken {
   @@index([userId])
   @@index([tenantId])
   @@map("push_tokens")
+}
+
+// =====================================================
+// WIDGET DATA — Sticky Notes & Calculator History
+// =====================================================
+
+model StickyNote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  title     String   @default("")
+  content   String   @default("")
+  mode      String   @default("plain") // plain, numbered, tasks
+  tasks     Json     @default("[]") // [{ id, text, done }]
+  color     String   @default("yellow")
+  pinned    Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tenantId])
+  @@map("sticky_notes")
+}
+
+model CalculatorHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  history   Json     @default("[]") // [{ expression, result, timestamp }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId])
+  @@map("calculator_history")
 }

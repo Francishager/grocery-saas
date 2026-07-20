@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { History, X, Delete } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { loadWidgetDataFromFirestore, subscribeToWidgetData, createDebouncedSaver } from '@/lib/widgetSync'
+import { apiFetch } from '@/lib/api'
 
 interface HistoryEntry {
   expression: string
@@ -25,7 +25,6 @@ function saveHistoryLS(history: HistoryEntry[]) {
 
 export function CalculatorWidget() {
   const { user } = useJWTAuth()
-  const userId = user?.id || 'guest'
   const [display, setDisplay] = useState('0')
   const [expression, setExpression] = useState('')
   const [previousValue, setPreviousValue] = useState<number | null>(null)
@@ -35,44 +34,50 @@ export function CalculatorWidget() {
   const [showHistory, setShowHistory] = useState(false)
   const [justCalculated, setJustCalculated] = useState(false)
   const inputRef = useRef<HTMLDivElement>(null)
-  const firestoreSaverRef = useRef<((data: Record<string, unknown>) => void) | null>(null)
-  const isRemoteUpdateRef = useRef(false)
+  const loadedRef = useRef(false)
+  const syncingRef = useRef(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Setup Firestore debounced saver
+  // Load from backend on mount
   useEffect(() => {
-    firestoreSaverRef.current = createDebouncedSaver(userId, 'calc_history', 800)
-  }, [userId])
-
-  // Load from Firestore on mount + subscribe to remote changes
-  useEffect(() => {
-    let unsub: (() => void) | null = null
+    if (!user?.id || loadedRef.current) return
+    loadedRef.current = true
     ;(async () => {
-      const remote = await loadWidgetDataFromFirestore<{ history: HistoryEntry[] }>(userId, 'calc_history')
-      if (remote?.history) {
-        isRemoteUpdateRef.current = true
-        setHistory(remote.history.slice(0, 2))
-        saveHistoryLS(remote.history.slice(0, 2))
-      }
-      unsub = subscribeToWidgetData<{ history: HistoryEntry[] }>(userId, 'calc_history', (data) => {
-        if (data?.history) {
-          isRemoteUpdateRef.current = true
-          setHistory(data.history.slice(0, 2))
-          saveHistoryLS(data.history.slice(0, 2))
+      try {
+        const res = await apiFetch('/api/widgets/calculator-history')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.history && data.history.length > 0) {
+            syncingRef.current = true
+            setHistory(data.history.slice(0, 2))
+            saveHistoryLS(data.history.slice(0, 2))
+          }
         }
-      })
+      } catch (err) {
+        console.error('Failed to load calculator history from server:', err)
+      }
     })()
-    return () => { if (unsub) unsub() }
-  }, [userId])
+  }, [user?.id])
 
-  // Keep only last 2 history entries + sync
+  // Debounced save to localStorage + backend
   useEffect(() => {
+    if (syncingRef.current) {
+      syncingRef.current = false
+      return
+    }
     const trimmed = history.slice(0, 2)
     saveHistoryLS(trimmed)
-    if (!isRemoteUpdateRef.current && firestoreSaverRef.current) {
-      firestoreSaverRef.current({ history: trimmed })
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    if (user?.id) {
+      saveTimerRef.current = setTimeout(() => {
+        apiFetch('/api/widgets/calculator-history', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ history: trimmed }),
+        }).catch((err) => console.error('Failed to sync calculator history:', err))
+      }, 800)
     }
-    isRemoteUpdateRef.current = false
-  }, [history])
+  }, [history, user?.id])
 
   const calculate = useCallback((a: number, b: number, op: string): number => {
     switch (op) {

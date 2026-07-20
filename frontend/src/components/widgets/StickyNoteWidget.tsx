@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Plus, Trash2, Pin, PinOff, ListOrdered, CheckSquare, FileText } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { loadWidgetDataFromFirestore, subscribeToWidgetData, createDebouncedSaver } from '@/lib/widgetSync'
+import { apiFetch } from '@/lib/api'
 
 type NoteMode = 'plain' | 'numbered' | 'tasks'
 
@@ -71,49 +71,44 @@ function makeNote(partial?: Partial<StickyNote>): StickyNote {
 
 export function StickyNoteWidget() {
   const { user } = useJWTAuth()
-  const userId = user?.id || 'guest'
   const [notes, setNotes] = useState<StickyNote[]>(loadNotesLS)
   const [activeId, setActiveId] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const firestoreSaverRef = useRef<((data: Record<string, unknown>) => void) | null>(null)
-  const isRemoteUpdateRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const loadedRef = useRef(false)
+  const syncingRef = useRef(false)
 
+  // Load notes from backend on mount
   useEffect(() => {
-    firestoreSaverRef.current = createDebouncedSaver(userId, 'sticky_notes', 800)
-  }, [userId])
-
-  useEffect(() => {
-    let unsub: (() => void) | null = null
-    void (async () => {
-      const remote = await loadWidgetDataFromFirestore<{ notes: StickyNote[] }>(userId, 'sticky_notes')
-      if (remote?.notes && remote.notes.length > 0) {
-        isRemoteUpdateRef.current = true
-        const migrated = remote.notes.map((n: any) => ({
-          ...n,
-          title: n.title || '',
-          mode: n.mode || 'plain',
-          tasks: n.tasks || [],
-        }))
-        setNotes(migrated)
-        saveNotesLS(migrated)
-      }
-      unsub = subscribeToWidgetData<{ notes: StickyNote[] }>(userId, 'sticky_notes', (data) => {
-        if (data?.notes) {
-          isRemoteUpdateRef.current = true
-          const migrated = data.notes.map((n: any) => ({
-            ...n,
-            title: n.title || '',
-            mode: n.mode || 'plain',
-            tasks: n.tasks || [],
-          }))
-          setNotes(migrated)
-          saveNotesLS(migrated)
+    if (!user?.id || loadedRef.current) return
+    loadedRef.current = true
+    ;(async () => {
+      try {
+        const res = await apiFetch('/api/widgets/sticky-notes')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.notes && data.notes.length > 0) {
+            syncingRef.current = true
+            const mapped = data.notes.map((n: any) => ({
+              id: n.id,
+              title: n.title || '',
+              content: n.content || '',
+              mode: n.mode || 'plain',
+              tasks: Array.isArray(n.tasks) ? n.tasks : [],
+              color: n.color || 'yellow',
+              pinned: n.pinned || false,
+              createdAt: new Date(n.createdAt).getTime(),
+              updatedAt: new Date(n.updatedAt).getTime(),
+            }))
+            setNotes(mapped)
+            saveNotesLS(mapped)
+          }
         }
-      })
+      } catch (err) {
+        console.error('Failed to load sticky notes from server:', err)
+      }
     })()
-    return () => { if (unsub) unsub() }
-  }, [userId])
+  }, [user?.id])
 
   useEffect(() => {
     if (notes.length === 0) {
@@ -126,17 +121,61 @@ export function StickyNoteWidget() {
     }
   }, [notes, activeId])
 
+  // Debounced save to localStorage + backend
   useEffect(() => {
+    if (syncingRef.current) {
+      syncingRef.current = false
+      return
+    }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       saveNotesLS(notes)
-      if (!isRemoteUpdateRef.current && firestoreSaverRef.current) {
-        firestoreSaverRef.current({ notes })
+      // Sync to backend (only if user is authenticated)
+      if (user?.id) {
+        syncToBackend(notes)
       }
-      isRemoteUpdateRef.current = false
-    }, 400)
+    }, 600)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [notes])
+  }, [notes, user?.id])
+
+  // Backend sync: upsert each note
+  const syncToBackend = useCallback(async (notesToSync: StickyNote[]) => {
+    for (const note of notesToSync) {
+      try {
+        await apiFetch(`/api/widgets/sticky-notes/${note.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: note.title,
+            content: note.content,
+            mode: note.mode,
+            tasks: note.tasks,
+            color: note.color,
+            pinned: note.pinned,
+          }),
+        })
+      } catch {
+        // If PUT fails (note doesn't exist on server yet), create it
+        try {
+          await apiFetch('/api/widgets/sticky-notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: note.id,
+              title: note.title,
+              content: note.content,
+              mode: note.mode,
+              tasks: note.tasks,
+              color: note.color,
+              pinned: note.pinned,
+            }),
+          })
+        } catch (err) {
+          console.error('Failed to sync note to server:', err)
+        }
+      }
+    }
+  }, [])
 
   const activeNote = notes.find((n) => n.id === activeId) || notes[0]
 
@@ -285,6 +324,10 @@ export function StickyNoteWidget() {
       if (id === activeId) setActiveId(filtered[0].id)
       return filtered
     })
+    // Delete from backend
+    if (user?.id) {
+      apiFetch(`/api/widgets/sticky-notes/${id}`, { method: 'DELETE' }).catch(() => {})
+    }
   }
 
   const changeColor = (color: string) => {
@@ -450,7 +493,7 @@ export function StickyNoteWidget() {
                 onChange={(e) => updateTaskText(task.id, e.target.value)}
                 onKeyDown={(e) => handleTaskKeyDown(e, task.id)}
                 placeholder="Type a task..."
-                className="flex-1 bg-transparent outline-none border-none"
+                className="flex-1 min-w-0 bg-transparent outline-none border-none overflow-hidden"
                 style={{
                   color: '#1c1917',
                   fontFamily: "'Caveat', cursive",
