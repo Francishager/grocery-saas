@@ -9,54 +9,59 @@ interface HistoryEntry {
   timestamp: number
 }
 
-function loadHistoryLS(): HistoryEntry[] {
+function loadHistoryLS(userId: string): HistoryEntry[] {
   try {
-    const raw = localStorage.getItem('calc_history')
+    const raw = localStorage.getItem(`calc_history_${userId}`)
     if (raw) return JSON.parse(raw)
   } catch {}
   return []
 }
 
-function saveHistoryLS(history: HistoryEntry[]) {
+function saveHistoryLS(userId: string, history: HistoryEntry[]) {
   try {
-    localStorage.setItem('calc_history', JSON.stringify(history))
+    localStorage.setItem(`calc_history_${userId}`, JSON.stringify(history))
   } catch {}
 }
 
 export function CalculatorWidget() {
   const { user } = useJWTAuth()
+  const userId = user?.id || 'guest'
   const [display, setDisplay] = useState('0')
   const [expression, setExpression] = useState('')
   const [previousValue, setPreviousValue] = useState<number | null>(null)
   const [operator, setOperator] = useState<string | null>(null)
   const [waitingForOperand, setWaitingForOperand] = useState(false)
-  const [history, setHistory] = useState<HistoryEntry[]>(loadHistoryLS)
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistoryLS(userId))
   const [showHistory, setShowHistory] = useState(false)
   const [justCalculated, setJustCalculated] = useState(false)
   const inputRef = useRef<HTMLDivElement>(null)
-  const loadedRef = useRef(false)
+  const loadedUserIdRef = useRef<string | null>(null)
   const syncingRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Load from backend on mount
+  // Load from backend when user changes
   useEffect(() => {
-    if (!user?.id || loadedRef.current) return
-    loadedRef.current = true
-    ;(async () => {
-      try {
-        const res = await apiFetch('/api/widgets/calculator-history')
-        if (res.ok) {
-          const data = await res.json()
-          if (data.history && data.history.length > 0) {
+    if (!user?.id) return
+    if (loadedUserIdRef.current !== user.id) {
+      loadedUserIdRef.current = user.id
+      ;(async () => {
+        try {
+          const res = await apiFetch('/api/widgets/calculator-history')
+          if (res.ok) {
+            const data = await res.json()
             syncingRef.current = true
-            setHistory(data.history.slice(0, 2))
-            saveHistoryLS(data.history.slice(0, 2))
+            if (data.history && data.history.length > 0) {
+              setHistory(data.history.slice(0, 50))
+              saveHistoryLS(user.id, data.history.slice(0, 50))
+            } else {
+              setHistory([])
+            }
           }
+        } catch (err) {
+          console.error('Failed to load calculator history from server:', err)
         }
-      } catch (err) {
-        console.error('Failed to load calculator history from server:', err)
-      }
-    })()
+      })()
+    }
   }, [user?.id])
 
   // Debounced save to localStorage + backend
@@ -65,8 +70,8 @@ export function CalculatorWidget() {
       syncingRef.current = false
       return
     }
-    const trimmed = history.slice(0, 2)
-    saveHistoryLS(trimmed)
+    const trimmed = history.slice(0, 50)
+    saveHistoryLS(userId, trimmed)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     if (user?.id) {
       saveTimerRef.current = setTimeout(() => {
@@ -77,7 +82,7 @@ export function CalculatorWidget() {
         }).catch((err) => console.error('Failed to sync calculator history:', err))
       }, 800)
     }
-  }, [history, user?.id])
+  }, [history, user?.id, userId])
 
   const calculate = useCallback((a: number, b: number, op: string): number => {
     switch (op) {
@@ -187,9 +192,9 @@ export function CalculatorWidget() {
         setWaitingForOperand(false)
         setJustCalculated(true)
 
-        // Add to history (keep last 2)
+        // Add to history (keep last 50)
         if (resultStr !== 'Error') {
-          setHistory((prev) => [{ expression: exprStr, result: resultStr, timestamp: Date.now() }, ...prev].slice(0, 2))
+          setHistory((prev) => [{ expression: exprStr, result: resultStr, timestamp: Date.now() }, ...prev].slice(0, 50))
         }
       }
     }
@@ -233,7 +238,7 @@ export function CalculatorWidget() {
 
   const clearHistory = () => {
     setHistory([])
-    saveHistoryLS([])
+    saveHistoryLS(userId, [])
   }
 
   const btnBase = "flex items-center justify-center text-lg font-medium rounded-lg transition-all active:scale-95 select-none cursor-pointer"
@@ -266,7 +271,7 @@ export function CalculatorWidget() {
             {history.length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-4">No history yet</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2 overflow-y-auto" style={{ maxHeight: '300px' }}>
                 {history.map((h, i) => (
                   <button
                     key={i}

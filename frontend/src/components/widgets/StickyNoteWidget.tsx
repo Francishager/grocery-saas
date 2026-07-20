@@ -32,9 +32,9 @@ const COLORS = [
   { name: 'purple', bg: '#f3e8ff', border: '#c084fc', accent: '#7e22ce' },
 ]
 
-function loadNotesLS(): StickyNote[] {
+function loadNotesLS(userId: string): StickyNote[] {
   try {
-    const raw = localStorage.getItem('sticky_notes')
+    const raw = localStorage.getItem(`sticky_notes_${userId}`)
     if (raw) {
       const parsed = JSON.parse(raw)
       return parsed.map((n: any) => ({
@@ -48,9 +48,9 @@ function loadNotesLS(): StickyNote[] {
   return []
 }
 
-function saveNotesLS(notes: StickyNote[]) {
+function saveNotesLS(userId: string, notes: StickyNote[]) {
   try {
-    localStorage.setItem('sticky_notes', JSON.stringify(notes))
+    localStorage.setItem(`sticky_notes_${userId}`, JSON.stringify(notes))
   } catch {}
 }
 
@@ -71,43 +71,50 @@ function makeNote(partial?: Partial<StickyNote>): StickyNote {
 
 export function StickyNoteWidget() {
   const { user } = useJWTAuth()
-  const [notes, setNotes] = useState<StickyNote[]>(loadNotesLS)
+  const userId = user?.id || 'guest'
+  const [notes, setNotes] = useState<StickyNote[]>(() => loadNotesLS(userId))
   const [activeId, setActiveId] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const loadedRef = useRef(false)
+  const loadedUserIdRef = useRef<string | null>(null)
   const syncingRef = useRef(false)
 
-  // Load notes from backend on mount
+  // Load notes from backend when user changes
   useEffect(() => {
-    if (!user?.id || loadedRef.current) return
-    loadedRef.current = true
-    ;(async () => {
-      try {
-        const res = await apiFetch('/api/widgets/sticky-notes')
-        if (res.ok) {
-          const data = await res.json()
-          if (data.notes && data.notes.length > 0) {
+    if (!user?.id) return
+    // If user changed, reset state and load from backend
+    if (loadedUserIdRef.current !== user.id) {
+      loadedUserIdRef.current = user.id
+      ;(async () => {
+        try {
+          const res = await apiFetch('/api/widgets/sticky-notes')
+          if (res.ok) {
+            const data = await res.json()
             syncingRef.current = true
-            const mapped = data.notes.map((n: any) => ({
-              id: n.id,
-              title: n.title || '',
-              content: n.content || '',
-              mode: n.mode || 'plain',
-              tasks: Array.isArray(n.tasks) ? n.tasks : [],
-              color: n.color || 'yellow',
-              pinned: n.pinned || false,
-              createdAt: new Date(n.createdAt).getTime(),
-              updatedAt: new Date(n.updatedAt).getTime(),
-            }))
-            setNotes(mapped)
-            saveNotesLS(mapped)
+            if (data.notes && data.notes.length > 0) {
+              const mapped = data.notes.map((n: any) => ({
+                id: n.id,
+                title: n.title || '',
+                content: n.content || '',
+                mode: n.mode || 'plain',
+                tasks: Array.isArray(n.tasks) ? n.tasks : [],
+                color: n.color || 'yellow',
+                pinned: n.pinned || false,
+                createdAt: new Date(n.createdAt).getTime(),
+                updatedAt: new Date(n.updatedAt).getTime(),
+              }))
+              setNotes(mapped)
+              saveNotesLS(user.id, mapped)
+            } else {
+              // No notes on server, start fresh for this user
+              setNotes([])
+            }
           }
+        } catch (err) {
+          console.error('Failed to load sticky notes from server:', err)
         }
-      } catch (err) {
-        console.error('Failed to load sticky notes from server:', err)
-      }
-    })()
+      })()
+    }
   }, [user?.id])
 
   useEffect(() => {
@@ -129,7 +136,7 @@ export function StickyNoteWidget() {
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      saveNotesLS(notes)
+      saveNotesLS(userId, notes)
       // Sync to backend (only if user is authenticated)
       if (user?.id) {
         syncToBackend(notes)
