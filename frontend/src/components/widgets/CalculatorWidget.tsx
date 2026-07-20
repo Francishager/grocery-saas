@@ -39,7 +39,7 @@ export function CalculatorWidget() {
   const syncingRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Load from backend when user changes
+  // Load from backend when user changes, merge with local
   useEffect(() => {
     if (!user?.id) return
     if (loadedUserIdRef.current !== user.id) {
@@ -50,11 +50,22 @@ export function CalculatorWidget() {
           if (res.ok) {
             const data = await res.json()
             syncingRef.current = true
+            const localHistory = loadHistoryLS(user.id)
             if (data.history && data.history.length > 0) {
-              setHistory(data.history.slice(0, 50))
-              saveHistoryLS(user.id, data.history.slice(0, 50))
+              // Use server history if it's longer or local is empty
+              if (data.history.length >= localHistory.length) {
+                setHistory(data.history.slice(0, 50))
+                saveHistoryLS(user.id, data.history.slice(0, 50))
+              } else {
+                setHistory(localHistory)
+              }
             } else {
-              setHistory([])
+              // Server empty — keep local if available
+              if (localHistory.length > 0) {
+                setHistory(localHistory)
+              } else {
+                setHistory([])
+              }
             }
           }
         } catch (err) {
