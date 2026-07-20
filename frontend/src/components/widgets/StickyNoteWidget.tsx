@@ -78,13 +78,18 @@ export function StickyNoteWidget() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const loadedUserIdRef = useRef<string | null>(null)
   const syncingRef = useRef(false)
+  const backendLoadedRef = useRef(false)
 
   // Load notes from backend when user changes
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id) {
+      backendLoadedRef.current = true
+      return
+    }
     // If user changed, reset state and load from backend
     if (loadedUserIdRef.current !== user.id) {
       loadedUserIdRef.current = user.id
+      backendLoadedRef.current = false
       ;(async () => {
         try {
           const res = await apiFetch('/api/widgets/sticky-notes')
@@ -112,12 +117,16 @@ export function StickyNoteWidget() {
           }
         } catch (err) {
           console.error('Failed to load sticky notes from server:', err)
+        } finally {
+          backendLoadedRef.current = true
         }
       })()
     }
   }, [user?.id])
 
+  // Ensure at least one note exists — but only after backend load is done
   useEffect(() => {
+    if (!backendLoadedRef.current) return
     if (notes.length === 0) {
       const newNote = makeNote()
       setNotes([newNote])
@@ -476,9 +485,30 @@ export function StickyNoteWidget() {
         />
       </div>
 
-      {/* Note content — mode dependent */}
-      {activeNote?.mode === 'tasks' ? (
-        <div className="flex-1 overflow-auto p-3 no-drag space-y-1" style={{ background: colorObj.bg }}>
+      {/* Note content — textarea always visible */}
+      <textarea
+        ref={textareaRef}
+        value={activeNote?.content || ''}
+        onChange={(e) => updateContent(e.target.value)}
+        onKeyDown={activeNote?.mode === 'numbered' ? handleNumberedKeyDown : undefined}
+        placeholder={activeNote?.mode === 'numbered' ? 'Type "1. " to start a numbered list...\nPress Enter for next number' : 'Write something...'}
+        className="w-full p-4 resize-none outline-none border-none no-drag"
+        style={{
+          background: colorObj.bg,
+          color: '#1c1917',
+          fontFamily: "'Caveat', cursive",
+          fontSize: '20px',
+          lineHeight: '1.5',
+          boxShadow: 'inset 0 0 20px rgba(0,0,0,0.03)',
+          minHeight: '60px',
+          flex: activeNote?.mode === 'tasks' ? '0 0 auto' : '1',
+        }}
+        autoFocus
+      />
+
+      {/* Task list — shown below content when in tasks mode */}
+      {activeNote?.mode === 'tasks' && (
+        <div className="flex-1 overflow-auto p-3 pt-0 no-drag space-y-1" style={{ background: colorObj.bg }}>
           {activeNote.tasks.map((task) => (
             <div key={task.id} className="flex items-start gap-2 group">
               <button
@@ -527,31 +557,13 @@ export function StickyNoteWidget() {
             <Plus className="h-4 w-4" /> Add task
           </button>
         </div>
-      ) : (
-        <textarea
-          ref={textareaRef}
-          value={activeNote?.content || ''}
-          onChange={(e) => updateContent(e.target.value)}
-          onKeyDown={activeNote?.mode === 'numbered' ? handleNumberedKeyDown : undefined}
-          placeholder={activeNote?.mode === 'numbered' ? 'Type "1. " to start a numbered list...\nPress Enter for next number' : 'Write something...'}
-          className="flex-1 w-full p-4 resize-none outline-none border-none no-drag"
-          style={{
-            background: colorObj.bg,
-            color: '#1c1917',
-            fontFamily: "'Caveat', cursive",
-            fontSize: '20px',
-            lineHeight: '1.5',
-            boxShadow: 'inset 0 0 20px rgba(0,0,0,0.03)',
-          }}
-          autoFocus
-        />
       )}
 
       {/* Footer */}
       <div className="flex items-center justify-between px-3 py-1 text-[10px] no-drag" style={{ color: colorObj.accent, background: colorObj.bg }}>
         <span>
           {activeNote?.mode === 'tasks'
-            ? `${doneCount}/${totalCount} tasks done`
+            ? `${activeNote?.content.length || 0} chars · ${doneCount}/${totalCount} tasks`
             : `${activeNote?.content.length || 0} chars`}
         </span>
         <span>{notes.length} note{notes.length !== 1 ? 's' : ''}</span>
