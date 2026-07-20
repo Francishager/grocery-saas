@@ -81,46 +81,55 @@ export function StickyNoteWidget() {
   const backendLoadedRef = useRef(false)
 
   // Load notes from backend when user changes
+  // Only load from backend if localStorage is empty for this user (new device)
+  // If localStorage has data, user has been here — don't overwrite their local edits
   useEffect(() => {
     if (!user?.id) {
       backendLoadedRef.current = true
       return
     }
-    // If user changed, reset state and load from backend
     if (loadedUserIdRef.current !== user.id) {
       loadedUserIdRef.current = user.id
-      backendLoadedRef.current = false
-      ;(async () => {
-        try {
-          const res = await apiFetch('/api/widgets/sticky-notes')
-          if (res.ok) {
-            const data = await res.json()
-            syncingRef.current = true
-            if (data.notes && data.notes.length > 0) {
-              const mapped = data.notes.map((n: any) => ({
-                id: n.id,
-                title: n.title || '',
-                content: n.content || '',
-                mode: n.mode || 'plain',
-                tasks: Array.isArray(n.tasks) ? n.tasks : [],
-                color: n.color || 'yellow',
-                pinned: n.pinned || false,
-                createdAt: new Date(n.createdAt).getTime(),
-                updatedAt: new Date(n.updatedAt).getTime(),
-              }))
-              setNotes(mapped)
-              saveNotesLS(user.id, mapped)
-            } else {
-              // No notes on server, start fresh for this user
-              setNotes([])
+      const localNotes = loadNotesLS(user.id)
+      if (localNotes.length > 0) {
+        // User has local data on this device — use it, don't overwrite from backend
+        backendLoadedRef.current = true
+        syncingRef.current = true
+        setNotes(localNotes)
+      } else {
+        // No local data — load from backend (new device or first login)
+        backendLoadedRef.current = false
+        ;(async () => {
+          try {
+            const res = await apiFetch('/api/widgets/sticky-notes')
+            if (res.ok) {
+              const data = await res.json()
+              syncingRef.current = true
+              if (data.notes && data.notes.length > 0) {
+                const mapped = data.notes.map((n: any) => ({
+                  id: n.id,
+                  title: n.title || '',
+                  content: n.content || '',
+                  mode: n.mode || 'plain',
+                  tasks: Array.isArray(n.tasks) ? n.tasks : [],
+                  color: n.color || 'yellow',
+                  pinned: n.pinned || false,
+                  createdAt: new Date(n.createdAt).getTime(),
+                  updatedAt: new Date(n.updatedAt).getTime(),
+                }))
+                setNotes(mapped)
+                saveNotesLS(user.id, mapped)
+              } else {
+                setNotes([])
+              }
             }
+          } catch (err) {
+            console.error('Failed to load sticky notes from server:', err)
+          } finally {
+            backendLoadedRef.current = true
           }
-        } catch (err) {
-          console.error('Failed to load sticky notes from server:', err)
-        } finally {
-          backendLoadedRef.current = true
-        }
-      })()
+        })()
+      }
     }
   }, [user?.id])
 
@@ -158,7 +167,7 @@ export function StickyNoteWidget() {
   const syncToBackend = useCallback(async (notesToSync: StickyNote[]) => {
     for (const note of notesToSync) {
       try {
-        await apiFetch(`/api/widgets/sticky-notes/${note.id}`, {
+        const res = await apiFetch(`/api/widgets/sticky-notes/${note.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -170,9 +179,8 @@ export function StickyNoteWidget() {
             pinned: note.pinned,
           }),
         })
-      } catch {
-        // If PUT fails (note doesn't exist on server yet), create it
-        try {
+        if (!res.ok) {
+          // Note doesn't exist on server yet — create it
           await apiFetch('/api/widgets/sticky-notes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -186,9 +194,9 @@ export function StickyNoteWidget() {
               pinned: note.pinned,
             }),
           })
-        } catch (err) {
-          console.error('Failed to sync note to server:', err)
         }
+      } catch (err) {
+        console.error('Failed to sync note to server:', err)
       }
     }
   }, [])
