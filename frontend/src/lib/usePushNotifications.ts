@@ -45,6 +45,22 @@ export function usePushNotifications() {
         timestamp: Date.now(),
       }
       setForegroundNotifications((prev) => [notif, ...prev].slice(0, 20))
+      // Also show a real browser notification so it's visible even if the tab isn't focused
+      if (Notification.permission === 'granted') {
+        try {
+          const n = new Notification(notif.title, {
+            body: notif.body,
+            icon: '/img/jibusales_logo.png',
+            badge: '/img/jibusales_logo.png',
+            tag: notif.id,
+            data: notif.data,
+          })
+          n.onclick = () => {
+            window.focus()
+            n.close()
+          }
+        } catch {}
+      }
     })
     unregisterRef.current = unsub
     return () => {

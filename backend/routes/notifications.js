@@ -3,6 +3,7 @@ import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { notifyOwnerOfDailySalesSummary, notifyOwnerOfExpiringProducts } from "../src/utils/notifications.js";
+import { sendNotificationToUser, sendNotificationToTenant } from "../src/services/fcm.js";
 
 const router = Router();
 
@@ -159,11 +160,15 @@ router.post("/broadcast", authenticateToken, requirePermission("canCreateCommuni
           })
         )
       );
+      // Push to all tenant devices
+      sendNotificationToTenant(tenantId, { title, body: message, data: { url: '/notifications' } }).catch((err) => console.error('Broadcast FCM push failed:', err));
       res.status(201).json({ message: `Broadcast sent to ${notifs.length} users`, count: notifs.length });
     } else {
       const notif = await prisma.notification.create({
         data: { tenantId, channel, title, message, type },
       });
+      // Push to all tenant devices
+      sendNotificationToTenant(tenantId, { title, body: message, data: { url: '/notifications' } }).catch((err) => console.error('Broadcast FCM push failed:', err));
       res.status(201).json(notif);
     }
   } catch (err) {

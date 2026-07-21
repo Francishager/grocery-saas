@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { sendNotificationToUser } from '../services/fcm.js';
 
 export function formatCurrency(value, currency = 'UGX') {
   const amount = Number(value || 0);
@@ -21,7 +22,7 @@ export function buildDailySalesSummaryMessage(summary = {}) {
 
 export async function createTenantNotification({ prismaClient = prisma, tenantId, userId = null, title, message, type = 'info', metadata = null, channel = 'in_app' }) {
   if (!tenantId || !title || !message) return null;
-  return prismaClient.notification.create({
+  const notif = await prismaClient.notification.create({
     data: {
       tenantId,
       userId,
@@ -32,6 +33,15 @@ export async function createTenantNotification({ prismaClient = prisma, tenantId
       metadata,
     },
   });
+  // Also send FCM push to the user (if they have registered devices)
+  if (userId) {
+    sendNotificationToUser(userId, {
+      title,
+      body: message,
+      data: { url: '/notifications', ...(metadata ? typeof metadata === 'object' ? metadata : { metadata: String(metadata) } : {}) },
+    }).catch((err) => console.error('FCM push failed for notification:', err));
+  }
+  return notif;
 }
 
 export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale, user, productNames = [], branchName = null, itemDetails = [] }) {
