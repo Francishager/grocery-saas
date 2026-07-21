@@ -48,6 +48,7 @@ import ServiceBusinessPage from '@/pages/ServiceBusinessPage'
 import UserProfilePage from '@/pages/UserProfilePage'
 import ReferralPage from '@/pages/ReferralPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
+import CreditDebitNotesPage from '@/pages/CreditDebitNotesPage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -150,6 +151,8 @@ function App() {
           <Route path="receivables" element={<Navigate to="/tenant/receivables/customers" replace />} />
           <Route path="receivables/:tab" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
+          <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
+          <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport']}><AccountingPage /></FeatureGuard>} />

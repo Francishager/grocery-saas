@@ -1352,3 +1352,30 @@ export const userGuideApi = {
   reorder: (category: string, steps: { id: string; stepNumber: number }[]) =>
     api.put<{ message: string }>(`/api/user-guide/reorder/${category}`, { body: { steps } }),
 }
+
+// Credit & Debit Notes endpoints
+export const creditNotesApi = {
+  list: (params?: { page?: number; limit?: number; customerId?: string; status?: string; search?: string; from?: string; to?: string }) =>
+    api.get<{ data: any[]; pagination: any }>('/api/credit-debit-notes/credit-notes', { params }),
+  get: (id: string) =>
+    api.get<any>(`/api/credit-debit-notes/credit-notes/${id}`),
+  create: (data: { customerId: string; saleId?: string; amount: number; reason: string; notes?: string; branchId?: string }) =>
+    api.post<any>('/api/credit-debit-notes/credit-notes', { body: data }),
+  update: (id: string, data: { amount?: number; reason?: string; notes?: string }) =>
+    api.put<any>(`/api/credit-debit-notes/credit-notes/${id}`, { body: data }),
+  cancel: (id: string) =>
+    api.patch<any>(`/api/credit-debit-notes/credit-notes/${id}/cancel`),
+}
+
+export const debitNotesApi = {
+  list: (params?: { page?: number; limit?: number; supplierId?: string; status?: string; search?: string; from?: string; to?: string }) =>
+    api.get<{ data: any[]; pagination: any }>('/api/credit-debit-notes/debit-notes', { params }),
+  get: (id: string) =>
+    api.get<any>(`/api/credit-debit-notes/debit-notes/${id}`),
+  create: (data: { supplierId: string; purchaseId?: string; amount: number; reason: string; notes?: string; branchId?: string }) =>
+    api.post<any>('/api/credit-debit-notes/debit-notes', { body: data }),
+  update: (id: string, data: { amount?: number; reason?: string; notes?: string }) =>
+    api.put<any>(`/api/credit-debit-notes/debit-notes/${id}`, { body: data }),
+  cancel: (id: string) =>
+    api.patch<any>(`/api/credit-debit-notes/debit-notes/${id}/cancel`),
+}

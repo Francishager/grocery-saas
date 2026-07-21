@@ -42,6 +42,7 @@ import tenantVisibilityRoutes from "./routes/tenant-visibility.js";
 import onboardingRoutes from "./routes/onboarding.js";
 import userGuideRoutes from "./routes/user-guide.js";
 import widgetsRouter from "../routes/widgets.js";
+import creditDebitNotesRouter from "../routes/credit-debit-notes.js";
 
 import { auditMiddleware } from "./utils/audit.js";
 
@@ -199,6 +200,7 @@ app.use("/api/service", serviceRouter);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/user-guide", userGuideRoutes);
 app.use("/api/widgets", widgetsRouter);
+app.use("/api/credit-debit-notes", creditDebitNotesRouter);
 
 // 404
 app.use("/{*path}", (req, res) => {
