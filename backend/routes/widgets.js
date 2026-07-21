@@ -24,11 +24,11 @@ router.get('/sticky-notes', authenticateToken, async (req, res) => {
 /**
  * POST /api/widgets/sticky-notes
  * Create a new sticky note
- * Body: { title?, content?, mode?, tasks?, color?, pinned? }
+ * Body: { title?, lines?, color?, pinned? }
  */
 router.post('/sticky-notes', authenticateToken, async (req, res) => {
   try {
-    const { id, title, content, mode, tasks, color, pinned } = req.body
+    const { id, title, lines, color, pinned } = req.body
     const tenantId = req.user.tenantId || req.user.tenant_id || null
 
     const note = await prisma.stickyNote.create({
@@ -37,9 +37,7 @@ router.post('/sticky-notes', authenticateToken, async (req, res) => {
         userId: req.user.id,
         tenantId,
         title: title || '',
-        content: content || '',
-        mode: mode || 'plain',
-        tasks: tasks || [],
+        lines: lines || [],
         color: color || 'yellow',
         pinned: pinned || false,
       },
@@ -54,12 +52,12 @@ router.post('/sticky-notes', authenticateToken, async (req, res) => {
 /**
  * PUT /api/widgets/sticky-notes/:id
  * Update a sticky note
- * Body: { title?, content?, mode?, tasks?, color?, pinned? }
+ * Body: { title?, lines?, color?, pinned? }
  */
 router.put('/sticky-notes/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
-    const { title, content, mode, tasks, color, pinned } = req.body
+    const { title, lines, color, pinned } = req.body
 
     // Verify ownership
     const existing = await prisma.stickyNote.findUnique({ where: { id } })
@@ -71,9 +69,7 @@ router.put('/sticky-notes/:id', authenticateToken, async (req, res) => {
       where: { id },
       data: {
         ...(title !== undefined && { title }),
-        ...(content !== undefined && { content }),
-        ...(mode !== undefined && { mode }),
-        ...(tasks !== undefined && { tasks }),
+        ...(lines !== undefined && { lines }),
         ...(color !== undefined && { color }),
         ...(pinned !== undefined && { pinned }),
       },

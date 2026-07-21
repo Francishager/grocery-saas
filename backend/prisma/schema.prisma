@@ -2838,9 +2838,7 @@ model StickyNote {
   tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   title     String   @default("")
-  content   String   @default("")
-  mode      String   @default("plain") // plain, numbered, tasks
-  tasks     Json     @default("[]") // [{ id, text, done }]
+  lines     Json     @default("[]") // [{ id, type: text|task|numbered, text, done, number }]
   color     String   @default("yellow")
   pinned    Boolean  @default(false)
 
