@@ -63,6 +63,8 @@ model Branch {
   fuelCards          FuelCard[]
   fuelCardTransactions FuelCardTransaction[]
   taxPayments        TaxPayment[]
+  creditNotes        CreditNote[]
+  debitNotes         DebitNote[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -250,6 +252,8 @@ model Tenant {
   // =====================
   stickyNotes       StickyNote[]
   calculatorHistory CalculatorHistory[]
+  creditNotes       CreditNote[]
+  debitNotes        DebitNote[]
 
   @@map("tenants")
 }
@@ -890,6 +894,8 @@ model Customer {
   fuelCards        FuelCard[]
   Tenant   Tenant            @relation(fields: [tenantId], references: [id])
 
+  creditNotes   CreditNote[]
+
   @@unique([tenantId, branchId, phone])
   @@index([tenantId, branchId])
   @@map("customers")
@@ -1106,6 +1112,8 @@ model Supplier {
   purchases SupplierPurchase[]
   payments  SupplierPayment[]
   Tenant    Tenant             @relation(fields: [tenantId], references: [id])
+
+  debitNotes    DebitNote[]
 
   @@unique([tenantId, branchId, phone])
   @@index([tenantId, branchId])
@@ -2864,4 +2872,54 @@ model CalculatorHistory {
 
   @@unique([userId])
   @@map("calculator_history")
+}
+
+// Credit Notes — issued to customers to reduce receivables (returns, allowances, overcharges)
+model CreditNote {
+  id          String   @id @default(cuid())
+  noteNo      String
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  saleId      String?  // Linked sale record (optional)
+  amount      Float
+  reason      String   // sales_return, price_adjustment, overcharge, cancellation, other
+  status      String   @default("issued") // issued, applied, cancelled
+  notes       String?
+  userId      String   // Who issued it
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, noteNo])
+  @@index([tenantId, branchId])
+  @@index([customerId])
+  @@map("credit_notes")
+}
+
+// Debit Notes — issued to suppliers to reduce payables (returns, short delivery, quality issues, price adjustments)
+model DebitNote {
+  id          String   @id @default(cuid())
+  noteNo      String
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  purchaseId  String?  // Linked purchase (optional)
+  amount      Float
+  reason      String   // purchase_return, short_delivery, quality_issue, price_adjustment, other
+  status      String   @default("issued") // issued, applied, cancelled
+  notes       String?
+  userId      String   // Who issued it
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, noteNo])
+  @@index([tenantId, branchId])
+  @@index([supplierId])
+  @@map("debit_notes")
 }

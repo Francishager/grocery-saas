@@ -7,7 +7,7 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
-import { reportsApiV2, type ReportParams } from '@/lib/api'
+import { reportsApiV2, branchesApi, inventoryApi, apiFetch, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,9 +27,12 @@ interface ReportItem {
   id: string
   label: string
   apiFn: (params?: ReportParams) => Promise<any>
-  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger'
+  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement'
   columns?: { key: string; label: string; format?: 'currency' | 'number' | 'date' | 'text' }[]
   summaryKeys?: { key: string; label: string; format?: 'currency' | 'number' | 'text' }[]
+  entityType?: 'customer' | 'supplier' | 'product'
+  ledgerType?: 'customer' | 'supplier' | 'product' | 'financial'
+  showBranchFilter?: boolean
 }
 
 interface ReportCategory {
@@ -127,6 +130,9 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'inventorySlowMoving', label: 'Slow Moving Products', apiFn: reportsApiV2.inventorySlowMoving, renderType: 'table',
         columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
       },
+      { id: 'inventoryProductLedger', label: 'Product Ledger', apiFn: reportsApiV2.inventoryProductLedger, renderType: 'ledger', ledgerType: 'product', entityType: 'product', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), numberCol('inQty', 'In Qty'), numberCol('outQty', 'Out Qty'), numberCol('balance', 'Balance')]
+      },
     ]
   },
   {
@@ -152,7 +158,7 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'financialTrialBalance', label: 'Trial Balance', apiFn: reportsApiV2.financialTrialBalance, renderType: 'trialBalance' },
       { id: 'financialBalanceSheet', label: 'Balance Sheet', apiFn: reportsApiV2.financialBalanceSheet, renderType: 'balanceSheet' },
-      { id: 'financialGeneralLedger', label: 'General Ledger', apiFn: reportsApiV2.financialGeneralLedger, renderType: 'ledger',
+      { id: 'financialGeneralLedger', label: 'General Ledger', apiFn: reportsApiV2.financialGeneralLedger, renderType: 'ledger', ledgerType: 'financial', showBranchFilter: true,
         columns: [dateCol('date', 'Date'), textCol('account', 'Account'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit')]
       },
       { id: 'financialBankTransactions', label: 'Bank Transactions Report', apiFn: reportsApiV2.financialBankTransactions, renderType: 'table',
@@ -187,6 +193,22 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'customersTop', label: 'Top Customers Report', apiFn: reportsApiV2.customersTop, renderType: 'table',
         columns: [textCol('customer', 'Customer'), numberCol('count', 'Orders'), currencyCol('total', 'Total Spent')]
       },
+      { id: 'customersLedger', label: 'Customer Ledger', apiFn: reportsApiV2.customersLedger, renderType: 'ledger', ledgerType: 'customer', entityType: 'customer', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'customersStatement', label: 'Customer Statement', apiFn: reportsApiV2.customersStatement, renderType: 'statement', entityType: 'customer', showBranchFilter: true,
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Sales', format: 'currency' },
+          { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'totalCreditNotes', label: 'Credit Notes', format: 'currency' },
+          { key: 'currentBalance', label: 'Current Balance', format: 'currency' },
+          { key: 'salesCount', label: 'Sales Count', format: 'number' },
+          { key: 'paymentCount', label: 'Payment Count', format: 'number' },
+        ]
+      },
+      { id: 'customersCreditNotes', label: 'Credit Notes Report', apiFn: reportsApiV2.customersCreditNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
     ]
   },
   {
@@ -203,6 +225,21 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'suppliersBalance', label: 'Supplier Balance Report', apiFn: reportsApiV2.suppliersBalance, renderType: 'table',
         columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'suppliersStatement', label: 'Supplier Statement', apiFn: reportsApiV2.suppliersStatement, renderType: 'statement', entityType: 'supplier', showBranchFilter: true,
+        summaryKeys: [
+          { key: 'totalPurchases', label: 'Total Purchases', format: 'currency' },
+          { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'openBalance', label: 'Open Balance', format: 'currency' },
+          { key: 'purchaseCount', label: 'Purchase Count', format: 'number' },
+          { key: 'paymentCount', label: 'Payment Count', format: 'number' },
+        ]
+      },
+      { id: 'suppliersDebitNotes', label: 'Debit Notes Report', apiFn: reportsApiV2.suppliersDebitNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
+      { id: 'suppliersLedger', label: 'Supplier Ledger', apiFn: reportsApiV2.suppliersLedger, renderType: 'ledger', ledgerType: 'supplier', entityType: 'supplier', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit'), currencyCol('balance', 'Balance')]
       },
     ]
   },
@@ -512,6 +549,241 @@ function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['colu
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function LedgerReport({ data, columns }: { data: any; columns: ReportItem['columns'] }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Select an entity and click Generate.</p>
+  const entries = data.data || []
+  if (!entries.length) return <p className="text-center text-muted-foreground py-8">No transactions found for the selected period.</p>
+
+  const entityName = data.customer?.name || data.supplier?.name || data.product?.name || ''
+  const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : data.product ? 'Product' : ''
+  const isProductLedger = !!data.product
+  const openingLabel = isProductLedger ? 'Opening Stock' : 'Opening Balance'
+  const closingLabel = isProductLedger ? 'Closing Stock' : 'Closing Balance'
+  const openingValue = isProductLedger ? data.openingStock : data.openingBalance
+  const closingValue = isProductLedger ? data.closingStock : data.closingBalance
+
+  return (
+    <div className="space-y-4">
+      {/* Entity header */}
+      {entityName && (
+        <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+          <div>
+            <p className="text-xs text-muted-foreground">{entityType}</p>
+            <p className="text-lg font-semibold">{entityName}</p>
+            {data.customer?.phone && <p className="text-sm text-muted-foreground">{data.customer.phone}</p>}
+            {data.supplier?.phone && <p className="text-sm text-muted-foreground">{data.supplier.phone}</p>}
+            {data.product?.sku && <p className="text-sm text-muted-foreground">SKU: {data.product.sku}</p>}
+          </div>
+          <div className="flex gap-6">
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">{openingLabel}</p>
+              <p className="font-semibold">{isProductLedger ? openingValue : formatCurrency(openingValue)}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">{closingLabel}</p>
+              <p className="font-semibold">{isProductLedger ? closingValue : formatCurrency(closingValue)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ledger table */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              {columns?.map(col => <th key={col.key} className="px-4 py-3 text-left font-medium text-muted-foreground">{col.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {/* Opening balance row */}
+            <tr className="border-t bg-muted/20 font-medium">
+              <td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Opening Balance</td>
+              <td className="px-4 py-2 text-right">{isProductLedger ? openingValue : formatCurrency(openingValue)}</td>
+            </tr>
+            {entries.map((row: any, i: number) => (
+              <tr key={i} className="border-t hover:bg-muted/30">
+                {columns?.map(col => <td key={col.key} className="px-4 py-2">{formatValue(row[col.key], col.format)}</td>)}
+              </tr>
+            ))}
+            {/* Closing balance row */}
+            <tr className="border-t bg-muted/20 font-medium">
+              <td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Closing Balance</td>
+              <td className="px-4 py-2 text-right">{isProductLedger ? closingValue : formatCurrency(closingValue)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Summary */}
+      {data.summary && (
+        <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
+          {Object.entries(data.summary).map(([k, v]) => (
+            <div key={k}>
+              <p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p>
+              <p className="font-semibold">{typeof v === 'number' ? (k.toLowerCase().includes('count') || k.toLowerCase().includes('qty') ? v : formatCurrency(v)) : String(v)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryKeys'] }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Select an entity and click Generate.</p>
+  const entityName = data.customer?.name || data.supplier?.name || ''
+  const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : ''
+  const isCustomer = !!data.customer
+
+  return (
+    <div className="space-y-4">
+      {/* Entity header */}
+      {entityName && (
+        <div className="rounded-lg border bg-muted/30 px-4 py-3">
+          <p className="text-xs text-muted-foreground">{entityType} Statement</p>
+          <p className="text-lg font-semibold">{entityName}</p>
+          {(data.customer?.phone || data.supplier?.phone) && <p className="text-sm text-muted-foreground">{data.customer?.phone || data.supplier?.phone}</p>}
+          {(data.customer?.email || data.supplier?.email) && <p className="text-sm text-muted-foreground">{data.customer?.email || data.supplier?.email}</p>}
+        </div>
+      )}
+
+      {/* Summary cards */}
+      {data.summary && keys && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {keys.map(k => (
+            <Card key={k.key}>
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">{k.label}</p>
+                <p className="mt-1 text-2xl font-bold">{formatValue(data.summary[k.key], k.format)}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Sales/Purchases section */}
+      {isCustomer && data.sales && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Sales Transactions</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Receipt No</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Total</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Paid</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Balance</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sales.map((s: any, i: number) => (
+                  <tr key={i} className="border-t hover:bg-muted/30">
+                    <td className="px-4 py-2">{s.receiptNo}</td>
+                    <td className="px-4 py-2">{s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(s.total)}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(s.amountPaid)}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(s.balance)}</td>
+                    <td className="px-4 py-2">{s.paymentStatus}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!isCustomer && data.purchases && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Purchase Transactions</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Ref No</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Total</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.purchases.map((p: any, i: number) => (
+                  <tr key={i} className="border-t hover:bg-muted/30">
+                    <td className="px-4 py-2">{p.refNo || 'N/A'}</td>
+                    <td className="px-4 py-2">{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(p.total)}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(p.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Payments section */}
+      {data.payments && data.payments.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Payments</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Amount</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Method</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Reference</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.payments.map((p: any, i: number) => (
+                  <tr key={i} className="border-t hover:bg-muted/30">
+                    <td className="px-4 py-2">{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(p.amount)}</td>
+                    <td className="px-4 py-2">{p.paymentMethod}</td>
+                    <td className="px-4 py-2">{p.reference || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Notes section (customer statement) */}
+      {isCustomer && data.creditNotes && data.creditNotes.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Credit Notes</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Note No</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Amount</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.creditNotes.map((cn: any, i: number) => (
+                  <tr key={i} className="border-t hover:bg-muted/30">
+                    <td className="px-4 py-2">{cn.noteNo}</td>
+                    <td className="px-4 py-2">{cn.createdAt ? new Date(cn.createdAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(cn.amount)}</td>
+                    <td className="px-4 py-2">{cn.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1167,6 +1439,10 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const [selectedEntityId, setSelectedEntityId] = useState('')
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+  const [entityList, setEntityList] = useState<any[]>([])
+  const [branchList, setBranchList] = useState<any[]>([])
   const { toast } = useToast()
   const { hasPermission, user } = useJWTAuth()
   const { canAccessFeature } = useFeatureAccess()
@@ -1178,6 +1454,50 @@ export default function ReportsPage() {
 
   const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])
 
+  // Fetch entity list when report changes
+  useEffect(() => {
+    setSelectedEntityId('')
+    setEntityList([])
+    if (!currentReport?.entityType) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (currentReport.entityType === 'customer') {
+          const res = await apiFetch('/api/customers?limit=10000')
+          if (res.ok) {
+            const data = await res.json()
+            const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+            if (!cancelled) setEntityList(list.map((c: any) => ({ id: c.id, label: c.name })))
+          }
+        } else if (currentReport.entityType === 'supplier') {
+          const res = await apiFetch('/api/suppliers?limit=10000')
+          if (res.ok) {
+            const data = await res.json()
+            const list = Array.isArray(data?.suppliers) ? data.suppliers : Array.isArray(data) ? data : []
+            if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
+          }
+        } else if (currentReport.entityType === 'product') {
+          const products = await inventoryApi.list()
+          if (!cancelled) setEntityList(products.map((p: any) => ({ id: p.id, label: p.name })))
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [selectedReport, currentReport])
+
+  // Fetch branches when report needs branch filter
+  useEffect(() => {
+    if (!currentReport?.showBranchFilter) { setBranchList([]); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const branches = await branchesApi.active()
+        if (!cancelled) setBranchList(branches)
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [selectedReport, currentReport])
+
   const loadReport = useCallback(async () => {
     if (!currentReport) return
     setLoading(true)
@@ -1187,6 +1507,10 @@ export default function ReportsPage() {
         const params: ReportParams = {}
         if (from) params.from = from
         if (to) params.to = to
+        if (currentReport.entityType === 'customer') params.customerId = selectedEntityId
+        if (currentReport.entityType === 'supplier') params.supplierId = selectedEntityId
+        if (currentReport.entityType === 'product') params.productId = selectedEntityId
+        if (currentReport.showBranchFilter && selectedBranchId) params.branchId = selectedBranchId
         const result = await currentReport.apiFn(params)
         setReportData(result)
       } else {
@@ -1208,7 +1532,7 @@ export default function ReportsPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentReport, from, to, toast, online])
+  }, [currentReport, from, to, selectedEntityId, selectedBranchId, toast, online])
 
   useEffect(() => {
     if (currentReport) {
@@ -1255,7 +1579,7 @@ export default function ReportsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <BarChart3 className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-lg font-medium">Select a report from the sidebar</p>
-            <p className="mt-1 text-sm text-muted-foreground">Choose from 64 report types across 10 categories</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose from 68 report types across 10 categories</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -1266,6 +1590,36 @@ export default function ReportsPage() {
                 <p className="text-sm text-muted-foreground">{currentReport.categoryLabel}</p>
               </div>
               <div className="flex flex-wrap items-end gap-2">
+                {currentReport.entityType && (
+                  <div>
+                    <Label htmlFor="entity" className="text-xs">
+                      {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : 'Product'}
+                    </Label>
+                    <select
+                      id="entity"
+                      value={selectedEntityId}
+                      onChange={e => setSelectedEntityId(e.target.value)}
+                      className="h-9 w-auto rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">Select {currentReport.entityType}...</option>
+                      {entityList.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                {currentReport.showBranchFilter && branchList.length > 0 && (
+                  <div>
+                    <Label htmlFor="branch" className="text-xs">Branch</Label>
+                    <select
+                      id="branch"
+                      value={selectedBranchId}
+                      onChange={e => setSelectedBranchId(e.target.value)}
+                      className="h-9 w-auto rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">All Branches</option>
+                      {branchList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <Label htmlFor="from" className="text-xs">From</Label>
                   <Input id="from" type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 w-auto" />
@@ -1344,7 +1698,9 @@ export default function ReportsPage() {
                     {currentReport.renderType === 'balanceSheet' && <BalanceSheetReport data={reportData} />}
                     {currentReport.renderType === 'trialBalance' && <TrialBalanceReport data={reportData} />}
                     {currentReport.renderType === 'aging' && <AgingReport data={reportData} />}
-                    {currentReport.renderType === 'ledger' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'ledger' && currentReport.ledgerType && <LedgerReport data={reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'ledger' && !currentReport.ledgerType && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'statement' && <StatementReport data={reportData} keys={currentReport.summaryKeys} />}
                     {reportData.note && <p className="text-xs text-muted-foreground italic">{reportData.note}</p>}
                   </div>
                 ) : (

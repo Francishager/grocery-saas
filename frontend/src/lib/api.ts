@@ -566,6 +566,7 @@ export const reportsApiV2 = {
   inventoryDamaged: (params?: ReportParams) => api.get<any>('/api/reports/inventory/damaged', { params }),
   inventoryFastMoving: (params?: ReportParams) => api.get<any>('/api/reports/inventory/fast-moving', { params }),
   inventorySlowMoving: (params?: ReportParams) => api.get<any>('/api/reports/inventory/slow-moving', { params }),
+  inventoryProductLedger: (params?: ReportParams) => api.get<any>('/api/reports/inventory/product-ledger', { params }),
 
   // Financial Reports
   financialProfitLoss: (params?: ReportParams) => api.get<any>('/api/reports/financial/profit-loss', { params }),
@@ -584,6 +585,9 @@ export const reportsApiV2 = {
   customersBalance: (params?: ReportParams) => api.get<any>('/api/reports/customers/balance', { params }),
   customersReceivables: (params?: ReportParams) => api.get<any>('/api/reports/customers/receivables', { params }),
   customersTop: (params?: ReportParams) => api.get<any>('/api/reports/customers/top', { params }),
+  customersLedger: (params?: ReportParams) => api.get<any>('/api/reports/customers/ledger', { params }),
+  customersStatement: (params?: ReportParams) => api.get<any>('/api/reports/customers/statement', { params }),
+  customersCreditNotes: (params?: ReportParams) => api.get<any>('/api/reports/customers/credit-notes', { params }),
 
   // Supplier Reports
   suppliersList: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/list', { params }),
@@ -591,6 +595,8 @@ export const reportsApiV2 = {
   suppliersPayables: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/payables', { params }),
   suppliersBalance: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/balance', { params }),
   suppliersStatement: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/statement', { params }),
+  suppliersLedger: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/ledger', { params }),
+  suppliersDebitNotes: (params?: ReportParams) => api.get<any>('/api/reports/suppliers/debit-notes', { params }),
   decisionSupport: (params?: ReportParams) => api.get<any>('/api/reports/decision-support', { params }),
 
   // Receivables Reports

@@ -759,12 +759,18 @@ router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
 router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [sales, purchases, expenses, customerPayments, supplierPayments] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
-      prisma.purchase.findMany({ where: scopedWhere(s, df(req)), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
-      prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), select: { id: true, category: true, amount: true, date: true }, orderBy: { date: "desc" } }),
-      prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
-      prisma.supplierPayment.findMany({ where: scopedWhere(s, df(req)), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+    const { customerId, branchId } = req.query;
+    const customerFilter = customerId ? { customerId } : {};
+    const branchFilter = branchId ? { branchId } : {};
+    const combinedFilter = { ...customerFilter, ...branchFilter };
+    const [sales, purchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes] = await Promise.all([
+      prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...combinedFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
+      prisma.purchase.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.expense.findMany({ where: scopedWhere(s, { ...df(req, "date"), ...branchFilter }), select: { id: true, category: true, amount: true, date: true }, orderBy: { date: "desc" } }),
+      prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.supplierPayment.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.debitNote.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
     ]);
     const entries = [
       // Sales: credit Sales Revenue, debit COGS (perpetual inventory)
@@ -783,6 +789,10 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       ...customerPayments.map((x) => ({ date: x.createdAt, account: "Cash", description: "Customer Payment", debit: x.amount, credit: 0 })),
       // Supplier payments: credit Accounts Payable
       ...supplierPayments.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: "Supplier Payment", debit: 0, credit: x.amount })),
+      // Credit notes: credit Accounts Receivable (reduces customer balance)
+      ...creditNotes.map((x) => ({ date: x.createdAt, account: "Accounts Receivable", description: `Credit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
+      // Debit notes: credit Accounts Payable (reduces supplier balance)
+      ...debitNotes.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
     res.json({ data: entries });
   } catch (err) { handleBranchError(res, err); }
@@ -862,6 +872,215 @@ router.get("/customers/top", authenticateToken, async (req, res) => {
   } catch (err) { handleBranchError(res, err); }
 });
 
+// Customer Ledger — all transactions (sales + payments) with running balance
+router.get("/customers/ledger", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { customerId } = req.query;
+    if (!customerId) return res.status(400).json({ error: "customerId is required" });
+
+    const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }) });
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const [sales, payments, creditNotes] = await Promise.all([
+      prisma.saleRecord.findMany({
+        where: scopedWhere(s, { customerId, ...df(req) }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, receiptNo: true, total: true, createdAt: true, paymentMethod: true },
+      }),
+      prisma.customerPayment.findMany({
+        where: scopedWhere(s, { customerId, ...df(req) }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true },
+      }),
+      prisma.creditNote.findMany({
+        where: scopedWhere(s, { customerId, ...df(req), status: { not: "cancelled" } }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
+      }),
+    ]);
+
+    // Build ledger entries
+    const entries = [];
+    // Opening balance = sum of all sales before the date range - sum of all payments before the date range - sum of all credit notes before the date range
+    const [allSales, allPayments, allCreditNotes] = await Promise.all([
+      prisma.saleRecord.findMany({
+        where: scopedWhere(s, { customerId }),
+        select: { total: true, createdAt: true },
+      }),
+      prisma.customerPayment.findMany({
+        where: scopedWhere(s, { customerId }),
+        select: { amount: true, createdAt: true },
+      }),
+      prisma.creditNote.findMany({
+        where: scopedWhere(s, { customerId, status: { not: "cancelled" } }),
+        select: { amount: true, createdAt: true },
+      }),
+    ]);
+    const { from } = req.query;
+    const fromDate = from ? new Date(from) : null;
+    const openingBalance = (fromDate
+      ? allSales.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
+        allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
+        allCreditNotes.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0)
+      : 0
+    );
+
+    for (const sale of sales) {
+      entries.push({
+        date: sale.createdAt,
+        refNo: sale.receiptNo,
+        description: "Sale",
+        debit: sale.total,
+        credit: 0,
+        balance: 0,
+      });
+    }
+    for (const payment of payments) {
+      entries.push({
+        date: payment.createdAt,
+        refNo: payment.reference || payment.id.slice(-6),
+        description: "Payment",
+        debit: 0,
+        credit: payment.amount,
+        balance: 0,
+      });
+    }
+    for (const cn of creditNotes) {
+      entries.push({
+        date: cn.createdAt,
+        refNo: cn.noteNo,
+        description: `Credit Note (${cn.reason})`,
+        debit: 0,
+        credit: cn.amount,
+        balance: 0,
+      });
+    }
+
+    // Sort by date
+    entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // Recalculate running balance in date order
+    let bal = openingBalance;
+    for (const e of entries) {
+      bal += e.debit - e.credit;
+      e.balance = bal;
+    }
+
+    res.json({
+      customer: { id: customer.id, name: customer.name, phone: customer.phone || "" },
+      openingBalance,
+      closingBalance: entries.length ? entries[entries.length - 1].balance : openingBalance,
+      data: entries,
+      summary: {
+        totalDebit: entries.reduce((a, e) => a + e.debit, 0),
+        totalCredit: entries.reduce((a, e) => a + e.credit, 0),
+        entryCount: entries.length,
+      },
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Customer Statement — summary of customer activity
+router.get("/customers/statement", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { customerId } = req.query;
+    if (!customerId) return res.status(400).json({ error: "customerId is required" });
+
+    const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }) });
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const [sales, payments, creditNotes] = await Promise.all([
+      prisma.saleRecord.findMany({
+        where: scopedWhere(s, { customerId, ...df(req) }),
+        include: { items: { include: { product: { select: { name: true } } } } },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.customerPayment.findMany({
+        where: scopedWhere(s, { customerId, ...df(req) }),
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.creditNote.findMany({
+        where: scopedWhere(s, { customerId, ...df(req), status: { not: "cancelled" } }),
+        orderBy: { createdAt: "desc" },
+        select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
+      }),
+    ]);
+
+    const totalSales = sales.reduce((a, x) => a + x.total, 0);
+    const totalPayments = payments.reduce((a, x) => a + x.amount, 0);
+    const totalCreditNotes = creditNotes.reduce((a, x) => a + x.amount, 0);
+    const currentBalance = customer.balance || 0;
+
+    res.json({
+      customer: { id: customer.id, name: customer.name, phone: customer.phone || "", email: customer.email || "" },
+      summary: {
+        totalSales,
+        totalPayments,
+        totalCreditNotes,
+        currentBalance,
+        salesCount: sales.length,
+        paymentCount: payments.length,
+        creditNoteCount: creditNotes.length,
+      },
+      sales: sales.map((x) => ({
+        id: x.id,
+        receiptNo: x.receiptNo,
+        total: x.total,
+        amountPaid: x.amountPaid,
+        balance: x.balance,
+        paymentStatus: x.paymentStatus,
+        createdAt: x.createdAt,
+        items: x.items.map((i) => ({ name: i.product?.name || "N/A", quantity: i.quantity, total: i.total })),
+      })),
+      payments: payments.map((x) => ({
+        id: x.id,
+        amount: x.amount,
+        paymentMethod: x.paymentMethod,
+        reference: x.reference,
+        createdAt: x.createdAt,
+      })),
+      creditNotes: creditNotes.map((x) => ({
+        id: x.id,
+        noteNo: x.noteNo,
+        amount: x.amount,
+        reason: x.reason,
+        createdAt: x.createdAt,
+      })),
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Credit Notes Report — list all credit notes
+router.get("/customers/credit-notes", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { customerId } = req.query;
+    const where = scopedWhere(s, { ...df(req), status: { not: "cancelled" }, ...(customerId ? { customerId } : {}) });
+    const creditNotes = await prisma.creditNote.findMany({
+      where,
+      include: { customer: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const data = creditNotes.map((cn) => ({
+      noteNo: cn.noteNo,
+      customer: cn.customer?.name || "N/A",
+      amount: cn.amount,
+      reason: cn.reason,
+      status: cn.status,
+      date: cn.createdAt,
+    }));
+    res.json({
+      data,
+      summary: {
+        count: data.length,
+        totalAmount: data.reduce((a, x) => a + x.amount, 0),
+      },
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
 // ==================== SUPPLIER REPORTS ====================
 router.get("/suppliers/list", authenticateToken, async (req, res) => {
   try {
@@ -934,6 +1153,246 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
   } catch (err) {
     handleBranchError(res, err);
   }
+});
+
+// Supplier Ledger — all transactions (purchases + payments) with running balance
+router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { supplierId } = req.query;
+    if (!supplierId) return res.status(400).json({ error: "supplierId is required" });
+
+    const supplier = await prisma.supplier.findFirst({ where: scopedWhere(s, { id: supplierId }) });
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+
+    const [purchases, payments, debitNotes] = await Promise.all([
+      prisma.supplierPurchase.findMany({
+        where: scopedWhere(s, { supplierId, ...df(req) }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, refNo: true, total: true, createdAt: true },
+      }),
+      prisma.supplierPayment.findMany({
+        where: scopedWhere(s, { supplierId, ...df(req) }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true },
+      }),
+      prisma.debitNote.findMany({
+        where: scopedWhere(s, { supplierId, ...df(req), status: { not: "cancelled" } }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
+      }),
+    ]);
+
+    // Opening balance
+    const [allPurchases, allPayments, allDebitNotes] = await Promise.all([
+      prisma.supplierPurchase.findMany({
+        where: scopedWhere(s, { supplierId }),
+        select: { total: true, createdAt: true },
+      }),
+      prisma.supplierPayment.findMany({
+        where: scopedWhere(s, { supplierId }),
+        select: { amount: true, createdAt: true },
+      }),
+      prisma.debitNote.findMany({
+        where: scopedWhere(s, { supplierId, status: { not: "cancelled" } }),
+        select: { amount: true, createdAt: true },
+      }),
+    ]);
+    const { from } = req.query;
+    const fromDate = from ? new Date(from) : null;
+    const openingBalance = fromDate
+      ? allPurchases.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
+        allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
+        allDebitNotes.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0)
+      : 0;
+
+    const entries = [];
+    for (const p of purchases) {
+      entries.push({
+        date: p.createdAt,
+        refNo: p.refNo || p.id.slice(-6),
+        description: "Purchase",
+        debit: p.total,
+        credit: 0,
+        balance: 0,
+      });
+    }
+    for (const p of payments) {
+      entries.push({
+        date: p.createdAt,
+        refNo: p.reference || p.id.slice(-6),
+        description: "Payment",
+        debit: 0,
+        credit: p.amount,
+        balance: 0,
+      });
+    }
+    for (const dn of debitNotes) {
+      entries.push({
+        date: dn.createdAt,
+        refNo: dn.noteNo,
+        description: `Debit Note (${dn.reason})`,
+        debit: 0,
+        credit: dn.amount,
+        balance: 0,
+      });
+    }
+
+    entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    let bal = openingBalance;
+    for (const e of entries) {
+      bal += e.debit - e.credit;
+      e.balance = bal;
+    }
+
+    res.json({
+      supplier: { id: supplier.id, name: supplier.name, phone: supplier.phone || "" },
+      openingBalance,
+      closingBalance: entries.length ? entries[entries.length - 1].balance : openingBalance,
+      data: entries,
+      summary: {
+        totalDebit: entries.reduce((a, e) => a + e.debit, 0),
+        totalCredit: entries.reduce((a, e) => a + e.credit, 0),
+        entryCount: entries.length,
+      },
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Debit Notes Report — list all debit notes
+router.get("/suppliers/debit-notes", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { supplierId } = req.query;
+    const where = scopedWhere(s, { ...df(req), status: { not: "cancelled" }, ...(supplierId ? { supplierId } : {}) });
+    const debitNotes = await prisma.debitNote.findMany({
+      where,
+      include: { supplier: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const data = debitNotes.map((dn) => ({
+      noteNo: dn.noteNo,
+      supplier: dn.supplier?.name || "N/A",
+      amount: dn.amount,
+      reason: dn.reason,
+      status: dn.status,
+      date: dn.createdAt,
+    }));
+    res.json({
+      data,
+      summary: {
+        count: data.length,
+        totalAmount: data.reduce((a, x) => a + x.amount, 0),
+      },
+    });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+// Product Ledger — stock movement history for a specific product
+router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
+  try {
+    const s = await getScope(req);
+    const { productId } = req.query;
+    if (!productId) return res.status(400).json({ error: "productId is required" });
+
+    const product = await prisma.product.findFirst({ where: scopedWhere(s, { id: productId }) });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    const [sales, purchases, adjustments] = await Promise.all([
+      prisma.sale.findMany({
+        where: scopedWhere(s, df(req)),
+        include: { items: { where: { productId }, select: { quantity: true, total: true } } },
+        select: { id: true, receiptNo: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.purchase.findMany({
+        where: scopedWhere(s, df(req)),
+        include: { items: { where: { productId }, select: { quantity: true, total: true } } },
+        select: { id: true, refNo: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.auditLog.findMany({
+        where: { tenantId: s.tenantId, model: "Product", entityId: productId, ...df(req, "createdAt") },
+        orderBy: { createdAt: "asc" },
+      }),
+    ]);
+
+    const entries = [];
+
+    // Opening stock = sum of all purchases before date range - sum of all sales before date range
+    const allSales = await prisma.sale.findMany({
+      where: scopedWhere(s),
+      include: { items: { where: { productId }, select: { quantity: true } } },
+      select: { createdAt: true },
+    });
+    const allPurchases = await prisma.purchase.findMany({
+      where: scopedWhere(s),
+      include: { items: { where: { productId }, select: { quantity: true } } },
+      select: { createdAt: true },
+    });
+    const { from } = req.query;
+    const fromDate = from ? new Date(from) : null;
+    const openingStock = fromDate
+      ? allPurchases.reduce((a, p) => a + (new Date(p.createdAt) < fromDate ? p.items.reduce((s, i) => s + i.quantity, 0) : 0), 0) -
+        allSales.reduce((a, p) => a + (new Date(p.createdAt) < fromDate ? p.items.reduce((s, i) => s + i.quantity, 0) : 0), 0)
+      : 0;
+
+    for (const sale of sales) {
+      for (const item of sale.items) {
+        entries.push({
+          date: sale.createdAt,
+          refNo: sale.receiptNo,
+          description: "Sale (out)",
+          inQty: 0,
+          outQty: item.quantity,
+          balance: 0,
+        });
+      }
+    }
+    for (const purchase of purchases) {
+      for (const item of purchase.items) {
+        entries.push({
+          date: purchase.createdAt,
+          refNo: purchase.refNo || purchase.id.slice(-6),
+          description: "Purchase (in)",
+          inQty: item.quantity,
+          outQty: 0,
+          balance: 0,
+        });
+      }
+    }
+    for (const adj of adjustments) {
+      entries.push({
+        date: adj.createdAt,
+        refNo: adj.id.slice(-6),
+        description: `Adjustment: ${adj.action}`,
+        inQty: 0,
+        outQty: 0,
+        balance: 0,
+      });
+    }
+
+    entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    let bal = openingStock;
+    for (const e of entries) {
+      bal += e.inQty - e.outQty;
+      e.balance = bal;
+    }
+
+    res.json({
+      product: { id: product.id, name: product.name, sku: product.sku || "", currentStock: product.quantity || 0 },
+      openingStock,
+      closingStock: entries.length ? entries[entries.length - 1].balance : openingStock,
+      data: entries,
+      summary: {
+        totalIn: entries.reduce((a, e) => a + e.inQty, 0),
+        totalOut: entries.reduce((a, e) => a + e.outQty, 0),
+        entryCount: entries.length,
+      },
+    });
+  } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/decision-support", authenticateToken, async (req, res) => {
