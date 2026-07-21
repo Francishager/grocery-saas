@@ -398,6 +398,18 @@ export function StickyNoteWidget() {
   const totalTaskCount = activeNote?.lines.filter((l) => l.type === 'task').length || 0
   const charCount = activeNote?.lines.reduce((sum, l) => sum + l.text.length, 0) || 0
 
+  // Auto-resize all line textareas when activeNote changes
+  useEffect(() => {
+    if (!activeNote) return
+    for (const line of activeNote.lines) {
+      const el = lineInputRefs.current[line.id]
+      if (el && 'scrollHeight' in el) {
+        el.style.height = 'auto'
+        el.style.height = el.scrollHeight + 'px'
+      }
+    }
+  }, [activeNote?.id, activeNote?.lines])
+
   // Handle keydown for line inputs
   const handleLineKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>, line: NoteLine) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -529,15 +541,20 @@ export function StickyNoteWidget() {
               <span className="shrink-0 w-1" />
             )}
 
-            {/* Text input */}
-            <input
+            {/* Text input — textarea for wrapping */}
+            <textarea
               ref={(el) => { if (el) lineInputRefs.current[line.id] = el }}
-              type="text"
               value={line.text}
               onChange={(e) => updateLineText(line.id, e.target.value)}
               onKeyDown={(e) => handleLineKeyDown(e, line)}
+              onInput={(e) => {
+                const ta = e.currentTarget
+                ta.style.height = 'auto'
+                ta.style.height = ta.scrollHeight + 'px'
+              }}
+              rows={1}
               placeholder={line.type === 'task' ? 'Type a task...' : line.type === 'numbered' ? 'Type a numbered item...' : 'Write something... or type "1. " for a list, "- [ ] " for a task'}
-              className="flex-1 min-w-0 bg-transparent outline-none border-none"
+              className="flex-1 min-w-0 bg-transparent outline-none border-none resize-none overflow-hidden"
               style={{
                 color: '#1c1917',
                 fontFamily: "'Caveat', cursive",
@@ -545,11 +562,14 @@ export function StickyNoteWidget() {
                 lineHeight: '1.4',
                 textDecoration: line.type === 'task' && line.done ? 'line-through' : 'none',
                 opacity: line.type === 'task' && line.done ? 0.5 : 1,
+                wordBreak: 'break-word',
+                whiteSpace: 'pre-wrap',
+                width: '100%',
               }}
             />
 
-            {/* Line type switcher — visible on hover */}
-            <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0 transition-opacity">
+            {/* Line type buttons — always visible next to delete */}
+            <div className="flex gap-0.5 shrink-0 items-center">
               <button
                 onClick={() => changeLineType(line.id, 'text')}
                 className={`p-0.5 rounded text-xs ${line.type === 'text' ? 'bg-black/15' : 'hover:bg-black/10'}`}
