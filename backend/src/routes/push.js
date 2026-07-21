@@ -24,7 +24,24 @@ router.post('/register', authenticateToken, async (req, res) => {
       create: { token, userId, tenantId: userTenantId, platform, isActive: true },
     })
 
-    res.json({ message: 'Token registered', pushToken })
+    // Push all unread notifications to this user's devices (screen lock / background)
+    const unreadNotifs = await prisma.notification.findMany({
+      where: {
+        OR: [{ userId }, { userId: null, tenantId: userTenantId }],
+        isRead: false,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    })
+    for (const n of unreadNotifs) {
+      sendNotificationToUser(userId, {
+        title: n.title,
+        body: n.message,
+        data: { url: '/notifications', notificationId: n.id },
+      }).catch(() => {})
+    }
+
+    res.json({ message: 'Token registered', pushToken, unreadPushed: unreadNotifs.length })
   } catch (error) {
     console.error('Register push token error:', error)
     res.status(500).json({ error: 'Failed to register token' })

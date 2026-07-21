@@ -573,7 +573,21 @@ export function StickyNoteWidget() {
             {/* Text input — textarea for wrapping */}
             <textarea
               ref={(el) => { if (el) lineInputRefs.current[line.id] = el }}
-              onFocus={() => setFocusedLineId(line.id)}
+              onFocus={(e) => {
+                setFocusedLineId(line.id)
+                // Keep cursor visible in the scrollable container
+                const container = e.currentTarget.closest('.overflow-auto')
+                if (container) {
+                  const ta = e.currentTarget
+                  const taRect = ta.getBoundingClientRect()
+                  const cRect = container.getBoundingClientRect()
+                  if (taRect.bottom > cRect.bottom) {
+                    container.scrollTop += taRect.bottom - cRect.bottom + 4
+                  } else if (taRect.top < cRect.top) {
+                    container.scrollTop -= cRect.top - taRect.top + 4
+                  }
+                }
+              }}
               value={line.text}
               onChange={(e) => updateLineText(line.id, e.target.value)}
               onKeyDown={(e) => handleLineKeyDown(e, line)}
@@ -581,6 +595,15 @@ export function StickyNoteWidget() {
                 const ta = e.currentTarget
                 ta.style.height = 'auto'
                 ta.style.height = ta.scrollHeight + 'px'
+                // Keep cursor in view as the textarea grows
+                const container = ta.closest('.overflow-auto')
+                if (container) {
+                  const taRect = ta.getBoundingClientRect()
+                  const cRect = container.getBoundingClientRect()
+                  if (taRect.bottom > cRect.bottom) {
+                    container.scrollTop += taRect.bottom - cRect.bottom + 4
+                  }
+                }
               }}
               rows={1}
               placeholder={line.type === 'task' ? 'Type a task...' : line.type === 'numbered' ? 'Type a numbered item...' : 'Write something... or type "1. " for a list, "- [ ] " for a task'}
