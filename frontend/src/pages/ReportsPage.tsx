@@ -1571,12 +1571,17 @@ export default function ReportsPage() {
   }, [currentReport, from, to, selectedEntityId, selectedBranchId, toast, online])
 
   useEffect(() => {
-    if (currentReport) {
-      loadReport()
-    } else {
+    if (!currentReport) {
       setReportData(null)
+      return
     }
-  }, [selectedReport])
+    // For entity-required reports, don't auto-load until an entity is selected
+    if (currentReport.entityType && !selectedEntityId) {
+      setReportData(null)
+      return
+    }
+    loadReport()
+  }, [selectedReport, selectedEntityId, selectedBranchId])
 
   const canExport = hasPermission('canExportReport')
 

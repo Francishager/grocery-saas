@@ -27,7 +27,7 @@ const reportPermMap = {
   fuel: "canViewFuelStationReport",
   manufacturing: "canViewManufacturingReport",
   agriculture: "canViewAgricultureReport",
-  service_business: "canViewServiceBusinessReport",
+  "service-business": "canViewServiceBusinessReport",
   restaurant: "canViewRestaurantReport",
 };
 
