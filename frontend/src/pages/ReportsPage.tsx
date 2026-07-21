@@ -230,6 +230,7 @@ const CATEGORIES: ReportCategory[] = [
         summaryKeys: [
           { key: 'totalPurchases', label: 'Total Purchases', format: 'currency' },
           { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'totalDebitNotes', label: 'Debit Notes', format: 'currency' },
           { key: 'openBalance', label: 'Open Balance', format: 'currency' },
           { key: 'purchaseCount', label: 'Purchase Count', format: 'number' },
           { key: 'paymentCount', label: 'Payment Count', format: 'number' },
@@ -256,6 +257,9 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'receivablesOverdue', label: 'Overdue Accounts Report', apiFn: reportsApiV2.receivablesOverdue, renderType: 'table',
         columns: [textCol('customer', 'Customer'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
       },
+      { id: 'receivablesCreditNotes', label: 'Credit Notes Report', apiFn: reportsApiV2.customersCreditNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
     ]
   },
   {
@@ -270,6 +274,9 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'payablesOverdue', label: 'Overdue Supplier Balances', apiFn: reportsApiV2.payablesOverdue, renderType: 'table',
         columns: [textCol('supplier', 'Supplier'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
+      },
+      { id: 'payablesDebitNotes', label: 'Debit Notes Report', apiFn: reportsApiV2.suppliersDebitNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
       },
     ]
   },
@@ -777,6 +784,35 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                     <td className="px-4 py-2">{cn.createdAt ? new Date(cn.createdAt).toLocaleDateString() : '—'}</td>
                     <td className="px-4 py-2 text-right">{formatCurrency(cn.amount)}</td>
                     <td className="px-4 py-2">{cn.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Debit Notes section (supplier statement) */}
+      {!isCustomer && data.debitNotes && data.debitNotes.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Debit Notes</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Note No</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Amount</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.debitNotes.map((dn: any, i: number) => (
+                  <tr key={i} className="border-t hover:bg-muted/30">
+                    <td className="px-4 py-2">{dn.noteNo}</td>
+                    <td className="px-4 py-2">{dn.createdAt ? new Date(dn.createdAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-2 text-right">{formatCurrency(dn.amount)}</td>
+                    <td className="px-4 py-2">{dn.reason}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1579,7 +1615,7 @@ export default function ReportsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <BarChart3 className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-lg font-medium">Select a report from the sidebar</p>
-            <p className="mt-1 text-sm text-muted-foreground">Choose from 68 report types across 10 categories</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose from 70 report types across 10 categories</p>
           </div>
         ) : (
           <div className="space-y-4">

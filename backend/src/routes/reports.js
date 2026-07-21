@@ -1131,7 +1131,7 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
       return res.status(400).json({ error: "supplierId is required" });
     }
 
-    const [supplier, purchases, payments] = await Promise.all([
+    const [supplier, purchases, payments, debitNotes] = await Promise.all([
       prisma.supplier.findFirst({ where: scopedWhere(s, { id: supplierId }) }),
       prisma.supplierPurchase.findMany({
         where: scopedWhere(s, { supplierId }),
@@ -1142,6 +1142,11 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
         where: scopedWhere(s, { supplierId }),
         include: { supplier: true, purchase: { select: { id: true, refNo: true } } },
         orderBy: { createdAt: "desc" }
+      }),
+      prisma.debitNote.findMany({
+        where: scopedWhere(s, { supplierId, status: { not: "cancelled" } }),
+        orderBy: { createdAt: "desc" },
+        select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
       })
     ]);
 
@@ -1149,7 +1154,24 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Supplier not found" });
     }
 
-    res.json(buildSupplierStatementData(supplier, purchases, payments));
+    const stmtData = buildSupplierStatementData(supplier, purchases, payments);
+    const totalDebitNotes = debitNotes.reduce((a, x) => a + x.amount, 0);
+    res.json({
+      ...stmtData,
+      supplier: { ...stmtData.supplier, phone: supplier.phone || "", email: supplier.email || "" },
+      summary: {
+        ...stmtData.summary,
+        totalDebitNotes,
+        debitNoteCount: debitNotes.length,
+      },
+      debitNotes: debitNotes.map((x) => ({
+        id: x.id,
+        noteNo: x.noteNo,
+        amount: x.amount,
+        reason: x.reason,
+        createdAt: x.createdAt,
+      })),
+    });
   } catch (err) {
     handleBranchError(res, err);
   }
