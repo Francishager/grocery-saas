@@ -108,6 +108,7 @@ export function StickyNoteWidget() {
   const userId = user?.id || 'guest'
   const [notes, setNotes] = useState<StickyNote[]>(() => loadNotesLS(userId))
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [focusedLineId, setFocusedLineId] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedUserIdRef = useRef<string | null>(null)
   const syncingRef = useRef(false)
@@ -474,6 +475,34 @@ export function StickyNoteWidget() {
           <Trash2 className="h-4 w-4" />
         </button>
 
+        {/* Line type buttons — apply to focused line */}
+        <div className="flex gap-0.5 ml-1 border-l border-black/10 pl-1">
+          <button
+            onClick={() => focusedLineId && changeLineType(focusedLineId, 'text')}
+            className="p-1 rounded transition-colors hover:bg-black/10"
+            style={{ color: colorObj.accent }}
+            title="Plain text line"
+          >
+            <span className="text-sm font-bold">¶</span>
+          </button>
+          <button
+            onClick={() => focusedLineId && changeLineType(focusedLineId, 'numbered')}
+            className="p-1 rounded transition-colors hover:bg-black/10"
+            style={{ color: colorObj.accent }}
+            title="Numbered list"
+          >
+            <span className="text-sm font-bold">#</span>
+          </button>
+          <button
+            onClick={() => focusedLineId && changeLineType(focusedLineId, 'task')}
+            className="p-1 rounded transition-colors hover:bg-black/10"
+            style={{ color: colorObj.accent }}
+            title="Task checkbox"
+          >
+            <span className="text-sm font-bold">☑</span>
+          </button>
+        </div>
+
         <div className="flex-1" />
 
         {/* Color picker */}
@@ -544,6 +573,7 @@ export function StickyNoteWidget() {
             {/* Text input — textarea for wrapping */}
             <textarea
               ref={(el) => { if (el) lineInputRefs.current[line.id] = el }}
+              onFocus={() => setFocusedLineId(line.id)}
               value={line.text}
               onChange={(e) => updateLineText(line.id, e.target.value)}
               onKeyDown={(e) => handleLineKeyDown(e, line)}
@@ -568,35 +598,15 @@ export function StickyNoteWidget() {
               }}
             />
 
-            {/* Line type buttons — always visible next to delete */}
-            <div className="flex gap-0.5 shrink-0 items-center">
-              <button
-                onClick={() => changeLineType(line.id, 'text')}
-                className={`p-0.5 rounded text-xs ${line.type === 'text' ? 'bg-black/15' : 'hover:bg-black/10'}`}
-                style={{ color: colorObj.accent }}
-                title="Plain text"
-              >¶</button>
-              <button
-                onClick={() => changeLineType(line.id, 'numbered')}
-                className={`p-0.5 rounded text-xs ${line.type === 'numbered' ? 'bg-black/15' : 'hover:bg-black/10'}`}
-                style={{ color: colorObj.accent }}
-                title="Numbered"
-              >#</button>
-              <button
-                onClick={() => changeLineType(line.id, 'task')}
-                className={`p-0.5 rounded text-xs ${line.type === 'task' ? 'bg-black/15' : 'hover:bg-black/10'}`}
-                style={{ color: colorObj.accent }}
-                title="Task"
-              >☑</button>
-              <button
-                onClick={() => deleteLine(line.id, false)}
-                className="p-0.5 rounded hover:bg-black/10"
-                style={{ color: colorObj.accent }}
-                title="Delete line"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            {/* Delete line button — visible on hover */}
+            <button
+              onClick={() => deleteLine(line.id, false)}
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-black/10 transition-opacity shrink-0"
+              style={{ color: colorObj.accent }}
+              title="Delete line"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         ))}
 
