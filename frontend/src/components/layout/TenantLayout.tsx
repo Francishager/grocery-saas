@@ -107,6 +107,7 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'inventoryDamaged', label: 'Damaged/Lost Stock Report' },
       { id: 'inventoryFastMoving', label: 'Fast Moving Products' },
       { id: 'inventorySlowMoving', label: 'Slow Moving Products' },
+      { id: 'inventoryProductLedger', label: 'Product Ledger' },
     ],
   },
   {
@@ -131,6 +132,9 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'customersBalance', label: 'Customer Balance Report' },
       { id: 'customersReceivables', label: 'Customer Receivables Report' },
       { id: 'customersTop', label: 'Top Customers Report' },
+      { id: 'customersLedger', label: 'Customer Ledger' },
+      { id: 'customersStatement', label: 'Customer Statement' },
+      { id: 'customersCreditNotes', label: 'Credit Notes Report' },
     ],
   },
   {
@@ -140,6 +144,9 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'suppliersPurchases', label: 'Supplier Purchases Report' },
       { id: 'suppliersPayables', label: 'Supplier Payables Report' },
       { id: 'suppliersBalance', label: 'Supplier Balance Report' },
+      { id: 'suppliersStatement', label: 'Supplier Statement' },
+      { id: 'suppliersDebitNotes', label: 'Debit Notes Report' },
+      { id: 'suppliersLedger', label: 'Supplier Ledger' },
     ],
   },
   {
@@ -149,6 +156,7 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'receivablesAging', label: 'Customer Aging Report' },
       { id: 'receivablesCollection', label: 'Collection Report' },
       { id: 'receivablesOverdue', label: 'Overdue Accounts Report' },
+      { id: 'receivablesCreditNotes', label: 'Credit Notes Report' },
     ],
   },
   {
@@ -158,6 +166,7 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'payablesAging', label: 'Supplier Aging Report' },
       { id: 'payablesPaymentHistory', label: 'Payment History Report' },
       { id: 'payablesOverdue', label: 'Overdue Supplier Balances' },
+      { id: 'payablesDebitNotes', label: 'Debit Notes Report' },
     ],
   },
   {
