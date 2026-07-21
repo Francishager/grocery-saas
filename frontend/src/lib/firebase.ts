@@ -46,8 +46,7 @@ export async function getFCMToken(): Promise<string | null> {
       serviceWorkerRegistration: await navigator.serviceWorker.ready,
     })
     return token
-  } catch (err) {
-    console.error('FCM getToken error:', err)
+  } catch {
     return null
   }
 }

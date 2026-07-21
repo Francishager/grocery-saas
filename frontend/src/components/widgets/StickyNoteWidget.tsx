@@ -115,35 +115,56 @@ export function StickyNoteWidget() {
   const backendLoadedRef = useRef(false)
   const lineInputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement>>({})
  
+  const serverNoteIdsRef = useRef<Set<string>>(new Set())
+
   const syncToBackend = useCallback(async (notesToSync: StickyNote[]) => {
     for (const note of notesToSync) {
       try {
-        const body = JSON.stringify({
+        const payload = JSON.stringify({
+          id: note.id,
           title: note.title,
           lines: note.lines,
           color: note.color,
           pinned: note.pinned,
         })
-        const res = await apiFetch(`/api/widgets/sticky-notes/${note.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        })
-        if (!res.ok) {
-          await apiFetch('/api/widgets/sticky-notes', {
+        const existsOnServer = serverNoteIdsRef.current.has(note.id)
+        if (existsOnServer) {
+          // PUT — note exists on server
+          const res = await apiFetch(`/api/widgets/sticky-notes/${note.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload,
+          })
+          if (!res.ok) {
+            // Note was deleted from server — re-create via POST
+            const postRes = await apiFetch('/api/widgets/sticky-notes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: payload,
+            })
+            if (postRes.ok) serverNoteIdsRef.current.add(note.id)
+          }
+        } else {
+          // POST — note likely doesn't exist on server yet
+          const res = await apiFetch('/api/widgets/sticky-notes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: note.id,
-              title: note.title,
-              lines: note.lines,
-              color: note.color,
-              pinned: note.pinned,
-            }),
+            body: payload,
           })
+          if (res.ok) {
+            serverNoteIdsRef.current.add(note.id)
+          } else if (res.status === 409) {
+            // Already exists — switch to PUT
+            serverNoteIdsRef.current.add(note.id)
+            await apiFetch(`/api/widgets/sticky-notes/${note.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: payload,
+            })
+          }
         }
-      } catch (err) {
-        console.error('Failed to sync note to server:', err)
+      } catch {
+        // Silently fail — will retry on next sync
       }
     }
   }, [])
@@ -175,6 +196,8 @@ export function StickyNoteWidget() {
                 createdAt: new Date(n.createdAt).getTime(),
                 updatedAt: new Date(n.updatedAt).getTime(),
               }))
+              // Track which note IDs exist on the server
+              serverNoteIdsRef.current = new Set(serverNotes.map((n: any) => n.id))
               const merged = serverNotes.map((sn) => {
                 const ln = localMap.get(sn.id)
                 if (ln && ln.updatedAt > sn.updatedAt) return ln

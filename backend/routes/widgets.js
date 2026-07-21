@@ -44,6 +44,9 @@ router.post('/sticky-notes', authenticateToken, async (req, res) => {
     })
     res.json({ note })
   } catch (error) {
+    if (error?.code === 'P2002') {
+      return res.status(409).json({ error: 'Note already exists' })
+    }
     console.error('Create sticky note error:', error)
     res.status(500).json({ error: 'Failed to create sticky note' })
   }

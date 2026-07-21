@@ -104,10 +104,10 @@ export function usePushNotifications() {
         setToken(fcmToken)
         return true
       }
-      console.error('Failed to register push token:', res.status)
+      console.warn('Push token registration failed:', res.status)
       return false
     } catch (err) {
-      console.error('Register push token error:', err)
+      // Silent fail — push not critical
       return false
     }
   }, [token, requestPermission])
@@ -122,7 +122,7 @@ export function usePushNotifications() {
       setRegistered(false)
       setToken(null)
     } catch (err) {
-      console.error('Unregister push token error:', err)
+      // Silent fail
     }
   }, [token])
 
