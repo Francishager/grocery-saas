@@ -820,7 +820,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
     const customerFilter = customerId ? { customerId } : {};
     const branchFilter = branchId ? { branchId } : {};
     const combinedFilter = { ...customerFilter, ...branchFilter };
-    const [sales, saleRecords, purchases, supplierPurchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes] = await Promise.all([
+    const [sales, saleRecords, purchases, supplierPurchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes, saleReturns] = await Promise.all([
       // POS sales
       prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...combinedFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       // Credit sales (SaleRecord)
@@ -839,6 +839,8 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Debit notes
       prisma.debitNote.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      // Sale returns
+      prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, status: "completed" }), select: { id: true, returnNo: true, total: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
     ]);
     const entries = [
       // POS Sales: credit Sales Revenue, debit COGS (perpetual inventory)
@@ -875,6 +877,11 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       ...creditNotes.map((x) => ({ date: x.createdAt, account: "Accounts Receivable", description: `Credit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
       // Debit notes: credit Accounts Payable (reduces supplier balance)
       ...debitNotes.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
+      // Sale returns: debit Sales Returns (contra-revenue), credit Accounts Receivable/Cash
+      ...saleReturns.flatMap((x) => [
+        { date: x.createdAt, account: "Sales Returns", description: `Sales Return ${x.returnNo} (${x.reason || ""})`, debit: x.total, credit: 0 },
+        { date: x.createdAt, account: "Accounts Receivable", description: `Sales Return ${x.returnNo}`, debit: 0, credit: x.total },
+      ]),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
     res.json({ data: entries });
   } catch (err) { handleBranchError(res, err); }
@@ -964,7 +971,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }) });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
-    const [sales, payments, creditNotes] = await Promise.all([
+    const [sales, payments, creditNotes, saleReturns] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(s, { customerId, ...df(req) }),
         orderBy: { createdAt: "asc" },
@@ -980,12 +987,17 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
         select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
       }),
+      prisma.saleReturn.findMany({
+        where: scopedWhere(s, { customerId, ...df(req), status: "completed" }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true },
+      }),
     ]);
 
     // Build ledger entries
     const entries = [];
-    // Opening balance = sum of all sales before the date range - sum of all payments before the date range - sum of all credit notes before the date range
-    const [allSales, allPayments, allCreditNotes] = await Promise.all([
+    // Opening balance = sales - payments - credit notes - sale returns (all before date range)
+    const [allSales, allPayments, allCreditNotes, allSaleReturns] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(s, { customerId }),
         select: { total: true, createdAt: true },
@@ -998,13 +1010,18 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         where: scopedWhere(s, { customerId, status: { not: "cancelled" } }),
         select: { amount: true, createdAt: true },
       }),
+      prisma.saleReturn.findMany({
+        where: scopedWhere(s, { customerId, status: "completed" }),
+        select: { total: true, createdAt: true },
+      }),
     ]);
     const { from } = req.query;
     const fromDate = from ? new Date(from) : null;
     const openingBalance = (fromDate
       ? allSales.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
         allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
-        allCreditNotes.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0)
+        allCreditNotes.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
+        allSaleReturns.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0)
       : 0
     );
 
@@ -1035,6 +1052,16 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         description: `Credit Note (${cn.reason})`,
         debit: 0,
         credit: cn.amount,
+        balance: 0,
+      });
+    }
+    for (const sr of saleReturns) {
+      entries.push({
+        date: sr.createdAt,
+        refNo: sr.returnNo,
+        description: `Sales Return (${sr.refundMethod})`,
+        debit: 0,
+        credit: sr.total,
         balance: 0,
       });
     }
@@ -1073,7 +1100,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }) });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
-    const [sales, payments, creditNotes] = await Promise.all([
+    const [sales, payments, creditNotes, saleReturns] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(s, { customerId, ...df(req) }),
         include: { items: { include: { product: { select: { name: true } } } } },
@@ -1088,11 +1115,17 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "desc" },
         select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
       }),
+      prisma.saleReturn.findMany({
+        where: scopedWhere(s, { customerId, ...df(req), status: "completed" }),
+        orderBy: { createdAt: "desc" },
+        select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true },
+      }),
     ]);
 
     const totalSales = sales.reduce((a, x) => a + x.total, 0);
     const totalPayments = payments.reduce((a, x) => a + x.amount, 0);
     const totalCreditNotes = creditNotes.reduce((a, x) => a + x.amount, 0);
+    const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
     const currentBalance = customer.balance || 0;
 
     res.json({
@@ -1101,10 +1134,12 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         totalSales,
         totalPayments,
         totalCreditNotes,
+        totalSaleReturns,
         currentBalance,
         salesCount: sales.length,
         paymentCount: payments.length,
         creditNoteCount: creditNotes.length,
+        saleReturnCount: saleReturns.length,
       },
       sales: sales.map((x) => ({
         id: x.id,
@@ -1128,6 +1163,14 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         noteNo: x.noteNo,
         amount: x.amount,
         reason: x.reason,
+        createdAt: x.createdAt,
+      })),
+      saleReturns: saleReturns.map((x) => ({
+        id: x.id,
+        returnNo: x.returnNo,
+        total: x.total,
+        reason: x.reason,
+        refundMethod: x.refundMethod,
         createdAt: x.createdAt,
       })),
     });
@@ -1316,8 +1359,8 @@ router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
         date: p.createdAt,
         refNo: p.refNo || p.id.slice(-6),
         description: "Purchase",
-        debit: p.total,
-        credit: 0,
+        debit: 0,
+        credit: p.total,
         balance: 0,
       });
     }
@@ -1326,8 +1369,8 @@ router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
         date: p.createdAt,
         refNo: p.reference || p.id.slice(-6),
         description: "Payment",
-        debit: 0,
-        credit: p.amount,
+        debit: p.amount,
+        credit: 0,
         balance: 0,
       });
     }
@@ -1336,17 +1379,18 @@ router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
         date: dn.createdAt,
         refNo: dn.noteNo,
         description: `Debit Note (${dn.reason})`,
-        debit: 0,
-        credit: dn.amount,
+        debit: dn.amount,
+        credit: 0,
         balance: 0,
       });
     }
 
     entries.sort((a, b) => new Date(a.date) - new Date(b.date));
 
+    // For supplier ledger: balance = credit - debit (positive = we owe them)
     let bal = openingBalance;
     for (const e of entries) {
-      bal += e.debit - e.credit;
+      bal += e.credit - e.debit;
       e.balance = bal;
     }
 
@@ -1403,7 +1447,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
     const product = await prisma.product.findFirst({ where: scopedWhere(s, { id: productId }) });
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    const [sales, saleRecords, purchases, supplierPurchases, adjustments] = await Promise.all([
+    const [sales, saleRecords, purchases, supplierPurchases, adjustments, saleReturns] = await Promise.all([
       // POS sales
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
@@ -1437,12 +1481,16 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         where: { tenantId: s.tenantId, model: "Product", entityId: productId, ...df(req, "createdAt") },
         orderBy: { createdAt: "asc" },
       }),
+      // Sale returns (stock comes back in)
+      prisma.saleReturn.findMany({
+        where: scopedWhere(s, { ...df(req), status: "completed" }),
+        include: { items: { where: { productId }, select: { quantity: true, total: true } } },
+        select: { id: true, returnNo: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      }),
     ]);
 
-    const entries = [];
-
-    // Opening stock = sum of all purchases (both types) before date range - sum of all sales (both types) before date range
-    const [allSales, allSaleRecords, allPurchases, allSupplierPurchases] = await Promise.all([
+    const [allSales, allSaleRecords, allPurchases, allSupplierPurchases, allSaleReturns] = await Promise.all([
       prisma.sale.findMany({
         where: scopedWhere(s),
         include: { items: { where: { productId }, select: { quantity: true } } },
@@ -1463,15 +1511,22 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         include: { items: { where: { productId }, select: { quantity: true } } },
         select: { createdAt: true },
       }),
+      prisma.saleReturn.findMany({
+        where: scopedWhere(s, { status: "completed" }),
+        include: { items: { where: { productId }, select: { quantity: true } } },
+        select: { createdAt: true },
+      }),
     ]);
     const { from } = req.query;
     const fromDate = from ? new Date(from) : null;
     const sumQtyBefore = (records, dateField = "createdAt") =>
       records.reduce((a, r) => a + (new Date(r[dateField]) < fromDate ? r.items.reduce((s, i) => s + i.quantity, 0) : 0), 0);
     const openingStock = fromDate
-      ? (sumQtyBefore(allPurchases) + sumQtyBefore(allSupplierPurchases)) -
+      ? (sumQtyBefore(allPurchases) + sumQtyBefore(allSupplierPurchases) + sumQtyBefore(allSaleReturns)) -
         (sumQtyBefore(allSales) + sumQtyBefore(allSaleRecords))
       : 0;
+
+    const entries = [];
 
     // POS sales (stock out)
     for (const sale of sales) {
@@ -1534,6 +1589,19 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         outQty: 0,
         balance: 0,
       });
+    }
+    // Sale returns (stock comes back in)
+    for (const sr of saleReturns) {
+      for (const item of sr.items) {
+        entries.push({
+          date: sr.createdAt,
+          refNo: sr.returnNo,
+          description: "Sale Return (in)",
+          inQty: item.quantity,
+          outQty: 0,
+          balance: 0,
+        });
+      }
     }
 
     entries.sort((a, b) => new Date(a.date) - new Date(b.date));

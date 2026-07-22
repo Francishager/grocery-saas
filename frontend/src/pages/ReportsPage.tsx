@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -201,6 +202,7 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'totalSales', label: 'Total Sales', format: 'currency' },
           { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
           { key: 'totalCreditNotes', label: 'Credit Notes', format: 'currency' },
+          { key: 'totalSaleReturns', label: 'Sale Returns', format: 'currency' },
           { key: 'currentBalance', label: 'Current Balance', format: 'currency' },
           { key: 'salesCount', label: 'Sales Count', format: 'number' },
           { key: 'paymentCount', label: 'Payment Count', format: 'number' },
@@ -603,7 +605,14 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
-              {columns?.map(col => <th key={col.key} className="px-4 py-3 text-left font-medium text-muted-foreground">{col.label}</th>)}
+              {columns?.map(col => {
+                const isNumeric = col.format === 'currency' || col.format === 'number'
+                return (
+                  <th key={col.key} className={`px-4 py-3 font-medium text-muted-foreground ${isNumeric ? 'text-right' : 'text-left'}`}>
+                    {col.label}
+                  </th>
+                )
+              })}
             </tr>
           </thead>
           <tbody>
@@ -614,7 +623,16 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
             </tr>
             {entries.map((row: any, i: number) => (
               <tr key={i} className="border-t hover:bg-muted/30">
-                {columns?.map(col => <td key={col.key} className="px-4 py-2">{formatValue(row[col.key], col.format)}</td>)}
+                {columns?.map(col => {
+                  const isNumeric = col.format === 'currency' || col.format === 'number'
+                  const val = row[col.key]
+                  const displayVal = (isNumeric && (val === 0 || val === null || val === undefined)) ? '—' : formatValue(val, col.format)
+                  return (
+                    <td key={col.key} className={`px-4 py-2 ${isNumeric ? 'text-right tabular-nums' : ''}`}>
+                      {displayVal}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
             {/* Closing balance row */}
@@ -1499,18 +1517,33 @@ export default function ReportsPage() {
     ;(async () => {
       try {
         if (currentReport.entityType === 'customer') {
-          const res = await apiFetch('/api/customers?limit=10000')
+          const res = await apiFetch('/api/receivables/customers?limit=10000')
           if (res.ok) {
             const data = await res.json()
             const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
             if (!cancelled) setEntityList(list.map((c: any) => ({ id: c.id, label: c.name })))
+          } else {
+            // Fallback to receivables endpoint without limit param
+            const res2 = await apiFetch('/api/receivables/customers')
+            if (res2.ok) {
+              const data = await res2.json()
+              const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+              if (!cancelled) setEntityList(list.map((c: any) => ({ id: c.id, label: c.name })))
+            }
           }
         } else if (currentReport.entityType === 'supplier') {
-          const res = await apiFetch('/api/suppliers?limit=10000')
+          const res = await apiFetch('/api/payables/suppliers?limit=10000')
           if (res.ok) {
             const data = await res.json()
             const list = Array.isArray(data?.suppliers) ? data.suppliers : Array.isArray(data) ? data : []
             if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
+          } else {
+            const res2 = await apiFetch('/api/payables/suppliers')
+            if (res2.ok) {
+              const data = await res2.json()
+              const list = Array.isArray(data?.suppliers) ? data.suppliers : Array.isArray(data) ? data : []
+              if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
+            }
           }
         } else if (currentReport.entityType === 'product') {
           const products = await inventoryApi.list()
@@ -1546,7 +1579,7 @@ export default function ReportsPage() {
         if (currentReport.entityType === 'customer') params.customerId = selectedEntityId
         if (currentReport.entityType === 'supplier') params.supplierId = selectedEntityId
         if (currentReport.entityType === 'product') params.productId = selectedEntityId
-        if (currentReport.showBranchFilter && selectedBranchId) params.branchId = selectedBranchId
+        if (currentReport.showBranchFilter && selectedBranchId && selectedBranchId !== 'all') params.branchId = selectedBranchId
         const result = await currentReport.apiFn(params)
         setReportData(result)
       } else {
@@ -1633,32 +1666,35 @@ export default function ReportsPage() {
               <div className="flex flex-wrap items-end gap-2">
                 {currentReport.entityType && (
                   <div>
-                    <Label htmlFor="entity" className="text-xs">
+                    <Label className="text-xs">
                       {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : 'Product'}
                     </Label>
-                    <select
-                      id="entity"
-                      value={selectedEntityId}
-                      onChange={e => setSelectedEntityId(e.target.value)}
-                      className="h-9 w-auto rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      <option value="">Select {currentReport.entityType}...</option>
-                      {entityList.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
-                    </select>
+                    <Select value={selectedEntityId} onValueChange={setSelectedEntityId}>
+                      <SelectTrigger className="w-[200px]">
+                        <SelectValue placeholder={`Select ${currentReport.entityType}...`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {entityList.length === 0 ? (
+                          <SelectItem value="_none" disabled>No {currentReport.entityType}s found</SelectItem>
+                        ) : (
+                          entityList.map(e => <SelectItem key={e.id} value={e.id}>{e.label}</SelectItem>)
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
                 {currentReport.showBranchFilter && branchList.length > 0 && (
                   <div>
-                    <Label htmlFor="branch" className="text-xs">Branch</Label>
-                    <select
-                      id="branch"
-                      value={selectedBranchId}
-                      onChange={e => setSelectedBranchId(e.target.value)}
-                      className="h-9 w-auto rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      <option value="">All Branches</option>
-                      {branchList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
+                    <Label className="text-xs">Branch</Label>
+                    <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue placeholder="All Branches" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Branches</SelectItem>
+                        {branchList.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
                 <div>
