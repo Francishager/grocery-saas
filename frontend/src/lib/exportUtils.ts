@@ -9,6 +9,28 @@ type ExportColumn = {
   format?: 'currency' | 'number' | 'date' | 'text'
 }
 
+export type BusinessInfo = {
+  name?: string
+  address?: string | null
+  phone?: string | null
+  email?: string | null
+  taxId?: string | null
+  logo?: string | null
+  currency?: string
+}
+
+function businessInfoToArray(biz?: BusinessInfo): string[] {
+  if (!biz || !biz.name) return []
+  const lines: string[] = [biz.name]
+  if (biz.address) lines.push(biz.address)
+  const contactParts: string[] = []
+  if (biz.phone) contactParts.push(`Tel: ${biz.phone}`)
+  if (biz.email) contactParts.push(`Email: ${biz.email}`)
+  if (contactParts.length) lines.push(contactParts.join(' | '))
+  if (biz.taxId) lines.push(`TIN: ${biz.taxId}`)
+  return lines
+}
+
 function formatExportValue(value: any, format?: string): string {
   if (value === null || value === undefined) return ''
   switch (format) {
@@ -64,16 +86,27 @@ export function exportToExcel(
   data: any,
   reportLabel: string,
   columns?: ExportColumn[],
-  summary?: Record<string, any>
+  summary?: Record<string, any>,
+  businessInfo?: BusinessInfo
 ) {
   const { headers, rows } = extractRows(data, columns)
   const wb = XLSX.utils.book_new()
 
-  // Add summary rows if present
   const sheetData: any[] = []
-  if (summary) {
-    sheetData.push([reportLabel])
+
+  // Business header
+  const bizLines = businessInfoToArray(businessInfo)
+  if (bizLines.length > 0) {
+    sheetData.push(...bizLines.map(l => [l]))
     sheetData.push([])
+  }
+
+  // Report title
+  sheetData.push([reportLabel])
+  sheetData.push([])
+
+  // Summary rows if present
+  if (summary) {
     for (const [k, v] of Object.entries(summary)) {
       sheetData.push([k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()), typeof v === 'number' ? formatCurrency(v) : String(v)])
     }
@@ -95,26 +128,49 @@ export function exportToPDF(
   reportLabel: string,
   categoryLabel?: string,
   columns?: ExportColumn[],
-  summary?: Record<string, any>
+  summary?: Record<string, any>,
+  businessInfo?: BusinessInfo
 ) {
   const doc = new jsPDF({ orientation: 'landscape' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 14
 
-  // Title
+  let startY = 20
+
+  // Business header
+  const bizLines = businessInfoToArray(businessInfo)
+  if (bizLines.length > 0) {
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text(bizLines[0], margin, startY)
+    startY += 5
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    for (let i = 1; i < bizLines.length; i++) {
+      doc.text(bizLines[i], margin, startY)
+      startY += 4
+    }
+    startY += 3
+    doc.setDrawColor(200)
+    doc.setLineWidth(0.3)
+    doc.line(margin, startY, pageWidth - margin, startY)
+    startY += 6
+  }
+
+  // Report title
   doc.setFontSize(16)
   doc.setFont('helvetica', 'bold')
-  doc.text(reportLabel, margin, 20)
+  doc.text(reportLabel, margin, startY)
+  startY += 6
 
   // Category + date
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
   if (categoryLabel) {
-    doc.text(categoryLabel, margin, 26)
+    doc.text(categoryLabel, margin, startY)
   }
-  doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin - 60, 26)
-
-  let startY = 32
+  doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin - 60, startY)
+  startY += 6
 
   // Summary section
   if (summary) {
@@ -159,7 +215,8 @@ export function printReport(
   reportLabel: string,
   categoryLabel: string,
   columns?: ExportColumn[],
-  summary?: Record<string, any>
+  summary?: Record<string, any>,
+  businessInfo?: BusinessInfo
 ) {
   const { headers, rows } = extractRows(data, columns)
 
@@ -173,9 +230,14 @@ export function printReport(
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; padding: 24px; }
-      h1 { font-size: 20px; margin-bottom: 4px; }
-      .category { font-size: 13px; color: #666; margin-bottom: 4px; }
-      .generated { font-size: 11px; color: #999; margin-bottom: 20px; }
+      .business-header { text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #333; }
+      .business-header .biz-name { font-size: 22px; font-weight: bold; }
+      .business-header .biz-address { font-size: 12px; color: #555; margin-top: 2px; }
+      .business-header .biz-contact { font-size: 12px; color: #555; margin-top: 1px; }
+      .business-header .biz-tin { font-size: 12px; color: #555; margin-top: 1px; }
+      h1 { font-size: 20px; margin-bottom: 4px; text-align: center; }
+      .category { font-size: 13px; color: #666; margin-bottom: 4px; text-align: center; }
+      .generated { font-size: 11px; color: #999; margin-bottom: 20px; text-align: center; }
       .summary { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
       .summary-item { background: #f5f5f5; padding: 10px 16px; border-radius: 6px; }
       .summary-item .label { font-size: 11px; color: #666; }
@@ -188,6 +250,18 @@ export function printReport(
       @media print { body { padding: 12px; } }
     </style>
   `
+
+  // Business header HTML
+  let bizHtml = ''
+  const bizLines = businessInfoToArray(businessInfo)
+  if (bizLines.length > 0) {
+    bizHtml = '<div class="business-header">'
+    bizHtml += `<div class="biz-name">${bizLines[0]}</div>`
+    if (bizLines[1]) bizHtml += `<div class="biz-address">${bizLines[1]}</div>`
+    if (bizLines[2]) bizHtml += `<div class="biz-contact">${bizLines[2]}</div>`
+    if (bizLines[3]) bizHtml += `<div class="biz-tin">${bizLines[3]}</div>`
+    bizHtml += '</div>'
+  }
 
   let summaryHtml = ''
   if (summary) {
@@ -221,6 +295,7 @@ export function printReport(
         ${styles}
       </head>
       <body>
+        ${bizHtml}
         <h1>${reportLabel}</h1>
         <div class="category">${categoryLabel}</div>
         <div class="generated">Generated: ${new Date().toLocaleString()}</div>

@@ -17,7 +17,7 @@ import { formatCurrency, cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
-import { exportToExcel, exportToPDF, printReport } from '@/lib/exportUtils'
+import { exportToExcel, exportToPDF, printReport, type BusinessInfo } from '@/lib/exportUtils'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReportData } from '@/db/hybrid'
@@ -1497,6 +1497,7 @@ export default function ReportsPage() {
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [entityList, setEntityList] = useState<any[]>([])
   const [branchList, setBranchList] = useState<any[]>([])
+  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null)
   const { toast } = useToast()
   const { hasPermission, user } = useJWTAuth()
   const { canAccessFeature } = useFeatureAccess()
@@ -1553,6 +1554,29 @@ export default function ReportsPage() {
     })()
     return () => { cancelled = true }
   }, [selectedReport, currentReport])
+
+  // Fetch business info for print/export headers
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch('/api/settings')
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          setBusinessInfo({
+            name: data.name,
+            address: data.address,
+            phone: data.phone,
+            email: data.email,
+            taxId: data.taxId,
+            logo: data.logo,
+            currency: data.currency,
+          })
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Fetch branches when report needs branch filter
   useEffect(() => {
@@ -1624,7 +1648,8 @@ export default function ReportsPage() {
       currentReport?.label || 'Report',
       currentReport?.categoryLabel || '',
       currentReport?.columns,
-      reportData?.summary
+      reportData?.summary,
+      businessInfo || undefined
     )
   }
 
@@ -1633,7 +1658,8 @@ export default function ReportsPage() {
       reportData?.data || reportData,
       currentReport?.label || 'Report',
       currentReport?.columns,
-      reportData?.summary
+      reportData?.summary,
+      businessInfo || undefined
     )
   }
 
@@ -1643,7 +1669,8 @@ export default function ReportsPage() {
       currentReport?.label || 'Report',
       currentReport?.categoryLabel,
       currentReport?.columns,
-      reportData?.summary
+      reportData?.summary,
+      businessInfo || undefined
     )
   }
 
