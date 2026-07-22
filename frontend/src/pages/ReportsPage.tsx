@@ -563,7 +563,7 @@ function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['colu
 }
 
 function LedgerReport({ data, columns }: { data: any; columns: ReportItem['columns'] }) {
-  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Select an entity and click Generate.</p>
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Click Generate to load.</p>
   const entries = data.data || []
   if (!entries.length) return <p className="text-center text-muted-foreground py-8">No transactions found for the selected period.</p>
 
@@ -660,7 +660,7 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
 }
 
 function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryKeys'] }) {
-  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Select an entity and click Generate.</p>
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Select an entity to view statement.</p>
   const entityName = data.customer?.name || data.supplier?.name || ''
   const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : ''
   const isCustomer = !!data.customer
@@ -1515,9 +1515,10 @@ export default function ReportsPage() {
     setEntityList([])
     if (!currentReport?.entityType) return
     let cancelled = false
+    const entityType = currentReport.entityType
     ;(async () => {
       try {
-        if (currentReport.entityType === 'customer') {
+        if (entityType === 'customer') {
           const res = await apiFetch('/api/receivables/customers?limit=10000')
           if (res.ok) {
             const data = await res.json()
@@ -1532,7 +1533,7 @@ export default function ReportsPage() {
               if (!cancelled) setEntityList(list.map((c: any) => ({ id: c.id, label: c.name })))
             }
           }
-        } else if (currentReport.entityType === 'supplier') {
+        } else if (entityType === 'supplier') {
           const res = await apiFetch('/api/payables/suppliers?limit=10000')
           if (res.ok) {
             const data = await res.json()
@@ -1546,14 +1547,15 @@ export default function ReportsPage() {
               if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
             }
           }
-        } else if (currentReport.entityType === 'product') {
+        } else if (entityType === 'product') {
           const products = await inventoryApi.list()
           if (!cancelled) setEntityList(products.map((p: any) => ({ id: p.id, label: p.name })))
         }
       } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
-  }, [selectedReport, currentReport])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport])
 
   // Fetch business info for print/export headers
   useEffect(() => {
@@ -1589,7 +1591,8 @@ export default function ReportsPage() {
       } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
-  }, [selectedReport, currentReport])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport])
 
   const loadReport = useCallback(async () => {
     if (!currentReport) return
@@ -1600,9 +1603,9 @@ export default function ReportsPage() {
         const params: ReportParams = {}
         if (from) params.from = from
         if (to) params.to = to
-        if (currentReport.entityType === 'customer') params.customerId = selectedEntityId
-        if (currentReport.entityType === 'supplier') params.supplierId = selectedEntityId
-        if (currentReport.entityType === 'product') params.productId = selectedEntityId
+        if (currentReport.entityType === 'customer' && selectedEntityId) params.customerId = selectedEntityId
+        if (currentReport.entityType === 'supplier' && selectedEntityId) params.supplierId = selectedEntityId
+        if (currentReport.entityType === 'product' && selectedEntityId) params.productId = selectedEntityId
         if (currentReport.showBranchFilter && selectedBranchId && selectedBranchId !== 'all') params.branchId = selectedBranchId
         const result = await currentReport.apiFn(params)
         setReportData(result)
@@ -1632,13 +1635,10 @@ export default function ReportsPage() {
       setReportData(null)
       return
     }
-    // For entity-required reports, don't auto-load until an entity is selected
-    if (currentReport.entityType && !selectedEntityId) {
-      setReportData(null)
-      return
-    }
+    // Entity selection is optional — load report with or without entity
     loadReport()
-  }, [selectedReport, selectedEntityId, selectedBranchId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport, selectedEntityId, selectedBranchId, from, to])
 
   const canExport = hasPermission('canExportReport')
 
@@ -1696,11 +1696,12 @@ export default function ReportsPage() {
                     <Label className="text-xs">
                       {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : 'Product'}
                     </Label>
-                    <Select value={selectedEntityId} onValueChange={setSelectedEntityId}>
+                    <Select value={selectedEntityId || 'all'} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
                       <SelectTrigger className="w-[200px]">
                         <SelectValue placeholder={`Select ${currentReport.entityType}...`} />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="all">All {currentReport.entityType}s</SelectItem>
                         {entityList.length === 0 ? (
                           <SelectItem value="_none" disabled>No {currentReport.entityType}s found</SelectItem>
                         ) : (

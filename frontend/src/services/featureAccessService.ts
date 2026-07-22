@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { apiFetch } from '@/lib/api'
 
@@ -363,17 +363,17 @@ export function useFeatureAccess() {
     return featureAccessService.isFeatureEnabled(featureName)
   }
 
-  const hasFeature = (featureName: string) => {
+  const hasFeature = useCallback((featureName: string) => {
     return featureAccessService.hasFeature(featureName)
-  }
+  }, [])
 
-  const hasAnyFeature = (featureNames: string[] | string) => {
+  const hasAnyFeature = useCallback((featureNames: string[] | string) => {
     return featureAccessService.isAnyFeatureEnabled(featureNames)
-  }
+  }, [])
 
-  const canAccessFeature = (featureName: string) => {
+  const canAccessFeature = useCallback((featureName: string) => {
     return featureAccessService.canAccessFeature(featureName, user?.role)
-  }
+  }, [user?.role])
 
   const getFeature = (featureName: string) => {
     return featureAccessService.getFeature(featureName)
