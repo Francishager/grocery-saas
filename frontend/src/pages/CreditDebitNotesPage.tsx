@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { creditNotesApi, debitNotesApi, apiFetch, branchesApi } from '@/lib/api'
@@ -61,6 +62,9 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
           const data = await res.json()
           const list = data?.customers || data || []
           setEntities(list.map((c: any) => ({ id: c.id, name: c.name })))
+        } else {
+          setEntities([])
+          toast({ variant: 'destructive', title: 'Failed to load customers' })
         }
       } else {
         const res = await apiFetch('/api/payables/suppliers?limit=10000')
@@ -68,10 +72,15 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
           const data = await res.json()
           const list = data?.suppliers || data || []
           setEntities(list.map((s: any) => ({ id: s.id, name: s.name })))
+        } else {
+          setEntities([])
+          toast({ variant: 'destructive', title: 'Failed to load suppliers' })
         }
       }
-    } catch { /* ignore */ }
-  }, [activeTab])
+    } catch {
+      setEntities([])
+    }
+  }, [activeTab, toast])
 
   const fetchNotes = useCallback(async () => {
     setLoading(true)
@@ -306,20 +315,21 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
           <div className="space-y-4">
             {!editNote && (
               <div>
-                <Label htmlFor="entity">{entityLabel}</Label>
-                <select
-                  id="entity"
-                  value={entityId}
-                  onChange={e => setEntityId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">Select {entityLabel}...</option>
-                  {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
+                <Label>{entityLabel} <span className="text-red-500">*</span></Label>
+                <Select value={entityId} onValueChange={setEntityId}>
+                  <SelectTrigger><SelectValue placeholder={`Select ${entityLabel}...`} /></SelectTrigger>
+                  <SelectContent>
+                    {entities.length === 0 ? (
+                      <SelectItem value="_none" disabled>No {entityLabel.toLowerCase()}s available</SelectItem>
+                    ) : (
+                      entities.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             <div>
-              <Label htmlFor="amount">Amount</Label>
+              <Label htmlFor="amount">Amount <span className="text-red-500">*</span></Label>
               <Input
                 id="amount"
                 type="number"
@@ -330,29 +340,27 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
               />
             </div>
             <div>
-              <Label htmlFor="reason">Reason</Label>
-              <select
-                id="reason"
-                value={reason}
-                onChange={e => setReason(e.target.value)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="">Select reason...</option>
-                {reasons.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-              </select>
+              <Label>Reason <span className="text-red-500">*</span></Label>
+              <Select value={reason} onValueChange={setReason}>
+                <SelectTrigger><SelectValue placeholder="Select reason..." /></SelectTrigger>
+                <SelectContent>
+                  {reasons.map(r => <SelectItem key={r} value={r}>{r.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
-            {!editNote && branches.length > 0 && (
+            {!editNote && (
               <div>
-                <Label htmlFor="branch">Branch (optional)</Label>
-                <select
-                  id="branch"
-                  value={branchId}
-                  onChange={e => setBranchId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">No branch</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <Label>Branch <span className="text-red-500">*</span></Label>
+                <Select value={branchId} onValueChange={setBranchId}>
+                  <SelectTrigger><SelectValue placeholder="Select branch..." /></SelectTrigger>
+                  <SelectContent>
+                    {branches.length === 0 ? (
+                      <SelectItem value="_none" disabled>No branches available</SelectItem>
+                    ) : (
+                      branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             <div>
@@ -367,7 +375,10 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={submitting}>
+            <Button 
+              onClick={handleSubmit} 
+              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId)) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
+            >
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editNote ? 'Update' : 'Create'}
             </Button>

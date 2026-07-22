@@ -72,7 +72,7 @@ const ACCOUNT_TYPES = [
   { value: 'expenses', label: 'Expenses' },
 ]
 
-const PAYMENT_METHODS = ['cash', 'mobile_money', 'cheque']
+const PAYMENT_METHODS = ['cash', 'bank', 'mobile_money', 'cheque', 'safe']
 const CURRENCIES = ['USD', 'KES', 'UGX', 'TZS', 'RWF', 'NGN', 'GHS', 'ZAR']
 const JOURNAL_ACTIONS = [
   { value: 'register_income', label: 'Register Income' },
@@ -85,8 +85,10 @@ const JOURNAL_ACTIONS = [
 ]
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: 'Cash Account',
+  bank: 'Bank Account',
   mobile_money: 'Mobile Money Account',
   cheque: 'Bank Account (Cheque)',
+  safe: 'Safe Account',
 }
 
 const ACCOUNT_CATEGORIES: Record<string, { code: string; name: string }[]> = {
@@ -142,6 +144,10 @@ const buildAccountOptions = (accounts: Account[], typeFilter?: string) => {
     return items
   }
 
+  const rootAccounts = accounts.filter(a => !a.parentId)
+  if (rootAccounts.length > 0) {
+    return rootAccounts.flatMap((account) => flatten(account))
+  }
   return accounts.flatMap((account) => flatten(account))
 }
 
@@ -221,7 +227,11 @@ export default function AccountingPage() {
     try {
       if (online) {
         const res = await apiFetch('/api/accounting/accounts')
-        if (res.ok) setAccounts(await res.json())
+        if (res.ok) {
+          setAccounts(await res.json())
+        } else {
+          try { setAccounts(await getLocalAccounts()) } catch {}
+        }
       } else {
         setAccounts(await getLocalAccounts())
       }
@@ -830,12 +840,23 @@ export default function AccountingPage() {
                   <Select value={jePaymentAccount} onValueChange={setJePaymentAccount}>
                     <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
                     <SelectContent>
-                      {accounts.filter(a => {
-                        if (jePaymentMethod === 'cash') return a.type === 'asset' && (a.subType?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('cash'))
-                        if (jePaymentMethod === 'cheque') return a.type === 'asset' && (a.subType?.toLowerCase().includes('bank') || a.name?.toLowerCase().includes('bank'))
-                        if (jePaymentMethod === 'mobile_money') return a.type === 'asset' && (a.subType?.toLowerCase().includes('mobile') || a.name?.toLowerCase().includes('mobile'))
-                        return true
-                      }).map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
+                      {(() => {
+                        const filtered = accounts.filter(a => {
+                          if (!a.isActive) return false
+                          const sub = (a.subType || '').toLowerCase()
+                          const nm = (a.name || '').toLowerCase()
+                          if (jePaymentMethod === 'cash') return a.type === 'asset' && (sub.includes('cash') || nm.includes('cash') || sub.includes('safe') || nm.includes('safe'))
+                          if (jePaymentMethod === 'bank') return a.type === 'asset' && (sub.includes('bank') || nm.includes('bank'))
+                          if (jePaymentMethod === 'cheque') return a.type === 'asset' && (sub.includes('bank') || nm.includes('bank') || sub.includes('cheque') || nm.includes('cheque'))
+                          if (jePaymentMethod === 'mobile_money') return a.type === 'asset' && (sub.includes('mobile') || nm.includes('mobile'))
+                          if (jePaymentMethod === 'safe') return a.type === 'asset' && (sub.includes('safe') || nm.includes('safe') || sub.includes('cash') || nm.includes('cash'))
+                          return true
+                        })
+                        if (filtered.length > 0) {
+                          return filtered.map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)
+                        }
+                        return accounts.filter(a => a.isActive).map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>
@@ -881,7 +902,7 @@ export default function AccountingPage() {
                     }}>
                       <SelectTrigger><SelectValue placeholder="Select DR account" /></SelectTrigger>
                       <SelectContent>
-                        {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
+                        {accountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -891,7 +912,7 @@ export default function AccountingPage() {
                     }}>
                       <SelectTrigger><SelectValue placeholder="Select CR account" /></SelectTrigger>
                       <SelectContent>
-                        {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
+                        {accountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

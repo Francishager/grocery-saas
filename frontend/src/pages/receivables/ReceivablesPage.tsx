@@ -190,8 +190,8 @@ export default function ReceivablesPage() {
     if (activeTab === 'customers') {
       loadCustomers()
     }
-    if (activeTab === 'sales') loadSales()
-    if (activeTab === 'payments') loadPayments()
+    if (activeTab === 'sales') { loadSales(); setLoading(false) }
+    if (activeTab === 'payments') { loadPayments(); setLoading(false) }
     if (activeTab === 'fuel-cards') loadFuelCards()
     if (activeTab === 'credit-accounts') loadCreditAccounts()
     loadReceivablesSummary()
@@ -237,14 +237,16 @@ export default function ReceivablesPage() {
         const response = await apiFetch('/api/receivables/sales')
         if (response.ok) {
           const data = await response.json()
-          setSales(data.sales)
+          setSales(data.sales || [])
+        } else {
+          try { setSales(await getLocalReceivableSales()) } catch { setSales([]) }
         }
       } else {
         const local = await getLocalReceivableSales()
         setSales(local)
       }
     } catch (error) {
-      try { setSales(await getLocalReceivableSales()) } catch {}
+      try { setSales(await getLocalReceivableSales()) } catch { setSales([]) }
     }
   }
 
@@ -254,14 +256,16 @@ export default function ReceivablesPage() {
         const response = await apiFetch('/api/receivables/payments')
         if (response.ok) {
           const data = await response.json()
-          setPayments(data.payments)
+          setPayments(data.payments || [])
+        } else {
+          try { setPayments(await getLocalReceivablePayments()) } catch { setPayments([]) }
         }
       } else {
         const local = await getLocalReceivablePayments()
         setPayments(local)
       }
     } catch (error) {
-      try { setPayments(await getLocalReceivablePayments()) } catch {}
+      try { setPayments(await getLocalReceivablePayments()) } catch { setPayments([]) }
     }
   }
 

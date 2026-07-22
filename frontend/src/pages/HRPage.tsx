@@ -76,6 +76,14 @@ export default function HRPage() {
   const [payrollDeductions, setPayrollDeductions] = useState(0)
   const [payrollBonus, setPayrollBonus] = useState(0)
 
+  // Leave form
+  const [showLeaveModal, setShowLeaveModal] = useState(false)
+  const [leaveEmployeeId, setLeaveEmployeeId] = useState('')
+  const [leaveType, setLeaveType] = useState('annual')
+  const [leaveStart, setLeaveStart] = useState('')
+  const [leaveEnd, setLeaveEnd] = useState('')
+  const [leaveReason, setLeaveReason] = useState('')
+
   const fetchEmployees = async () => {
     try {
       if (online) {
@@ -125,13 +133,15 @@ export default function HRPage() {
     fetchPayroll()
   }, [])
 
+  const employeeFormValid = firstName.trim() && lastName.trim() && phone.trim() && position.trim() && department.trim() && salary > 0 && payFrequency
+
   const handleCreate = async () => {
-    if (!firstName || !lastName) return toast({ variant: 'destructive', title: 'First and last name required' })
+    if (!employeeFormValid) return toast({ variant: 'destructive', title: 'Please fill all required fields' })
     try {
       const res = await apiFetch('/api/hr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, phone, position, department, salary, payFrequency }),
+        body: JSON.stringify({ firstName, lastName, email: email || undefined, phone, position, department, salary, payFrequency }),
       })
       if (res.ok) {
         toast({ title: 'Employee added' })
@@ -167,6 +177,31 @@ export default function HRPage() {
       }
     } catch (err) {
       toast({ variant: 'destructive', title: 'Failed to run payroll' })
+    }
+  }
+
+  const leaveFormValid = leaveEmployeeId && leaveStart && leaveEnd && new Date(leaveEnd) >= new Date(leaveStart)
+
+  const handleCreateLeave = async () => {
+    if (!leaveFormValid) return toast({ variant: 'destructive', title: 'Please fill all required fields' })
+    const days = Math.ceil((new Date(leaveEnd).getTime() - new Date(leaveStart).getTime()) / (1000 * 60 * 60 * 24)) + 1
+    try {
+      const res = await apiFetch(`/api/hr/${leaveEmployeeId}/leave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leaveType, startDate: leaveStart, endDate: leaveEnd, days, reason: leaveReason || undefined }),
+      })
+      if (res.ok) {
+        toast({ title: 'Leave request created' })
+        setShowLeaveModal(false)
+        setLeaveEmployeeId(''); setLeaveType('annual'); setLeaveStart(''); setLeaveEnd(''); setLeaveReason('')
+        fetchLeaves()
+      } else {
+        const data = await res.json()
+        toast({ variant: 'destructive', title: data.error })
+      }
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Failed to create leave request' })
     }
   }
 
@@ -238,23 +273,23 @@ export default function HRPage() {
                 <DialogHeader><DialogTitle>Add Employee</DialogTitle></DialogHeader>
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><Label>First Name</Label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
-                    <div><Label>Last Name</Label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
+                    <div><Label>First Name <span className="text-red-500">*</span></Label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
+                    <div><Label>Last Name <span className="text-red-500">*</span></Label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><Label>Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-                    <div><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+                    <div><Label>Email (optional)</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@example.com" /></div>
+                    <div><Label>Phone <span className="text-red-500">*</span></Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1234567890" /></div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><Label>Position</Label><Input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="e.g. Cashier" /></div>
-                    <div><Label>Department</Label><Input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Sales" /></div>
+                    <div><Label>Position <span className="text-red-500">*</span></Label><Input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="e.g. Cashier" /></div>
+                    <div><Label>Department <span className="text-red-500">*</span></Label><Input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Sales" /></div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><Label>Salary</Label><Input type="number" value={salary} onChange={(e) => setSalary(Number(e.target.value))} /></div>
+                    <div><Label>Salary <span className="text-red-500">*</span></Label><Input type="number" value={salary} onChange={(e) => setSalary(Number(e.target.value))} placeholder="0" /></div>
                     <div>
-                      <Label>Pay Frequency</Label>
+                      <Label>Pay Frequency <span className="text-red-500">*</span></Label>
                       <Select value={payFrequency} onValueChange={setPayFrequency}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="weekly">Weekly</SelectItem>
                           <SelectItem value="biweekly">Bi-weekly</SelectItem>
@@ -264,7 +299,7 @@ export default function HRPage() {
                     </div>
                   </div>
                 </div>
-                <DialogFooter><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleCreate}>Add</Button></DialogFooter>
+                <DialogFooter><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleCreate} disabled={!employeeFormValid}>Add</Button></DialogFooter>
               </DialogContent>
             </Dialog>
           </div>
@@ -296,6 +331,51 @@ export default function HRPage() {
 
         {/* Leave Requests */}
         <TabsContent value="leave" className="space-y-4">
+          <div className="flex justify-end">
+            <Dialog open={showLeaveModal} onOpenChange={setShowLeaveModal}>
+              <DialogTrigger asChild><Button disabled={employees.length === 0}><Plus className="h-4 w-4 mr-2" /> New Leave Request</Button></DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New Leave Request</DialogTitle></DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <Label>Employee <span className="text-red-500">*</span></Label>
+                    <Select value={leaveEmployeeId} onValueChange={setLeaveEmployeeId}>
+                      <SelectTrigger><SelectValue placeholder="Select employee..." /></SelectTrigger>
+                      <SelectContent>
+                        {employees.map((emp) => (
+                          <SelectItem key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Leave Type <span className="text-red-500">*</span></Label>
+                    <Select value={leaveType} onValueChange={setLeaveType}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="annual">Annual</SelectItem>
+                        <SelectItem value="sick">Sick</SelectItem>
+                        <SelectItem value="casual">Casual</SelectItem>
+                        <SelectItem value="maternity">Maternity</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><Label>Start Date <span className="text-red-500">*</span></Label><Input type="date" value={leaveStart} onChange={(e) => setLeaveStart(e.target.value)} /></div>
+                    <div><Label>End Date <span className="text-red-500">*</span></Label><Input type="date" value={leaveEnd} onChange={(e) => setLeaveEnd(e.target.value)} /></div>
+                  </div>
+                  <div>
+                    <Label>Reason (optional)</Label>
+                    <Input value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} placeholder="Reason for leave..." />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowLeaveModal(false)}>Cancel</Button>
+                  <Button onClick={handleCreateLeave} disabled={!leaveFormValid}>Submit</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
           <div className="space-y-2">
             {leaveRequests.map((leave) => (
               <div key={leave.id} className="flex items-center justify-between rounded-lg border p-4">
