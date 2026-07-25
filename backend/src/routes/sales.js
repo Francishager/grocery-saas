@@ -20,6 +20,51 @@ function normalizeItems(items, idKey = "productId") {
   }));
 }
 
+function userHasEffectivePermission(req, permission) {
+  const permissions = req.user?.permissions || [];
+  return permissions.includes(permission) || permissions.includes("*");
+}
+
+async function checkDiscountPermission(req, userId, saleItems, cashDiscount = 0) {
+  const invoiceCashDiscount = Number(cashDiscount) || 0;
+  const hasLineItemDiscount = saleItems.some((item) =>
+    Number(item.discount || 0) > 0 || Number(item.cashDiscount || 0) > 0
+  );
+  const hasAnyDiscount = hasLineItemDiscount || invoiceCashDiscount > 0;
+
+  if (!hasAnyDiscount) {
+    return { allowed: true, invoiceCashDiscount };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      discountPermission: true,
+      permissions: { select: { canGiveDiscount: true } },
+    },
+  });
+
+  const canGiveDiscount =
+    userHasEffectivePermission(req, "canGiveDiscount") ||
+    Boolean(user?.permissions?.canGiveDiscount);
+  const discountPermission = user?.discountPermission || "none";
+
+  if (!canGiveDiscount && discountPermission === "none") {
+    return { allowed: false, invoiceCashDiscount, error: "You do not have permission to give discounts" };
+  }
+
+  if (!canGiveDiscount) {
+    if (hasLineItemDiscount && discountPermission === "invoice") {
+      return { allowed: false, invoiceCashDiscount, error: "You can only give invoice-level discounts" };
+    }
+    if (invoiceCashDiscount > 0 && discountPermission === "lineItem") {
+      return { allowed: false, invoiceCashDiscount, error: "You can only give line item discounts" };
+    }
+  }
+
+  return { allowed: true, invoiceCashDiscount };
+}
+
 async function checkedSaleItems(items, scope) {
   const normalized = normalizeItems(items);
   const productIds = [...new Set(normalized.map((item) => item.productId).filter(Boolean))];
@@ -90,30 +135,11 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId } = req.body;
     if (!items.length) return res.status(400).json({ error: "Items required" });
 
-    // Check discount permission — check both UserPermission.canGiveDiscount and User.discountPermission
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { permissions: { select: { canGiveDiscount: true } } },
-    });
-    const userPerm = user?.permissions;
-    const invoiceCashDiscount = Number(cashDiscount) || 0;
-    const hasLineItemDiscount = items.some((i) => Number(i.cashDiscount || 0) > 0);
-    const hasAnyDiscount = hasLineItemDiscount || invoiceCashDiscount > 0;
-    if (hasAnyDiscount) {
-      // Primary gate: UserPermission.canGiveDiscount
-      if (!userPerm?.canGiveDiscount && user?.discountPermission === "none") {
-        return res.status(403).json({ error: "You do not have permission to give discounts" });
-      }
-      // Granular gate: only apply discountPermission enum restrictions if canGiveDiscount is false
-      if (!userPerm?.canGiveDiscount) {
-        if (hasLineItemDiscount && user?.discountPermission === "invoice") {
-          return res.status(403).json({ error: "You can only give invoice-level discounts" });
-        }
-        if (invoiceCashDiscount > 0 && user?.discountPermission === "lineItem") {
-          return res.status(403).json({ error: "You can only give line item discounts" });
-        }
-      }
+    const discountCheck = await checkDiscountPermission(req, userId, items, cashDiscount);
+    if (!discountCheck.allowed) {
+      return res.status(403).json({ error: discountCheck.error });
     }
+    const { invoiceCashDiscount } = discountCheck;
 
     const saleItems = await checkedSaleItems(items, scope);
     const subtotal = saleItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -215,30 +241,11 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, amountPaid, changeGiven } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
 
-    // Check discount permission — check both UserPermission.canGiveDiscount and User.discountPermission
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { permissions: { select: { canGiveDiscount: true } } },
-    });
-    const userPerm = user?.permissions;
-    const invoiceCashDiscount = Number(cashDiscount) || 0;
-    const hasLineItemDiscount = cart.some((i) => Number(i.cashDiscount || 0) > 0);
-    const hasAnyDiscount = hasLineItemDiscount || invoiceCashDiscount > 0;
-    if (hasAnyDiscount) {
-      // Primary gate: UserPermission.canGiveDiscount
-      if (!userPerm?.canGiveDiscount && user?.discountPermission === "none") {
-        return res.status(403).json({ error: "You do not have permission to give discounts" });
-      }
-      // Granular gate: only apply discountPermission enum restrictions if canGiveDiscount is false
-      if (!userPerm?.canGiveDiscount) {
-        if (hasLineItemDiscount && user?.discountPermission === "invoice") {
-          return res.status(403).json({ error: "You can only give invoice-level discounts" });
-        }
-        if (invoiceCashDiscount > 0 && user?.discountPermission === "lineItem") {
-          return res.status(403).json({ error: "You can only give line item discounts" });
-        }
-      }
+    const discountCheck = await checkDiscountPermission(req, userId, cart, cashDiscount);
+    if (!discountCheck.allowed) {
+      return res.status(403).json({ error: discountCheck.error });
     }
+    const { invoiceCashDiscount } = discountCheck;
 
     const saleItems = await checkedSaleItems(cart, scope);
     const subtotal = saleItems.reduce((sum, c) => sum + c.price * c.quantity, 0);
