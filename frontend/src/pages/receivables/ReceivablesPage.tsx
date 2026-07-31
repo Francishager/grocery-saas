@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -683,7 +685,119 @@ export default function ReceivablesPage() {
     )
   }
 
-  const printSaleInvoice = (sale: any) => {
+  const buildInvoiceData = (sale: any, customerOverride?: any) => {
+    const business = businessProfile || {}
+    const saleItems = Array.isArray(sale?.items) ? sale.items : []
+    const customer = customerOverride || sale?.customer || { name: 'Walk-in customer' }
+    const items = saleItems.map((item: any) => ({
+      name: item?.product?.name || item?.name || 'Item',
+      quantity: Number(item?.quantity || 0),
+      price: Number(item?.price || item?.unitPrice || 0),
+      total: Number(item?.total || (Number(item?.quantity || 0) * Number(item?.price || item?.unitPrice || 0)))
+    }))
+
+    return {
+      business,
+      customer,
+      sale,
+      items,
+      invoiceNo: sale?.receiptNo || sale?.invoiceNo || 'N/A',
+      subtotal: Number(sale?.subtotal || 0),
+      tax: Number(sale?.tax || 0),
+      discount: Number(sale?.discount || 0),
+      total: Number(sale?.total || 0),
+      amountPaid: Number(sale?.amountPaid || 0),
+      balance: Number(sale?.balance || 0),
+      createdAt: sale?.createdAt || new Date().toISOString(),
+    }
+  }
+
+  const exportSaleInvoicePdf = (sale: any, customerOverride?: any) => {
+    const invoice = buildInvoiceData(sale, customerOverride)
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 40
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(20)
+    doc.text(invoice.business?.name || 'Business Name', pageWidth / 2, 56, { align: 'center' })
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    const businessLines = [
+      invoice.business?.address,
+      invoice.business?.phone ? `Tel: ${invoice.business.phone}` : '',
+      invoice.business?.email,
+    ].filter(Boolean)
+    businessLines.forEach((line, index) => doc.text(line, pageWidth / 2, 78 + index * 12, { align: 'center' }))
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.text('Invoice', margin, 140)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`No: ${invoice.invoiceNo}`, margin, 160)
+    doc.text(`Date: ${new Date(invoice.createdAt).toLocaleString()}`, margin, 176)
+
+    doc.setFont('helvetica', 'bold')
+    doc.text('Customer', pageWidth - 180, 140)
+    doc.setFont('helvetica', 'normal')
+    const customerName = invoice.customer?.name || 'Walk-in customer'
+    doc.text(customerName, pageWidth - 180, 160)
+    if (invoice.customer?.phone) doc.text(`Phone: ${invoice.customer.phone}`, pageWidth - 180, 176)
+    if (invoice.customer?.email) doc.text(`Email: ${invoice.customer.email}`, pageWidth - 180, 192)
+
+    const rows = invoice.items.map((item: any) => [
+      item.name,
+      String(item.quantity),
+      formatCurrency(Number(item.price)),
+      formatCurrency(Number(item.total)),
+    ])
+
+    autoTable(doc, {
+      startY: 220,
+      head: [['Item', 'Qty', 'Price', 'Total']],
+      body: rows.length ? rows : [['No items recorded', '', '', '']],
+      theme: 'striped',
+      styles: { fontSize: 9, cellPadding: 6 },
+      headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold' },
+      margin: { left: margin, right: margin },
+    })
+
+    const tableEndY = (doc as any).lastAutoTable?.finalY ?? 220
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    const totalsX = pageWidth - margin - 120
+    doc.text('Subtotal', totalsX, tableEndY + 24)
+    doc.text(formatCurrency(invoice.subtotal), pageWidth - margin, tableEndY + 24, { align: 'right' })
+    doc.text('Tax', totalsX, tableEndY + 40)
+    doc.text(formatCurrency(invoice.tax), pageWidth - margin, tableEndY + 40, { align: 'right' })
+    doc.text('Discount', totalsX, tableEndY + 56)
+    doc.text(formatCurrency(invoice.discount), pageWidth - margin, tableEndY + 56, { align: 'right' })
+    doc.setFont('helvetica', 'bold')
+    doc.text('Total', totalsX, tableEndY + 76)
+    doc.text(formatCurrency(invoice.total), pageWidth - margin, tableEndY + 76, { align: 'right' })
+    doc.setFont('helvetica', 'normal')
+    doc.text('Amount Paid', totalsX, tableEndY + 92)
+    doc.text(formatCurrency(invoice.amountPaid), pageWidth - margin, tableEndY + 92, { align: 'right' })
+    doc.text('Balance', totalsX, tableEndY + 108)
+    doc.text(formatCurrency(invoice.balance), pageWidth - margin, tableEndY + 108, { align: 'right' })
+
+    if (invoice.business?.receiptHeader) {
+      doc.setFont('helvetica', 'italic')
+      doc.text(invoice.business.receiptHeader, pageWidth / 2, pageHeight - 70, { align: 'center' })
+    }
+    doc.setFont('helvetica', 'normal')
+    doc.text('Thank you for your business.', pageWidth / 2, pageHeight - 52, { align: 'center' })
+    if (invoice.business?.receiptFooter) {
+      doc.text(invoice.business.receiptFooter, pageWidth / 2, pageHeight - 36, { align: 'center' })
+    }
+
+    doc.save(`invoice-${String(invoice.invoiceNo).replace(/\s+/g, '-')}.pdf`)
+  }
+
+  const printSaleInvoice = (sale: any, customerOverride?: any) => {
     const business = businessProfile || {}
     const customerName = sale?.customer?.name || 'Walk-in customer'
     const customerPhone = sale?.customer?.phone || ''
@@ -807,9 +921,27 @@ export default function ReceivablesPage() {
     }, 300)
   }
 
+  const exportPaymentInvoicePdf = (payment: any) => {
+    const linkedSale = sales.find((sale) => sale.id === payment.saleId || sale.id === payment.sale?.id) || payment.sale || null
+    const invoiceSale = linkedSale || {
+      id: payment?.saleId || payment?.id,
+      receiptNo: payment?.sale?.receiptNo || `PAY-${payment?.id || 'receipt'}`,
+      customer: payment?.customer || null,
+      subtotal: 0,
+      tax: 0,
+      discount: 0,
+      total: Number(payment?.amount || 0),
+      amountPaid: Number(payment?.amount || 0),
+      balance: 0,
+      createdAt: payment?.createdAt || new Date().toISOString(),
+      items: [],
+    }
+    exportSaleInvoicePdf(invoiceSale, payment?.customer || invoiceSale?.customer)
+  }
+
   const printPaymentInvoice = (payment: any) => {
     const business = businessProfile || {}
-    const linkedSale = sales.find((sale) => sale.id === payment.saleId) || payment.sale || null
+    const linkedSale = sales.find((sale) => sale.id === payment.saleId || sale.id === payment.sale?.id) || payment.sale || null
     const customerName = payment.customer?.name || linkedSale?.customer?.name || 'Walk-in customer'
     const customerPhone = payment.customer?.phone || linkedSale?.customer?.phone || ''
     const customerEmail = payment.customer?.email || linkedSale?.customer?.email || ''
@@ -1173,6 +1305,10 @@ export default function ReceivablesPage() {
                       <Printer className="h-4 w-4 mr-1" />
                       Print Invoice
                     </Button>
+                    <Button size="sm" variant="outline" onClick={() => exportSaleInvoicePdf(sale)}>
+                      <Download className="h-4 w-4 mr-1" />
+                      Download PDF
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => setSelectedSaleDetail(sale)}>
                       <Eye className="h-4 w-4 mr-1" />
                       View Details
@@ -1217,10 +1353,16 @@ export default function ReceivablesPage() {
                     {payment.sale?.receiptNo && (
                       <p className="text-sm text-muted-foreground">Sale: {payment.sale.receiptNo}</p>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => printPaymentInvoice(payment)}>
-                      <Printer className="h-4 w-4 mr-1" />
-                      Print Invoice
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => printPaymentInvoice(payment)}>
+                        <Printer className="h-4 w-4 mr-1" />
+                        Print Invoice
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => exportPaymentInvoicePdf(payment)}>
+                        <Download className="h-4 w-4 mr-1" />
+                        Download PDF
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1714,6 +1856,10 @@ export default function ReceivablesPage() {
                   <Button size="sm" variant="outline" onClick={() => printSaleInvoice(selectedSaleDetail)}>
                     <Printer className="h-4 w-4 mr-1" />
                     Print Invoice
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => exportSaleInvoicePdf(selectedSaleDetail)}>
+                    <Download className="h-4 w-4 mr-1" />
+                    Download PDF
                   </Button>
                 </div>
                 <div>
