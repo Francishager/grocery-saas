@@ -807,6 +807,132 @@ export default function ReceivablesPage() {
     }, 300)
   }
 
+  const printPaymentInvoice = (payment: any) => {
+    const business = businessProfile || {}
+    const linkedSale = sales.find((sale) => sale.id === payment.saleId) || payment.sale || null
+    const customerName = payment.customer?.name || linkedSale?.customer?.name || 'Walk-in customer'
+    const customerPhone = payment.customer?.phone || linkedSale?.customer?.phone || ''
+    const customerEmail = payment.customer?.email || linkedSale?.customer?.email || ''
+    const items = Array.isArray(linkedSale?.items) ? linkedSale.items : []
+    const invoiceTotal = Number(linkedSale?.total ?? payment.amount ?? 0)
+    const amountPaid = Number(linkedSale?.amountPaid ?? payment.amount ?? 0)
+    const balance = Number(linkedSale?.balance ?? Math.max(0, invoiceTotal - amountPaid))
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (!printWindow) {
+      toast({ title: 'Pop-up blocked', description: 'Enable pop-ups to print the invoice.', variant: 'destructive' })
+      return
+    }
+
+    const escapeHtml = (value: any) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+
+    const invoiceItemsHtml = items.length
+      ? items.map((item: any) => {
+          const productName = item?.product?.name || item?.name || 'Item'
+          const qty = Number(item?.quantity || 0)
+          const price = Number(item?.price || 0)
+          const total = Number(item?.total || qty * price)
+          return `
+            <tr>
+              <td>${escapeHtml(productName)}</td>
+              <td>${qty}</td>
+              <td>${formatCurrency(price)}</td>
+              <td>${formatCurrency(total)}</td>
+            </tr>
+          `
+        }).join('')
+      : '<tr><td colspan="4">No items recorded</td></tr>'
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Payment Invoice ${escapeHtml(linkedSale?.receiptNo || payment.sale?.receiptNo || 'Receipt')}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; padding: 24px; }
+            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 16px; }
+            .company-name { font-size: 26px; font-weight: 700; }
+            .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+            .top-row { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+            .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; }
+            .label { font-size: 12px; color: #6b7280; }
+            .value { font-size: 14px; font-weight: 600; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 8px; text-align: left; }
+            th { background: #f3f4f6; }
+            .totals { margin-left: auto; width: 320px; margin-top: 18px; }
+            .amount-row { display: flex; justify-content: space-between; margin-top: 8px; }
+            .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #374151; }
+            @media print { body { padding: 12px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-name">${escapeHtml(business?.name || 'Business Name')}</div>
+            ${business?.address ? `<div class="meta">${escapeHtml(business.address)}</div>` : ''}
+            ${business?.phone ? `<div class="meta">Tel: ${escapeHtml(business.phone)}</div>` : ''}
+            ${business?.email ? `<div class="meta">${escapeHtml(business.email)}</div>` : ''}
+          </div>
+
+          <div class="top-row">
+            <div class="card" style="flex: 1;">
+              <div class="label">Invoice</div>
+              <div class="value">${escapeHtml(linkedSale?.receiptNo || payment.sale?.receiptNo || 'N/A')}</div>
+            </div>
+            <div class="card" style="flex: 1;">
+              <div class="label">Payment Date</div>
+              <div class="value">${new Date(payment?.createdAt || Date.now()).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <div class="label">Customer</div>
+            <div class="value">${escapeHtml(customerName)}</div>
+            ${customerPhone ? `<div class="meta">Phone: ${escapeHtml(customerPhone)}</div>` : ''}
+            ${customerEmail ? `<div class="meta">Email: ${escapeHtml(customerEmail)}</div>` : ''}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoiceItemsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="amount-row"><span>Invoice Total</span><strong>${formatCurrency(invoiceTotal)}</strong></div>
+            <div class="amount-row"><span>Payment Amount</span><strong>${formatCurrency(Number(payment.amount || 0))}</strong></div>
+            <div class="amount-row"><span>Amount Paid To Date</span><strong>${formatCurrency(amountPaid)}</strong></div>
+            <div class="amount-row"><span>Balance</span><strong>${formatCurrency(balance)}</strong></div>
+          </div>
+
+          <div class="footer">
+            ${business?.receiptHeader ? `<div>${escapeHtml(business.receiptHeader)}</div>` : ''}
+            <div>Thank you for your business.</div>
+            ${business?.receiptFooter ? `<div>${escapeHtml(business.receiptFooter)}</div>` : ''}
+          </div>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => {
+      printWindow.print()
+    }, 300)
+  }
+
   const closeDetails = () => {
     setSelectedCustomerDetail(null)
     setSelectedSaleDetail(null)
@@ -1087,9 +1213,15 @@ export default function ReceivablesPage() {
                     <Badge variant="outline">{payment.paymentMethod}</Badge>
                   </div>
 
-                  {payment.sale?.receiptNo && (
-                    <p className="mt-4 text-sm text-muted-foreground">Sale: {payment.sale.receiptNo}</p>
-                  )}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                    {payment.sale?.receiptNo && (
+                      <p className="text-sm text-muted-foreground">Sale: {payment.sale.receiptNo}</p>
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => printPaymentInvoice(payment)}>
+                      <Printer className="h-4 w-4 mr-1" />
+                      Print Invoice
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))
