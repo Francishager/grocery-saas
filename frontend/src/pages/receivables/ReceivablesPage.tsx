@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { apiFetch, inventoryApi, settingsApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
@@ -34,7 +34,8 @@ import {
   DollarSign,
   Shield,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Printer
 } from 'lucide-react'
 
 interface Customer {
@@ -134,6 +135,7 @@ export default function ReceivablesPage() {
   const [products, setProducts] = useState<InventoryItem[]>([])
   const [sales, setSales] = useState<any[]>([])
   const [payments, setPayments] = useState<any[]>([])
+  const [businessProfile, setBusinessProfile] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -180,6 +182,10 @@ export default function ReceivablesPage() {
   const [creditAccountForm, setCreditAccountForm] = useState({
     creditLimit: '0', status: 'active' as 'active' | 'inactive' | 'blocked', trustScore: '50', notes: ''
   })
+
+  useEffect(() => {
+    loadBusinessProfile()
+  }, [])
 
   useEffect(() => {
     if (!creditEnabled) {
@@ -247,6 +253,15 @@ export default function ReceivablesPage() {
       }
     } catch (error) {
       try { setSales(await getLocalReceivableSales()) } catch { setSales([]) }
+    }
+  }
+
+  const loadBusinessProfile = async () => {
+    try {
+      const data = await settingsApi.get()
+      setBusinessProfile(data)
+    } catch (error) {
+      console.error('Failed to load business profile for invoice printing:', error)
     }
   }
 
@@ -668,6 +683,130 @@ export default function ReceivablesPage() {
     )
   }
 
+  const printSaleInvoice = (sale: any) => {
+    const business = businessProfile || {}
+    const customerName = sale?.customer?.name || 'Walk-in customer'
+    const customerPhone = sale?.customer?.phone || ''
+    const customerEmail = sale?.customer?.email || ''
+    const items = Array.isArray(sale?.items) ? sale.items : []
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+
+    if (!printWindow) {
+      toast({ title: 'Pop-up blocked', description: 'Enable pop-ups to print the invoice.', variant: 'destructive' })
+      return
+    }
+
+    const escapeHtml = (value: any) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+
+    const invoiceItemsHtml = items.length
+      ? items.map((item: any) => {
+          const productName = item?.product?.name || item?.name || 'Item'
+          const qty = Number(item?.quantity || 0)
+          const price = Number(item?.price || 0)
+          const total = Number(item?.total || qty * price)
+          return `
+            <tr>
+              <td>${escapeHtml(productName)}</td>
+              <td>${qty}</td>
+              <td>${formatCurrency(price)}</td>
+              <td>${formatCurrency(total)}</td>
+            </tr>
+          `
+        }).join('')
+      : '<tr><td colspan="4">No items recorded</td></tr>'
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Invoice ${escapeHtml(sale?.receiptNo || 'Sale')}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; padding: 24px; }
+            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 16px; }
+            .company-name { font-size: 26px; font-weight: 700; }
+            .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+            .top-row { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+            .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; }
+            .label { font-size: 12px; color: #6b7280; }
+            .value { font-size: 14px; font-weight: 600; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 8px; text-align: left; }
+            th { background: #f3f4f6; }
+            .totals { margin-left: auto; width: 320px; margin-top: 18px; }
+            .amount-row { display: flex; justify-content: space-between; margin-top: 8px; }
+            .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #374151; }
+            @media print { body { padding: 12px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-name">${escapeHtml(business?.name || 'Business Name')}</div>
+            ${business?.address ? `<div class="meta">${escapeHtml(business.address)}</div>` : ''}
+            ${business?.phone ? `<div class="meta">Tel: ${escapeHtml(business.phone)}</div>` : ''}
+            ${business?.email ? `<div class="meta">${escapeHtml(business.email)}</div>` : ''}
+          </div>
+
+          <div class="top-row">
+            <div class="card" style="flex: 1;">
+              <div class="label">Invoice</div>
+              <div class="value">${escapeHtml(sale?.receiptNo || 'N/A')}</div>
+            </div>
+            <div class="card" style="flex: 1;">
+              <div class="label">Date</div>
+              <div class="value">${new Date(sale?.createdAt || Date.now()).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <div class="label">Customer</div>
+            <div class="value">${escapeHtml(customerName)}</div>
+            ${customerPhone ? `<div class="meta">Phone: ${escapeHtml(customerPhone)}</div>` : ''}
+            ${customerEmail ? `<div class="meta">Email: ${escapeHtml(customerEmail)}</div>` : ''}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoiceItemsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="amount-row"><span>Subtotal</span><strong>${formatCurrency(Number(sale?.subtotal || 0))}</strong></div>
+            <div class="amount-row"><span>Tax</span><strong>${formatCurrency(Number(sale?.tax || 0))}</strong></div>
+            <div class="amount-row"><span>Discount</span><strong>${formatCurrency(Number(sale?.discount || 0))}</strong></div>
+            <div class="amount-row" style="font-size: 18px; margin-top: 12px;"><span>Total</span><strong>${formatCurrency(Number(sale?.total || 0))}</strong></div>
+            <div class="amount-row"><span>Amount Paid</span><strong>${formatCurrency(Number(sale?.amountPaid || 0))}</strong></div>
+            <div class="amount-row"><span>Balance</span><strong>${formatCurrency(Number(sale?.balance || 0))}</strong></div>
+          </div>
+
+          <div class="footer">
+            ${business?.receiptHeader ? `<div>${escapeHtml(business.receiptHeader)}</div>` : ''}
+            <div>Thank you for your business.</div>
+            ${business?.receiptFooter ? `<div>${escapeHtml(business.receiptFooter)}</div>` : ''}
+          </div>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => {
+      printWindow.print()
+    }, 300)
+  }
+
   const closeDetails = () => {
     setSelectedCustomerDetail(null)
     setSelectedSaleDetail(null)
@@ -889,7 +1028,7 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     {Number(sale.balance || 0) > 0 && sale.customer && (
                       <Button
                         size="sm"
@@ -904,6 +1043,10 @@ export default function ReceivablesPage() {
                         Record Payment
                       </Button>
                     )}
+                    <Button size="sm" variant="outline" onClick={() => printSaleInvoice(sale)}>
+                      <Printer className="h-4 w-4 mr-1" />
+                      Print Invoice
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => setSelectedSaleDetail(sale)}>
                       <Eye className="h-4 w-4 mr-1" />
                       View Details
@@ -1435,6 +1578,12 @@ export default function ReceivablesPage() {
 
             {selectedSaleDetail && (
               <div className="space-y-5">
+                <div className="flex flex-wrap gap-2 pb-2">
+                  <Button size="sm" variant="outline" onClick={() => printSaleInvoice(selectedSaleDetail)}>
+                    <Printer className="h-4 w-4 mr-1" />
+                    Print Invoice
+                  </Button>
+                </div>
                 <div>
                   <DetailRow label="Customer" value={selectedSaleDetail.customer?.name || 'Walk-in customer'} />
                   <DetailRow label="Status" value={getPaymentStatusBadge(selectedSaleDetail.paymentStatus)} />
