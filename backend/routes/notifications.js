@@ -20,7 +20,6 @@ router.get("/", authenticateToken, async (req, res) => {
         ],
       },
       orderBy: { createdAt: "desc" },
-      take: 50,
     });
     res.json(notifications);
   } catch (err) {

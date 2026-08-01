@@ -429,7 +429,6 @@ export function NotificationBell() {
     }
   }
 
-  const maxVisible = 8
   const pushNotifs: NotificationItem[] = foregroundNotifications.map((n) => ({
     id: n.id,
     title: n.title,
@@ -441,7 +440,6 @@ export function NotificationBell() {
     source: 'local',
   }))
   const allNotifications = [...pushNotifs, ...notifications]
-  const visible = allNotifications.slice(0, maxVisible)
 
   return (
     <div ref={bellRef} className="relative">
@@ -504,14 +502,14 @@ export function NotificationBell() {
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
               </div>
-            ) : visible.length === 0 ? (
+            ) : allNotifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <Bell className="h-10 w-10 mb-2 opacity-40" />
                 <p className="text-sm">No notifications</p>
                 <p className="text-xs mt-1">You're all caught up!</p>
               </div>
             ) : (
-              visible.map((n) => {
+              allNotifications.map((n) => {
                 const Icon = TYPE_ICONS[n.type] || Bell
                 const colorClass = TYPE_COLORS[n.type] || TYPE_COLORS.info
                 return (
@@ -568,18 +566,6 @@ export function NotificationBell() {
             )}
           </div>
 
-          {/* Footer */}
-          {notifications.length > maxVisible && (
-            <div className="px-4 py-3 border-t border-border">
-              <button
-                type="button"
-                onClick={() => { navigate('/tenant/communication'); setOpen(false) }}
-                className="w-full text-sm text-primary hover:underline text-center"
-              >
-                View all notifications ({allNotifications.length})
-              </button>
-            </div>
-          )}
         </div>,
         document.body
       )}

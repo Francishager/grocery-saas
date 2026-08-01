@@ -26,7 +26,7 @@ export interface NotificationsPopoverProps {
   onNotificationClick?: (notification: Notification) => void
   /** Callback when settings is clicked */
   onSettingsClick?: () => void
-  /** Maximum visible notifications */
+  /** Deprecated: notifications now render fully in the popover. */
   maxVisible?: number
   /** Additional className */
   className?: string
@@ -45,7 +45,7 @@ export const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({
   onMarkAllAsRead,
   onNotificationClick,
   onSettingsClick,
-  maxVisible = 5,
+  maxVisible: _maxVisible = 5,
   className,
   trigger,
   open: controlledOpen,
@@ -143,7 +143,7 @@ export const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({
             <p className="text-sm">No notifications</p>
           </div>
         ) : (
-          notifications.slice(0, maxVisible).map((notification) => (
+          notifications.map((notification) => (
             <div
               key={notification.id}
               className={cn(
@@ -204,17 +204,6 @@ export const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({
         )}
       </div>
 
-      {/* Footer */}
-      {notifications.length > maxVisible && (
-        <div className="px-4 py-3 border-t border-gray-200">
-          <button
-            type="button"
-            className="w-full text-sm text-primary hover:underline"
-          >
-            View all notifications ({notifications.length})
-          </button>
-        </div>
-      )}
     </div>
   )
 
