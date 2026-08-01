@@ -399,9 +399,23 @@ export default function AccountingPage() {
 
   // Submit single journal entry
   const handleSingleJournalSubmit = async () => {
-    if (!jeAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account and amount required' })
+    if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
+    if (jeAccount === jePaymentAccount) return toast({ variant: 'destructive', title: 'Choose different debit and credit accounts' })
     try {
       const amount = Number(jeAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return toast({ variant: 'destructive', title: 'Enter a valid amount' })
+      }
+      const moneyInActions = ['register_income', 'register_capital', 'register_liability', 'collect_receivable']
+      const lines = moneyInActions.includes(jeAction)
+        ? [
+            { accountId: jePaymentAccount, debit: amount, credit: 0, description: jeDescription },
+            { accountId: jeAccount, debit: 0, credit: amount, description: jeDescription },
+          ]
+        : [
+            { accountId: jeAccount, debit: amount, credit: 0, description: jeDescription },
+            { accountId: jePaymentAccount, debit: 0, credit: amount, description: jeDescription },
+          ]
       const res = await apiFetch('/api/accounting/journal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -416,9 +430,7 @@ export default function AccountingPage() {
           action: jeAction,
           voucherNo: jeVoucher,
           comment: jeComment,
-          lines: [
-            { accountId: jeAccount, debit: amount, credit: 0, description: jeDescription },
-          ],
+          lines,
         }),
       })
       if (res.ok) {

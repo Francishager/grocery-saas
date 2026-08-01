@@ -360,7 +360,21 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       })
     }
 
-    res.status(201).json(withUser(sale))
+    const printableSale = await prisma.saleRecord.findUnique({
+      where: { id: sale.id },
+      include: {
+        customer: true,
+        branch: true,
+        User: userSelect,
+        items: {
+          include: {
+            product: { select: { id: true, name: true, sku: true } }
+          }
+        }
+      }
+    })
+
+    res.status(201).json(withUser(printableSale))
   } catch (error) {
     console.error('Create sale error:', error)
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })

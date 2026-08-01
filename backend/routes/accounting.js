@@ -5,11 +5,69 @@ import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 
 const router = Router();
+const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
+
+const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
+
+const linkedCashAccountId = (account) => {
+  const match = String(account?.description || "").match(/cashAccount:([^\s]+)/);
+  return match?.[1] || null;
+};
+
+async function ensureTransactionAccounts(tenantId, client = prisma) {
+  const cashAccounts = await client.cashAccount.findMany({
+    where: { tenantId, isActive: true },
+    orderBy: { name: "asc" },
+  });
+
+  for (const cashAccount of cashAccounts) {
+    const marker = cashAccountMarker(cashAccount.id);
+    const description = `Linked transaction account ${marker}`;
+    const subType = `transaction_${cashAccount.type}`;
+    const existing = await client.account.findFirst({
+      where: { tenantId, description: { contains: marker } },
+    });
+
+    if (existing) {
+      await client.account.update({
+        where: { id: existing.id },
+        data: {
+          name: cashAccount.name,
+          type: "asset",
+          subType,
+          balance: cashAccount.balance,
+          isActive: cashAccount.isActive,
+          description,
+        },
+      });
+      continue;
+    }
+
+    let code = `TX-${cashAccount.id.slice(-8).toUpperCase()}`;
+    let suffix = 1;
+    while (await client.account.findFirst({ where: { tenantId, code } })) {
+      code = `TX-${cashAccount.id.slice(-6).toUpperCase()}-${suffix++}`;
+    }
+
+    await client.account.create({
+      data: {
+        tenantId,
+        code,
+        name: cashAccount.name,
+        type: "asset",
+        subType,
+        balance: cashAccount.balance,
+        description,
+      },
+    });
+  }
+}
 
 // List accounts (chart of accounts)
 router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
+    await ensureTransactionAccounts(tenantId);
     const accounts = await prisma.account.findMany({
       where: { tenantId },
       include: { parent: true, children: true },
@@ -109,6 +167,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
     const { date, description, reference, lines = [], branchId } = req.body;
 
     if (!lines.length) return res.status(400).json({ error: "Journal lines required" });
+    await ensureTransactionAccounts(tenantId);
 
     const totalDebit = lines.reduce((sum, l) => sum + Number(l.debit || 0), 0);
     const totalCredit = lines.reduce((sum, l) => sum + Number(l.credit || 0), 0);
@@ -118,45 +177,75 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
 
     const entryNo = `JE-${Date.now()}`;
 
-    const entry = await prisma.journalEntry.create({
-      data: {
-        entryNo,
-        tenantId,
-        branchId: branchId || null,
-        date: date ? new Date(date) : new Date(),
-        description,
-        reference,
-        status: "posted",
-        userId: req.user.id,
-        lines: {
-          create: lines.map((l) => ({
-            accountId: l.accountId,
-            debit: Number(l.debit || 0),
-            credit: Number(l.credit || 0),
-            description: l.description || null,
-          })),
-        },
-      },
-      include: {
-        lines: { include: { account: { select: { id: true, code: true, name: true, type: true } } } },
-      },
-    });
+    const accountIds = [...new Set(lines.map((line) => line.accountId).filter(Boolean))];
+    const accounts = await prisma.account.findMany({ where: { tenantId, id: { in: accountIds } } });
+    if (accounts.length !== accountIds.length) {
+      return res.status(400).json({ error: "One or more accounts were not found" });
+    }
+    const accountsById = new Map(accounts.map((account) => [account.id, account]));
 
-    // Update account balances
-    for (const line of lines) {
-      const account = await prisma.account.findUnique({ where: { id: line.accountId } });
-      if (account) {
+    const entry = await prisma.$transaction(async (tx) => {
+      const createdEntry = await tx.journalEntry.create({
+        data: {
+          entryNo,
+          tenantId,
+          branchId: branchId || null,
+          date: date ? new Date(date) : new Date(),
+          description,
+          reference,
+          status: "posted",
+          userId: req.user.id,
+          lines: {
+            create: lines.map((l) => ({
+              accountId: l.accountId,
+              debit: Number(l.debit || 0),
+              credit: Number(l.credit || 0),
+              description: l.description || null,
+            })),
+          },
+        },
+        include: {
+          lines: { include: { account: { select: { id: true, code: true, name: true, type: true } } } },
+          user: { select: { id: true, fname: true, lname: true } },
+        },
+      });
+
+      for (const line of lines) {
+        const account = accountsById.get(line.accountId);
         const debit = Number(line.debit || 0);
         const credit = Number(line.credit || 0);
         // Assets/expenses increase with debit, liabilities/equity/revenue increase with credit
-        const isDebitNormal = account.type === "asset" || account.type === "expense";
+        const isDebitNormal = ["asset", "expense", "expenses"].includes(account.type);
         const delta = isDebitNormal ? debit - credit : credit - debit;
-        await prisma.account.update({
+        await tx.account.update({
           where: { id: line.accountId },
           data: { balance: { increment: delta } },
         });
+
+        const cashAccountId = linkedCashAccountId(account);
+        if (cashAccountId && Math.abs(delta) > 0) {
+          const updatedCashAccount = await tx.cashAccount.update({
+            where: { id: cashAccountId },
+            data: { balance: { increment: delta } },
+          });
+
+          await tx.cashTransaction.create({
+            data: {
+              tenantId,
+              accountId: cashAccountId,
+              type: delta >= 0 ? "journal_in" : "journal_out",
+              amount: Math.abs(delta),
+              balanceAfter: updatedCashAccount.balance,
+              reference: reference || entryNo,
+              description: description || line.description || "Journal entry",
+              userId: req.user.id,
+            },
+          });
+        }
       }
-    }
+
+      return createdEntry;
+    });
 
     res.status(201).json(entry);
   } catch (err) {

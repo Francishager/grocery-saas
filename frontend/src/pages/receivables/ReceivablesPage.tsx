@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { apiFetch, inventoryApi, settingsApi, type InventoryItem } from '@/lib/api'
+import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
@@ -260,8 +260,10 @@ export default function ReceivablesPage() {
 
   const loadBusinessProfile = async () => {
     try {
-      const data = await settingsApi.get()
-      setBusinessProfile(data)
+      const response = await apiFetch('/api/settings/business-profile')
+      if (response.ok) {
+        setBusinessProfile(await response.json())
+      }
     } catch (error) {
       console.error('Failed to load business profile for invoice printing:', error)
     }
@@ -567,11 +569,16 @@ export default function ReceivablesPage() {
         throw new Error(await readResponseError(response, 'Failed to create sale'))
       }
 
+      const createdSale = await response.json()
       toast({
         title: 'Success',
-        description: 'Sale recorded successfully'
+        description: 'Sale recorded successfully. Print or download the invoice from the details window.'
       })
       setShowSaleModal(false)
+      setSelectedSaleDetail(createdSale)
+      if (createdSale?.id) {
+        setSales((prev) => [createdSale, ...prev.filter((sale) => sale.id !== createdSale.id)])
+      }
       setSaleForm({
         customerId: '',
         paymentMethod: 'credit',
@@ -799,9 +806,10 @@ export default function ReceivablesPage() {
 
   const printSaleInvoice = (sale: any, customerOverride?: any) => {
     const business = businessProfile || {}
-    const customerName = sale?.customer?.name || 'Walk-in customer'
-    const customerPhone = sale?.customer?.phone || ''
-    const customerEmail = sale?.customer?.email || ''
+    const customer = customerOverride || sale?.customer || {}
+    const customerName = customer?.name || 'Walk-in customer'
+    const customerPhone = customer?.phone || ''
+    const customerEmail = customer?.email || ''
     const items = Array.isArray(sale?.items) ? sale.items : []
     const printWindow = window.open('', '_blank', 'width=900,height=700')
 

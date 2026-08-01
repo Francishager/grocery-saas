@@ -38,6 +38,29 @@ router.get("/", authenticateToken, requirePermission("canViewSettings"), async (
   }
 });
 
+// Get tenant invoice profile. Receipts/invoices need business details even for
+// users who can sell or collect receivables but cannot edit settings.
+router.get("/business-profile", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true, name: true, slug: true, email: true, phone: true, address: true,
+        logo: true, currency: true, taxRate: true, taxEnabled: true, taxId: true,
+        receiptHeader: true, receiptFooter: true,
+      },
+    });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json(tenant);
+  } catch (err) {
+    console.error("Get business profile error:", err);
+    res.status(500).json({ error: "Failed to load business profile" });
+  }
+});
+
 // Update tenant settings
 router.put("/", authenticateToken, requirePermission("canEditSettings"), async (req, res) => {
   try {
