@@ -26,6 +26,9 @@ interface Customer {
   address?: string
   creditLimit: number
   balance: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
   trustScore: number
   notes?: string
@@ -40,11 +43,17 @@ interface CreateCustomerModalProps {
   initialData?: Partial<Customer>
 }
 
+const todayInputDate = () => new Date().toISOString().slice(0, 10)
+const openingBalanceRoles = ['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin']
+
 export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initialData }: CreateCustomerModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
   const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
   const canManageCustomers = hasPermission('canCreateSale') || hasPermission('canViewSale')
+  const canManageOpeningBalances = Boolean(
+    user && (openingBalanceRoles.includes(user.role) || user.permissions?.includes('*'))
+  )
   
   const [formData, setFormData] = useState({
     name: '',
@@ -52,6 +61,9 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
     phone: '',
     address: '',
     creditLimit: 0,
+    openingBalance: 0,
+    openingBalanceDate: todayInputDate(),
+    openingBalanceNote: '',
     notes: '',
     branchId: '',
     ...initialData
@@ -71,6 +83,9 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       creditLimit: 0,
       notes: '',
       ...initialData,
+      openingBalance: initialData?.openingBalance ?? 0,
+      openingBalanceDate: initialData?.openingBalanceDate ? String(initialData.openingBalanceDate).slice(0, 10) : todayInputDate(),
+      openingBalanceNote: initialData?.openingBalanceNote || '',
       branchId: initialData?.branchId || initialData?.branch?.id || '',
     })
   }, [isOpen, initialData])
@@ -124,9 +139,22 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       const url = initialData?.id 
         ? `/api/receivables/customers/${initialData.id}`
         : '/api/receivables/customers'
+      const openingBalanceChanged = Boolean(
+        initialData?.id &&
+        canManageOpeningBalances &&
+        Number(formData.openingBalance || 0) !== Number(initialData?.openingBalance || 0)
+      )
+      if (openingBalanceChanged && !window.confirm('Changing this opening balance will adjust the current customer balance. Continue?')) {
+        setLoading(false)
+        return
+      }
       const payload = {
         ...formData,
         branchId: canManageCustomers ? formData.branchId : undefined,
+        openingBalance: canManageOpeningBalances ? Number(formData.openingBalance || 0) : undefined,
+        openingBalanceDate: canManageOpeningBalances ? formData.openingBalanceDate || null : undefined,
+        openingBalanceNote: canManageOpeningBalances ? formData.openingBalanceNote || '' : undefined,
+        confirmOpeningBalanceChange: openingBalanceChanged || undefined,
       }
       
       const response = await apiFetch(url, {
@@ -155,6 +183,9 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         phone: '',
         address: '',
         creditLimit: 0,
+        openingBalance: 0,
+        openingBalanceDate: todayInputDate(),
+        openingBalanceNote: '',
         notes: '',
         branchId: branches.length === 1 ? branches[0].id : '',
       })
@@ -196,7 +227,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initialData?.id ? 'Edit Customer' : 'Add New Customer'}</DialogTitle>
           <DialogDescription>
@@ -264,6 +295,44 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
               rows={2}
             />
           </div>
+
+          {canManageOpeningBalances && (
+            <div className="rounded-md border p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="openingBalance">Opening Balance</Label>
+                  <Input
+                    id="openingBalance"
+                    type="number"
+                    value={formData.openingBalance}
+                    onChange={(e) => handleInputChange('openingBalance', Number(e.target.value))}
+                    min="0"
+                    step="0.01"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="openingBalanceDate">Opening Balance Date</Label>
+                  <Input
+                    id="openingBalanceDate"
+                    type="date"
+                    value={formData.openingBalanceDate || ''}
+                    onChange={(e) => handleInputChange('openingBalanceDate', e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="openingBalanceNote">Opening Balance Note</Label>
+                <Textarea
+                  id="openingBalanceNote"
+                  value={formData.openingBalanceNote || ''}
+                  onChange={(e) => handleInputChange('openingBalanceNote', e.target.value)}
+                  placeholder="Optional migration note"
+                  rows={2}
+                />
+              </div>
+            </div>
+          )}
 
           {canManageCustomers && (
             <div className="space-y-2">

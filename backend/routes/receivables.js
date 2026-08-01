@@ -14,6 +14,26 @@ const toMoney = (value, fallback = 0) => {
   return Number.isFinite(num) ? num : fallback
 }
 
+const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
+
+const canManageOpeningBalance = (req) => (
+  openingBalanceRoles.has(req.user?.role) ||
+  req.user?.isPlatformUser ||
+  (req.user?.permissions || []).includes('*')
+)
+
+const hasOpeningBalanceInput = (body) => (
+  Object.prototype.hasOwnProperty.call(body, 'openingBalance') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceDate') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceNote')
+)
+
+const parseOpeningBalanceDate = (value, openingBalance) => {
+  if (!value) return openingBalance > 0 ? new Date() : null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 const paymentStatusFor = (total, amountPaid) => {
   if (amountPaid >= total) return 'paid'
   if (amountPaid > 0) return 'partial'
@@ -81,9 +101,23 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { name, email, phone, address, creditLimit = 0, notes } = req.body
+    const { name, email, phone, address, creditLimit = 0, notes, openingBalanceNote } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })
+    }
+
+    const openingBalance = toMoney(req.body.openingBalance, 0)
+    if (openingBalance < 0) {
+      return res.status(400).json({ error: 'Opening balance cannot be negative' })
+    }
+
+    if ((openingBalance > 0 || req.body.openingBalanceDate || openingBalanceNote) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalance)
+    if (req.body.openingBalanceDate && !openingBalanceDate) {
+      return res.status(400).json({ error: 'Opening balance date is invalid' })
     }
 
     await checkUsageLimit(scope.tenantId, 'customers')
@@ -110,6 +144,10 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
         phone,
         address,
         creditLimit: toMoney(creditLimit),
+        balance: openingBalance,
+        openingBalance,
+        openingBalanceDate,
+        openingBalanceNote,
         notes,
         tenantId: scope.tenantId,
         branchId: scope.branchId
@@ -129,7 +167,7 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { name, email, phone, address, creditLimit, status, trustScore, notes, branchId } = req.body
+    const { name, email, phone, address, creditLimit, status, trustScore, notes, branchId, openingBalanceNote } = req.body
 
     // Check if customer belongs to tenant
     const existingCustomer = await prisma.customer.findFirst({
@@ -140,6 +178,60 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
       return res.status(404).json({ error: 'Customer not found' })
     }
 
+    if (hasOpeningBalanceInput(req.body) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const existingOpeningBalance = toMoney(existingCustomer.openingBalance, 0)
+    let openingBalanceDelta = 0
+    const openingBalanceData = {}
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalance')) {
+      const openingBalance = toMoney(req.body.openingBalance, 0)
+      if (openingBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance cannot be negative' })
+      }
+
+      openingBalanceDelta = openingBalance - existingOpeningBalance
+      if (openingBalanceDelta !== 0) {
+        const transactionCount = await Promise.all([
+          prisma.saleRecord.count({ where: scopedWhere(scope, { customerId: id }) }),
+          prisma.customerPayment.count({ where: scopedWhere(scope, { customerId: id }) }),
+          prisma.creditNote.count({ where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }) }),
+          prisma.saleReturn.count({ where: scopedWhere(scope, { customerId: id, status: 'completed' }) })
+        ]).then((counts) => counts.reduce((sum, count) => sum + count, 0))
+
+        if (transactionCount > 0 && req.body.confirmOpeningBalanceChange !== true) {
+          return res.status(409).json({
+            error: 'Changing opening balance after transactions exist requires confirmation',
+            requiresConfirmation: true
+          })
+        }
+      }
+
+      const nextBalance = toMoney(existingCustomer.balance, 0) + openingBalanceDelta
+      if (nextBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance change would make the customer balance negative' })
+      }
+
+      openingBalanceData.openingBalance = openingBalance
+      openingBalanceData.balance = nextBalance
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceDate')) {
+      const openingBalanceForDate = Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')
+        ? openingBalanceData.openingBalance
+        : existingOpeningBalance
+      const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalanceForDate)
+      if (req.body.openingBalanceDate && !openingBalanceDate) {
+        return res.status(400).json({ error: 'Opening balance date is invalid' })
+      }
+      openingBalanceData.openingBalanceDate = openingBalanceDate
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceNote')) {
+      openingBalanceData.openingBalanceNote = openingBalanceNote
+    }
+
     const data = {
       name,
       email,
@@ -148,7 +240,8 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
       creditLimit,
       status,
       trustScore,
-      notes
+      notes,
+      ...openingBalanceData
     }
 
     if (branchId !== undefined) {

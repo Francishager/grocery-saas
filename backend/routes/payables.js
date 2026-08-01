@@ -15,6 +15,26 @@ const toMoney = (value, fallback = 0) => {
   return Number.isFinite(num) ? num : fallback
 }
 
+const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
+
+const canManageOpeningBalance = (req) => (
+  openingBalanceRoles.has(req.user?.role) ||
+  req.user?.isPlatformUser ||
+  (req.user?.permissions || []).includes('*')
+)
+
+const hasOpeningBalanceInput = (body) => (
+  Object.prototype.hasOwnProperty.call(body, 'openingBalance') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceDate') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceNote')
+)
+
+const parseOpeningBalanceDate = (value, openingBalance) => {
+  if (!value) return openingBalance > 0 ? new Date() : null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 const paymentStatusFor = (total, amountPaid) => {
   if (amountPaid >= total) return 'paid'
   if (amountPaid > 0) return 'partial'
@@ -112,9 +132,23 @@ router.post('/suppliers', authenticateToken, requirePermission('canCreatePayable
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { name, email, phone, address, notes } = req.body
+    const { name, email, phone, address, notes, openingBalanceNote } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Supplier name is required' })
+    }
+
+    const openingBalance = toMoney(req.body.openingBalance, 0)
+    if (openingBalance < 0) {
+      return res.status(400).json({ error: 'Opening balance cannot be negative' })
+    }
+
+    if ((openingBalance > 0 || req.body.openingBalanceDate || openingBalanceNote) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalance)
+    if (req.body.openingBalanceDate && !openingBalanceDate) {
+      return res.status(400).json({ error: 'Opening balance date is invalid' })
     }
 
     await checkUsageLimit(scope.tenantId, 'suppliers')
@@ -140,6 +174,10 @@ router.post('/suppliers', authenticateToken, requirePermission('canCreatePayable
         email,
         phone,
         address,
+        balance: openingBalance,
+        openingBalance,
+        openingBalanceDate,
+        openingBalanceNote,
         notes,
         tenantId: scope.tenantId,
         branchId: scope.branchId
@@ -159,7 +197,7 @@ router.put('/suppliers/:id', authenticateToken, requirePermission('canEditPayabl
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { name, email, phone, address, status, notes, branchId } = req.body
+    const { name, email, phone, address, status, notes, branchId, openingBalanceNote } = req.body
 
     // Check if supplier belongs to tenant
     const existingSupplier = await prisma.supplier.findFirst({
@@ -170,7 +208,60 @@ router.put('/suppliers/:id', authenticateToken, requirePermission('canEditPayabl
       return res.status(404).json({ error: 'Supplier not found' })
     }
 
-    const data = { name, email, phone, address, status, notes }
+    if (hasOpeningBalanceInput(req.body) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const existingOpeningBalance = toMoney(existingSupplier.openingBalance, 0)
+    let openingBalanceDelta = 0
+    const openingBalanceData = {}
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalance')) {
+      const openingBalance = toMoney(req.body.openingBalance, 0)
+      if (openingBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance cannot be negative' })
+      }
+
+      openingBalanceDelta = openingBalance - existingOpeningBalance
+      if (openingBalanceDelta !== 0) {
+        const transactionCount = await Promise.all([
+          prisma.supplierPurchase.count({ where: scopedWhere(scope, { supplierId: id }) }),
+          prisma.supplierPayment.count({ where: scopedWhere(scope, { supplierId: id }) }),
+          prisma.debitNote.count({ where: scopedWhere(scope, { supplierId: id, status: { not: 'cancelled' } }) })
+        ]).then((counts) => counts.reduce((sum, count) => sum + count, 0))
+
+        if (transactionCount > 0 && req.body.confirmOpeningBalanceChange !== true) {
+          return res.status(409).json({
+            error: 'Changing opening balance after transactions exist requires confirmation',
+            requiresConfirmation: true
+          })
+        }
+      }
+
+      const nextBalance = toMoney(existingSupplier.balance, 0) + openingBalanceDelta
+      if (nextBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance change would make the supplier balance negative' })
+      }
+
+      openingBalanceData.openingBalance = openingBalance
+      openingBalanceData.balance = nextBalance
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceDate')) {
+      const openingBalanceForDate = Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')
+        ? openingBalanceData.openingBalance
+        : existingOpeningBalance
+      const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalanceForDate)
+      if (req.body.openingBalanceDate && !openingBalanceDate) {
+        return res.status(400).json({ error: 'Opening balance date is invalid' })
+      }
+      openingBalanceData.openingBalanceDate = openingBalanceDate
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceNote')) {
+      openingBalanceData.openingBalanceNote = openingBalanceNote
+    }
+
+    const data = { name, email, phone, address, status, notes, ...openingBalanceData }
 
     if (branchId !== undefined) {
       const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {

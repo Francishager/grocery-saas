@@ -25,6 +25,9 @@ interface Supplier {
   phone?: string
   address?: string
   balance: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
   notes?: string
   branchId?: string | null
@@ -38,17 +41,26 @@ interface CreateSupplierModalProps {
   initialData?: Partial<Supplier>
 }
 
+const todayInputDate = () => new Date().toISOString().slice(0, 10)
+const openingBalanceRoles = ['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin']
+
 export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initialData }: CreateSupplierModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
   const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
   const canManageSuppliers = hasPermission('canCreatePurchase') || hasPermission('canViewPurchase')
+  const canManageOpeningBalances = Boolean(
+    user && (openingBalanceRoles.includes(user.role) || user.permissions?.includes('*'))
+  )
   
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
     address: '',
+    openingBalance: 0,
+    openingBalanceDate: todayInputDate(),
+    openingBalanceNote: '',
     notes: '',
     branchId: '',
     ...initialData
@@ -67,6 +79,9 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
       address: '',
       notes: '',
       ...initialData,
+      openingBalance: initialData?.openingBalance ?? 0,
+      openingBalanceDate: initialData?.openingBalanceDate ? String(initialData.openingBalanceDate).slice(0, 10) : todayInputDate(),
+      openingBalanceNote: initialData?.openingBalanceNote || '',
       branchId: initialData?.branchId || initialData?.branch?.id || '',
     })
   }, [isOpen, initialData])
@@ -120,9 +135,22 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
       const url = initialData?.id 
         ? `/api/payables/suppliers/${initialData.id}`
         : '/api/payables/suppliers'
+      const openingBalanceChanged = Boolean(
+        initialData?.id &&
+        canManageOpeningBalances &&
+        Number(formData.openingBalance || 0) !== Number(initialData?.openingBalance || 0)
+      )
+      if (openingBalanceChanged && !window.confirm('Changing this opening balance will adjust the current supplier balance. Continue?')) {
+        setLoading(false)
+        return
+      }
       const payload = {
         ...formData,
         branchId: canManageSuppliers ? formData.branchId : undefined,
+        openingBalance: canManageOpeningBalances ? Number(formData.openingBalance || 0) : undefined,
+        openingBalanceDate: canManageOpeningBalances ? formData.openingBalanceDate || null : undefined,
+        openingBalanceNote: canManageOpeningBalances ? formData.openingBalanceNote || '' : undefined,
+        confirmOpeningBalanceChange: openingBalanceChanged || undefined,
       }
       
       const response = await apiFetch(url, {
@@ -150,6 +178,9 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
         email: '',
         phone: '',
         address: '',
+        openingBalance: 0,
+        openingBalanceDate: todayInputDate(),
+        openingBalanceNote: '',
         notes: '',
         branchId: branches.length === 1 ? branches[0].id : '',
       })
@@ -191,7 +222,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initialData?.id ? 'Edit Supplier' : 'Add New Supplier'}</DialogTitle>
           <DialogDescription>
@@ -245,6 +276,44 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
               />
             </div>
           </div>
+
+          {canManageOpeningBalances && (
+            <div className="rounded-md border p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="supplierOpeningBalance">Opening Balance</Label>
+                  <Input
+                    id="supplierOpeningBalance"
+                    type="number"
+                    value={formData.openingBalance}
+                    onChange={(e) => handleInputChange('openingBalance', Number(e.target.value))}
+                    min="0"
+                    step="0.01"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="supplierOpeningBalanceDate">Opening Balance Date</Label>
+                  <Input
+                    id="supplierOpeningBalanceDate"
+                    type="date"
+                    value={formData.openingBalanceDate || ''}
+                    onChange={(e) => handleInputChange('openingBalanceDate', e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="supplierOpeningBalanceNote">Opening Balance Note</Label>
+                <Textarea
+                  id="supplierOpeningBalanceNote"
+                  value={formData.openingBalanceNote || ''}
+                  onChange={(e) => handleInputChange('openingBalanceNote', e.target.value)}
+                  placeholder="Optional migration note"
+                  rows={2}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>

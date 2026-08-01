@@ -48,6 +48,9 @@ interface Customer {
   address?: string
   creditLimit: number
   balance: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
   trustScore: number
   notes?: string
@@ -75,6 +78,9 @@ interface Supplier {
   phone?: string
   address?: string
   balance: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
   notes?: string
 }
@@ -146,6 +152,7 @@ export default function ReceivablesPage() {
   const activeTab = (urlTab === 'sales' || urlTab === 'payments' || urlTab === 'fuel-cards' || urlTab === 'credit-accounts') ? urlTab : 'customers'
   const [summary, setSummary] = useState<any>(null)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [showSaleModal, setShowSaleModal] = useState(false)
   const [savingSale, setSavingSale] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -1123,7 +1130,10 @@ export default function ReceivablesPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {tab === 'customers' && (
-            <Button variant="outline" onClick={() => setShowCustomerModal(true)}>
+            <Button variant="outline" onClick={() => {
+              setEditingCustomer(null)
+              setShowCustomerModal(true)
+            }}>
               <Plus className="h-4 w-4 mr-2" />
               Add Customer
             </Button>
@@ -1240,6 +1250,13 @@ export default function ReceivablesPage() {
                     <Button size="sm" variant="outline" onClick={() => setSelectedCustomerDetail(customer)}>
                       <Eye className="h-4 w-4 mr-1" />
                       View Details
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => {
+                      setEditingCustomer(customer)
+                      setShowCustomerModal(true)
+                    }}>
+                      <Edit className="h-4 w-4 mr-1" />
+                      Edit
                     </Button>
                   </div>
                 </CardContent>
@@ -1496,10 +1513,15 @@ export default function ReceivablesPage() {
 
       <CreateCustomerModal
         isOpen={showCustomerModal}
-        onClose={() => setShowCustomerModal(false)}
+        initialData={editingCustomer || undefined}
+        onClose={() => {
+          setShowCustomerModal(false)
+          setEditingCustomer(null)
+        }}
         onSuccess={(customer) => {
           setCustomers((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
           setCustomerOptions((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
+          setEditingCustomer(null)
           if (activeTab === 'customers') loadCustomers()
           loadReceivablesSummary()
         }}
@@ -1849,6 +1871,12 @@ export default function ReceivablesPage() {
                 <DetailRow label="Address" value={selectedCustomerDetail.address} />
                 <DetailRow label="Credit Limit" value={formatCurrency(selectedCustomerDetail.creditLimit || 0)} />
                 <DetailRow label="Balance" value={formatCurrency(selectedCustomerDetail.balance || 0)} />
+                <DetailRow label="Opening Balance" value={formatCurrency(selectedCustomerDetail.openingBalance || 0)} />
+                <DetailRow
+                  label="Opening Balance Date"
+                  value={selectedCustomerDetail.openingBalanceDate ? new Date(selectedCustomerDetail.openingBalanceDate).toLocaleDateString() : 'Not set'}
+                />
+                <DetailRow label="Opening Balance Note" value={selectedCustomerDetail.openingBalanceNote} />
                 <DetailRow
                   label="Available Credit"
                   value={formatCurrency(Number(selectedCustomerDetail.creditLimit || 0) - Number(selectedCustomerDetail.balance || 0))}

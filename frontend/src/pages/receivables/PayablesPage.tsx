@@ -39,6 +39,9 @@ interface Supplier {
   phone?: string
   address?: string
   balance: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
   notes?: string
 }
@@ -138,6 +141,7 @@ export default function PayablesPage() {
   const [activeTab, setActiveTab] = useState<'suppliers' | 'purchases' | 'payments'>('suppliers')
   const [summary, setSummary] = useState<any>(null)
   const [showSupplierModal, setShowSupplierModal] = useState(false)
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
   const [showPurchaseModal, setShowPurchaseModal] = useState(false)
   const [savingPurchase, setSavingPurchase] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -493,7 +497,10 @@ export default function PayablesPage() {
           <p className="text-muted-foreground">Manage suppliers and outstanding payments</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => setShowSupplierModal(true)}>
+          <Button variant="outline" onClick={() => {
+            setEditingSupplier(null)
+            setShowSupplierModal(true)
+          }}>
             <Plus className="h-4 w-4 mr-2" />
             Add Supplier
           </Button>
@@ -585,6 +592,13 @@ export default function PayablesPage() {
                       <Button size="sm" variant="outline" onClick={() => setSelectedSupplierDetail(supplier)}>
                         <Eye className="h-4 w-4 mr-1" />
                         View Details
+                      </Button>
+                      <Button size="sm" variant="outline" className="ml-2" onClick={() => {
+                        setEditingSupplier(supplier)
+                        setShowSupplierModal(true)
+                      }}>
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
                       </Button>
                     </div>
                   </div>
@@ -709,10 +723,15 @@ export default function PayablesPage() {
 
       <CreateSupplierModal
         isOpen={showSupplierModal}
-        onClose={() => setShowSupplierModal(false)}
+        initialData={editingSupplier || undefined}
+        onClose={() => {
+          setShowSupplierModal(false)
+          setEditingSupplier(null)
+        }}
         onSuccess={(supplier) => {
           setSuppliers((prev) => [supplier, ...prev.filter((item) => item.id !== supplier.id)])
           setSupplierOptions((prev) => [supplier, ...prev.filter((item) => item.id !== supplier.id)])
+          setEditingSupplier(null)
           if (activeTab === 'suppliers') loadSuppliers()
           loadPayablesSummary()
         }}
@@ -1008,6 +1027,12 @@ export default function PayablesPage() {
                   <DetailRow label="Email" value={selectedSupplierDetail.email} />
                   <DetailRow label="Address" value={selectedSupplierDetail.address} />
                   <DetailRow label="Outstanding Balance" value={formatCurrency(selectedSupplierDetail.balance)} />
+                  <DetailRow label="Opening Balance" value={formatCurrency(selectedSupplierDetail.openingBalance || 0)} />
+                  <DetailRow
+                    label="Opening Balance Date"
+                    value={selectedSupplierDetail.openingBalanceDate ? new Date(selectedSupplierDetail.openingBalanceDate).toLocaleDateString() : 'Not set'}
+                  />
+                  <DetailRow label="Opening Balance Note" value={selectedSupplierDetail.openingBalanceNote} />
                   <DetailRow label="Notes" value={selectedSupplierDetail.notes} />
                 </div>
               </div>

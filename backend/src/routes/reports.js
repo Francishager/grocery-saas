@@ -73,6 +73,21 @@ async function getScope(req) {
   return resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
 }
 
+function positiveOpeningBalance(entity) {
+  return Math.max(0, Number(entity?.openingBalance || 0));
+}
+
+function openingBalanceDate(entity) {
+  return entity?.openingBalanceDate || entity?.createdAt || new Date();
+}
+
+function isWithinDateRange(date, fromDate, toDate) {
+  const value = new Date(date);
+  if (fromDate && value < fromDate) return false;
+  if (toDate && value > toDate) return false;
+  return true;
+}
+
 // ==================== LEGACY ROUTES (backward compatibility) ====================
 router.get("/sales", authenticateToken, async (req, res) => {
   try {
@@ -820,7 +835,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
     const customerFilter = customerId ? { customerId } : {};
     const branchFilter = branchId ? { branchId } : {};
     const combinedFilter = { ...customerFilter, ...branchFilter };
-    const [sales, saleRecords, purchases, supplierPurchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes, saleReturns] = await Promise.all([
+    const [sales, saleRecords, purchases, supplierPurchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes, saleReturns, openingCustomers, openingSuppliers] = await Promise.all([
       // POS sales
       prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...combinedFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       // Credit sales (SaleRecord)
@@ -841,8 +856,25 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       prisma.debitNote.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Sale returns
       prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, status: "completed" }), select: { id: true, returnNo: true, total: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      // Customer opening balances
+      prisma.customer.findMany({ where: scopedWhere(s, { ...(customerId ? { id: customerId } : {}), ...branchFilter, openingBalance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true, createdAt: true }, orderBy: { name: "asc" } }),
+      // Supplier opening balances
+      prisma.supplier.findMany({ where: scopedWhere(s, { ...branchFilter, openingBalance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true, createdAt: true }, orderBy: { name: "asc" } }),
     ]);
+    const { from, to } = req.query;
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
     const entries = [
+      // Customer opening balances: debit AR, credit opening balance equity
+      ...openingCustomers.filter((x) => isWithinDateRange(openingBalanceDate(x), fromDate, toDate)).flatMap((x) => [
+        { date: openingBalanceDate(x), account: "Accounts Receivable", description: `Customer Opening Balance - ${x.name}`, debit: positiveOpeningBalance(x), credit: 0 },
+        { date: openingBalanceDate(x), account: "Opening Balance Equity", description: `Customer Opening Balance - ${x.name}`, debit: 0, credit: positiveOpeningBalance(x) },
+      ]),
+      // Supplier opening balances: credit AP, debit opening balance equity
+      ...openingSuppliers.filter((x) => isWithinDateRange(openingBalanceDate(x), fromDate, toDate)).flatMap((x) => [
+        { date: openingBalanceDate(x), account: "Opening Balance Equity", description: `Supplier Opening Balance - ${x.name}`, debit: positiveOpeningBalance(x), credit: 0 },
+        { date: openingBalanceDate(x), account: "Accounts Payable", description: `Supplier Opening Balance - ${x.name}`, debit: 0, credit: positiveOpeningBalance(x) },
+      ]),
       // POS Sales: credit Sales Revenue, debit COGS (perpetual inventory)
       ...sales.flatMap((x) => {
         const cogs = x.items.reduce((sum, item) => sum + (item.product?.cost || 0) * item.quantity, 0);
@@ -869,14 +901,20 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       ]),
       // Expenses: debit expense category
       ...expenses.map((x) => ({ date: x.date, account: x.category, description: "Expense", debit: x.amount, credit: 0 })),
-      // Customer payments: debit Cash
-      ...customerPayments.map((x) => ({ date: x.createdAt, account: "Cash", description: "Customer Payment", debit: x.amount, credit: 0 })),
-      // Supplier payments: credit Accounts Payable
-      ...supplierPayments.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: "Supplier Payment", debit: 0, credit: x.amount })),
+      // Customer payments: debit Cash, credit Accounts Receivable
+      ...customerPayments.flatMap((x) => [
+        { date: x.createdAt, account: "Cash", description: "Customer Payment", debit: x.amount, credit: 0 },
+        { date: x.createdAt, account: "Accounts Receivable", description: "Customer Payment", debit: 0, credit: x.amount },
+      ]),
+      // Supplier payments: debit Accounts Payable, credit Cash
+      ...supplierPayments.flatMap((x) => [
+        { date: x.createdAt, account: "Accounts Payable", description: "Supplier Payment", debit: x.amount, credit: 0 },
+        { date: x.createdAt, account: "Cash", description: "Supplier Payment", debit: 0, credit: x.amount },
+      ]),
       // Credit notes: credit Accounts Receivable (reduces customer balance)
       ...creditNotes.map((x) => ({ date: x.createdAt, account: "Accounts Receivable", description: `Credit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
-      // Debit notes: credit Accounts Payable (reduces supplier balance)
-      ...debitNotes.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
+      // Debit notes: debit Accounts Payable (reduces supplier balance)
+      ...debitNotes.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: x.amount, credit: 0 })),
       // Sale returns: debit Sales Returns (contra-revenue), credit Accounts Receivable/Cash
       ...saleReturns.flatMap((x) => [
         { date: x.createdAt, account: "Sales Returns", description: `Sales Return ${x.returnNo} (${x.reason || ""})`, debit: x.total, credit: 0 },
@@ -941,9 +979,19 @@ router.get("/customers/balance", authenticateToken, async (req, res) => {
 router.get("/customers/receivables", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const records = await prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { customer: true }, orderBy: { createdAt: "desc" } });
+    const [records, customers] = await Promise.all([
+      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { customer: true }, orderBy: { createdAt: "desc" } }),
+      prisma.customer.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, balance: true, openingBalance: true, openingBalanceDate: true, createdAt: true } }),
+    ]);
+    const saleBalanceByCustomer = new Map();
+    records.forEach((r) => saleBalanceByCustomer.set(r.customerId, (saleBalanceByCustomer.get(r.customerId) || 0) + Number(r.balance || 0)));
+    const openingRows = customers.map((c) => {
+      const historicalBalance = Math.max(0, Number(c.balance || 0) - (saleBalanceByCustomer.get(c.id) || 0));
+      return { customer: c.name, total: historicalBalance, amountPaid: 0, balance: historicalBalance, source: "Opening Balance", createdAt: openingBalanceDate(c) };
+    }).filter((row) => row.balance > 0);
     const data = records.map((r) => ({ customer: r.customer?.name || "Walk-in", total: r.total, amountPaid: r.amountPaid, balance: r.balance }));
-    res.json({ data, summary: { count: data.length, totalReceivable: data.reduce((a, r) => a + r.balance, 0) } });
+    const combined = [...openingRows, ...data];
+    res.json({ data: combined, summary: { count: combined.length, totalReceivable: combined.reduce((a, r) => a + r.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -967,6 +1015,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const { customerId } = req.query;
     const custFilter = customerId ? { customerId } : {};
+    const customerOpeningFilter = customerId ? { id: customerId } : { openingBalance: { gt: 0 } };
 
     let customer = null;
     if (customerId) {
@@ -974,30 +1023,31 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
       if (!customer) return res.status(404).json({ error: "Customer not found" });
     }
 
-    const [sales, payments, creditNotes, saleReturns] = await Promise.all([
+    const [sales, payments, creditNotes, saleReturns, openingCustomers] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(s, { ...custFilter, ...df(req) }),
         orderBy: { createdAt: "asc" },
-        include: { customer: { select: { id: true, name: true } } },
         select: { id: true, receiptNo: true, total: true, createdAt: true, paymentMethod: true, customer: { select: { id: true, name: true } } },
       }),
       prisma.customerPayment.findMany({
         where: scopedWhere(s, { ...custFilter, ...df(req) }),
         orderBy: { createdAt: "asc" },
-        include: { customer: { select: { id: true, name: true } } },
         select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true, customer: { select: { id: true, name: true } } },
       }),
       prisma.creditNote.findMany({
         where: scopedWhere(s, { ...custFilter, ...df(req), status: { not: "cancelled" } }),
         orderBy: { createdAt: "asc" },
-        include: { customer: { select: { id: true, name: true } } },
         select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true, customer: { select: { id: true, name: true } } },
       }),
       prisma.saleReturn.findMany({
         where: scopedWhere(s, { ...custFilter, ...df(req), status: "completed" }),
         orderBy: { createdAt: "asc" },
-        include: { customer: { select: { id: true, name: true } } },
         select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true, customer: { select: { id: true, name: true } } },
+      }),
+      prisma.customer.findMany({
+        where: scopedWhere(s, customerOpeningFilter),
+        select: { id: true, name: true, phone: true, openingBalance: true, openingBalanceDate: true, openingBalanceNote: true, createdAt: true },
+        orderBy: { name: "asc" },
       }),
     ]);
 
@@ -1022,15 +1072,35 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         select: { total: true, createdAt: true },
       }),
     ]);
-    const { from } = req.query;
+    const { from, to } = req.query;
     const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
     const openingBalance = (fromDate
-      ? allSales.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
+      ? openingCustomers.filter((x) => new Date(openingBalanceDate(x)) < fromDate).reduce((a, x) => a + positiveOpeningBalance(x), 0) +
+        allSales.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
         allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
         allCreditNotes.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
         allSaleReturns.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0)
       : 0
     );
+
+    for (const c of openingCustomers) {
+      const amount = positiveOpeningBalance(c);
+      const date = openingBalanceDate(c);
+      if (amount > 0 && isWithinDateRange(date, fromDate, toDate)) {
+        entries.push({
+          date,
+          refNo: "OPENING",
+          type: "Opening Balance",
+          description: customerId ? "Opening Balance" : `Opening Balance - ${c.name}`,
+          debit: amount,
+          credit: 0,
+          balance: 0,
+          isSystem: true,
+          systemTransaction: true,
+        });
+      }
+    }
 
     for (const sale of sales) {
       entries.push({
@@ -1133,11 +1203,25 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const totalPayments = payments.reduce((a, x) => a + x.amount, 0);
     const totalCreditNotes = creditNotes.reduce((a, x) => a + x.amount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
+    const openingBalanceAmount = positiveOpeningBalance(customer);
+    const openingBalanceTxn = {
+      date: openingBalanceDate(customer),
+      description: "Opening Balance",
+      debit: openingBalanceAmount,
+      credit: 0,
+      balance: openingBalanceAmount,
+      note: customer.openingBalanceNote || "",
+      type: "Opening Balance",
+      isSystem: true,
+      systemTransaction: true,
+    };
     const currentBalance = customer.balance || 0;
 
     res.json({
       customer: { id: customer.id, name: customer.name, phone: customer.phone || "", email: customer.email || "" },
+      openingBalance: openingBalanceTxn,
       summary: {
+        openingBalance: openingBalanceAmount,
         totalSales,
         totalPayments,
         totalCreditNotes,
@@ -1240,9 +1324,19 @@ router.get("/suppliers/purchases", authenticateToken, async (req, res) => {
 router.get("/suppliers/payables", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "desc" } });
+    const [purchases, suppliers] = await Promise.all([
+      prisma.supplierPurchase.findMany({ where: scopedWhere(s, { ...df(req), balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "desc" } }),
+      prisma.supplier.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, balance: true, openingBalance: true, openingBalanceDate: true, createdAt: true } }),
+    ]);
+    const purchaseBalanceBySupplier = new Map();
+    purchases.forEach((p) => purchaseBalanceBySupplier.set(p.supplierId, (purchaseBalanceBySupplier.get(p.supplierId) || 0) + Number(p.balance || 0)));
+    const openingRows = suppliers.map((sup) => {
+      const historicalBalance = Math.max(0, Number(sup.balance || 0) - (purchaseBalanceBySupplier.get(sup.id) || 0));
+      return { supplier: sup.name, total: historicalBalance, balance: historicalBalance, source: "Opening Balance", createdAt: openingBalanceDate(sup) };
+    }).filter((row) => row.balance > 0);
     const data = purchases.map((p) => ({ supplier: p.supplier?.name || "Unknown", total: p.total, balance: p.balance, createdAt: p.createdAt }));
-    res.json({ data, summary: { count: data.length, totalPayable: data.reduce((a, p) => a + p.balance, 0) } });
+    const combined = [...openingRows, ...data];
+    res.json({ data: combined, summary: { count: combined.length, totalPayable: combined.reduce((a, p) => a + p.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -1294,6 +1388,7 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
       summary: {
         ...stmtData.summary,
         totalDebitNotes,
+        currentBalance: supplier.balance || 0,
         debitNoteCount: debitNotes.length,
       },
       debitNotes: debitNotes.map((x) => ({
@@ -1315,6 +1410,7 @@ router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const { supplierId } = req.query;
     const supFilter = supplierId ? { supplierId } : {};
+    const supplierOpeningFilter = supplierId ? { id: supplierId } : { openingBalance: { gt: 0 } };
 
     let supplier = null;
     if (supplierId) {
@@ -1322,24 +1418,26 @@ router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
       if (!supplier) return res.status(404).json({ error: "Supplier not found" });
     }
 
-    const [purchases, payments, debitNotes] = await Promise.all([
+    const [purchases, payments, debitNotes, openingSuppliers] = await Promise.all([
       prisma.supplierPurchase.findMany({
         where: scopedWhere(s, { ...supFilter, ...df(req) }),
         orderBy: { createdAt: "asc" },
-        include: { supplier: { select: { id: true, name: true } } },
         select: { id: true, refNo: true, total: true, createdAt: true, supplier: { select: { id: true, name: true } } },
       }),
       prisma.supplierPayment.findMany({
         where: scopedWhere(s, { ...supFilter, ...df(req) }),
         orderBy: { createdAt: "asc" },
-        include: { supplier: { select: { id: true, name: true } } },
         select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true, supplier: { select: { id: true, name: true } } },
       }),
       prisma.debitNote.findMany({
         where: scopedWhere(s, { ...supFilter, ...df(req), status: { not: "cancelled" } }),
         orderBy: { createdAt: "asc" },
-        include: { supplier: { select: { id: true, name: true } } },
         select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true, supplier: { select: { id: true, name: true } } },
+      }),
+      prisma.supplier.findMany({
+        where: scopedWhere(s, supplierOpeningFilter),
+        select: { id: true, name: true, phone: true, openingBalance: true, openingBalanceDate: true, openingBalanceNote: true, createdAt: true },
+        orderBy: { name: "asc" },
       }),
     ]);
 
@@ -1358,15 +1456,34 @@ router.get("/suppliers/ledger", authenticateToken, async (req, res) => {
         select: { amount: true, createdAt: true },
       }),
     ]);
-    const { from } = req.query;
+    const { from, to } = req.query;
     const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
     const openingBalance = fromDate
-      ? allPurchases.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
+      ? openingSuppliers.filter((x) => new Date(openingBalanceDate(x)) < fromDate).reduce((a, x) => a + positiveOpeningBalance(x), 0) +
+        allPurchases.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) -
         allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
         allDebitNotes.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0)
       : 0;
 
     const entries = [];
+    for (const sup of openingSuppliers) {
+      const amount = positiveOpeningBalance(sup);
+      const date = openingBalanceDate(sup);
+      if (amount > 0 && isWithinDateRange(date, fromDate, toDate)) {
+        entries.push({
+          date,
+          refNo: "OPENING",
+          type: "Opening Balance",
+          description: supplierId ? "Opening Balance" : `Opening Balance - ${sup.name}`,
+          debit: 0,
+          credit: amount,
+          balance: 0,
+          isSystem: true,
+          systemTransaction: true,
+        });
+      }
+    }
     for (const p of purchases) {
       entries.push({
         date: p.createdAt,
@@ -1685,9 +1802,19 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
 router.get("/receivables/outstanding", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const invoices = await prisma.invoice.findMany({ where: scopedWhere(s, { status: { in: ["unpaid", "partial", "overdue"] } }), include: { customer: true }, orderBy: { dueDate: "asc" } });
+    const [invoices, customers] = await Promise.all([
+      prisma.invoice.findMany({ where: scopedWhere(s, { status: { in: ["unpaid", "partial", "overdue"] } }), include: { customer: true }, orderBy: { dueDate: "asc" } }),
+      prisma.customer.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, balance: true, openingBalanceDate: true, createdAt: true } }),
+    ]);
+    const invoiceBalanceByCustomer = new Map();
+    invoices.forEach((inv) => invoiceBalanceByCustomer.set(inv.customerId, (invoiceBalanceByCustomer.get(inv.customerId) || 0) + Number(inv.balance || 0)));
+    const openingRows = customers.map((c) => {
+      const historicalBalance = Math.max(0, Number(c.balance || 0) - (invoiceBalanceByCustomer.get(c.id) || 0));
+      return { customer: c.name, status: "opening_balance", balance: historicalBalance, dueDate: openingBalanceDate(c) };
+    }).filter((row) => row.balance > 0);
     const data = invoices.map((inv) => ({ customer: inv.customer?.name || "Unknown", status: inv.status, balance: inv.balance, dueDate: inv.dueDate }));
-    res.json({ data, summary: { count: data.length, totalOutstanding: data.reduce((a, inv) => a + inv.balance, 0) } });
+    const combined = [...openingRows, ...data];
+    res.json({ data: combined, summary: { count: combined.length, totalOutstanding: combined.reduce((a, inv) => a + inv.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -1737,9 +1864,19 @@ router.get("/receivables/overdue", authenticateToken, async (req, res) => {
 router.get("/payables/outstanding", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const purchases = await prisma.supplierPurchase.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "asc" } });
+    const [purchases, suppliers] = await Promise.all([
+      prisma.supplierPurchase.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { supplier: true }, orderBy: { createdAt: "asc" } }),
+      prisma.supplier.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, balance: true, openingBalanceDate: true, createdAt: true } }),
+    ]);
+    const purchaseBalanceBySupplier = new Map();
+    purchases.forEach((p) => purchaseBalanceBySupplier.set(p.supplierId, (purchaseBalanceBySupplier.get(p.supplierId) || 0) + Number(p.balance || 0)));
+    const openingRows = suppliers.map((sup) => {
+      const historicalBalance = Math.max(0, Number(sup.balance || 0) - (purchaseBalanceBySupplier.get(sup.id) || 0));
+      return { supplier: sup.name, total: historicalBalance, balance: historicalBalance, source: "Opening Balance", createdAt: openingBalanceDate(sup) };
+    }).filter((row) => row.balance > 0);
     const data = purchases.map((p) => ({ supplier: p.supplier?.name || "Unknown", total: p.total, balance: p.balance, createdAt: p.createdAt }));
-    res.json({ data, summary: { count: data.length, totalOutstanding: data.reduce((a, p) => a + p.balance, 0) } });
+    const combined = [...openingRows, ...data];
+    res.json({ data: combined, summary: { count: combined.length, totalOutstanding: combined.reduce((a, p) => a + p.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 

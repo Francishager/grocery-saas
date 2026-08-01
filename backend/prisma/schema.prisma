@@ -873,6 +873,9 @@ model Customer {
   branch      Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   creditLimit Float          @default(0)
   balance     Float          @default(0) // Current outstanding balance
+  openingBalance     Float    @default(0)
+  openingBalanceDate DateTime?
+  openingBalanceNote String?
   status      CustomerStatus @default(active)
   trustScore  Int            @default(50) // 0-100, affects credit eligibility
   notes       String?
@@ -1104,6 +1107,9 @@ model Supplier {
   branchId  String?
   branch    Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   balance   Float          @default(0) // Amount owed to supplier
+  openingBalance     Float    @default(0)
+  openingBalanceDate DateTime?
+  openingBalanceNote String?
   status    SupplierStatus @default(active)
   notes     String?
   createdAt DateTime       @default(now())

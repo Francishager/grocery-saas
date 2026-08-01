@@ -199,6 +199,7 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'customersStatement', label: 'Customer Statement', apiFn: reportsApiV2.customersStatement, renderType: 'statement', entityType: 'customer', showBranchFilter: true,
         summaryKeys: [
+          { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
           { key: 'totalSales', label: 'Total Sales', format: 'currency' },
           { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
           { key: 'totalCreditNotes', label: 'Credit Notes', format: 'currency' },
@@ -230,10 +231,12 @@ const CATEGORIES: ReportCategory[] = [
       },
       { id: 'suppliersStatement', label: 'Supplier Statement', apiFn: reportsApiV2.suppliersStatement, renderType: 'statement', entityType: 'supplier', showBranchFilter: true,
         summaryKeys: [
+          { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
           { key: 'totalPurchases', label: 'Total Purchases', format: 'currency' },
           { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
           { key: 'totalDebitNotes', label: 'Debit Notes', format: 'currency' },
           { key: 'openBalance', label: 'Open Balance', format: 'currency' },
+          { key: 'currentBalance', label: 'Current Balance', format: 'currency' },
           { key: 'purchaseCount', label: 'Purchase Count', format: 'number' },
           { key: 'paymentCount', label: 'Payment Count', format: 'number' },
         ]
@@ -664,6 +667,8 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
   const entityName = data.customer?.name || data.supplier?.name || ''
   const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : ''
   const isCustomer = !!data.customer
+  const openingBalance = typeof data.openingBalance === 'object' ? data.openingBalance : null
+  const openingAmount = Number(openingBalance?.amount ?? data.summary?.openingBalance ?? 0)
 
   return (
     <div className="space-y-4">
@@ -688,6 +693,34 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {openingAmount > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">Opening Balance</h3>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Description</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Debit</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Credit</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t bg-muted/20">
+                  <td className="px-4 py-2">{openingBalance?.date ? new Date(openingBalance.date).toLocaleDateString() : 'N/A'}</td>
+                  <td className="px-4 py-2">Opening Balance</td>
+                  <td className="px-4 py-2 text-right">{isCustomer ? formatCurrency(openingAmount) : 'N/A'}</td>
+                  <td className="px-4 py-2 text-right">{isCustomer ? 'N/A' : formatCurrency(openingAmount)}</td>
+                  <td className="px-4 py-2 text-right">{formatCurrency(openingAmount)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

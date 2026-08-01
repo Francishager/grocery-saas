@@ -2,9 +2,11 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
   const normalizedPurchases = Array.isArray(purchases) ? purchases : [];
   const normalizedPayments = Array.isArray(payments) ? payments : [];
 
+  const openingBalance = Math.max(0, Number(supplier?.openingBalance || 0));
+  const openingBalanceDate = supplier?.openingBalanceDate || supplier?.createdAt || null;
   const totalPurchases = normalizedPurchases.reduce((sum, purchase) => sum + Number(purchase?.total || 0), 0);
   const totalPayments = normalizedPayments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
-  const openBalance = normalizedPurchases.reduce((sum, purchase) => sum + Math.max(0, Number(purchase?.balance || 0)), 0);
+  const openBalance = openingBalance + normalizedPurchases.reduce((sum, purchase) => sum + Math.max(0, Number(purchase?.balance || 0)), 0);
   const openPurchases = normalizedPurchases.filter((purchase) => Number(purchase?.balance || 0) > 0);
 
   return {
@@ -12,7 +14,16 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
       id: supplier?.id || null,
       name: supplier?.name || 'Unknown supplier',
     },
+    openingBalance: {
+      amount: openingBalance,
+      date: openingBalanceDate,
+      note: supplier?.openingBalanceNote || '',
+      type: 'Opening Balance',
+      isSystem: true,
+      systemTransaction: true,
+    },
     summary: {
+      openingBalance,
       totalPurchases,
       totalPayments,
       openBalance,
@@ -29,6 +40,8 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
     payments: normalizedPayments.map((payment) => ({
       id: payment?.id,
       amount: Number(payment?.amount || 0),
+      paymentMethod: payment?.paymentMethod,
+      reference: payment?.reference,
       createdAt: payment?.createdAt,
     })),
     openPurchases,
