@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission, getPaymentMethodPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
@@ -347,7 +347,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
     res.json({
       cashAccountId: user.cashAccountId,
       cashAccount: user.cashAccount,
-      paymentMethodPermissions: user.permissions || { canUseCash: true, canUseMobileMoney: false, canUseBank: false, canUseCard: false }
+      paymentMethodPermissions: getPaymentMethodPermissions(req, user.permissions)
     })
   } catch (error) {
     console.error('Get my cash account error:', error)

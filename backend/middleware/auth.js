@@ -7,6 +7,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Platform admin roles
 const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
+const PAYMENT_METHOD_PERMISSION_MAP = {
+  cash: 'canUseCash',
+  mobile_money: 'canUseMobileMoney',
+  bank_transfer: 'canUseBank',
+  bank: 'canUseBank',
+  card: 'canUseCard',
+};
 
 export const canUseCashTransactions = (user, hasAssignedCashAccount) => {
   if (!user) return false;
@@ -309,8 +316,35 @@ export const requireCashAccount = async (req, res, next) => {
   // Attach the cash account and permissions for downstream use
   req.userCashAccountId = user.cashAccountId;
   req.userCashAccount = user.cashAccount;
-  req.userPermissions = user.permissions;
+  req.userPermissions = Array.isArray(user.permissions) ? user.permissions[0] : user.permissions;
   next();
+};
+
+/**
+ * Resolve payment-method permissions from either the JWT effective
+ * permission list or Prisma's UserPermission relation.
+ */
+export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) => {
+  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
+    return { canUseCash: true, canUseMobileMoney: true, canUseBank: true, canUseCard: true };
+  }
+
+  const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  const rawPermissionRecord = permissionRecordOrList || req.userPermissions;
+  const permissionRecord = Array.isArray(rawPermissionRecord) ? rawPermissionRecord[0] : rawPermissionRecord;
+
+  const hasPermission = (key) => (
+    effectivePermissions.includes('*') ||
+    effectivePermissions.includes(key) ||
+    Boolean(permissionRecord?.[key])
+  );
+
+  return {
+    canUseCash: hasPermission('canUseCash'),
+    canUseMobileMoney: hasPermission('canUseMobileMoney'),
+    canUseBank: hasPermission('canUseBank'),
+    canUseCard: hasPermission('canUseCard'),
+  };
 };
 
 /**
@@ -318,26 +352,10 @@ export const requireCashAccount = async (req, res, next) => {
  * Must be called after requireCashAccount.
  */
 export const checkPaymentMethodPermission = (req, paymentMethod) => {
-  // Platform admins can use all payment methods
-  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
-    return true;
-  }
-
-  const perms = req.userPermissions;
-  if (!perms) return false;
-
-  const permMap = {
-    cash: 'canUseCash',
-    mobile_money: 'canUseMobileMoney',
-    bank_transfer: 'canUseBank',
-    bank: 'canUseBank',
-    card: 'canUseCard',
-  };
-
-  const permKey = permMap[paymentMethod];
+  const permKey = PAYMENT_METHOD_PERMISSION_MAP[paymentMethod];
   if (!permKey) return false;
 
-  return Boolean(perms[permKey]);
+  return Boolean(getPaymentMethodPermissions(req)[permKey]);
 };
 
 export default {
@@ -352,5 +370,6 @@ export default {
   enforceTenantIsolation,
   requireCashAccount,
   checkPaymentMethodPermission,
+  getPaymentMethodPermissions,
   canUseCashTransactions,
 };
