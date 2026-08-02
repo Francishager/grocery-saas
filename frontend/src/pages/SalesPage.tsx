@@ -574,8 +574,8 @@ export default function SalesPage() {
                           const isUncategorized = (item as any).isUncategorized
                           return (
                             <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
-                              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 mb-1">
-                                <div className="flex-1 min-w-0">
+                              <div className="grid grid-cols-1 justify-items-center gap-2 text-center sm:grid-cols-[minmax(0,1fr)_auto] sm:justify-items-stretch sm:text-left mb-1">
+                                <div className="min-w-0">
                                   <p className="font-medium whitespace-normal break-words leading-snug" title={item.product_name}>{item.product_name}</p>
                                   <p className="text-sm text-muted-foreground">
                                     {item.quantity} {baseUnit} in stock
@@ -587,7 +587,7 @@ export default function SalesPage() {
                                   </span>
                                 )}
                               </div>
-                              <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+                              <div className="flex flex-wrap items-center justify-center gap-2 mt-2 sm:justify-between">
                                 <p className="font-bold text-primary whitespace-nowrap">
                                   {formatCurrency(item.unit_price)}
                                 </p>
@@ -608,7 +608,7 @@ export default function SalesPage() {
                                 </p>
                               )}
                               {units.length > 0 ? (
-                                <div className="flex flex-wrap gap-1 mt-2">
+                                <div className="flex flex-wrap justify-center gap-1 mt-2 sm:justify-start">
                                   <button
                                     onClick={() => !isUncategorized && addToCart(item)}
                                     disabled={isUncategorized}
@@ -650,8 +650,8 @@ export default function SalesPage() {
                           const isUncategorized = (item as any).isUncategorized
                           return (
                             <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
-                              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 mb-1">
-                                <div className="flex-1 min-w-0">
+                              <div className="grid grid-cols-1 justify-items-center gap-2 text-center sm:grid-cols-[minmax(0,1fr)_auto] sm:justify-items-stretch sm:text-left mb-1">
+                                <div className="min-w-0">
                                   <p className="font-medium whitespace-normal break-words leading-snug" title={item.product_name}>{item.product_name}</p>
                                   <p className="text-sm text-muted-foreground">Service</p>
                                 </div>
@@ -661,7 +661,7 @@ export default function SalesPage() {
                                   </span>
                                 )}
                               </div>
-                              <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+                              <div className="flex flex-wrap items-center justify-center gap-2 mt-2 sm:justify-between">
                                 <p className="font-bold text-primary whitespace-nowrap">
                                   {formatCurrency(item.unit_price)}
                                 </p>
@@ -698,11 +698,11 @@ export default function SalesPage() {
               )}
               {/* Pagination Controls */}
               {filteredInventory.length > ITEMS_PER_PAGE && (
-                <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                <div className="flex flex-col items-center justify-center gap-3 mt-4 pt-4 border-t text-center sm:flex-row sm:justify-between sm:text-left">
                   <p className="text-xs text-muted-foreground">
                     Showing {pageStartIdx + 1} to {Math.min(pageStartIdx + ITEMS_PER_PAGE, filteredInventory.length)} of {filteredInventory.length} items
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap justify-center gap-2">
                     <Button
                       variant="outline"
                       size="sm"
@@ -711,7 +711,7 @@ export default function SalesPage() {
                     >
                       Previous
                     </Button>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center justify-center gap-1">
                       {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                         <button
                           key={page}
@@ -764,7 +764,7 @@ export default function SalesPage() {
                     {cart.map((item) => (
                       <div
                         key={item.id}
-                        className="grid gap-3 rounded-lg border p-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start"
+                        className="grid justify-items-center gap-3 rounded-lg border p-2 text-center sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:justify-items-stretch sm:text-left"
                       >
                         <div className="min-w-0">
                           <p className="font-medium whitespace-normal break-words leading-snug">{item.name}</p>
@@ -772,7 +772,7 @@ export default function SalesPage() {
                             {formatCurrency(item.selling_price)} each
                             {item.unitName && <span className="ml-1 text-xs">({item.unitName})</span>}
                           </p>
-                          <div className="flex items-center gap-1 mt-1">
+                          <div className="flex items-center justify-center gap-1 mt-1 sm:justify-start">
                             <span className="text-xs text-muted-foreground">Disc:</span>
                             <Input
                               type="number"
@@ -787,7 +787,7 @@ export default function SalesPage() {
                             />
                           </div>
                         </div>
-                        <div className="flex shrink-0 items-center justify-end gap-2">
+                        <div className="flex shrink-0 items-center justify-center gap-2 sm:justify-end">
                           <Input
                             type="number"
                             min="1"
