@@ -574,9 +574,9 @@ export default function SalesPage() {
                           const isUncategorized = (item as any).isUncategorized
                           return (
                             <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
-                              <div className="flex items-start justify-between gap-2 mb-1">
+                              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 mb-1">
                                 <div className="flex-1 min-w-0">
-                                  <p className="font-medium truncate" title={item.product_name}>{item.product_name}</p>
+                                  <p className="font-medium whitespace-normal break-words leading-snug" title={item.product_name}>{item.product_name}</p>
                                   <p className="text-sm text-muted-foreground">
                                     {item.quantity} {baseUnit} in stock
                                   </p>
@@ -587,7 +587,7 @@ export default function SalesPage() {
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center justify-between gap-2 mt-1">
+                              <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
                                 <p className="font-bold text-primary whitespace-nowrap">
                                   {formatCurrency(item.unit_price)}
                                 </p>
@@ -612,7 +612,7 @@ export default function SalesPage() {
                                   <button
                                     onClick={() => !isUncategorized && addToCart(item)}
                                     disabled={isUncategorized}
-                                    className={`rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                                    className={`rounded border px-2 py-1 text-left text-xs whitespace-normal break-words transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
                                   >
                                     {baseUnit} (1)
                                   </button>
@@ -621,7 +621,7 @@ export default function SalesPage() {
                                       key={u.id}
                                       onClick={() => !isUncategorized && addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
                                       disabled={isUncategorized}
-                                      className={`rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                                      className={`rounded border px-2 py-1 text-left text-xs whitespace-normal break-words transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
                                     >
                                       {u.unitName} ({u.conversionFactor})
                                     </button>
@@ -650,9 +650,9 @@ export default function SalesPage() {
                           const isUncategorized = (item as any).isUncategorized
                           return (
                             <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
-                              <div className="flex items-start justify-between gap-2 mb-1">
+                              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 mb-1">
                                 <div className="flex-1 min-w-0">
-                                  <p className="font-medium truncate" title={item.product_name}>{item.product_name}</p>
+                                  <p className="font-medium whitespace-normal break-words leading-snug" title={item.product_name}>{item.product_name}</p>
                                   <p className="text-sm text-muted-foreground">Service</p>
                                 </div>
                                 {isUncategorized && (
@@ -661,7 +661,7 @@ export default function SalesPage() {
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center justify-between gap-2 mt-1">
+                              <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
                                 <p className="font-bold text-primary whitespace-nowrap">
                                   {formatCurrency(item.unit_price)}
                                 </p>
@@ -764,10 +764,10 @@ export default function SalesPage() {
                     {cart.map((item) => (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between rounded-lg border p-2"
+                        className="grid gap-3 rounded-lg border p-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start"
                       >
-                        <div className="flex-1 min-w-0 mr-2">
-                          <p className="font-medium truncate">{item.name}</p>
+                        <div className="min-w-0">
+                          <p className="font-medium whitespace-normal break-words leading-snug">{item.name}</p>
                           <p className="text-sm text-muted-foreground">
                             {formatCurrency(item.selling_price)} each
                             {item.unitName && <span className="ml-1 text-xs">({item.unitName})</span>}
@@ -787,7 +787,7 @@ export default function SalesPage() {
                             />
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex shrink-0 items-center justify-end gap-2">
                           <Input
                             type="number"
                             min="1"
