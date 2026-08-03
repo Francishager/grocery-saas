@@ -74,6 +74,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   }
 
   const connectDirectPrinter = async (): Promise<DirectPrinter | null> => {
+    let lastUsbError: any = null
     const rememberedConnectors = [
       isUsbSupported() ? () => tryConnect(new UsbThermalPrinter(), (printer) => printer.connectToKnownDevice(), true) : null,
       isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connectToKnownPort(), true) : null,
@@ -86,7 +87,14 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     }
 
     const promptConnectors = [
-      isUsbSupported() ? () => tryConnect(new UsbThermalPrinter(), (printer) => printer.connect(), false) : null,
+      isUsbSupported() ? async () => {
+        try {
+          return await tryConnect(new UsbThermalPrinter(), (printer) => printer.connect(), false)
+        } catch (error) {
+          lastUsbError = error
+          return null
+        }
+      } : null,
       isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connect(), false) : null,
       isBluetoothSupported() ? () => tryConnect(new BluetoothThermalPrinter(), (printer) => printer.connect(), false) : null,
     ].filter(Boolean) as Array<() => Promise<DirectPrinter | null>>
@@ -96,6 +104,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       if (printer) return printer
     }
 
+    if (lastUsbError) throw lastUsbError
     return null
   }
 
@@ -360,7 +369,7 @@ function directPrintErrorMessage(error: any) {
     return 'This Bluetooth printer is not exposing a BLE receipt-printer service. On desktop, pair it as a COM/serial printer and choose it from the serial picker.'
   }
   if (message.includes('usb') || message.includes('endpoint') || message.includes('interface')) {
-    return 'The selected USB printer could not be opened for direct receipt printing. Try the serial/COM connection for this printer if available.'
+    return `USB printer direct printing failed: ${error?.message || 'the printer interface could not be opened'}. If the same printer exposes a serial/COM option, choose that when prompted.`
   }
   return error?.message || 'Unable to connect to the printer.'
 }

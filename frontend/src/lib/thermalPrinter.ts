@@ -232,6 +232,7 @@ export class UsbThermalPrinter {
   private device: any | null = null
   private interfaceNumber: number | null = null
   private endpointNumber: number | null = null
+  private packetSize = 64
 
   async connect(): Promise<boolean> {
     const usb = getUsbApi()
@@ -244,9 +245,7 @@ export class UsbThermalPrinter {
       await this.openDevice(this.device)
       return true
     } catch (err: any) {
-      this.device = null
-      this.interfaceNumber = null
-      this.endpointNumber = null
+      await this.disconnect()
       throw new Error(`USB printer connection failed: ${err?.message || 'permission denied'}`)
     }
   }
@@ -262,9 +261,7 @@ export class UsbThermalPrinter {
         await this.openDevice(device)
         return true
       } catch {
-        this.device = null
-        this.interfaceNumber = null
-        this.endpointNumber = null
+        await this.disconnect()
       }
     }
 
@@ -272,23 +269,53 @@ export class UsbThermalPrinter {
   }
 
   private async openDevice(device: any) {
-    await device.open()
-    if (!device.configuration) {
-      await device.selectConfiguration(1)
+    if (!device.opened) {
+      await device.open()
     }
 
-    const selected = findUsbOutEndpoint(device)
-    if (!selected) {
+    const candidates = findUsbOutEndpointCandidates(device)
+    if (!candidates.length) {
       throw new Error('No writable USB printer endpoint found')
     }
 
-    await device.claimInterface(selected.interfaceNumber)
-    if (selected.alternateSetting && selected.alternateSetting !== 0 && device.selectAlternateInterface) {
-      await device.selectAlternateInterface(selected.interfaceNumber, selected.alternateSetting)
+    let lastError: any = null
+    for (const candidate of candidates) {
+      let claimed = false
+      try {
+        if (!device.configuration || device.configuration.configurationValue !== candidate.configurationValue) {
+          await device.selectConfiguration(candidate.configurationValue)
+        }
+
+        if (device.isKernelDriverActive) {
+          try {
+            if (await device.isKernelDriverActive(candidate.interfaceNumber)) {
+              await device.detachKernelDriver(candidate.interfaceNumber)
+            }
+          } catch {}
+        }
+
+        await device.claimInterface(candidate.interfaceNumber)
+        claimed = true
+
+        if (candidate.alternateSetting && candidate.alternateSetting !== 0 && device.selectAlternateInterface) {
+          await device.selectAlternateInterface(candidate.interfaceNumber, candidate.alternateSetting)
+        }
+
+        this.interfaceNumber = candidate.interfaceNumber
+        this.endpointNumber = candidate.endpointNumber
+        this.packetSize = candidate.packetSize || 64
+        return
+      } catch (error: any) {
+        lastError = error
+        if (claimed) {
+          try {
+            await device.releaseInterface(candidate.interfaceNumber)
+          } catch {}
+        }
+      }
     }
 
-    this.interfaceNumber = selected.interfaceNumber
-    this.endpointNumber = selected.endpointNumber
+    throw new Error(`Unable to open a writable USB printer interface: ${lastError?.message || 'access denied'}`)
   }
 
   async disconnect() {
@@ -316,8 +343,11 @@ export class UsbThermalPrinter {
 
     for (const hex of hexCommands) {
       const bytes = hexToBytes(hex)
-      for (const chunk of chunkBytes(bytes, 64)) {
-        await this.device.transferOut(this.endpointNumber, chunk)
+      for (const chunk of chunkBytes(bytes, this.packetSize)) {
+        const result = await this.device.transferOut(this.endpointNumber, chunk)
+        if (result?.status && result.status !== 'ok') {
+          throw new Error(`USB printer write failed: ${result.status}`)
+        }
         await wait(5)
       }
     }
@@ -484,36 +514,57 @@ async function requestUsbPrinterDevice(usb: any) {
   }
 }
 
-function findUsbOutEndpoint(device: any): { interfaceNumber: number; alternateSetting: number; endpointNumber: number } | null {
-  const interfaces = device.configuration?.interfaces || []
+function findUsbOutEndpointCandidates(device: any): Array<{
+  configurationValue: number
+  interfaceNumber: number
+  alternateSetting: number
+  endpointNumber: number
+  packetSize: number
+  priority: number
+}> {
+  const configurations = device.configurations?.length
+    ? device.configurations
+    : device.configuration
+      ? [device.configuration]
+      : []
 
-  for (const iface of interfaces) {
-    for (const alternate of iface.alternates || []) {
-      const outEndpoint = (alternate.endpoints || []).find((endpoint: any) => endpoint.direction === 'out')
-      if (outEndpoint && alternate.interfaceClass === 7) {
-        return {
-          interfaceNumber: iface.interfaceNumber,
-          alternateSetting: alternate.alternateSetting || 0,
-          endpointNumber: outEndpoint.endpointNumber,
+  const candidates: Array<{
+    configurationValue: number
+    interfaceNumber: number
+    alternateSetting: number
+    endpointNumber: number
+    packetSize: number
+    priority: number
+  }> = []
+
+  for (const configuration of configurations) {
+    for (const iface of configuration.interfaces || []) {
+      for (const alternate of iface.alternates || []) {
+        for (const endpoint of alternate.endpoints || []) {
+          if (endpoint.direction !== 'out') continue
+
+          const isPrinterClass = alternate.interfaceClass === 0x07
+          const isVendorClass = alternate.interfaceClass === 0xff
+
+          candidates.push({
+            configurationValue: configuration.configurationValue || 1,
+            interfaceNumber: iface.interfaceNumber,
+            alternateSetting: alternate.alternateSetting || 0,
+            endpointNumber: endpoint.endpointNumber,
+            packetSize: endpoint.packetSize || 64,
+            priority: isPrinterClass ? 0 : isVendorClass ? 1 : 2,
+          })
         }
       }
     }
   }
 
-  for (const iface of interfaces) {
-    for (const alternate of iface.alternates || []) {
-      const outEndpoint = (alternate.endpoints || []).find((endpoint: any) => endpoint.direction === 'out')
-      if (outEndpoint) {
-        return {
-          interfaceNumber: iface.interfaceNumber,
-          alternateSetting: alternate.alternateSetting || 0,
-          endpointNumber: outEndpoint.endpointNumber,
-        }
-      }
-    }
-  }
-
-  return null
+  return candidates.sort((a, b) =>
+    a.priority - b.priority
+    || a.configurationValue - b.configurationValue
+    || a.interfaceNumber - b.interfaceNumber
+    || a.alternateSetting - b.alternateSetting
+  )
 }
 
 function hexToBytes(hex: string): Uint8Array {
