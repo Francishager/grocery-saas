@@ -72,82 +72,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     }
   }
 
-  const connectDirectPrinter = async (allowPrompt: boolean) => {
-    const remembered = [
-      isUsbSupported() ? () => connectPrinter(new UsbThermalPrinter(), (printer) => printer.connectToKnownDevice()) : null,
-      isSerialSupported() ? () => connectPrinter(new ThermalPrinter(), (printer) => printer.connectToKnownPort()) : null,
-      isBluetoothSupported() ? () => connectPrinter(new BluetoothThermalPrinter(), (printer) => printer.connectToKnownDevice()) : null,
-    ].filter(Boolean) as Array<() => Promise<BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null>>
-
-    for (const connect of remembered) {
-      const printer = await connect()
-      if (printer) return printer
-    }
-
-    if (!allowPrompt) return null
-
-    const prompts = [
-      isUsbSupported() ? () => connectPrinter(new UsbThermalPrinter(), (printer) => printer.connect()) : null,
-      isSerialSupported() ? () => connectPrinter(new ThermalPrinter(), (printer) => printer.connect()) : null,
-      isBluetoothSupported() ? () => connectPrinter(new BluetoothThermalPrinter(), (printer) => printer.connect()) : null,
-    ].filter(Boolean) as Array<() => Promise<BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null>>
-
-    for (const connect of prompts) {
-      const printer = await connect()
-      if (printer) return printer
-    }
-
-    return null
-  }
-
-  const connectPrinter = async <T extends BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter>(
-    printer: T,
-    connect: (printer: T) => Promise<boolean>,
-  ): Promise<T | null> => {
-    try {
-      if (await connect(printer)) return printer
-    } catch {
-    }
-
-    await printer.disconnect()
-    return null
-  }
-
-  const directPrintErrorMessage = (error: any) => {
-    const message = String(error?.message || '').toLowerCase()
-    if (message.includes('permission') || message.includes('denied') || message.includes('notallowed')) {
-      return 'Printer permission was denied. Tap Print again, choose the printer, and allow access.'
-    }
-    if (message.includes('no compatible') || message.includes('no printer') || message.includes('notfound')) {
-      return 'No compatible direct printer was selected. Choose a USB, serial, or BLE Bluetooth thermal printer.'
-    }
-    return error?.message || 'Unable to connect to the printer.'
-  }
-
-  const handlePrint = async () => {
-    if (directPrintAvailable) {
-      setPrinting(true)
-      let printer: BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null = null
-      try {
-        printer = await connectDirectPrinter(true)
-        if (!printer) throw new Error('No compatible printer was selected.')
-
-        const { commands } = await receiptsApi.getEscPos(saleId)
-        await printer.printFromCommands(commands)
-        toast({ title: 'Receipt printed successfully' })
-      } catch (error: any) {
-        toast({
-          variant: 'destructive',
-          title: 'Print failed',
-          description: directPrintErrorMessage(error),
-        })
-      } finally {
-        await printer?.disconnect()
-        setPrinting(false)
-      }
-      return
-    }
-
+  const handlePrint = () => {
     const opened = printReceiptInBrowser(loadReceiptForPrint, receiptNo)
     if (!opened) {
       toast({
@@ -157,6 +82,10 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       })
     }
   }
+
+  const connectDirectPrinter = async (_allowPrompt: boolean): Promise<BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null> => null
+
+  const directPrintErrorMessage = (error: any) => error?.message || 'Unable to connect to the printer.'
 
   const handleDirectPrint = async () => {
     if (!directPrintAvailable) {
