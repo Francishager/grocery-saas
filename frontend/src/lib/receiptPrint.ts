@@ -3,6 +3,9 @@ import { formatCurrency } from '@/lib/utils'
 
 type ReceiptLoader = ReceiptPreview | (() => Promise<ReceiptPreview>)
 
+const RAWBT_PACKAGE = 'ru.a402d.rawbtprinter'
+const RAWBT_FALLBACK_URL = 'https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter'
+
 export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo = 'Receipt'): boolean {
   const printWindow = window.open('', '_blank', 'width=420,height=740')
   if (!printWindow) return false
@@ -24,6 +27,28 @@ export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo 
       writePrintWindow(printWindow, errorHtml(error?.message || 'Failed to load receipt'))
     })
 
+  return true
+}
+
+export function isAndroidReceiptPrinterBridgeAvailable(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /Android/i.test(navigator.userAgent || '')
+}
+
+export async function printReceiptWithAndroidBridge(receiptOrLoader: ReceiptLoader): Promise<boolean> {
+  if (!isAndroidReceiptPrinterBridgeAvailable()) return false
+
+  const loadReceipt =
+    typeof receiptOrLoader === 'function'
+      ? receiptOrLoader
+      : async () => receiptOrLoader
+
+  const receipt = await loadReceipt()
+  const text = buildReceiptText(receipt)
+  const fallback = encodeURIComponent(RAWBT_FALLBACK_URL)
+  const intentUrl = `intent:${encodeURIComponent(text)}#Intent;scheme=rawbt;package=${RAWBT_PACKAGE};S.browser_fallback_url=${fallback};end;`
+
+  window.location.href = intentUrl
   return true
 }
 
@@ -87,6 +112,46 @@ function receiptHtml(receipt: ReceiptPreview): string {
   `)
 }
 
+function buildReceiptText(receipt: ReceiptPreview): string {
+  const width = 32
+  const business = receipt.business || { name: 'JibuSales' }
+  const lines: string[] = []
+
+  lines.push('\x1B@')
+  lines.push(centerText(business.name || 'JibuSales', width))
+  if (business.address) lines.push(centerText(business.address, width))
+  if (business.phone) lines.push(centerText(`Tel: ${business.phone}`, width))
+  if (business.email) lines.push(centerText(business.email, width))
+  if (receipt.branch?.name) lines.push(centerText(`Branch: ${receipt.branch.name}`, width))
+  lines.push('-'.repeat(width))
+  lines.push(`Receipt: ${receipt.receiptNo}`)
+  lines.push(`Date: ${new Date(receipt.createdAt).toLocaleString()}`)
+  lines.push(`Cashier: ${receipt.cashier || '-'}`)
+  lines.push(`Payment: ${(receipt.paymentMethod || 'cash').toUpperCase()}`)
+  lines.push('-'.repeat(width))
+
+  for (const item of receipt.items) {
+    lines.push(...wrapText(item.name || 'Item', width))
+    lines.push(twoColumn(`${item.quantity} x ${formatCurrency(item.price)}`, formatCurrency(item.total), width))
+  }
+
+  lines.push('-'.repeat(width))
+  lines.push(twoColumn('Subtotal', formatCurrency(receipt.subtotal), width))
+  if (receipt.discount > 0) lines.push(twoColumn('Discount', formatCurrency(receipt.discount), width))
+  if (receipt.tax > 0) lines.push(twoColumn('Tax', formatCurrency(receipt.tax), width))
+  lines.push(twoColumn('TOTAL', formatCurrency(receipt.total), width))
+  if (receipt.amountPaid != null) lines.push(twoColumn('Amount Paid', formatCurrency(receipt.amountPaid), width))
+  if (receipt.amountPaid != null) lines.push(twoColumn('Change', formatCurrency(receipt.changeGiven || 0), width))
+  lines.push('-'.repeat(width))
+  if (business.receiptHeader) lines.push(...wrapText(business.receiptHeader, width).map((line) => centerText(line, width)))
+  lines.push(centerText('Thank you for your purchase!', width))
+  if (business.receiptFooter) lines.push(...wrapText(business.receiptFooter, width).map((line) => centerText(line, width)))
+  lines.push(centerText('Powered by JibuSales', width))
+  lines.push('\n\n\n\x1DV\x00')
+
+  return lines.join('\n')
+}
+
 function itemHtml(item: ReceiptPreview['items'][number]): string {
   return `
     <div class="item">
@@ -97,6 +162,57 @@ function itemHtml(item: ReceiptPreview['items'][number]): string {
       </div>
     </div>
   `
+}
+
+function centerText(text: string, width: number): string {
+  const clean = normalizeReceiptText(text)
+  if (clean.length >= width) return clean
+  return `${' '.repeat(Math.floor((width - clean.length) / 2))}${clean}`
+}
+
+function twoColumn(left: string, right: string, width: number): string {
+  const cleanLeft = normalizeReceiptText(left)
+  const cleanRight = normalizeReceiptText(right)
+  const gap = Math.max(1, width - cleanLeft.length - cleanRight.length)
+
+  if (gap === 1 && cleanLeft.length + cleanRight.length >= width) {
+    return `${cleanLeft.slice(0, Math.max(0, width - cleanRight.length - 1))} ${cleanRight}`
+  }
+
+  return `${cleanLeft}${' '.repeat(gap)}${cleanRight}`
+}
+
+function wrapText(text: string, width: number): string[] {
+  const words = normalizeReceiptText(text).split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  let current = ''
+
+  for (const word of words) {
+    if (!current) {
+      current = word
+    } else if (`${current} ${word}`.length <= width) {
+      current = `${current} ${word}`
+    } else {
+      lines.push(current)
+      current = word
+    }
+
+    while (current.length > width) {
+      lines.push(current.slice(0, width))
+      current = current.slice(width)
+    }
+  }
+
+  if (current) lines.push(current)
+  return lines.length ? lines : ['']
+}
+
+function normalizeReceiptText(value: string): string {
+  return String(value)
+    .normalize('NFKD')
+    .replace(/[^\x00-\x7F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function row(label: string, value: string, className = ''): string {

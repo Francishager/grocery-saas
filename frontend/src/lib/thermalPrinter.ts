@@ -341,7 +341,7 @@ export function isThermalPrintingSupported(): boolean {
 
 export function isDirectThermalPrintingAvailable(): boolean {
   if (isPhoneOrTabletBrowser()) return false
-  return isSerialSupported() || isBluetoothSupported()
+  return isSerialSupported()
 }
 
 function getSerialApi(): any | null {
