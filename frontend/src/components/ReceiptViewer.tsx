@@ -22,9 +22,11 @@ interface ReceiptViewerProps {
 }
 
 type DirectPrinter = BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter
+type PrinterChoice = 'usb' | 'serial' | 'bluetooth'
 
 export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptViewerProps) {
   const [printing, setPrinting] = useState(false)
+  const [showPrinterPicker, setShowPrinterPicker] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [receipt, setReceipt] = useState<ReceiptPreview | null>(null)
   const [loadingReceipt, setLoadingReceipt] = useState(false)
@@ -73,8 +75,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     }
   }
 
-  const connectDirectPrinter = async (): Promise<DirectPrinter | null> => {
-    let lastUsbError: any = null
+  const connectRememberedPrinter = async (): Promise<DirectPrinter | null> => {
     const rememberedConnectors = [
       isUsbSupported() ? () => tryConnect(new UsbThermalPrinter(), (printer) => printer.connectToKnownDevice(), true) : null,
       isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connectToKnownPort(), true) : null,
@@ -86,26 +87,25 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       if (printer) return printer
     }
 
-    const promptConnectors = [
-      isUsbSupported() ? async () => {
-        try {
-          return await tryConnect(new UsbThermalPrinter(), (printer) => printer.connect(), false)
-        } catch (error) {
-          lastUsbError = error
-          return null
-        }
-      } : null,
-      isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connect(), false) : null,
-      isBluetoothSupported() ? () => tryConnect(new BluetoothThermalPrinter(), (printer) => printer.connect(), false) : null,
-    ].filter(Boolean) as Array<() => Promise<DirectPrinter | null>>
+    return null
+  }
 
-    for (const connect of promptConnectors) {
-      const printer = await connect()
-      if (printer) return printer
+  const connectSelectedPrinter = async (choice: PrinterChoice): Promise<DirectPrinter | null> => {
+    if (choice === 'usb') {
+      if (!isUsbSupported()) throw new Error('USB printer access is not supported in this browser.')
+      return tryConnect(new UsbThermalPrinter(), (printer) => printer.connect(), false)
     }
 
-    if (lastUsbError) throw lastUsbError
-    return null
+    if (choice === 'serial') {
+      if (!isSerialSupported()) throw new Error('Serial/COM printer access is not supported in this browser.')
+      return tryConnect(new ThermalPrinter(), (printer) => printer.connect(), false)
+    }
+
+    if (!isBluetoothSupported()) {
+      throw new Error('Bluetooth printer access is not supported in this browser.')
+    }
+
+    return tryConnect(new BluetoothThermalPrinter(), (printer) => printer.connect(), false)
   }
 
   const tryConnect = async <T extends DirectPrinter>(
@@ -139,19 +139,13 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     let printer: DirectPrinter | null = null
 
     try {
-      printer = await connectDirectPrinter()
+      printer = await connectRememberedPrinter()
       if (!printer) {
-        toast({
-          variant: 'destructive',
-          title: 'No printer selected',
-          description: 'Choose a USB, serial/COM, or BLE Bluetooth thermal printer.',
-        })
+        setShowPrinterPicker(true)
         return
       }
 
-      const { commands } = await receiptsApi.getEscPos(saleId)
-      await printer.printFromCommands(commands)
-      toast({ title: 'Receipt printed successfully' })
+      await printWithPrinter(printer)
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -162,6 +156,33 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       await printer?.disconnect()
       setPrinting(false)
     }
+  }
+
+  const handlePrinterChoice = async (choice: PrinterChoice) => {
+    setShowPrinterPicker(false)
+    setPrinting(true)
+    let printer: DirectPrinter | null = null
+
+    try {
+      printer = await connectSelectedPrinter(choice)
+      if (!printer) return
+      await printWithPrinter(printer)
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Print failed',
+        description: directPrintErrorMessage(error),
+      })
+    } finally {
+      await printer?.disconnect()
+      setPrinting(false)
+    }
+  }
+
+  const printWithPrinter = async (printer: DirectPrinter) => {
+    const { commands } = await receiptsApi.getEscPos(saleId)
+    await printer.printFromCommands(commands)
+    toast({ title: 'Receipt printed successfully' })
   }
 
   const handleSystemPrint = () => {
@@ -205,6 +226,48 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
           </Button>
         )}
       </div>
+
+      {showPrinterPicker && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-background shadow-2xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <p className="text-sm font-semibold">Select Printer</p>
+              <Button variant="ghost" size="icon" onClick={() => setShowPrinterPicker(false)} aria-label="Close printer selection">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="grid gap-2 p-4">
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => handlePrinterChoice('usb')}
+                disabled={!isUsbSupported() || printing}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                USB Printer
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => handlePrinterChoice('bluetooth')}
+                disabled={!isBluetoothSupported() || printing}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Bluetooth Printer
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start"
+                onClick={() => handlePrinterChoice('serial')}
+                disabled={!isSerialSupported() || printing}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Serial/COM Printer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPreview && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-6">
