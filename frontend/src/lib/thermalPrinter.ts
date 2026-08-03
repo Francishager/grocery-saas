@@ -339,6 +339,11 @@ export function isThermalPrintingSupported(): boolean {
   return isSerialSupported() || isBluetoothSupported()
 }
 
+export function isDirectThermalPrintingAvailable(): boolean {
+  if (isPhoneOrTabletBrowser()) return false
+  return isSerialSupported() || isBluetoothSupported()
+}
+
 function getSerialApi(): any | null {
   if (typeof navigator === 'undefined') return null
   return (navigator as any).serial || null
@@ -347,6 +352,16 @@ function getSerialApi(): any | null {
 function getBluetoothApi(): any | null {
   if (typeof navigator === 'undefined') return null
   return (navigator as any).bluetooth || null
+}
+
+function isPhoneOrTabletBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  const platform = navigator.platform || ''
+  const touchPoints = navigator.maxTouchPoints || 0
+
+  return /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua)
+    || (platform === 'MacIntel' && touchPoints > 1)
 }
 
 function hexToBytes(hex: string): Uint8Array {

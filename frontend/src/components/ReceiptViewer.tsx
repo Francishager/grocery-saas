@@ -6,8 +6,10 @@ import {
   BluetoothThermalPrinter,
   ThermalPrinter,
   isBluetoothSupported,
+  isDirectThermalPrintingAvailable,
   isSerialSupported,
 } from '@/lib/thermalPrinter'
+import { printReceiptInBrowser } from '@/lib/receiptPrint'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency } from '@/lib/utils'
 
@@ -26,6 +28,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const { toast } = useToast()
   const pdfUrl = receiptsApi.getPdf(saleId)
+  const directPrintAvailable = isDirectThermalPrintingAvailable()
 
   useEffect(() => {
     if (!showPreview || receipt || loadingReceipt) return
@@ -49,12 +52,41 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     link.remove()
   }
 
-  const handleAutoPrint = async () => {
+  const loadReceiptForPrint = async () => {
+    if (receipt) return receipt
+
+    setLoadingReceipt(true)
+    setReceiptError(null)
+    try {
+      const loadedReceipt = await receiptsApi.get(saleId)
+      setReceipt(loadedReceipt)
+      return loadedReceipt
+    } catch (error: any) {
+      const message = error?.message || 'Failed to load receipt'
+      setReceiptError(message)
+      throw new Error(message)
+    } finally {
+      setLoadingReceipt(false)
+    }
+  }
+
+  const handleBrowserPrint = () => {
+    const opened = printReceiptInBrowser(loadReceiptForPrint, receiptNo)
+    if (!opened) {
+      toast({
+        variant: 'destructive',
+        title: 'Pop-up blocked',
+        description: 'Enable pop-ups to print the receipt.',
+      })
+    }
+  }
+
+  const handleDirectPrint = async () => {
     if (!isSerialSupported() && !isBluetoothSupported()) {
       toast({
         variant: 'destructive',
         title: 'Not supported',
-        description: 'Thermal printing requires Chrome or Edge with Serial/Bluetooth support.',
+        description: 'Use the main Print button on this device.',
       })
       return
     }
@@ -102,11 +134,11 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       await printer.printFromCommands(commands)
 
       toast({ title: 'Receipt printed successfully' })
-    } catch (err: any) {
+    } catch {
       toast({
         variant: 'destructive',
-        title: 'Print failed',
-        description: err?.message || 'Unable to print receipt',
+        title: 'Direct print failed',
+        description: 'Use the main Print button if this printer uses phone or tablet Bluetooth pairing.',
       })
     } finally {
       await printer?.disconnect()
@@ -118,7 +150,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const printLabel = () => {
     if (connectingPrinter) return 'Connecting...'
     if (printing) return 'Printing...'
-    return 'Print'
+    return 'Direct'
   }
 
   return (
@@ -127,18 +159,18 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setShowPreview(true)}
+          onClick={handleBrowserPrint}
           className="flex items-center gap-1"
         >
-          <FileText className="h-4 w-4" />
-          Receipt
+          <Printer className="h-4 w-4" />
+          Print
         </Button>
 
-        {(isSerialSupported() || isBluetoothSupported()) && (
+        {directPrintAvailable && (
           <Button
             variant="outline"
             size="sm"
-            onClick={handleAutoPrint}
+            onClick={handleDirectPrint}
             disabled={printing || connectingPrinter}
             className="flex items-center gap-1"
           >
@@ -146,6 +178,16 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
             {printLabel()}
           </Button>
         )}
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowPreview(true)}
+          className="flex items-center gap-1"
+        >
+          <FileText className="h-4 w-4" />
+          Receipt
+        </Button>
 
         {onClose && (
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -280,8 +322,12 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
-              {(isSerialSupported() || isBluetoothSupported()) && (
-                <Button variant="outline" size="sm" onClick={handleAutoPrint} disabled={printing || connectingPrinter}>
+              <Button variant="outline" size="sm" onClick={handleBrowserPrint}>
+                <Printer className="mr-2 h-4 w-4" />
+                Print
+              </Button>
+              {directPrintAvailable && (
+                <Button variant="outline" size="sm" onClick={handleDirectPrint} disabled={printing || connectingPrinter}>
                   <Printer className="mr-2 h-4 w-4" />
                   {printLabel()}
                 </Button>

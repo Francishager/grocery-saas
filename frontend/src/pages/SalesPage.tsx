@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
-import { BluetoothThermalPrinter, ThermalPrinter, isBluetoothSupported, isSerialSupported } from '@/lib/thermalPrinter'
+import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
@@ -185,26 +185,15 @@ export default function SalesPage() {
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
 
   const autoPrintReceipt = async (saleId: string) => {
-    if (!isSerialSupported() && !isBluetoothSupported()) return
+    if (!isSerialSupported()) return
 
-    let printer: BluetoothThermalPrinter | ThermalPrinter | null = null
+    let printer: ThermalPrinter | null = null
     try {
-      if (isSerialSupported()) {
-        const serialPrinter = new ThermalPrinter()
-        if (await serialPrinter.connectToKnownPort()) {
-          printer = serialPrinter
-        } else {
-          await serialPrinter.disconnect()
-        }
-      }
-
-      if (!printer && isBluetoothSupported()) {
-        const bluetoothPrinter = new BluetoothThermalPrinter()
-        if (await bluetoothPrinter.connectToKnownDevice()) {
-          printer = bluetoothPrinter
-        } else {
-          await bluetoothPrinter.disconnect()
-        }
+      const serialPrinter = new ThermalPrinter()
+      if (await serialPrinter.connectToKnownPort()) {
+        printer = serialPrinter
+      } else {
+        await serialPrinter.disconnect()
       }
 
       if (!printer) return
@@ -212,11 +201,11 @@ export default function SalesPage() {
       const { commands } = await receiptsApi.getEscPos(saleId)
       await printer.printFromCommands(commands)
       toast({ title: 'Receipt printed' })
-    } catch (error: any) {
+    } catch {
       toast({
         variant: 'destructive',
         title: 'Auto print failed',
-        description: error?.message || 'Open the receipt and print manually.',
+        description: 'Open the receipt and use Print to choose the paired printer.',
       })
     } finally {
       await printer?.disconnect()
