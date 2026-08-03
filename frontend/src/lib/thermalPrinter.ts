@@ -226,7 +226,7 @@ export class UsbThermalPrinter {
     }
 
     try {
-      this.device = await usb.requestDevice({ filters: [] })
+      this.device = await requestUsbPrinterDevice(usb)
       await this.openDevice(this.device)
       return true
     } catch (err: any) {
@@ -456,6 +456,17 @@ function getBluetoothApi(): any | null {
 function getUsbApi(): any | null {
   if (typeof navigator === 'undefined') return null
   return (navigator as any).usb || null
+}
+
+async function requestUsbPrinterDevice(usb: any) {
+  try {
+    return await usb.requestDevice({ filters: [{}] })
+  } catch (error: any) {
+    if (String(error?.message || '').toLowerCase().includes('filters')) {
+      return usb.requestDevice({ filters: [] })
+    }
+    throw error
+  }
 }
 
 function findUsbOutEndpoint(device: any): { interfaceNumber: number; alternateSetting: number; endpointNumber: number } | null {
