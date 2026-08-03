@@ -214,6 +214,102 @@ export class ThermalPrinter {
   }
 }
 
+export class UsbThermalPrinter {
+  private device: any | null = null
+  private interfaceNumber: number | null = null
+  private endpointNumber: number | null = null
+
+  async connect(): Promise<boolean> {
+    const usb = getUsbApi()
+    if (!usb) {
+      throw new Error('USB printer access is not supported in this browser.')
+    }
+
+    try {
+      this.device = await usb.requestDevice({ filters: [] })
+      await this.openDevice(this.device)
+      return true
+    } catch (err: any) {
+      this.device = null
+      this.interfaceNumber = null
+      this.endpointNumber = null
+      throw new Error(`USB printer connection failed: ${err?.message || 'permission denied'}`)
+    }
+  }
+
+  async connectToKnownDevice(): Promise<boolean> {
+    const usb = getUsbApi()
+    if (!usb?.getDevices) return false
+
+    const devices = await usb.getDevices()
+    for (const device of devices) {
+      try {
+        this.device = device
+        await this.openDevice(device)
+        return true
+      } catch {
+        this.device = null
+        this.interfaceNumber = null
+        this.endpointNumber = null
+      }
+    }
+
+    return false
+  }
+
+  private async openDevice(device: any) {
+    await device.open()
+    if (!device.configuration) {
+      await device.selectConfiguration(1)
+    }
+
+    const selected = findUsbOutEndpoint(device)
+    if (!selected) {
+      throw new Error('No writable USB printer endpoint found')
+    }
+
+    await device.claimInterface(selected.interfaceNumber)
+    if (selected.alternateSetting && selected.alternateSetting !== 0 && device.selectAlternateInterface) {
+      await device.selectAlternateInterface(selected.interfaceNumber, selected.alternateSetting)
+    }
+
+    this.interfaceNumber = selected.interfaceNumber
+    this.endpointNumber = selected.endpointNumber
+  }
+
+  async disconnect() {
+    try {
+      if (this.device && this.interfaceNumber !== null) {
+        await this.device.releaseInterface(this.interfaceNumber)
+      }
+      if (this.device?.opened) {
+        await this.device.close()
+      }
+    } catch {
+    } finally {
+      this.device = null
+      this.interfaceNumber = null
+      this.endpointNumber = null
+    }
+  }
+
+  get connected(): boolean {
+    return !!this.device && this.endpointNumber !== null
+  }
+
+  async printFromCommands(hexCommands: string[]) {
+    if (!this.device || this.endpointNumber === null) throw new Error('USB printer not connected')
+
+    for (const hex of hexCommands) {
+      const bytes = hexToBytes(hex)
+      for (const chunk of chunkBytes(bytes, 64)) {
+        await this.device.transferOut(this.endpointNumber, chunk)
+        await wait(5)
+      }
+    }
+  }
+}
+
 export class BluetoothThermalPrinter {
   private device: any | null = null
   private characteristic: any | null = null
@@ -331,17 +427,20 @@ export function isSerialSupported(): boolean {
   return !!getSerialApi()
 }
 
+export function isUsbSupported(): boolean {
+  return !!getUsbApi()
+}
+
 export function isBluetoothSupported(): boolean {
   return !!getBluetoothApi()
 }
 
 export function isThermalPrintingSupported(): boolean {
-  return isSerialSupported() || isBluetoothSupported()
+  return isSerialSupported() || isUsbSupported() || isBluetoothSupported()
 }
 
 export function isDirectThermalPrintingAvailable(): boolean {
-  if (isPhoneOrTabletBrowser()) return false
-  return isSerialSupported()
+  return isSerialSupported() || isUsbSupported() || isBluetoothSupported()
 }
 
 function getSerialApi(): any | null {
@@ -354,14 +453,41 @@ function getBluetoothApi(): any | null {
   return (navigator as any).bluetooth || null
 }
 
-function isPhoneOrTabletBrowser(): boolean {
-  if (typeof navigator === 'undefined') return false
-  const ua = navigator.userAgent || ''
-  const platform = navigator.platform || ''
-  const touchPoints = navigator.maxTouchPoints || 0
+function getUsbApi(): any | null {
+  if (typeof navigator === 'undefined') return null
+  return (navigator as any).usb || null
+}
 
-  return /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua)
-    || (platform === 'MacIntel' && touchPoints > 1)
+function findUsbOutEndpoint(device: any): { interfaceNumber: number; alternateSetting: number; endpointNumber: number } | null {
+  const interfaces = device.configuration?.interfaces || []
+
+  for (const iface of interfaces) {
+    for (const alternate of iface.alternates || []) {
+      const outEndpoint = (alternate.endpoints || []).find((endpoint: any) => endpoint.direction === 'out')
+      if (outEndpoint && alternate.interfaceClass === 7) {
+        return {
+          interfaceNumber: iface.interfaceNumber,
+          alternateSetting: alternate.alternateSetting || 0,
+          endpointNumber: outEndpoint.endpointNumber,
+        }
+      }
+    }
+  }
+
+  for (const iface of interfaces) {
+    for (const alternate of iface.alternates || []) {
+      const outEndpoint = (alternate.endpoints || []).find((endpoint: any) => endpoint.direction === 'out')
+      if (outEndpoint) {
+        return {
+          interfaceNumber: iface.interfaceNumber,
+          alternateSetting: alternate.alternateSetting || 0,
+          endpointNumber: outEndpoint.endpointNumber,
+        }
+      }
+    }
+  }
+
+  return null
 }
 
 function hexToBytes(hex: string): Uint8Array {

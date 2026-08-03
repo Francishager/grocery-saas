@@ -3,15 +3,15 @@ import { Download, FileText, Loader2, Printer, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { receiptsApi, type ReceiptPreview } from '@/lib/api'
 import {
+  BluetoothThermalPrinter,
   ThermalPrinter,
+  UsbThermalPrinter,
+  isBluetoothSupported,
   isDirectThermalPrintingAvailable,
   isSerialSupported,
+  isUsbSupported,
 } from '@/lib/thermalPrinter'
-import {
-  isAndroidReceiptPrinterBridgeAvailable,
-  printReceiptInBrowser,
-  printReceiptWithAndroidBridge,
-} from '@/lib/receiptPrint'
+import { printReceiptInBrowser } from '@/lib/receiptPrint'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency } from '@/lib/utils'
 
@@ -31,7 +31,6 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const { toast } = useToast()
   const pdfUrl = receiptsApi.getPdf(saleId)
   const directPrintAvailable = isDirectThermalPrintingAvailable()
-  const androidPrintBridgeAvailable = isAndroidReceiptPrinterBridgeAvailable()
 
   useEffect(() => {
     if (!showPreview || receipt || loadingReceipt) return
@@ -73,21 +72,77 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     }
   }
 
+  const connectDirectPrinter = async (allowPrompt: boolean) => {
+    const remembered = [
+      isUsbSupported() ? () => connectPrinter(new UsbThermalPrinter(), (printer) => printer.connectToKnownDevice()) : null,
+      isSerialSupported() ? () => connectPrinter(new ThermalPrinter(), (printer) => printer.connectToKnownPort()) : null,
+      isBluetoothSupported() ? () => connectPrinter(new BluetoothThermalPrinter(), (printer) => printer.connectToKnownDevice()) : null,
+    ].filter(Boolean) as Array<() => Promise<BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null>>
+
+    for (const connect of remembered) {
+      const printer = await connect()
+      if (printer) return printer
+    }
+
+    if (!allowPrompt) return null
+
+    const prompts = [
+      isUsbSupported() ? () => connectPrinter(new UsbThermalPrinter(), (printer) => printer.connect()) : null,
+      isSerialSupported() ? () => connectPrinter(new ThermalPrinter(), (printer) => printer.connect()) : null,
+      isBluetoothSupported() ? () => connectPrinter(new BluetoothThermalPrinter(), (printer) => printer.connect()) : null,
+    ].filter(Boolean) as Array<() => Promise<BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null>>
+
+    for (const connect of prompts) {
+      const printer = await connect()
+      if (printer) return printer
+    }
+
+    return null
+  }
+
+  const connectPrinter = async <T extends BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter>(
+    printer: T,
+    connect: (printer: T) => Promise<boolean>,
+  ): Promise<T | null> => {
+    try {
+      if (await connect(printer)) return printer
+    } catch {
+    }
+
+    await printer.disconnect()
+    return null
+  }
+
+  const directPrintErrorMessage = (error: any) => {
+    const message = String(error?.message || '').toLowerCase()
+    if (message.includes('permission') || message.includes('denied') || message.includes('notallowed')) {
+      return 'Printer permission was denied. Tap Print again, choose the printer, and allow access.'
+    }
+    if (message.includes('no compatible') || message.includes('no printer') || message.includes('notfound')) {
+      return 'No compatible direct printer was selected. Choose a USB, serial, or BLE Bluetooth thermal printer.'
+    }
+    return error?.message || 'Unable to connect to the printer.'
+  }
+
   const handlePrint = async () => {
-    if (androidPrintBridgeAvailable) {
+    if (directPrintAvailable) {
       setPrinting(true)
+      let printer: BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null = null
       try {
-        const opened = await printReceiptWithAndroidBridge(loadReceiptForPrint)
-        if (opened) {
-          toast({ title: 'Opening printer app', description: 'Choose your paired SP-58 printer in RawBT.' })
-        }
+        printer = await connectDirectPrinter(true)
+        if (!printer) throw new Error('No compatible printer was selected.')
+
+        const { commands } = await receiptsApi.getEscPos(saleId)
+        await printer.printFromCommands(commands)
+        toast({ title: 'Receipt printed successfully' })
       } catch (error: any) {
         toast({
           variant: 'destructive',
           title: 'Print failed',
-          description: error?.message || 'Failed to open the Android printer app.',
+          description: directPrintErrorMessage(error),
         })
       } finally {
+        await printer?.disconnect()
         setPrinting(false)
       }
       return
@@ -104,21 +159,23 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   }
 
   const handleDirectPrint = async () => {
-    if (!isSerialSupported()) {
+    if (!directPrintAvailable) {
       toast({
         variant: 'destructive',
         title: 'Not supported',
-        description: 'Use the main Print button on this device.',
+        description: 'Use the receipt preview and your system print service on this device.',
       })
       return
     }
 
     setConnectingPrinter(true)
-    let printer: ThermalPrinter | null = null
+    let printer: BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter | null = null
 
     try {
+      printer = await connectDirectPrinter(true)
+
       // Try serial (USB) first
-      if (isSerialSupported()) {
+      if (!printer && isSerialSupported()) {
         const serialPrinter = new ThermalPrinter()
         try {
           if (await serialPrinter.connectToKnownPort()) {
@@ -133,7 +190,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       }
 
       if (!printer) {
-        toast({ variant: 'destructive', title: 'No printer found', description: 'Select a USB/serial printer first.' })
+        toast({ variant: 'destructive', title: 'No printer found', description: 'Choose a USB, serial, or compatible Bluetooth printer.' })
         return
       }
 
@@ -142,11 +199,11 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       await printer.printFromCommands(commands)
 
       toast({ title: 'Receipt printed successfully' })
-    } catch {
+    } catch (error: any) {
       toast({
         variant: 'destructive',
         title: 'Direct print failed',
-        description: 'Use the main Print button on phones and tablets.',
+        description: directPrintErrorMessage(error),
       })
     } finally {
       await printer?.disconnect()
@@ -158,7 +215,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const printLabel = () => {
     if (connectingPrinter) return 'Connecting...'
     if (printing) return 'Printing...'
-    return 'Direct'
+    return 'Connect'
   }
 
   return (
@@ -172,21 +229,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
           className="flex items-center gap-1"
         >
           <Printer className="h-4 w-4" />
-          {printing && androidPrintBridgeAvailable ? 'Opening...' : 'Print'}
+          {printing ? 'Printing...' : 'Print'}
         </Button>
-
-        {directPrintAvailable && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDirectPrint}
-            disabled={printing || connectingPrinter}
-            className="flex items-center gap-1"
-          >
-            <Printer className="h-4 w-4" />
-            {printLabel()}
-          </Button>
-        )}
 
         <Button
           variant="ghost"
@@ -333,14 +377,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
             <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
               <Button variant="outline" size="sm" onClick={handlePrint} disabled={printing}>
                 <Printer className="mr-2 h-4 w-4" />
-                {printing && androidPrintBridgeAvailable ? 'Opening...' : 'Print'}
+                {printing ? 'Printing...' : 'Print'}
               </Button>
-              {directPrintAvailable && (
-                <Button variant="outline" size="sm" onClick={handleDirectPrint} disabled={printing || connectingPrinter}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  {printLabel()}
-                </Button>
-              )}
             </div>
           </div>
         </div>
