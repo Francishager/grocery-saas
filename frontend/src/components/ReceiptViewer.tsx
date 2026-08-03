@@ -75,8 +75,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
 
   const connectDirectPrinter = async (): Promise<DirectPrinter | null> => {
     const rememberedConnectors = [
-      isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connectToKnownPort(), true) : null,
       isUsbSupported() ? () => tryConnect(new UsbThermalPrinter(), (printer) => printer.connectToKnownDevice(), true) : null,
+      isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connectToKnownPort(), true) : null,
       isBluetoothSupported() ? () => tryConnect(new BluetoothThermalPrinter(), (printer) => printer.connectToKnownDevice(), true) : null,
     ].filter(Boolean) as Array<() => Promise<DirectPrinter | null>>
 
@@ -86,8 +86,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     }
 
     const promptConnectors = [
-      isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connect(), false) : null,
       isUsbSupported() ? () => tryConnect(new UsbThermalPrinter(), (printer) => printer.connect(), false) : null,
+      isSerialSupported() ? () => tryConnect(new ThermalPrinter(), (printer) => printer.connect(), false) : null,
       isBluetoothSupported() ? () => tryConnect(new BluetoothThermalPrinter(), (printer) => printer.connect(), false) : null,
     ].filter(Boolean) as Array<() => Promise<DirectPrinter | null>>
 

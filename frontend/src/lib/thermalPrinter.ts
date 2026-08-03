@@ -31,6 +31,20 @@ const BLUETOOTH_PRINTER_PROFILES = [
   },
 ]
 
+const USB_PRINTER_FILTERS = [
+  { classCode: 0x07 },
+  { classCode: 0xff },
+  { vendorId: 0x04b8 }, // Epson
+  { vendorId: 0x0416 },
+  { vendorId: 0x0483 },
+  { vendorId: 0x04f9 }, // Brother
+  { vendorId: 0x067b },
+  { vendorId: 0x0fe6 },
+  { vendorId: 0x1504 },
+  { vendorId: 0x1a86 },
+  { vendorId: 0x1fc9 },
+]
+
 export class ThermalPrinter {
   private port: any | null = null
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null
@@ -460,9 +474,10 @@ function getUsbApi(): any | null {
 
 async function requestUsbPrinterDevice(usb: any) {
   try {
-    return await usb.requestDevice({ filters: [{}] })
+    return await usb.requestDevice({ filters: USB_PRINTER_FILTERS })
   } catch (error: any) {
-    if (String(error?.message || '').toLowerCase().includes('filters')) {
+    const message = String(error?.message || '').toLowerCase()
+    if (message.includes('filters') || message.includes('no device selected')) {
       return usb.requestDevice({ filters: [] })
     }
     throw error
