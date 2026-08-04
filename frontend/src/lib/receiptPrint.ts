@@ -136,20 +136,28 @@ function baseHtml(content: string): string {
     <style>
       @page { size: 58mm auto; margin: 3mm; }
       * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; color: #000; background: #fff; }
-      body { font-family: "Courier New", Courier, monospace; font-size: 10px; line-height: 1.28; }
-      .receipt { width: 52mm; max-width: 100%; margin: 0 auto; overflow-wrap: anywhere; }
+      html, body { margin: 0; padding: 0; color: #050505; background: #fff; }
+      body {
+        font-family: "Courier New", Courier, monospace;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.35;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .receipt { width: 52mm; max-width: 100%; margin: 0 auto; overflow-wrap: anywhere; color: #050505; }
       .center { text-align: center; }
-      h1 { margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.15; }
-      p { margin: 1px 0; }
+      h1 { margin: 0 0 5px; font-family: Arial, sans-serif; font-size: 16px; font-weight: 800; line-height: 1.15; }
+      p { margin: 1px 0; font-weight: 600; }
       .logo { display: block; width: 40px; height: 40px; object-fit: contain; margin: 0 auto 4px; }
-      .dash { border-top: 1px dashed #000; margin: 7px 0; }
+      .dash { border-top: 1.5px dashed #000; margin: 8px 0; }
       .line { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin: 2px 0; }
-      .line strong { max-width: 29mm; text-align: right; white-space: normal; overflow-wrap: anywhere; }
+      .line span { font-weight: 700; }
+      .line strong { max-width: 29mm; text-align: right; white-space: normal; overflow-wrap: anywhere; font-weight: 800; }
       .item { margin: 0 0 6px; }
-      .item-name { font-weight: 700; overflow-wrap: anywhere; }
-      .total { border-top: 1px solid #000; margin-top: 5px; padding-top: 5px; font-size: 12px; }
-      .powered { font-size: 9px; }
+      .item-name { font-weight: 800; overflow-wrap: anywhere; }
+      .total { border-top: 1.5px solid #000; margin-top: 5px; padding-top: 5px; font-size: 13px; font-weight: 800; }
+      .powered { font-size: 9.5px; font-weight: 700; }
       @media screen {
         body { background: #f3f4f6; padding: 12px; }
         .receipt { background: #fff; padding: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); }

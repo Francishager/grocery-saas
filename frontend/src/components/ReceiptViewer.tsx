@@ -440,73 +440,73 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
               )}
 
               {!loadingReceipt && receipt && (
-                <div className="mx-auto w-full max-w-[340px] rounded-sm bg-white p-5 font-mono text-[13px] leading-relaxed text-slate-950 shadow">
-                  <div className="text-center">
+                <div className="mx-auto w-full max-w-[340px] rounded-sm bg-white p-5 font-mono text-[14px] font-semibold leading-6 text-zinc-950 shadow-xl ring-1 ring-zinc-300">
+                  <div className="text-center text-zinc-950">
                     {receipt.business.logo && (
                       <img src={receipt.business.logo} alt="Logo" className="mx-auto mb-2 h-16 w-16 rounded object-contain" />
                     )}
-                    <h2 className="font-sans text-lg font-bold">{receipt.business.name}</h2>
+                    <h2 className="font-sans text-xl font-extrabold">{receipt.business.name}</h2>
                     {receipt.business.address && <p>{receipt.business.address}</p>}
                     {receipt.business.phone && <p>Tel: {receipt.business.phone}</p>}
                     {receipt.business.email && <p>{receipt.business.email}</p>}
                     {receipt.branch?.name && <p>Branch: {receipt.branch.name}</p>}
                   </div>
 
-                  <div className="my-3 border-t border-dashed border-slate-400" />
+                  <div className="my-3 border-t border-dashed border-zinc-900" />
 
-                  <div className="space-y-1">
+                  <div className="space-y-1 text-zinc-950">
                     <div className="flex justify-between gap-3">
                       <span>Receipt</span>
-                      <span className="text-right">{receipt.receiptNo}</span>
+                      <span className="text-right font-bold">{receipt.receiptNo}</span>
                     </div>
                     <div className="flex justify-between gap-3">
                       <span>Date</span>
-                      <span className="text-right">{new Date(receipt.createdAt).toLocaleString()}</span>
+                      <span className="text-right font-bold">{new Date(receipt.createdAt).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between gap-3">
                       <span>Cashier</span>
-                      <span className="text-right">{receipt.cashier || '-'}</span>
+                      <span className="text-right font-bold">{receipt.cashier || '-'}</span>
                     </div>
                     <div className="flex justify-between gap-3">
                       <span>Payment</span>
-                      <span className="text-right uppercase">{receipt.paymentMethod}</span>
+                      <span className="text-right font-bold uppercase">{receipt.paymentMethod}</span>
                     </div>
                   </div>
 
-                  <div className="my-3 border-t border-dashed border-slate-400" />
+                  <div className="my-3 border-t border-dashed border-zinc-900" />
 
                   <div className="space-y-2">
                     {receipt.items.map((item) => (
                       <div key={item.id}>
-                        <p className="break-words font-semibold">{item.name}</p>
+                        <p className="break-words font-extrabold">{item.name}</p>
                         <div className="flex justify-between gap-3">
                           <span>{item.quantity} x {formatCurrency(item.price)}</span>
-                          <span>{formatCurrency(item.total)}</span>
+                          <span className="font-bold">{formatCurrency(item.total)}</span>
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  <div className="my-3 border-t border-dashed border-slate-400" />
+                  <div className="my-3 border-t border-dashed border-zinc-900" />
 
                   <div className="space-y-1">
                     <div className="flex justify-between gap-3">
                       <span>Subtotal</span>
-                      <span>{formatCurrency(receipt.subtotal)}</span>
+                      <span className="font-bold">{formatCurrency(receipt.subtotal)}</span>
                     </div>
                     {receipt.discount > 0 && (
                       <div className="flex justify-between gap-3">
                         <span>Discount</span>
-                        <span>{formatCurrency(receipt.discount)}</span>
+                        <span className="font-bold">{formatCurrency(receipt.discount)}</span>
                       </div>
                     )}
                     {receipt.tax > 0 && (
                       <div className="flex justify-between gap-3">
                         <span>Tax</span>
-                        <span>{formatCurrency(receipt.tax)}</span>
+                        <span className="font-bold">{formatCurrency(receipt.tax)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between gap-3 border-t border-slate-300 pt-2 text-base font-bold">
+                    <div className="flex justify-between gap-3 border-t border-zinc-900 pt-2 text-lg font-extrabold">
                       <span>Total</span>
                       <span>{formatCurrency(receipt.total)}</span>
                     </div>
@@ -514,17 +514,17 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                       <>
                         <div className="flex justify-between gap-3 pt-1">
                           <span>Amount Paid</span>
-                          <span>{formatCurrency(receipt.amountPaid)}</span>
+                          <span className="font-bold">{formatCurrency(receipt.amountPaid)}</span>
                         </div>
                         <div className="flex justify-between gap-3">
                           <span>Change</span>
-                          <span>{formatCurrency(receipt.changeGiven || 0)}</span>
+                          <span className="font-bold">{formatCurrency(receipt.changeGiven || 0)}</span>
                         </div>
                       </>
                     )}
                   </div>
 
-                  <div className="my-3 border-t border-dashed border-slate-400" />
+                  <div className="my-3 border-t border-dashed border-zinc-900" />
 
                   <div className="text-center">
                     {receipt.business.receiptHeader && <p className="mb-1">{receipt.business.receiptHeader}</p>}

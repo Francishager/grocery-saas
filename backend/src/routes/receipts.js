@@ -110,6 +110,8 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
       },
     });
 
+    doc.fillColor("black");
+
     if (!sale) return res.status(404).json({ error: "Sale not found" });
 
     // Get tenant info for receipt header
@@ -151,23 +153,23 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
     // Receipt Header
     doc.fontSize(14).font("Helvetica-Bold").text(tenant?.name || "Business", { align: "center" });
     doc.moveDown(0.3);
-    if (tenant?.address) doc.fontSize(8).font("Helvetica").text(tenant.address, { align: "center" });
+    if (tenant?.address) doc.fontSize(9).font("Helvetica-Bold").text(tenant.address, { align: "center" });
     // Phone + Email on same row
     const contactParts = [tenant?.phone ? `Tel: ${tenant.phone}` : "", tenant?.email || ""].filter(Boolean).join(" | ");
-    if (contactParts) doc.fontSize(8).text(contactParts, { align: "center" });
+    if (contactParts) doc.fontSize(9).font("Helvetica-Bold").text(contactParts, { align: "center" });
     // Branch on same row
-    if (sale.branch?.name) doc.fontSize(8).text(`Branch: ${sale.branch.name}`, { align: "center" });
+    if (sale.branch?.name) doc.fontSize(9).font("Helvetica-Bold").text(`Branch: ${sale.branch.name}`, { align: "center" });
     doc.moveDown(0.3);
 
     // Divider
-    doc.fontSize(8).text("-".repeat(40), { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text("-".repeat(40), { align: "center" });
     doc.moveDown(0.2);
 
     // Receipt info
     doc.fontSize(9).font("Helvetica-Bold").text(`RECEIPT: ${sale.receiptNo}`, { align: "center" });
-    doc.fontSize(8).font("Helvetica").text(`Date: ${new Date(sale.createdAt).toLocaleString()}`, { align: "center" });
-    doc.fontSize(8).text(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim(), { align: "center" });
-    doc.fontSize(8).text(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Date: ${new Date(sale.createdAt).toLocaleString()}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim(), { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`, { align: "center" });
     doc.moveDown(0.3);
 
     // Divider
@@ -175,9 +177,9 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
     doc.moveDown(0.2);
 
     // Items
-    doc.fontSize(8).font("Helvetica-Bold");
+    doc.fontSize(9).font("Helvetica-Bold");
     doc.text("ITEM                    QTY   PRICE   TOTAL", { align: "left" });
-    doc.font("Helvetica");
+    doc.font("Helvetica-Bold");
     doc.moveDown(0.1);
 
     for (const item of sale.items) {
@@ -185,7 +187,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
       const qty = String(item.quantity).padStart(4);
       const price = formatNum(item.price).padStart(7);
       const total = formatNum(item.total).padStart(8);
-      doc.fontSize(8).text(`${name}${qty}${price}${total}`);
+      doc.fontSize(8.5).text(`${name}${qty}${price}${total}`);
     }
 
     doc.moveDown(0.2);
@@ -193,20 +195,20 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
     doc.moveDown(0.2);
 
     // Totals
-    doc.fontSize(8).font("Helvetica");
+    doc.fontSize(9).font("Helvetica-Bold");
     doc.text(`Subtotal:${formatNum(sale.subtotal).padStart(32)}`);
     if (sale.discount > 0) doc.text(`Discount:${formatNum(sale.discount).padStart(31)}`);
     if (tenant?.taxEnabled && sale.tax > 0) doc.text(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(28)}`);
     else if (!tenant?.taxEnabled) doc.text(`Tax: 0.00`);
-    doc.fontSize(10).font("Helvetica-Bold").text(`TOTAL:${formatNum(sale.total).padStart(33)}`);
+    doc.fontSize(11).font("Helvetica-Bold").text(`TOTAL:${formatNum(sale.total).padStart(33)}`);
     if (sale.amountPaid != null) {
-      doc.fontSize(8).font("Helvetica").text(`Amount Paid:${formatNum(sale.amountPaid).padStart(26)}`);
+      doc.fontSize(9).font("Helvetica-Bold").text(`Amount Paid:${formatNum(sale.amountPaid).padStart(26)}`);
       doc.text(`Change:${formatNum(sale.changeGiven || 0).padStart(31)}`);
     }
     doc.moveDown(0.5);
 
     // Footer
-    doc.fontSize(8).font("Helvetica");
+    doc.fontSize(9).font("Helvetica-Bold");
     if (tenant?.receiptHeader) doc.text(tenant.receiptHeader, { align: "center" });
     doc.text("Thank you for your purchase!", { align: "center" });
     if (tenant?.receiptFooter) doc.text(tenant.receiptFooter, { align: "center" });
