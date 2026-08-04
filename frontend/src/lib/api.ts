@@ -807,6 +807,9 @@ export const settingsApi = {
   getTaxConfig: () =>
     api.get<any>('/api/settings/tax-config'),
 
+  getBusinessProfile: () =>
+    api.get<any>('/api/settings/business-profile'),
+
   update: (data: Record<string, any>) =>
     api.put<{ message: string; tenant: any }>('/api/settings', { body: data }),
 

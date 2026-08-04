@@ -12,7 +12,6 @@ import {
   isUsbSupported,
 } from '@/lib/thermalPrinter'
 import { printReceiptInBrowser } from '@/lib/receiptPrint'
-import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
 import {
   type PrintAgentPrinter,
   discoverPrintAgent,
@@ -77,19 +76,9 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       setReceipt(loadedReceipt)
       return loadedReceipt
     } catch (error: any) {
-      const fallbackReceipt = buildReceiptPreviewFromData({
-        id: saleId,
-        receiptNo,
-        business: { name: 'JibuSales' },
-        createdAt: new Date().toISOString(),
-        subtotal: 0,
-        discount: 0,
-        tax: 0,
-        total: 0,
-        items: [],
-      })
-      setReceipt(fallbackReceipt)
-      return fallbackReceipt
+      const message = error?.message || 'Failed to load receipt'
+      setReceiptError(message)
+      throw new Error(message)
     } finally {
       setLoadingReceipt(false)
     }

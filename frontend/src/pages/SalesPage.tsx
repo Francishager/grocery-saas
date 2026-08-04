@@ -179,7 +179,7 @@ export default function SalesPage() {
   const loadBusinessSettings = async () => {
     try {
       if (online) {
-        const data = await settingsApi.get()
+        const data = await settingsApi.getBusinessProfile()
         setBusinessSettings(data)
       } else {
         const local = await getLocalSettings()
@@ -190,6 +190,24 @@ export default function SalesPage() {
         const local = await getLocalSettings()
         setBusinessSettings(local)
       } catch {}
+    }
+  }
+
+  const ensureBusinessSettings = async () => {
+    if (businessSettings?.name || businessSettings?.businessName) return businessSettings
+
+    try {
+      const data = online ? await settingsApi.getBusinessProfile() : await getLocalSettings()
+      if (data) setBusinessSettings(data)
+      return data
+    } catch {
+      try {
+        const local = await getLocalSettings()
+        if (local) setBusinessSettings(local)
+        return local
+      } catch {
+        return null
+      }
     }
   }
 
@@ -206,7 +224,7 @@ export default function SalesPage() {
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
 
-  const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string) => {
+  const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string, settings = businessSettings) => {
     const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
     const lineCashDiscounts = cart.reduce((sum, item) => sum + (item.cashDiscount || 0), 0)
     const taxableAmount = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount)
@@ -220,13 +238,13 @@ export default function SalesPage() {
       id: saleId,
       receiptNo: receiptNoValue,
       business: {
-        name: businessSettings?.name || businessSettings?.businessName || 'JibuSales',
-        address: businessSettings?.address || null,
-        phone: businessSettings?.phone || null,
-        email: businessSettings?.email || null,
-        logo: businessSettings?.logo || null,
-        receiptHeader: businessSettings?.receiptHeader || businessSettings?.receipt_header || null,
-        receiptFooter: businessSettings?.receiptFooter || businessSettings?.receipt_footer || null,
+        name: settings?.name || settings?.businessName || 'Business',
+        address: settings?.address || null,
+        phone: settings?.phone || null,
+        email: settings?.email || null,
+        logo: settings?.logo || null,
+        receiptHeader: settings?.receiptHeader || settings?.receipt_header || null,
+        receiptFooter: settings?.receiptFooter || settings?.receipt_footer || null,
       },
       cashier: cashierName,
       paymentMethod: paymentMode,
@@ -247,8 +265,9 @@ export default function SalesPage() {
     })
   }
 
-  const openBrowserReceiptPreview = (saleId: string, receiptNoValue: string) => {
-    const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue)
+  const openBrowserReceiptPreview = async (saleId: string, receiptNoValue: string) => {
+    const settings = await ensureBusinessSettings()
+    const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue, settings)
     return printReceiptInBrowser(() => Promise.resolve(preview), receiptNoValue)
   }
 
@@ -269,7 +288,7 @@ export default function SalesPage() {
       }
 
       if (!isSerialSupported()) {
-        const opened = openBrowserReceiptPreview(saleId, finalReceiptNo)
+        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -286,7 +305,7 @@ export default function SalesPage() {
       }
 
       if (!printer) {
-        const opened = openBrowserReceiptPreview(saleId, finalReceiptNo)
+        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -301,7 +320,7 @@ export default function SalesPage() {
       const message = String(error?.message || '').toLowerCase()
       const fallback = message.includes('permission') || message.includes('denied') || message.includes('notallowed') || message.includes('serial') || message.includes('bluetooth') || message.includes('usb')
       if (fallback) {
-        const opened = openBrowserReceiptPreview(saleId, previewReceiptNo)
+        const opened = await openBrowserReceiptPreview(saleId, previewReceiptNo)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Auto print failed', description: 'Enable pop-ups to print the receipt.' })
         } else {

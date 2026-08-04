@@ -29,7 +29,7 @@ export function buildReceiptPreviewFromData(data: ReceiptPreviewFallback): Recei
     id: data.id || 'receipt-preview',
     receiptNo: data.receiptNo || 'Receipt',
     business: {
-      name: data.business?.name || 'JibuSales',
+      name: data.business?.name || 'Business',
       email: data.business?.email ?? null,
       phone: data.business?.phone ?? null,
       address: data.business?.address ?? null,

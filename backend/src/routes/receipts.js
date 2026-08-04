@@ -28,7 +28,7 @@ async function getReceiptData(req) {
   if (!sale) return null;
 
   const tenant = await prisma.tenant.findUnique({
-    where: { id: scope.tenantId },
+    where: { id: sale.tenantId || scope.tenantId },
     select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
   });
 
@@ -43,7 +43,7 @@ function receiptJson(data) {
     id: sale.id,
     receiptNo: sale.receiptNo,
     business: {
-      name: tenant?.name || "JibuSales",
+      name: tenant?.name || "Business",
       email: tenant?.email || null,
       phone: tenant?.phone || null,
       address: tenant?.address || null,
@@ -114,7 +114,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
 
     // Get tenant info for receipt header
     const tenant = await prisma.tenant.findUnique({
-      where: { id: scope.tenantId },
+      where: { id: sale.tenantId || scope.tenantId },
       select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
 
@@ -149,7 +149,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
     }
 
     // Receipt Header
-    doc.fontSize(14).font("Helvetica-Bold").text(tenant?.name || "JibuSales", { align: "center" });
+    doc.fontSize(14).font("Helvetica-Bold").text(tenant?.name || "Business", { align: "center" });
     doc.moveDown(0.3);
     if (tenant?.address) doc.fontSize(8).font("Helvetica").text(tenant.address, { align: "center" });
     // Phone + Email on same row
@@ -246,7 +246,7 @@ router.get("/:saleId/escpos", authenticateReceipt, requirePermission("canViewRec
     if (!sale) return res.status(404).json({ error: "Sale not found" });
 
     const tenant = await prisma.tenant.findUnique({
-      where: { id: scope.tenantId },
+      where: { id: sale.tenantId || scope.tenantId },
       select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
 
@@ -260,7 +260,7 @@ router.get("/:saleId/escpos", authenticateReceipt, requirePermission("canViewRec
     cmds.push("1B6101"); // ESC a 1
 
     // Header
-    cmds.push(escText(tenant?.name || "JibuSales", true));
+    cmds.push(escText(tenant?.name || "Business", true));
     if (tenant?.address) cmds.push(escText(tenant.address));
     // Phone + Email on same row
     const escContact = [tenant?.phone ? `Tel: ${tenant.phone}` : "", tenant?.email || ""].filter(Boolean).join(" | ");

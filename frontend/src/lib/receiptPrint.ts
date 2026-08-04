@@ -34,7 +34,7 @@ function writePrintWindow(printWindow: Window, html: string) {
 }
 
 function receiptHtml(receipt: ReceiptPreview): string {
-  const business = receipt.business || { name: 'JibuSales' }
+  const business = receipt.business || { name: 'Business' }
   const cashier = receipt.cashier || '-'
   const paymentMethod = receipt.paymentMethod || 'cash'
 
@@ -42,7 +42,7 @@ function receiptHtml(receipt: ReceiptPreview): string {
     <main class="receipt">
       <section class="center">
         ${business.logo ? `<img class="logo" src="${escapeAttr(business.logo)}" alt="Logo">` : ''}
-        <h1>${escapeHtml(business.name || 'JibuSales')}</h1>
+        <h1>${escapeHtml(business.name || 'Business')}</h1>
         ${business.address ? `<p>${escapeHtml(business.address)}</p>` : ''}
         ${business.phone ? `<p>Tel: ${escapeHtml(business.phone)}</p>` : ''}
         ${business.email ? `<p>${escapeHtml(business.email)}</p>` : ''}
@@ -111,7 +111,7 @@ function row(label: string, value: string, className = ''): string {
 function loadingHtml(receiptNo: string): string {
   return baseHtml(`
     <main class="receipt center">
-      <h1>JibuSales</h1>
+      <h1>Preparing receipt</h1>
       <p>Preparing ${escapeHtml(receiptNo)}...</p>
     </main>
   `)
