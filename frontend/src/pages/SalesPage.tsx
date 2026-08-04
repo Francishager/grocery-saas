@@ -14,6 +14,7 @@ import ReceiptViewer from '@/components/ReceiptViewer'
 import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
 import { isPrintAgentUnavailableError, printReceiptViaAgent } from '@/lib/printAgent'
 import { printReceiptInBrowser } from '@/lib/receiptPrint'
+import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
@@ -186,13 +187,53 @@ export default function SalesPage() {
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
 
-  const autoPrintReceipt = async (saleId: string) => {
+  const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string) => {
+    const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
+    const lineCashDiscounts = cart.reduce((sum, item) => sum + (item.cashDiscount || 0), 0)
+    const taxableAmount = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount)
+    const tax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
+    const total = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount + tax)
+    const amountPaidValue = amountPaid !== '' ? Number(amountPaid) : null
+    const changeGivenValue = amountPaidValue != null && changeDue > 0 ? changeDue : 0
+
+    return buildReceiptPreviewFromData({
+      id: saleId,
+      receiptNo: receiptNoValue,
+      business: { name: 'JibuSales' },
+      cashier: 'Current user',
+      paymentMethod: paymentMode,
+      createdAt: new Date().toISOString(),
+      subtotal,
+      discount: invoiceCashDiscount,
+      tax,
+      total,
+      amountPaid: amountPaidValue,
+      changeGiven: changeGivenValue,
+      items: cart.map((item) => ({
+        id: String(item.id),
+        name: item.product_name || item.name || 'Item',
+        quantity: item.qty,
+        price: item.selling_price,
+        total: item.selling_price * item.qty - (item.cashDiscount || 0),
+      })),
+    })
+  }
+
+  const openBrowserReceiptPreview = (saleId: string, receiptNoValue: string) => {
+    const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue)
+    return printReceiptInBrowser(() => Promise.resolve(preview), receiptNoValue)
+  }
+
+  const autoPrintReceipt = async (saleId: string, fallbackReceiptNo?: string) => {
     let printer: ThermalPrinter | null = null
+    const previewReceiptNo = fallbackReceiptNo || 'Receipt'
+
     try {
       const { commands, receiptNo } = await receiptsApi.getEscPos(saleId)
+      const finalReceiptNo = receiptNo || previewReceiptNo
 
       try {
-        await printReceiptViaAgent({ saleId, receiptNo, commands })
+        await printReceiptViaAgent({ saleId, receiptNo: finalReceiptNo, commands })
         toast({ title: 'Receipt sent to printer' })
         return
       } catch (error) {
@@ -200,7 +241,7 @@ export default function SalesPage() {
       }
 
       if (!isSerialSupported()) {
-        const opened = printReceiptInBrowser(() => receiptsApi.get(saleId), receiptNo)
+        const opened = openBrowserReceiptPreview(saleId, finalReceiptNo)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -217,7 +258,7 @@ export default function SalesPage() {
       }
 
       if (!printer) {
-        const opened = printReceiptInBrowser(() => receiptsApi.get(saleId), receiptNo)
+        const opened = openBrowserReceiptPreview(saleId, finalReceiptNo)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -232,7 +273,7 @@ export default function SalesPage() {
       const message = String(error?.message || '').toLowerCase()
       const fallback = message.includes('permission') || message.includes('denied') || message.includes('notallowed') || message.includes('serial') || message.includes('bluetooth') || message.includes('usb')
       if (fallback) {
-        const opened = printReceiptInBrowser(() => receiptsApi.get(saleId), 'Receipt')
+        const opened = openBrowserReceiptPreview(saleId, previewReceiptNo)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Auto print failed', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -354,7 +395,7 @@ export default function SalesPage() {
       setMobileProvider('')
       setPhoneNumber('')
       setTransactionId('')
-      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id))
+      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo)
       loadRecentSales()
       loadInventory()
     } catch (error: any) {
