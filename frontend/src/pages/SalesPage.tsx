@@ -13,6 +13,7 @@ import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
 import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
 import { isPrintAgentUnavailableError, printReceiptViaAgent } from '@/lib/printAgent'
+import { printReceiptInBrowser } from '@/lib/receiptPrint'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
@@ -198,7 +199,15 @@ export default function SalesPage() {
         if (!isPrintAgentUnavailableError(error)) throw error
       }
 
-      if (!isSerialSupported()) return
+      if (!isSerialSupported()) {
+        const opened = printReceiptInBrowser(() => receiptsApi.get(saleId), receiptNo)
+        if (!opened) {
+          toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
+        } else {
+          toast({ title: 'Browser print opened', description: 'Use the print dialog to complete the receipt print.' })
+        }
+        return
+      }
 
       const serialPrinter = new ThermalPrinter()
       if (await serialPrinter.connectToKnownPort()) {
@@ -207,11 +216,31 @@ export default function SalesPage() {
         await serialPrinter.disconnect()
       }
 
-      if (!printer) return
+      if (!printer) {
+        const opened = printReceiptInBrowser(() => receiptsApi.get(saleId), receiptNo)
+        if (!opened) {
+          toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
+        } else {
+          toast({ title: 'Browser print opened', description: 'Use the print dialog to complete the receipt print.' })
+        }
+        return
+      }
 
       await printer.printFromCommands(commands)
       toast({ title: 'Receipt printed' })
-    } catch {
+    } catch (error) {
+      const message = String(error?.message || '').toLowerCase()
+      const fallback = message.includes('permission') || message.includes('denied') || message.includes('notallowed') || message.includes('serial') || message.includes('bluetooth') || message.includes('usb')
+      if (fallback) {
+        const opened = printReceiptInBrowser(() => receiptsApi.get(saleId), 'Receipt')
+        if (!opened) {
+          toast({ variant: 'destructive', title: 'Auto print failed', description: 'Enable pop-ups to print the receipt.' })
+        } else {
+          toast({ title: 'Browser print opened', description: 'Use the print dialog to complete the receipt print.' })
+        }
+        return
+      }
+
       toast({
         variant: 'destructive',
         title: 'Auto print failed',

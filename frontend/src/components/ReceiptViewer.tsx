@@ -156,19 +156,39 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     return null
   }
 
+  const fallbackToBrowserPrint = (reason?: string) => {
+    const opened = printReceiptInBrowser(loadReceiptForPrint, receiptNo)
+    if (!opened) {
+      toast({
+        variant: 'destructive',
+        title: 'Pop-up blocked',
+        description: 'Enable pop-ups to print the receipt.',
+      })
+      return false
+    }
+
+    toast({
+      title: 'Browser print opened',
+      description: reason || 'Use the print dialog to complete the receipt print on this device.',
+    })
+    return true
+  }
+
   const handlePrint = async () => {
     setPrinting(true)
     let printer: DirectPrinter | null = null
 
     try {
-      if (await tryPrintViaAgent()) return
+      try {
+        if (await tryPrintViaAgent()) return
+      } catch (error: any) {
+        if (!shouldFallbackToBrowserPrint(error)) throw error
+        fallbackToBrowserPrint(fallbackDescription(error))
+        return
+      }
 
       if (!directPrintAvailable) {
-        toast({
-          variant: 'destructive',
-          title: 'Printer unavailable',
-          description: 'Open the JibuSales Print Agent on this device, or use Chrome/Edge with a supported direct printer.',
-        })
+        fallbackToBrowserPrint('No direct printer access is available on this device. Use the browser print dialog instead.')
         return
       }
 
@@ -180,6 +200,11 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
 
       await printWithPrinter(printer)
     } catch (error: any) {
+      if (shouldFallbackToBrowserPrint(error)) {
+        fallbackToBrowserPrint(fallbackDescription(error))
+        return
+      }
+
       toast({
         variant: 'destructive',
         title: 'Print failed',
@@ -198,6 +223,11 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     try {
       await printWithAgent(printer.id, agentBaseUrl || undefined)
     } catch (error: any) {
+      if (shouldFallbackToBrowserPrint(error)) {
+        fallbackToBrowserPrint(fallbackDescription(error))
+        return
+      }
+
       toast({
         variant: 'destructive',
         title: 'Print failed',
@@ -218,6 +248,11 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       if (!printer) return
       await printWithPrinter(printer)
     } catch (error: any) {
+      if (shouldFallbackToBrowserPrint(error)) {
+        fallbackToBrowserPrint(fallbackDescription(error))
+        return
+      }
+
       toast({
         variant: 'destructive',
         title: 'Print failed',
@@ -547,6 +582,38 @@ function printErrorMessage(error: any) {
     return agentPrintErrorMessage(error)
   }
   return directPrintErrorMessage(error)
+}
+
+function shouldFallbackToBrowserPrint(error: any): boolean {
+  if (isSelectionCancel(error)) return false
+
+  const message = String(error?.message || '').toLowerCase()
+  return message.includes('permission')
+    || message.includes('denied')
+    || message.includes('notallowed')
+    || message.includes('access denied')
+    || message.includes('not supported')
+    || message.includes('not writable')
+    || message.includes('requestdevice')
+    || message.includes('gatt')
+    || message.includes('serial')
+    || message.includes('bluetooth')
+    || message.includes('usb')
+    || message.includes('endpoint')
+    || message.includes('failed to fetch')
+    || message.includes('network')
+    || message.includes('print agent')
+}
+
+function fallbackDescription(error: any): string {
+  const message = String(error?.message || '').toLowerCase()
+  if (message.includes('print agent')) {
+    return 'The JibuSales Print Agent is unavailable on this device, so the browser print dialog will open instead.'
+  }
+  if (message.includes('permission') || message.includes('denied') || message.includes('notallowed')) {
+    return 'Direct printer access was blocked by the browser, so the browser print dialog will open instead.'
+  }
+  return 'Direct printer access is unavailable on this device, so the browser print dialog will open instead.'
 }
 
 function agentPrintErrorMessage(error: any) {
