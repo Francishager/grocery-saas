@@ -204,7 +204,7 @@ export default function SalesPage() {
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
-          toast({ title: 'Browser print opened', description: 'Use the print dialog to complete the receipt print.' })
+          toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
         }
         return
       }
@@ -221,7 +221,7 @@ export default function SalesPage() {
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
-          toast({ title: 'Browser print opened', description: 'Use the print dialog to complete the receipt print.' })
+          toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
         }
         return
       }
@@ -236,7 +236,7 @@ export default function SalesPage() {
         if (!opened) {
           toast({ variant: 'destructive', title: 'Auto print failed', description: 'Enable pop-ups to print the receipt.' })
         } else {
-          toast({ title: 'Browser print opened', description: 'Use the print dialog to complete the receipt print.' })
+          toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
         }
         return
       }

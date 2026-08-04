@@ -156,7 +156,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     return null
   }
 
-  const fallbackToBrowserPrint = (reason?: string) => {
+  const fallbackToBrowserPrint = () => {
     const opened = printReceiptInBrowser(loadReceiptForPrint, receiptNo)
     if (!opened) {
       toast({
@@ -168,8 +168,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     }
 
     toast({
-      title: 'Browser print opened',
-      description: reason || 'Use the print dialog to complete the receipt print on this device.',
+      title: 'Print dialog ready',
+      description: 'A browser print window has been opened. Use it to finish printing the receipt.',
     })
     return true
   }
@@ -183,25 +183,25 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
         if (await tryPrintViaAgent()) return
       } catch (error: any) {
         if (!shouldFallbackToBrowserPrint(error)) throw error
-        fallbackToBrowserPrint(fallbackDescription(error))
+        fallbackToBrowserPrint()
         return
       }
 
       if (!directPrintAvailable) {
-        fallbackToBrowserPrint('No direct printer access is available on this device. Use the browser print dialog instead.')
+        fallbackToBrowserPrint()
         return
       }
 
       printer = await connectRememberedPrinter()
       if (!printer) {
-        setShowPrinterPicker(true)
+        fallbackToBrowserPrint()
         return
       }
 
       await printWithPrinter(printer)
     } catch (error: any) {
       if (shouldFallbackToBrowserPrint(error)) {
-        fallbackToBrowserPrint(fallbackDescription(error))
+        fallbackToBrowserPrint()
         return
       }
 
@@ -224,7 +224,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       await printWithAgent(printer.id, agentBaseUrl || undefined)
     } catch (error: any) {
       if (shouldFallbackToBrowserPrint(error)) {
-        fallbackToBrowserPrint(fallbackDescription(error))
+        fallbackToBrowserPrint()
         return
       }
 
@@ -245,11 +245,14 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
 
     try {
       printer = await connectSelectedPrinter(choice)
-      if (!printer) return
+      if (!printer) {
+        fallbackToBrowserPrint()
+        return
+      }
       await printWithPrinter(printer)
     } catch (error: any) {
       if (shouldFallbackToBrowserPrint(error)) {
-        fallbackToBrowserPrint(fallbackDescription(error))
+        fallbackToBrowserPrint()
         return
       }
 
@@ -603,17 +606,6 @@ function shouldFallbackToBrowserPrint(error: any): boolean {
     || message.includes('failed to fetch')
     || message.includes('network')
     || message.includes('print agent')
-}
-
-function fallbackDescription(error: any): string {
-  const message = String(error?.message || '').toLowerCase()
-  if (message.includes('print agent')) {
-    return 'The JibuSales Print Agent is unavailable on this device, so the browser print dialog will open instead.'
-  }
-  if (message.includes('permission') || message.includes('denied') || message.includes('notallowed')) {
-    return 'Direct printer access was blocked by the browser, so the browser print dialog will open instead.'
-  }
-  return 'Direct printer access is unavailable on this device, so the browser print dialog will open instead.'
 }
 
 function agentPrintErrorMessage(error: any) {
