@@ -16,7 +16,7 @@ import { isPrintAgentUnavailableError, printReceiptViaAgent } from '@/lib/printA
 import { printReceiptInBrowser } from '@/lib/receiptPrint'
 import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
 import { useOnlineStatus } from '@/db/hooks'
-import { getLocalProducts, getLocalSales } from '@/db/hybrid'
+import { getLocalProducts, getLocalSales, getLocalSettings } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
 
@@ -31,7 +31,7 @@ interface RecentSale {
 }
 
 export default function SalesPage() {
-  const { hasPermission } = useJWTAuth()
+  const { hasPermission, user } = useJWTAuth()
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
@@ -57,6 +57,7 @@ export default function SalesPage() {
   const [scannerFailed, setScannerFailed] = useState(false)
   const [barcodeInput, setBarcodeInput] = useState('')
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
+  const [businessSettings, setBusinessSettings] = useState<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const ITEMS_PER_PAGE = 20
   const { toast } = useToast()
@@ -66,6 +67,7 @@ export default function SalesPage() {
     loadInventory()
     loadRecentSales()
     loadTaxConfig()
+    loadBusinessSettings()
   }, [])
 
   const filteredCategories = useMemo(() => {
@@ -174,6 +176,23 @@ export default function SalesPage() {
     } catch {}
   }
 
+  const loadBusinessSettings = async () => {
+    try {
+      if (online) {
+        const data = await settingsApi.get()
+        setBusinessSettings(data)
+      } else {
+        const local = await getLocalSettings()
+        setBusinessSettings(local)
+      }
+    } catch {
+      try {
+        const local = await getLocalSettings()
+        setBusinessSettings(local)
+      } catch {}
+    }
+  }
+
   const cartSubtotal = cart.reduce(
     (sum, item) => sum + item.selling_price * item.qty,
     0
@@ -195,12 +214,21 @@ export default function SalesPage() {
     const total = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount + tax)
     const amountPaidValue = amountPaid !== '' ? Number(amountPaid) : null
     const changeGivenValue = amountPaidValue != null && changeDue > 0 ? changeDue : 0
+    const cashierName = [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || user?.name || 'Cashier'
 
     return buildReceiptPreviewFromData({
       id: saleId,
       receiptNo: receiptNoValue,
-      business: { name: 'JibuSales' },
-      cashier: 'Current user',
+      business: {
+        name: businessSettings?.name || businessSettings?.businessName || 'JibuSales',
+        address: businessSettings?.address || null,
+        phone: businessSettings?.phone || null,
+        email: businessSettings?.email || null,
+        logo: businessSettings?.logo || null,
+        receiptHeader: businessSettings?.receiptHeader || businessSettings?.receipt_header || null,
+        receiptFooter: businessSettings?.receiptFooter || businessSettings?.receipt_footer || null,
+      },
+      cashier: cashierName,
       paymentMethod: paymentMode,
       createdAt: new Date().toISOString(),
       subtotal,
