@@ -12,6 +12,13 @@ import {
   isUsbSupported,
 } from '@/lib/thermalPrinter'
 import { printReceiptInBrowser } from '@/lib/receiptPrint'
+import {
+  type PrintAgentPrinter,
+  discoverPrintAgent,
+  getPrintAgentPrinters,
+  getStoredPrintAgentPrinterId,
+  printReceiptViaAgent,
+} from '@/lib/printAgent'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency } from '@/lib/utils'
 
@@ -31,6 +38,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const [receipt, setReceipt] = useState<ReceiptPreview | null>(null)
   const [loadingReceipt, setLoadingReceipt] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  const [agentBaseUrl, setAgentBaseUrl] = useState<string | null>(null)
+  const [agentPrinters, setAgentPrinters] = useState<PrintAgentPrinter[]>([])
   const { toast } = useToast()
   const pdfUrl = receiptsApi.getPdf(saleId)
   const directPrintAvailable = isDirectThermalPrintingAvailable()
@@ -108,6 +117,28 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     return tryConnect(new BluetoothThermalPrinter(), (printer) => printer.connect(), false)
   }
 
+  const tryPrintViaAgent = async (): Promise<boolean> => {
+    const agent = await discoverPrintAgent()
+    if (!agent) return false
+
+    setAgentBaseUrl(agent.baseUrl)
+    const printers = agent.printers?.length ? agent.printers : await getPrintAgentPrinters(agent.baseUrl)
+    setAgentPrinters(printers)
+
+    const storedPrinterId = getStoredPrintAgentPrinterId()
+    const selectedPrinter = printers.find((printer) => printer.id === storedPrinterId)
+      || printers.find((printer) => printer.isDefault && printer.isOnline !== false)
+      || printers.find((printer) => printer.isOnline !== false)
+
+    if (printers.length > 1 && !storedPrinterId) {
+      setShowPrinterPicker(true)
+      return true
+    }
+
+    await printWithAgent(selectedPrinter?.id, agent.baseUrl)
+    return true
+  }
+
   const tryConnect = async <T extends DirectPrinter>(
     printer: T,
     connect: (printer: T) => Promise<boolean>,
@@ -126,19 +157,21 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   }
 
   const handlePrint = async () => {
-    if (!directPrintAvailable) {
-      toast({
-        variant: 'destructive',
-        title: 'Direct print not supported',
-        description: 'Use Chrome or Edge to connect directly to USB, serial, or BLE Bluetooth receipt printers.',
-      })
-      return
-    }
-
     setPrinting(true)
     let printer: DirectPrinter | null = null
 
     try {
+      if (await tryPrintViaAgent()) return
+
+      if (!directPrintAvailable) {
+        toast({
+          variant: 'destructive',
+          title: 'Printer unavailable',
+          description: 'Open the JibuSales Print Agent on this device, or use Chrome/Edge with a supported direct printer.',
+        })
+        return
+      }
+
       printer = await connectRememberedPrinter()
       if (!printer) {
         setShowPrinterPicker(true)
@@ -150,10 +183,27 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       toast({
         variant: 'destructive',
         title: 'Print failed',
-        description: directPrintErrorMessage(error),
+        description: printErrorMessage(error),
       })
     } finally {
       await printer?.disconnect()
+      setPrinting(false)
+    }
+  }
+
+  const handleAgentPrinterChoice = async (printer: PrintAgentPrinter) => {
+    setShowPrinterPicker(false)
+    setPrinting(true)
+
+    try {
+      await printWithAgent(printer.id, agentBaseUrl || undefined)
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Print failed',
+        description: agentPrintErrorMessage(error),
+      })
+    } finally {
       setPrinting(false)
     }
   }
@@ -183,6 +233,28 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     const { commands } = await receiptsApi.getEscPos(saleId)
     await printer.printFromCommands(commands)
     toast({ title: 'Receipt printed successfully' })
+  }
+
+  const printWithAgent = async (printerId?: string, baseUrl?: string) => {
+    const [{ commands, receiptNo: generatedReceiptNo }, receiptData] = await Promise.all([
+      receiptsApi.getEscPos(saleId),
+      receipt ? Promise.resolve(receipt) : receiptsApi.get(saleId).catch(() => null),
+    ])
+
+    if (receiptData && !receipt) setReceipt(receiptData)
+
+    const result = await printReceiptViaAgent({
+      baseUrl,
+      printerId,
+      saleId,
+      receiptNo: generatedReceiptNo || receiptNo,
+      commands,
+      receipt: receiptData,
+    })
+
+    toast({
+      title: result.queued ? 'Receipt sent to printer queue' : 'Receipt sent to printer',
+    })
   }
 
   const handleSystemPrint = () => {
@@ -237,6 +309,38 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
               </Button>
             </div>
             <div className="grid gap-2 p-4">
+              {agentBaseUrl && (
+                <div className="grid gap-2">
+                  {agentPrinters.length > 0 ? (
+                    agentPrinters.map((printer) => (
+                      <Button
+                        key={printer.id}
+                        variant="outline"
+                        className="justify-start"
+                        onClick={() => handleAgentPrinterChoice(printer)}
+                        disabled={printing || printer.isOnline === false}
+                      >
+                        <Printer className="mr-2 h-4 w-4" />
+                        <span className="min-w-0 truncate">{printer.name}</span>
+                        {printer.connectionType && (
+                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{printer.connectionType}</span>
+                        )}
+                      </Button>
+                    ))
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="justify-start"
+                      onClick={() => handleAgentPrinterChoice({ id: '', name: 'Default printer' })}
+                      disabled={printing}
+                    >
+                      <Printer className="mr-2 h-4 w-4" />
+                      Default Print Agent Printer
+                    </Button>
+                  )}
+                  <div className="my-1 border-t" />
+                </div>
+              )}
               <Button
                 variant="outline"
                 className="justify-start"
@@ -435,4 +539,20 @@ function directPrintErrorMessage(error: any) {
     return `USB printer direct printing failed: ${error?.message || 'the printer interface could not be opened'}. If the same printer exposes a serial/COM option, choose that when prompted.`
   }
   return error?.message || 'Unable to connect to the printer.'
+}
+
+function printErrorMessage(error: any) {
+  const message = String(error?.message || '')
+  if (message.toLowerCase().includes('jibusales print agent')) {
+    return agentPrintErrorMessage(error)
+  }
+  return directPrintErrorMessage(error)
+}
+
+function agentPrintErrorMessage(error: any) {
+  const message = String(error?.message || '')
+  if (message.toLowerCase().includes('failed to fetch') || message.toLowerCase().includes('network')) {
+    return 'JibuSales Print Agent is not reachable. Open the Windows or Android Print Agent on this device and try again.'
+  }
+  return message || 'JibuSales Print Agent could not print this receipt.'
 }

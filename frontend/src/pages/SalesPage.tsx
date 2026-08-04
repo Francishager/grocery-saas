@@ -12,6 +12,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
 import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
+import { isPrintAgentUnavailableError, printReceiptViaAgent } from '@/lib/printAgent'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
@@ -185,10 +186,20 @@ export default function SalesPage() {
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
 
   const autoPrintReceipt = async (saleId: string) => {
-    if (!isSerialSupported()) return
-
     let printer: ThermalPrinter | null = null
     try {
+      const { commands, receiptNo } = await receiptsApi.getEscPos(saleId)
+
+      try {
+        await printReceiptViaAgent({ saleId, receiptNo, commands })
+        toast({ title: 'Receipt sent to printer' })
+        return
+      } catch (error) {
+        if (!isPrintAgentUnavailableError(error)) throw error
+      }
+
+      if (!isSerialSupported()) return
+
       const serialPrinter = new ThermalPrinter()
       if (await serialPrinter.connectToKnownPort()) {
         printer = serialPrinter
@@ -198,14 +209,13 @@ export default function SalesPage() {
 
       if (!printer) return
 
-      const { commands } = await receiptsApi.getEscPos(saleId)
       await printer.printFromCommands(commands)
       toast({ title: 'Receipt printed' })
     } catch {
       toast({
         variant: 'destructive',
         title: 'Auto print failed',
-        description: 'Open the receipt and use Print to choose the paired printer.',
+        description: 'Open the receipt and use Print to choose the station printer.',
       })
     } finally {
       await printer?.disconnect()

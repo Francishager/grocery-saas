@@ -507,7 +507,7 @@ async function requestUsbPrinterDevice(usb: any) {
     return await usb.requestDevice({ filters: USB_PRINTER_FILTERS })
   } catch (error: any) {
     const message = String(error?.message || '').toLowerCase()
-    if (message.includes('filters') || message.includes('no device selected')) {
+    if (message.includes('filters')) {
       return usb.requestDevice({ filters: [] })
     }
     throw error
