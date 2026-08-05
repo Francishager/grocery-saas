@@ -1015,6 +1015,7 @@ export interface ReceiptPreview {
   }
   branch?: BranchOption | null
   cashier?: string
+  customerName?: string | null
   paymentMethod: string
   createdAt: string
   subtotal: number

@@ -36,6 +36,7 @@ function writePrintWindow(printWindow: Window, html: string) {
 function receiptHtml(receipt: ReceiptPreview): string {
   const business = receipt.business || { name: 'Business' }
   const cashier = receipt.cashier || '-'
+  const customerName = receipt.customerName || ''
   const paymentMethod = receipt.paymentMethod || 'cash'
 
   return baseHtml(`

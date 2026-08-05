@@ -6,6 +6,7 @@ export interface ReceiptPreviewFallback {
   business?: Partial<ReceiptPreview['business']> & { name?: string }
   branch?: ReceiptPreview['branch']
   cashier?: string
+  customerName?: string
   paymentMethod?: string
   createdAt?: string
   subtotal?: number
@@ -39,6 +40,7 @@ export function buildReceiptPreviewFromData(data: ReceiptPreviewFallback): Recei
     },
     branch: data.branch ?? null,
     cashier: data.cashier || '-',
+    customerName: data.customerName ?? null,
     paymentMethod: data.paymentMethod || 'cash',
     createdAt: data.createdAt || new Date().toISOString(),
     subtotal: data.subtotal ?? 0,

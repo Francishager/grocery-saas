@@ -39,6 +39,7 @@ export default function SalesPage() {
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [transactionId, setTransactionId] = useState('')
+  const [customerName, setCustomerName] = useState('')
   const [invoiceCashDiscount, setInvoiceCashDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
   const [loading, setLoading] = useState(false)
@@ -224,7 +225,7 @@ export default function SalesPage() {
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
 
-  const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string, settings = businessSettings) => {
+  const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string, settings = businessSettings, customerName?: string) => {
     const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
     const lineCashDiscounts = cart.reduce((sum, item) => sum + (item.cashDiscount || 0), 0)
     const taxableAmount = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount)
@@ -253,6 +254,7 @@ export default function SalesPage() {
       discount: invoiceCashDiscount,
       tax,
       total,
+      customerName: customerName || undefined,
       amountPaid: amountPaidValue,
       changeGiven: changeGivenValue,
       items: cart.map((item) => ({
@@ -267,7 +269,7 @@ export default function SalesPage() {
 
   const openBrowserReceiptPreview = async (saleId: string, receiptNoValue: string) => {
     const settings = await ensureBusinessSettings()
-    const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue, settings)
+    const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue, settings, customerName)
     return printReceiptInBrowser(() => Promise.resolve(preview), receiptNoValue)
   }
 
@@ -429,6 +431,7 @@ export default function SalesPage() {
         mobileProvider: paymentMode === 'mobile_money' ? mobileProvider : undefined,
         phoneNumber: paymentMode === 'mobile_money' ? phoneNumber : undefined,
         transactionId: ['mobile_money', 'card'].includes(paymentMode) ? transactionId : undefined,
+        customerName: customerName?.trim() || undefined,
         amountPaid: amountPaid !== '' ? amountPaid : undefined,
         changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
       })
