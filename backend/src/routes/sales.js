@@ -238,7 +238,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, amountPaid, changeGiven } = req.body;
+    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, amountPaid, changeGiven } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
 
     const discountCheck = await checkDiscountPermission(req, userId, cart, cashDiscount);
@@ -275,6 +275,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
+          customerName: customerName?.trim() || null,
           amountPaid: amountPaid != null ? Number(amountPaid) : null,
           changeGiven: changeGiven != null ? Number(changeGiven) : null,
           items: { create: saleItems.map(({ baseQty, itemType, productName, ...rest }) => rest) },

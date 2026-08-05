@@ -401,6 +401,7 @@ export default function SalesPage() {
             conversionFactor: c.conversionFactor ?? null,
           })),
           paymentMethod: paymentMode,
+          customerName: customerName?.trim() || undefined,
           cashDiscount: invoiceCashDiscount,
           amountPaid: amountPaid !== '' ? amountPaid : undefined,
           changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
@@ -950,6 +951,15 @@ export default function SalesPage() {
                         onChange={(e) => setInvoiceCashDiscount(parseFloat(e.target.value) || 0)}
                         className="w-28 h-8 text-sm text-right"
                         placeholder="0"
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="text-sm font-medium">Customer Name (optional)</label>
+                      <Input
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="Walk-in / Customer name"
+                        className="w-full"
                       />
                     </div>
                     {cartTax > 0 && (

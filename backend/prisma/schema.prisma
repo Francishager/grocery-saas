@@ -780,6 +780,7 @@ model Sale {
   mobileProvider String?
   phoneNumber    String?
   transactionId  String?
+  customerName   String?
   amountPaid     Float?     // Amount customer paid (for cash change calculation)
   changeGiven    Float?     // Change given back to customer
   status        SaleStatus @default(completed)
