@@ -541,26 +541,84 @@ function formatValue(value: any, format?: string): string {
   }
 }
 
+function BreakdownList({ title, data }: { title: string; data?: Record<string, number> }) {
+  const entries = Object.entries(data || {}).filter(([, value]) => Number(value) > 0)
+  if (!entries.length) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-4">
+      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      <div className="space-y-2">
+        {entries.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">{label}</span>
+            <span className="font-medium">{formatCurrency(Number(value) || 0)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ExpenseCategoryBreakdown({ summary }: { summary: any }) {
+  const categories = Object.entries(summary?.byCategory || {})
+  if (!categories.length) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-4">
+      <h3 className="mb-3 text-sm font-semibold">Category Breakdown</h3>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {categories.map(([category, amount]) => (
+          <div key={category} className="rounded-lg border bg-background/70 p-3">
+            <p className="text-sm text-muted-foreground">{category}</p>
+            <p className="mt-1 font-semibold">{formatCurrency(Number(amount) || 0)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['columns'] }) {
   if (!data || data.length === 0) return <p className="text-center text-muted-foreground py-8">No data available for this report.</p>
   const rows = Array.isArray(data) ? data : [data]
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+  const startIndex = (page - 1) * pageSize
+  const visibleRows = rows.slice(startIndex, startIndex + pageSize)
   const cols = columns || Object.keys(rows[0]).map(k => ({ key: k, label: k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()), format: 'text' as const }))
+
+  useEffect(() => {
+    setPage(1)
+  }, [data])
+
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50">
-          <tr>
-            {cols.map(col => <th key={col.key} className="px-4 py-3 text-left font-medium text-muted-foreground">{col.label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className="border-t hover:bg-muted/30">
-              {cols.map(col => <td key={col.key} className="px-4 py-2">{formatValue(row[col.key], col.format)}</td>)}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>Showing {rows.length ? startIndex + 1 : 0}-{Math.min(startIndex + pageSize, rows.length)} of {rows.length} rows</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page === 1}>Previous</Button>
+          <span>Page {page} of {totalPages}</span>
+          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>Next</Button>
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              {cols.map(col => <th key={col.key} className="px-4 py-3 text-left font-medium text-muted-foreground">{col.label}</th>)}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, i) => (
+              <tr key={`${row.id || row.receiptNo || row.name || i}-${i}`} className="border-t hover:bg-muted/30">
+                {cols.map(col => <td key={col.key} className="px-4 py-2">{formatValue(row[col.key], col.format)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -1817,6 +1875,15 @@ export default function ReportsPage() {
                         ))}
                       </div>
                     )}
+                    {currentReport.id === 'salesDiscounts' && reportData?.summary && (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <BreakdownList title="By User" data={reportData.summary.byUser} />
+                        <BreakdownList title="By Branch" data={reportData.summary.byBranch} />
+                        <BreakdownList title="By Product" data={reportData.summary.byProduct} />
+                        <BreakdownList title="By Date" data={reportData.summary.byDate} />
+                      </div>
+                    )}
+                    {currentReport.id === 'financialExpense' && reportData?.summary?.byCategory && <ExpenseCategoryBreakdown summary={reportData.summary} />}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'summary' && (
