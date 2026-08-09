@@ -56,6 +56,7 @@ function receiptHtml(receipt: ReceiptPreview): string {
         ${row('Receipt', receipt.receiptNo)}
         ${row('Date', new Date(receipt.createdAt).toLocaleString())}
         ${row('Cashier', cashier)}
+        ${customerName ? row('Customer', customerName) : ''}
         ${row('Payment', paymentMethod.toUpperCase())}
       </section>
 
