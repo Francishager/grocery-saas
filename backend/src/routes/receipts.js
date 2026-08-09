@@ -39,7 +39,6 @@ async function getReceiptData(req) {
       items: { include: { product: true } },
       user: { select: { fname: true, lname: true } },
       branch: { select: { id: true, name: true } },
-      customer: { select: { id: true, name: true } },
     },
   });
 
@@ -74,7 +73,7 @@ function receiptJson(data) {
     },
     branch: sale.branch || null,
     cashier,
-    customerName: sale.customerName || sale.customer?.name || null,
+    customerName: sale.customerName || null,
     paymentMethod: sale.paymentMethod || "cash",
     createdAt: sale.createdAt,
     subtotal: sale.subtotal || 0,
@@ -129,8 +128,6 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
       },
     });
 
-    doc.fillColor("black");
-
     if (!sale) return res.status(404).json({ error: "Sale not found" });
 
     // Get tenant info for receipt header
@@ -140,6 +137,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     });
 
     const doc = new PDFDocument({ size: [226.77, 600], margin: 10 }); // 80mm thermal width
+    doc.fillColor("black");
     const chunks = [];
 
     doc.on("data", (chunk) => chunks.push(chunk));
@@ -188,8 +186,8 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     doc.fontSize(9).font("Helvetica-Bold").text(`RECEIPT: ${sale.receiptNo}`, { align: "center" });
     doc.fontSize(9).font("Helvetica-Bold").text(`Date: ${new Date(sale.createdAt).toLocaleString()}`, { align: "center" });
     doc.fontSize(9).font("Helvetica-Bold").text(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim(), { align: "center" });
-    if (sale.customerName || sale.customer?.name) {
-      doc.fontSize(9).font("Helvetica-Bold").text(`Customer: ${sale.customerName || sale.customer?.name}`, { align: "center" });
+    if (sale.customerName) {
+      doc.fontSize(9).font("Helvetica-Bold").text(`Customer: ${sale.customerName}`, { align: "center" });
     }
     doc.fontSize(9).font("Helvetica-Bold").text(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`, { align: "center" });
     doc.moveDown(0.3);
@@ -265,7 +263,6 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
         items: { include: { product: true } },
         user: { select: { fname: true, lname: true } },
         branch: { select: { id: true, name: true } },
-        customer: { select: { id: true, name: true } },
       },
     });
     if (!sale) return res.status(404).json({ error: "Sale not found" });
@@ -300,8 +297,8 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
     cmds.push(escText(`Receipt: ${sale.receiptNo}`));
     cmds.push(escText(`Date: ${new Date(sale.createdAt).toLocaleString()}`));
     cmds.push(escText(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim()));
-    if (sale.customerName || sale.customer?.name) {
-      cmds.push(escText(`Customer: ${sale.customerName || sale.customer?.name}`));
+    if (sale.customerName) {
+      cmds.push(escText(`Customer: ${sale.customerName}`));
     }
     cmds.push(escText(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`));
     cmds.push(escText(""));
