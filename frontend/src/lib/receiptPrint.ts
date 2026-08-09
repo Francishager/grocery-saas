@@ -16,7 +16,8 @@ export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo 
 
   loadReceipt()
     .then((receipt) => {
-      writePrintWindow(printWindow, receiptHtml(receipt))
+      const safeReceipt = normalizeReceipt(receipt)
+      writePrintWindow(printWindow, receiptHtml(safeReceipt))
       printWindow.focus()
       window.setTimeout(() => printWindow.print(), 250)
     })
@@ -25,6 +26,42 @@ export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo 
     })
 
   return true
+}
+
+function normalizeReceipt(receipt: Partial<ReceiptPreview> | null | undefined): ReceiptPreview {
+  const fallbackItems = Array.isArray(receipt?.items) && receipt.items.length ? receipt.items : [{ id: 'item-1', name: 'Item', quantity: 1, price: 0, total: 0 }]
+  return {
+    id: receipt?.id || 'receipt-preview',
+    receiptNo: receipt?.receiptNo || 'Receipt',
+    business: {
+      name: receipt?.business?.name || 'Business',
+      email: receipt?.business?.email ?? null,
+      phone: receipt?.business?.phone ?? null,
+      address: receipt?.business?.address ?? null,
+      logo: receipt?.business?.logo ?? null,
+      receiptHeader: receipt?.business?.receiptHeader ?? null,
+      receiptFooter: receipt?.business?.receiptFooter ?? null,
+    },
+    branch: receipt?.branch ?? null,
+    cashier: receipt?.cashier || '-',
+    customerName: receipt?.customerName ?? null,
+    paymentMethod: receipt?.paymentMethod || 'cash',
+    createdAt: receipt?.createdAt || new Date().toISOString(),
+    subtotal: Number(receipt?.subtotal || 0),
+    discount: Number(receipt?.discount || 0),
+    tax: Number(receipt?.tax || 0),
+    total: Number(receipt?.total || 0),
+    amountPaid: receipt?.amountPaid ?? null,
+    changeGiven: receipt?.changeGiven ?? null,
+    items: fallbackItems.map((item: any, index: number) => ({
+      id: item?.id || `item-${index}`,
+      name: item?.name || 'Item',
+      sku: item?.sku ?? null,
+      quantity: Number(item?.quantity || 0),
+      price: Number(item?.price || 0),
+      total: Number(item?.total || 0),
+    })),
+  }
 }
 
 function writePrintWindow(printWindow: Window, html: string) {
