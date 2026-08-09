@@ -176,42 +176,15 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
 
   const handlePrint = async () => {
     setPrinting(true)
-    let printer: DirectPrinter | null = null
-
     try {
-      try {
-        if (await tryPrintViaAgent()) return
-      } catch (error: any) {
-        if (!shouldFallbackToBrowserPrint(error)) throw error
-        fallbackToBrowserPrint()
-        return
-      }
-
-      if (!directPrintAvailable) {
-        fallbackToBrowserPrint()
-        return
-      }
-
-      printer = await connectRememberedPrinter()
-      if (!printer) {
-        fallbackToBrowserPrint()
-        return
-      }
-
-      await printWithPrinter(printer)
+      fallbackToBrowserPrint()
     } catch (error: any) {
-      if (shouldFallbackToBrowserPrint(error)) {
-        fallbackToBrowserPrint()
-        return
-      }
-
       toast({
         variant: 'destructive',
         title: 'Print failed',
-        description: printErrorMessage(error),
+        description: error?.message || 'Unable to open the browser receipt.',
       })
     } finally {
-      await printer?.disconnect()
       setPrinting(false)
     }
   }

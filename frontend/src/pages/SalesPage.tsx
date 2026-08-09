@@ -1,6 +1,6 @@
  import { useEffect, useState, useRef, useMemo } from 'react'
 import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown } from 'lucide-react'
-import { inventoryApi, salesApi, barcodeApi, receiptsApi, settingsApi, categoriesApi, type InventoryItem, type CartItem } from '@/lib/api'
+import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,8 +11,6 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
-import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
-import { isPrintAgentUnavailableError, printReceiptViaAgent } from '@/lib/printAgent'
 import { openReceiptPrintWindow, printReceiptInBrowser } from '@/lib/receiptPrint'
 import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
 import { useOnlineStatus } from '@/db/hooks'
@@ -274,70 +272,21 @@ export default function SalesPage() {
   }
 
   const autoPrintReceipt = async (saleId: string, fallbackReceiptNo?: string, printWindow?: Window | null) => {
-    let printer: ThermalPrinter | null = null
     const previewReceiptNo = fallbackReceiptNo || 'Receipt'
 
     try {
-      const { commands, receiptNo } = await receiptsApi.getEscPos(saleId)
-      const finalReceiptNo = receiptNo || previewReceiptNo
-
-      try {
-        await printReceiptViaAgent({ saleId, receiptNo: finalReceiptNo, commands })
-        toast({ title: 'Receipt sent to printer' })
-        return
-      } catch (error) {
-        if (!isPrintAgentUnavailableError(error)) throw error
-      }
-
-      if (!isSerialSupported()) {
-        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo, printWindow)
-        if (!opened) {
-          toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
-        } else {
-          toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
-        }
-        return
-      }
-
-      const serialPrinter = new ThermalPrinter()
-      if (await serialPrinter.connectToKnownPort()) {
-        printer = serialPrinter
+      const opened = await openBrowserReceiptPreview(saleId, previewReceiptNo, printWindow)
+      if (!opened) {
+        toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
       } else {
-        await serialPrinter.disconnect()
+        toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
       }
-
-      if (!printer) {
-        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo, printWindow)
-        if (!opened) {
-          toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
-        } else {
-          toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
-        }
-        return
-      }
-
-      await printer.printFromCommands(commands)
-      toast({ title: 'Receipt printed' })
     } catch (error) {
-      const message = String(error?.message || '').toLowerCase()
-      const fallback = message.includes('permission') || message.includes('denied') || message.includes('notallowed') || message.includes('serial') || message.includes('bluetooth') || message.includes('usb')
-      if (fallback) {
-        const opened = await openBrowserReceiptPreview(saleId, previewReceiptNo, printWindow)
-        if (!opened) {
-          toast({ variant: 'destructive', title: 'Auto print failed', description: 'Enable pop-ups to print the receipt.' })
-        } else {
-          toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
-        }
-        return
-      }
-
       toast({
         variant: 'destructive',
         title: 'Auto print failed',
-        description: 'Open the receipt and use Print to choose the station printer.',
+        description: error?.message || 'Unable to open the browser receipt.',
       })
-    } finally {
-      await printer?.disconnect()
     }
   }
 
@@ -348,6 +297,7 @@ export default function SalesPage() {
     }
 
     setProcessing(true)
+    const browserPrintWindow = openReceiptPrintWindow('Receipt')
 
     if (!online) {
       // Offline checkout — save locally, queue for sync
@@ -419,15 +369,15 @@ export default function SalesPage() {
         setTransactionId('')
         loadRecentSales()
         loadInventory()
+        void autoPrintReceipt(saleId, receiptNo, browserPrintWindow)
       } catch (error: any) {
+        browserPrintWindow?.close()
         toast({ variant: 'destructive', title: 'Offline checkout failed', description: error.message })
       } finally {
         setProcessing(false)
       }
       return
     }
-
-    const browserPrintWindow = openReceiptPrintWindow('Receipt')
 
     try {
       const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount, {
@@ -452,6 +402,7 @@ export default function SalesPage() {
       loadRecentSales()
       loadInventory()
     } catch (error: any) {
+      browserPrintWindow?.close()
       toast({
         variant: 'destructive',
         title: 'Checkout failed',

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import prisma from "../db.js";
-import { authenticateToken, requirePermission } from "../../middleware/auth.js";
+import { authenticateToken } from "../../middleware/auth.js";
 import { auditLog } from "../utils/audit.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
@@ -12,6 +12,23 @@ function authenticateReceipt(req, res, next) {
     req.headers.authorization = `Bearer ${req.query.token}`;
   }
   return authenticateToken(req, res, next);
+}
+
+function requireReceiptAccess(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+
+  const permissions = req.user.permissions || [];
+  const allowedPermissions = ["canViewReceipt", "canCreateReceipt", "canCreateSale", "canViewSale"];
+  if (permissions.includes("*") || allowedPermissions.some((permission) => permissions.includes(permission))) {
+    return next();
+  }
+
+  return res.status(403).json({
+    message: "Permission denied",
+    required: allowedPermissions.join(" or "),
+  });
 }
 
 async function getReceiptData(req) {
@@ -77,7 +94,7 @@ function receiptJson(data) {
   };
 }
 
-router.get("/:saleId", authenticateReceipt, requirePermission("canViewReceipt"), async (req, res) => {
+router.get("/:saleId", authenticateReceipt, requireReceiptAccess, async (req, res) => {
   try {
     const data = await getReceiptData(req);
     if (!data) return res.status(404).json({ error: "Sale not found" });
@@ -100,7 +117,7 @@ router.get("/:saleId", authenticateReceipt, requirePermission("canViewReceipt"),
 });
 
 // Generate PDF receipt for a sale
-router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceipt"), async (req, res) => {
+router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const sale = await prisma.sale.findFirst({
@@ -239,7 +256,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requirePermission("canViewReceip
 });
 
 // Get ESC/POS raw commands for thermal printing (sent via Web Serial API from frontend)
-router.get("/:saleId/escpos", authenticateReceipt, requirePermission("canViewReceipt"), async (req, res) => {
+router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const sale = await prisma.sale.findFirst({
