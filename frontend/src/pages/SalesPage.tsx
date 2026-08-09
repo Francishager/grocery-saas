@@ -13,7 +13,7 @@ import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
 import { ThermalPrinter, isSerialSupported } from '@/lib/thermalPrinter'
 import { isPrintAgentUnavailableError, printReceiptViaAgent } from '@/lib/printAgent'
-import { printReceiptInBrowser } from '@/lib/receiptPrint'
+import { openReceiptPrintWindow, printReceiptInBrowser } from '@/lib/receiptPrint'
 import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales, getLocalSettings } from '@/db/hybrid'
@@ -267,13 +267,13 @@ export default function SalesPage() {
     })
   }
 
-  const openBrowserReceiptPreview = async (saleId: string, receiptNoValue: string) => {
+  const openBrowserReceiptPreview = async (saleId: string, receiptNoValue: string, printWindow?: Window | null) => {
     const settings = await ensureBusinessSettings()
     const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue, settings, customerName)
-    return printReceiptInBrowser(() => Promise.resolve(preview), receiptNoValue)
+    return printReceiptInBrowser(() => Promise.resolve(preview), receiptNoValue, printWindow)
   }
 
-  const autoPrintReceipt = async (saleId: string, fallbackReceiptNo?: string) => {
+  const autoPrintReceipt = async (saleId: string, fallbackReceiptNo?: string, printWindow?: Window | null) => {
     let printer: ThermalPrinter | null = null
     const previewReceiptNo = fallbackReceiptNo || 'Receipt'
 
@@ -290,7 +290,7 @@ export default function SalesPage() {
       }
 
       if (!isSerialSupported()) {
-        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo)
+        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo, printWindow)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -307,7 +307,7 @@ export default function SalesPage() {
       }
 
       if (!printer) {
-        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo)
+        const opened = await openBrowserReceiptPreview(saleId, finalReceiptNo, printWindow)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -322,7 +322,7 @@ export default function SalesPage() {
       const message = String(error?.message || '').toLowerCase()
       const fallback = message.includes('permission') || message.includes('denied') || message.includes('notallowed') || message.includes('serial') || message.includes('bluetooth') || message.includes('usb')
       if (fallback) {
-        const opened = await openBrowserReceiptPreview(saleId, previewReceiptNo)
+        const opened = await openBrowserReceiptPreview(saleId, previewReceiptNo, printWindow)
         if (!opened) {
           toast({ variant: 'destructive', title: 'Auto print failed', description: 'Enable pop-ups to print the receipt.' })
         } else {
@@ -427,6 +427,8 @@ export default function SalesPage() {
       return
     }
 
+    const browserPrintWindow = openReceiptPrintWindow('Receipt')
+
     try {
       const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount, {
         mobileProvider: paymentMode === 'mobile_money' ? mobileProvider : undefined,
@@ -446,7 +448,7 @@ export default function SalesPage() {
       setMobileProvider('')
       setPhoneNumber('')
       setTransactionId('')
-      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo)
+      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo, browserPrintWindow)
       loadRecentSales()
       loadInventory()
     } catch (error: any) {

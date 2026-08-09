@@ -3,11 +3,21 @@ import { formatCurrency } from '@/lib/utils'
 
 type ReceiptLoader = ReceiptPreview | (() => Promise<ReceiptPreview>)
 
-export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo = 'Receipt'): boolean {
+export function openReceiptPrintWindow(receiptNo = 'Receipt'): Window | null {
   const printWindow = window.open('', '_blank', 'width=420,height=740')
-  if (!printWindow) return false
+  if (!printWindow) return null
 
   writePrintWindow(printWindow, loadingHtml(receiptNo))
+  return printWindow
+}
+
+export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo = 'Receipt', printWindow?: Window | null): boolean {
+  const targetWindow = printWindow ?? openReceiptPrintWindow(receiptNo)
+  if (!targetWindow) return false
+
+  if (!printWindow) {
+    writePrintWindow(targetWindow, loadingHtml(receiptNo))
+  }
 
   const loadReceipt =
     typeof receiptOrLoader === 'function'
@@ -17,12 +27,12 @@ export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo 
   loadReceipt()
     .then((receipt) => {
       const safeReceipt = normalizeReceipt(receipt)
-      writePrintWindow(printWindow, receiptHtml(safeReceipt))
-      printWindow.focus()
-      window.setTimeout(() => printWindow.print(), 250)
+      writePrintWindow(targetWindow, receiptHtml(safeReceipt))
+      targetWindow.focus()
+      window.setTimeout(() => targetWindow.print(), 250)
     })
     .catch((error) => {
-      writePrintWindow(printWindow, errorHtml(error?.message || 'Failed to load receipt'))
+      writePrintWindow(targetWindow, errorHtml(error?.message || 'Failed to load receipt'))
     })
 
   return true
