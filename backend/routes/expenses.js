@@ -740,6 +740,9 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
 
 // === STAFF TILL SHEET ===
 
+const STAFF_TILL_CREDIT_TYPES = new Set(['sale', 'receipt', 'income', 'journal_in', 'transfer_in'])
+const STAFF_TILL_DEBIT_TYPES = new Set(['expense', 'payment', 'transfer', 'journal_out', 'transfer_out'])
+
 // Get staff till sheet data — aggregates all cash transactions per staff member
 router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewStaffTillSheet'), requireTenant, async (req, res) => {
   try {
@@ -776,11 +779,17 @@ router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewSt
       }
     })
 
-    // Get all cash transactions for these users within the date range
+    const assignedCashAccountIds = [...new Set(users.map(u => u.cashAccountId).filter(Boolean))]
+    const userIds = users.map(u => u.id)
+
+    // Get cash transactions made by these users or affecting their assigned cash accounts.
     const transactions = await prisma.cashTransaction.findMany({
       where: {
         tenantId: req.tenant.id,
-        userId: { in: users.map(u => u.id) },
+        OR: [
+          { userId: { in: userIds } },
+          { accountId: { in: assignedCashAccountIds } }
+        ],
         ...dateFilter
       },
       include: {
@@ -791,15 +800,15 @@ router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewSt
 
     // Group transactions by user
     const tillSheets = users.map(user => {
-      const userTxns = transactions.filter(t => t.userId === user.id)
+      const userTxns = transactions.filter(t => t.accountId === user.cashAccountId || t.userId === user.id)
       const primaryBranch = user.branches?.find(b => b.isPrimary)?.branch || user.branches?.[0]?.branch || null
 
-      // Credited (money in): sales, receipts
-      const credited = userTxns.filter(t => ['sale', 'receipt', 'income'].includes(t.type))
+      // Credited (money in): sales, receipts, income, journal increases
+      const credited = userTxns.filter(t => STAFF_TILL_CREDIT_TYPES.has(t.type))
       const totalCredited = credited.reduce((sum, t) => sum + t.amount, 0)
 
-      // Debited (money out): expenses, payments
-      const debited = userTxns.filter(t => ['expense', 'payment', 'transfer'].includes(t.type))
+      // Debited (money out): expenses, payments, transfers, journal decreases
+      const debited = userTxns.filter(t => STAFF_TILL_DEBIT_TYPES.has(t.type))
       const totalDebited = debited.reduce((sum, t) => sum + t.amount, 0)
 
       // Group by type for breakdown

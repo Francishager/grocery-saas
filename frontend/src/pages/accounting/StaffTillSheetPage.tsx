@@ -41,6 +41,9 @@ interface Branch {
   name: string
 }
 
+const CREDIT_TXN_TYPES = new Set(['sale', 'receipt', 'income', 'journal_in', 'transfer_in'])
+const DEBIT_TXN_TYPES = new Set(['expense', 'payment', 'transfer', 'journal_out', 'transfer_out'])
+
 export default function StaffTillSheetPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -117,14 +120,16 @@ export default function StaffTillSheetPage() {
   const txnTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
       sale: 'Sale', receipt: 'Customer Payment', income: 'Income',
-      expense: 'Expense', payment: 'Supplier Payment', transfer: 'Transfer'
+      journal_in: 'Journal Transfer In', transfer_in: 'Transfer In',
+      expense: 'Expense', payment: 'Supplier Payment', transfer: 'Transfer',
+      journal_out: 'Journal Transfer Out', transfer_out: 'Transfer Out'
     }
     return labels[type] || type
   }
 
   const txnTypeColor = (type: string) => {
-    if (['sale', 'receipt', 'income'].includes(type)) return 'text-green-600'
-    if (['expense', 'payment', 'transfer'].includes(type)) return 'text-red-600'
+    if (CREDIT_TXN_TYPES.has(type)) return 'text-green-600'
+    if (DEBIT_TXN_TYPES.has(type)) return 'text-red-600'
     return ''
   }
 
@@ -316,14 +321,14 @@ export default function StaffTillSheetPage() {
                           <p className="text-xs text-muted-foreground">Transactions that added money to this account</p>
                           <div className="space-y-1 pt-1">
                             {Object.entries(till.breakdown)
-                              .filter(([type]) => ['sale', 'receipt', 'income'].includes(type))
+                              .filter(([type]) => CREDIT_TXN_TYPES.has(type))
                               .map(([type, data]) => (
                                 <div key={type} className="flex items-center justify-between text-xs">
                                   <span>{txnTypeLabel(type)}</span>
                                   <span className="font-mono font-semibold text-green-600">{fmt(data.total)}</span>
                                 </div>
                               ))}
-                            {Object.entries(till.breakdown).filter(([type]) => ['sale', 'receipt', 'income'].includes(type)).length === 0 && (
+                            {Object.entries(till.breakdown).filter(([type]) => CREDIT_TXN_TYPES.has(type)).length === 0 && (
                               <p className="text-xs text-muted-foreground italic">No credited transactions</p>
                             )}
                           </div>
@@ -346,14 +351,14 @@ export default function StaffTillSheetPage() {
                           <p className="text-xs text-muted-foreground">Transactions that removed money from this account</p>
                           <div className="space-y-1 pt-1">
                             {Object.entries(till.breakdown)
-                              .filter(([type]) => ['expense', 'payment', 'transfer'].includes(type))
+                              .filter(([type]) => DEBIT_TXN_TYPES.has(type))
                               .map(([type, data]) => (
                                 <div key={type} className="flex items-center justify-between text-xs">
                                   <span>{txnTypeLabel(type)}</span>
                                   <span className="font-mono font-semibold text-red-600">{fmt(data.total)}</span>
                                 </div>
                               ))}
-                            {Object.entries(till.breakdown).filter(([type]) => ['expense', 'payment', 'transfer'].includes(type)).length === 0 && (
+                            {Object.entries(till.breakdown).filter(([type]) => DEBIT_TXN_TYPES.has(type)).length === 0 && (
                               <p className="text-xs text-muted-foreground italic">No debited transactions</p>
                             )}
                           </div>
@@ -420,7 +425,7 @@ export default function StaffTillSheetPage() {
                                 ) : '—'}
                               </td>
                               <td className={`py-2 px-3 text-right font-mono font-semibold ${txnTypeColor(txn.type)}`}>
-                                {['sale', 'receipt', 'income'].includes(txn.type) ? '+' : '-'}{fmt(txn.amount)}
+                                {CREDIT_TXN_TYPES.has(txn.type) ? '+' : DEBIT_TXN_TYPES.has(txn.type) ? '-' : ''}{fmt(txn.amount)}
                               </td>
                               <td className="py-2 px-3 text-right font-mono">{fmt(txn.balanceAfter)}</td>
                             </tr>
