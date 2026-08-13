@@ -8,7 +8,7 @@
     "start": "node backend/src/app.js",
     "dev": "nodemon backend/src/app.js",
     "build": "npm run build:client && npm run build:server",
-    "build:client": "cd public && npm install && npm run build",
+    "build:client": "cd frontend && npm install && npm run build",
     "build:server": "npm install",
     "obfuscate:admin": "node scripts/obfuscate-admin.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"

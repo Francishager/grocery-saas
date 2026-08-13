@@ -91,6 +91,16 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   safe: 'Safe Account',
 }
 
+const PAYMENT_METHOD_PERMISSION_KEYS: Record<string, string> = {
+  cash: 'canUseCash',
+  safe: 'canUseCash',
+  mobile_money: 'canUseMobileMoney',
+  bank: 'canUseBank',
+  bank_transfer: 'canUseBank',
+  cheque: 'canUseBank',
+  card: 'canUseCard',
+}
+
 const ACCOUNT_CATEGORIES: Record<string, { code: string; name: string }[]> = {
   asset: [
     { code: '1100', name: 'Current Assets' },
@@ -126,7 +136,36 @@ const accountTypeColor: Record<string, string> = {
   expense: 'bg-orange-100 text-orange-800',
 }
 
-const buildAccountOptions = (accounts: Account[], typeFilter?: string) => {
+type AccountOption = { value: string; label: string; account: Account }
+
+const normalizeValue = (value?: string) => String(value || '').trim().toLowerCase()
+
+const getTransactionAccountType = (account: Account) => {
+  const subType = normalizeValue(account.subType)
+  if (subType.startsWith('transaction_')) return subType.replace('transaction_', '')
+  if (String(account.description || '').includes('cashAccount:')) return 'cash'
+  return null
+}
+
+const isTransactionAccount = (account: Account) => Boolean(getTransactionAccountType(account))
+
+const paymentPermissionKey = (paymentMethod?: string | null) => PAYMENT_METHOD_PERMISSION_KEYS[normalizeValue(paymentMethod || '')]
+
+const accountBalanceLabel = (account: Account) => `Balance: ${Number(account.balance || 0).toFixed(2)}`
+
+const transactionAccountMatchesMethod = (account: Account, paymentMethod?: string | null) => {
+  const type = getTransactionAccountType(account)
+  if (!type) return false
+  if (!paymentMethod) return true
+  if (paymentMethod === 'cash') return type === 'cash'
+  if (paymentMethod === 'safe') return type === 'safe' || type === 'cash'
+  if (paymentMethod === 'bank' || paymentMethod === 'bank_transfer' || paymentMethod === 'cheque') return type === 'bank'
+  if (paymentMethod === 'mobile_money') return type === 'mobile_money'
+  if (paymentMethod === 'card') return type === 'card'
+  return type === paymentMethod
+}
+
+const buildAccountOptions = (accounts: Account[], typeFilter?: string): AccountOption[] => {
   const matchesType = (account: Account) => {
     if (!typeFilter) return true
     if (typeFilter === 'income') return account.type === 'income' || account.type === 'revenue'
@@ -134,10 +173,14 @@ const buildAccountOptions = (accounts: Account[], typeFilter?: string) => {
     return account.type === typeFilter
   }
 
-  const flatten = (account: Account, depth = 0): Array<{ value: string; label: string }> => {
+  const flatten = (account: Account, depth = 0): AccountOption[] => {
     if (!matchesType(account)) return []
 
-    const items = [{ value: account.id, label: `${'— '.repeat(depth)}${account.code} - ${account.name}` }]
+    const prefix = '-- '.repeat(depth)
+    const label = isTransactionAccount(account)
+      ? `${prefix}${account.name} - ${accountBalanceLabel(account)}`
+      : `${prefix}${account.code} - ${account.name}`
+    const items = [{ value: account.id, label, account }]
     for (const child of account.children || []) {
       items.push(...flatten(child, depth + 1))
     }
@@ -280,7 +323,40 @@ export default function AccountingPage() {
     }
   }
 
-  const accountOptions = useMemo(() => buildAccountOptions(accounts), [accounts])
+  const canUsePaymentMethod = (paymentMethod: string) => {
+    const permissionKey = paymentPermissionKey(paymentMethod)
+    return !permissionKey || hasPermission(permissionKey)
+  }
+
+  const visibleAccounts = useMemo(() => (
+    accounts.filter(account => {
+      if (!account.isActive) return false
+      const transactionType = getTransactionAccountType(account)
+      if (!transactionType) return true
+      return canUsePaymentMethod(transactionType)
+    })
+  ), [accounts, hasPermission])
+
+  const accountOptions = useMemo(() => buildAccountOptions(visibleAccounts), [visibleAccounts])
+  const transactionAccounts = useMemo(() => (
+    visibleAccounts.filter(account => isTransactionAccount(account))
+  ), [visibleAccounts])
+  const allowedPaymentMethods = useMemo(() => (
+    PAYMENT_METHODS.filter(method => canUsePaymentMethod(method))
+  ), [hasPermission])
+  const paymentAccountOptions = useMemo(() => (
+    transactionAccounts
+      .filter(account => account.id !== jeAccount)
+      .filter(account => transactionAccountMatchesMethod(account, jePaymentMethod))
+      .map(account => ({ value: account.id, label: `${account.name} - ${accountBalanceLabel(account)}`, account }))
+  ), [transactionAccounts, jeAccount, jePaymentMethod])
+
+  const selectedMultipleJournalAccountIds = (currentIndex: number, currentField: 'debitAccount' | 'creditAccount') => new Set(
+    mjLines.flatMap((line, lineIndex) => [
+      lineIndex === currentIndex && currentField === 'debitAccount' ? '' : line.debitAccount,
+      lineIndex === currentIndex && currentField === 'creditAccount' ? '' : line.creditAccount,
+    ]).filter(Boolean)
+  )
 
   useEffect(() => {
     if (user?.branchId && !hasPermission('canViewBranch')) {
@@ -303,6 +379,23 @@ export default function AccountingPage() {
   useEffect(() => {
     if (activeTab === 'tax-management') fetchTaxPayments()
   }, [activeTab])
+
+  useEffect(() => {
+    if (allowedPaymentMethods.length > 0 && !allowedPaymentMethods.includes(jePaymentMethod)) {
+      setJePaymentMethod(allowedPaymentMethods[0])
+      setJePaymentAccount('')
+    }
+    if (allowedPaymentMethods.length === 0 && jePaymentMethod) {
+      setJePaymentMethod('')
+      setJePaymentAccount('')
+    }
+  }, [allowedPaymentMethods, jePaymentMethod])
+
+  useEffect(() => {
+    if (jePaymentAccount && !paymentAccountOptions.some(option => option.value === jePaymentAccount)) {
+      setJePaymentAccount('')
+    }
+  }, [jePaymentAccount, paymentAccountOptions])
 
   const handleCreateAccount = async () => {
     if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
@@ -401,6 +494,8 @@ export default function AccountingPage() {
   const handleSingleJournalSubmit = async () => {
     if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
     if (jeAccount === jePaymentAccount) return toast({ variant: 'destructive', title: 'Choose different debit and credit accounts' })
+    if (!jePaymentMethod || !canUsePaymentMethod(jePaymentMethod)) return toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
+    if (!paymentAccountOptions.some(option => option.value === jePaymentAccount)) return toast({ variant: 'destructive', title: 'Choose a permitted transaction account' })
     try {
       const amount = Number(jeAmount)
       if (!Number.isFinite(amount) || amount <= 0) {
@@ -450,11 +545,21 @@ export default function AccountingPage() {
   const handleMultipleJournalSubmit = async () => {
     const validLines = mjLines.filter(l => l.debitAccount && l.creditAccount && l.amount)
     if (!validLines.length) return toast({ variant: 'destructive', title: 'Add at least one valid line' })
+    const selectedAccountIds = validLines.flatMap(line => [line.debitAccount, line.creditAccount])
+    if (new Set(selectedAccountIds).size !== selectedAccountIds.length) {
+      return toast({ variant: 'destructive', title: 'Each account can only be selected once in the same multiple journal form' })
+    }
 
     try {
       for (const line of validLines) {
         const amount = Number(line.amount)
-        await apiFetch('/api/accounting/journal', {
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return toast({ variant: 'destructive', title: 'Enter a valid amount for every journal row' })
+        }
+        if (line.debitAccount === line.creditAccount) {
+          return toast({ variant: 'destructive', title: 'Debit and credit accounts must be different' })
+        }
+        const res = await apiFetch('/api/accounting/journal', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -466,12 +571,16 @@ export default function AccountingPage() {
             ],
           }),
         })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || 'Failed to post journal entry')
+        }
       }
       toast({ title: `${validLines.length} journal entries posted` })
       setMjLines([{ debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' }])
       fetchEntries(); fetchAccounts()
-    } catch {
-      toast({ variant: 'destructive', title: 'Failed to post journal entries' })
+    } catch (err) {
+      toast({ variant: 'destructive', title: err instanceof Error ? err.message : 'Failed to post journal entries' })
     }
   }
 
@@ -819,10 +928,13 @@ export default function AccountingPage() {
                 </div>
                 <div>
                   <Label>Account</Label>
-                  <Select value={jeAccount} onValueChange={setJeAccount}>
+                  <Select value={jeAccount} onValueChange={(value) => {
+                    setJeAccount(value)
+                    if (value === jePaymentAccount) setJePaymentAccount('')
+                  }}>
                     <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
                     <SelectContent>
-                      {accountOptions.map(option => (
+                      {accountOptions.filter(option => option.value !== jePaymentAccount).map(option => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -841,7 +953,9 @@ export default function AccountingPage() {
                   <Select value={jePaymentMethod} onValueChange={(v) => { setJePaymentMethod(v); setJePaymentAccount('') }}>
                     <SelectTrigger><SelectValue placeholder="Select payment method" /></SelectTrigger>
                     <SelectContent>
-                      {PAYMENT_METHODS.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)}
+                      {allowedPaymentMethods.length > 0
+                        ? allowedPaymentMethods.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)
+                        : <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>}
                     </SelectContent>
                   </Select>
                 </div>
@@ -852,23 +966,9 @@ export default function AccountingPage() {
                   <Select value={jePaymentAccount} onValueChange={setJePaymentAccount}>
                     <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
                     <SelectContent>
-                      {(() => {
-                        const filtered = accounts.filter(a => {
-                          if (!a.isActive) return false
-                          const sub = (a.subType || '').toLowerCase()
-                          const nm = (a.name || '').toLowerCase()
-                          if (jePaymentMethod === 'cash') return a.type === 'asset' && (sub.includes('cash') || nm.includes('cash') || sub.includes('safe') || nm.includes('safe'))
-                          if (jePaymentMethod === 'bank') return a.type === 'asset' && (sub.includes('bank') || nm.includes('bank'))
-                          if (jePaymentMethod === 'cheque') return a.type === 'asset' && (sub.includes('bank') || nm.includes('bank') || sub.includes('cheque') || nm.includes('cheque'))
-                          if (jePaymentMethod === 'mobile_money') return a.type === 'asset' && (sub.includes('mobile') || nm.includes('mobile'))
-                          if (jePaymentMethod === 'safe') return a.type === 'asset' && (sub.includes('safe') || nm.includes('safe') || sub.includes('cash') || nm.includes('cash'))
-                          return true
-                        })
-                        if (filtered.length > 0) {
-                          return filtered.map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)
-                        }
-                        return accounts.filter(a => a.isActive).map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)
-                      })()}
+                      {paymentAccountOptions.length > 0
+                        ? paymentAccountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)
+                        : <SelectItem value="no-transaction-accounts" disabled>No permitted transaction accounts</SelectItem>}
                     </SelectContent>
                   </Select>
                 </div>
@@ -910,21 +1010,31 @@ export default function AccountingPage() {
                 <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center rounded-lg border p-3">
                   <div>
                     <Select value={line.debitAccount} onValueChange={(v) => {
-                      const updated = [...mjLines]; updated[idx].debitAccount = v; setMjLines(updated)
+                      const updated = [...mjLines]
+                      updated[idx].debitAccount = v
+                      if (updated[idx].creditAccount === v) updated[idx].creditAccount = ''
+                      setMjLines(updated)
                     }}>
                       <SelectTrigger><SelectValue placeholder="Select DR account" /></SelectTrigger>
                       <SelectContent>
-                        {accountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                        {accountOptions
+                          .filter(option => option.value === line.debitAccount || !selectedMultipleJournalAccountIds(idx, 'debitAccount').has(option.value))
+                          .map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
                     <Select value={line.creditAccount} onValueChange={(v) => {
-                      const updated = [...mjLines]; updated[idx].creditAccount = v; setMjLines(updated)
+                      const updated = [...mjLines]
+                      updated[idx].creditAccount = v
+                      if (updated[idx].debitAccount === v) updated[idx].debitAccount = ''
+                      setMjLines(updated)
                     }}>
                       <SelectTrigger><SelectValue placeholder="Select CR account" /></SelectTrigger>
                       <SelectContent>
-                        {accountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                        {accountOptions
+                          .filter(option => option.value === line.creditAccount || !selectedMultipleJournalAccountIds(idx, 'creditAccount').has(option.value))
+                          .map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

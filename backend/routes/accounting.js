@@ -1,17 +1,85 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, getPaymentMethodPermissions } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
+const BALANCE_EPSILON = 0.01;
+const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
+const TRANSACTION_ACCOUNT_PERMISSION_KEYS = {
+  cash: "canUseCash",
+  safe: "canUseCash",
+  mobile_money: "canUseMobileMoney",
+  bank: "canUseBank",
+  bank_transfer: "canUseBank",
+  cheque: "canUseBank",
+  card: "canUseCard",
+};
 
 const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
 
 const linkedCashAccountId = (account) => {
   const match = String(account?.description || "").match(/cashAccount:([^\s]+)/);
   return match?.[1] || null;
+};
+
+const normalizeValue = (value) => String(value || "").trim().toLowerCase();
+
+const isDebitNormalAccount = (account) => DEBIT_NORMAL_ACCOUNT_TYPES.has(normalizeValue(account?.type));
+
+const journalLineBalanceDelta = (account, debit, credit) => {
+  return isDebitNormalAccount(account) ? debit - credit : credit - debit;
+};
+
+const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
+
+const formatAmount = (value) => Number(value || 0).toFixed(2);
+
+const transactionAccountPermissionKey = (cashAccountType) => {
+  return TRANSACTION_ACCOUNT_PERMISSION_KEYS[normalizeValue(cashAccountType)];
+};
+
+const canUseTransactionAccount = (req, cashAccountType) => {
+  const permissionKey = transactionAccountPermissionKey(cashAccountType);
+  if (!permissionKey) return false;
+  return Boolean(getPaymentMethodPermissions(req)[permissionKey]);
+};
+
+const normalizeJournalLines = (lines) => {
+  if (!Array.isArray(lines) || !lines.length) {
+    throw httpError(400, "Journal lines required");
+  }
+
+  return lines.map((line, index) => {
+    const debit = Number(line.debit || 0);
+    const credit = Number(line.credit || 0);
+    const lineNo = index + 1;
+
+    if (!line.accountId) {
+      throw httpError(400, `Select an account for journal line ${lineNo}`);
+    }
+    if (!Number.isFinite(debit) || !Number.isFinite(credit)) {
+      throw httpError(400, `Enter valid debit and credit amounts for journal line ${lineNo}`);
+    }
+    if (debit < 0 || credit < 0) {
+      throw httpError(400, `Negative debit or credit amounts are not allowed on journal line ${lineNo}`);
+    }
+    if (debit <= 0 && credit <= 0) {
+      throw httpError(400, `Enter either a debit or a credit amount on journal line ${lineNo}`);
+    }
+    if (debit > 0 && credit > 0) {
+      throw httpError(400, `Journal line ${lineNo} cannot have both debit and credit amounts`);
+    }
+
+    return {
+      accountId: line.accountId,
+      debit,
+      credit,
+      description: line.description || null,
+    };
+  });
 };
 
 async function ensureTransactionAccounts(tenantId, client = prisma) {
@@ -166,23 +234,70 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { date, description, reference, lines = [], branchId } = req.body;
 
-    if (!lines.length) return res.status(400).json({ error: "Journal lines required" });
+    const normalizedLines = normalizeJournalLines(lines);
+    const uniqueLineAccountIds = new Set(normalizedLines.map((line) => line.accountId));
+    if (uniqueLineAccountIds.size !== normalizedLines.length) {
+      return res.status(400).json({ error: "Each account can only be selected once in the same journal entry" });
+    }
+
     await ensureTransactionAccounts(tenantId);
 
-    const totalDebit = lines.reduce((sum, l) => sum + Number(l.debit || 0), 0);
-    const totalCredit = lines.reduce((sum, l) => sum + Number(l.credit || 0), 0);
+    const totalDebit = normalizedLines.reduce((sum, l) => sum + l.debit, 0);
+    const totalCredit = normalizedLines.reduce((sum, l) => sum + l.credit, 0);
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
       return res.status(400).json({ error: "Debits and credits must balance" });
     }
 
     const entryNo = `JE-${Date.now()}`;
 
-    const accountIds = [...new Set(lines.map((line) => line.accountId).filter(Boolean))];
+    const accountIds = [...uniqueLineAccountIds];
     const accounts = await prisma.account.findMany({ where: { tenantId, id: { in: accountIds } } });
     if (accounts.length !== accountIds.length) {
       return res.status(400).json({ error: "One or more accounts were not found" });
     }
     const accountsById = new Map(accounts.map((account) => [account.id, account]));
+    const linkedCashAccountIds = [...new Set(accounts.map(linkedCashAccountId).filter(Boolean))];
+    const cashAccounts = linkedCashAccountIds.length
+      ? await prisma.cashAccount.findMany({ where: { tenantId, id: { in: linkedCashAccountIds }, isActive: true } })
+      : [];
+    const cashAccountsById = new Map(cashAccounts.map((account) => [account.id, account]));
+    const accountDeltas = new Map();
+
+    for (const line of normalizedLines) {
+      const account = accountsById.get(line.accountId);
+      const delta = journalLineBalanceDelta(account, line.debit, line.credit);
+      accountDeltas.set(line.accountId, (accountDeltas.get(line.accountId) || 0) + delta);
+    }
+
+    for (const [accountId, delta] of accountDeltas) {
+      const account = accountsById.get(accountId);
+      const projectedBalance = Number(account.balance || 0) + delta;
+      if (delta < 0 && projectedBalance < -BALANCE_EPSILON) {
+        return res.status(400).json({
+          error: `Insufficient balance in ${account.name}. Available: ${formatAmount(account.balance)}, required: ${formatAmount(Math.abs(delta))}`,
+        });
+      }
+
+      const cashAccountId = linkedCashAccountId(account);
+      if (!cashAccountId) continue;
+
+      const cashAccount = cashAccountsById.get(cashAccountId);
+      if (!cashAccount) {
+        return res.status(400).json({ error: `Linked transaction account for ${account.name} was not found or is inactive` });
+      }
+      if (!canUseTransactionAccount(req, cashAccount.type)) {
+        return res.status(403).json({
+          error: `You do not have permission to use ${cashAccount.type} as a transaction account. Please contact your administrator.`,
+        });
+      }
+
+      const projectedCashBalance = Number(cashAccount.balance || 0) + delta;
+      if (delta < 0 && projectedCashBalance < -BALANCE_EPSILON) {
+        return res.status(400).json({
+          error: `Insufficient balance in ${cashAccount.name}. Available: ${formatAmount(cashAccount.balance)}, required: ${formatAmount(Math.abs(delta))}`,
+        });
+      }
+    }
 
     const entry = await prisma.$transaction(async (tx) => {
       const createdEntry = await tx.journalEntry.create({
@@ -196,11 +311,11 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
           status: "posted",
           userId: req.user.id,
           lines: {
-            create: lines.map((l) => ({
+            create: normalizedLines.map((l) => ({
               accountId: l.accountId,
-              debit: Number(l.debit || 0),
-              credit: Number(l.credit || 0),
-              description: l.description || null,
+              debit: l.debit,
+              credit: l.credit,
+              description: l.description,
             })),
           },
         },
@@ -210,13 +325,9 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
         },
       });
 
-      for (const line of lines) {
+      for (const line of normalizedLines) {
         const account = accountsById.get(line.accountId);
-        const debit = Number(line.debit || 0);
-        const credit = Number(line.credit || 0);
-        // Assets/expenses increase with debit, liabilities/equity/revenue increase with credit
-        const isDebitNormal = ["asset", "expense", "expenses"].includes(account.type);
-        const delta = isDebitNormal ? debit - credit : credit - debit;
+        const delta = journalLineBalanceDelta(account, line.debit, line.credit);
         await tx.account.update({
           where: { id: line.accountId },
           data: { balance: { increment: delta } },
@@ -250,6 +361,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
     res.status(201).json(entry);
   } catch (err) {
     console.error("Create journal entry error:", err);
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: "Failed to create journal entry" });
   }
 });

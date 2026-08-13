@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +14,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface Account {
   id: string
@@ -24,6 +25,7 @@ interface Account {
   balance: number
   isActive: boolean
   parentId?: string
+  description?: string
 }
 
 interface JournalEntry {
@@ -37,9 +39,37 @@ interface JournalEntry {
   lines: { id: string; accountId: string; account: { code: string; name: string; type: string }; debit: number; credit: number; description?: string }[]
 }
 
+const PAYMENT_METHOD_PERMISSION_KEYS: Record<string, string> = {
+  cash: 'canUseCash',
+  safe: 'canUseCash',
+  mobile_money: 'canUseMobileMoney',
+  bank: 'canUseBank',
+  bank_transfer: 'canUseBank',
+  cheque: 'canUseBank',
+  card: 'canUseCard',
+}
+
+const normalizeValue = (value?: string) => String(value || '').trim().toLowerCase()
+
+const getTransactionAccountType = (account: Account) => {
+  const subType = normalizeValue(account.subType)
+  if (subType.startsWith('transaction_')) return subType.replace('transaction_', '')
+  if (String(account.description || '').includes('cashAccount:')) return 'cash'
+  return null
+}
+
+const paymentPermissionKey = (paymentMethod?: string | null) => PAYMENT_METHOD_PERMISSION_KEYS[normalizeValue(paymentMethod || '')]
+
+const accountOptionLabel = (account: Account) => (
+  getTransactionAccountType(account)
+    ? `${account.name} - Balance: ${Number(account.balance || 0).toFixed(2)}`
+    : `${account.code} - ${account.name}`
+)
+
 export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
+  const { hasPermission } = useJWTAuth()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const { paginatedItems: paginatedEntries, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(entries, 10)
@@ -96,6 +126,18 @@ export default function AccountingPage() {
     fetchEntries()
   }, [])
 
+  const visibleAccounts = useMemo(() => accounts.filter(account => {
+    if (!account.isActive) return false
+    const transactionType = getTransactionAccountType(account)
+    if (!transactionType) return true
+    const permissionKey = paymentPermissionKey(transactionType)
+    return !permissionKey || hasPermission(permissionKey)
+  }), [accounts, hasPermission])
+
+  const journalAccountOptions = useMemo(() => (
+    visibleAccounts.map(account => ({ value: account.id, label: accountOptionLabel(account) }))
+  ), [visibleAccounts])
+
   const handleCreateAccount = async () => {
     if (!accCode || !accName) return toast({ variant: 'destructive', title: 'Code and name required' })
     try {
@@ -136,6 +178,10 @@ export default function AccountingPage() {
     if (!jeLines.length) return toast({ variant: 'destructive', title: 'Add at least one line' })
     if (!isBalanced) return toast({ variant: 'destructive', title: 'Debits and credits must balance' })
     if (jeLines.some((l) => !l.accountId)) return toast({ variant: 'destructive', title: 'Select account for all lines' })
+    const selectedAccountIds = jeLines.map((l) => l.accountId).filter(Boolean)
+    if (new Set(selectedAccountIds).size !== selectedAccountIds.length) {
+      return toast({ variant: 'destructive', title: 'Each account can only be selected once in the same journal entry' })
+    }
 
     try {
       const res = await apiFetch('/api/accounting/journal', {
@@ -282,7 +328,9 @@ export default function AccountingPage() {
                           <Select value={line.accountId} onValueChange={(v) => updateJournalLine(idx, 'accountId', v)}>
                             <SelectTrigger><SelectValue placeholder="Account" /></SelectTrigger>
                             <SelectContent>
-                              {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
+                              {journalAccountOptions
+                                .filter((option) => option.value === line.accountId || !jeLines.some((otherLine, otherIdx) => otherIdx !== idx && otherLine.accountId === option.value))
+                                .map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
