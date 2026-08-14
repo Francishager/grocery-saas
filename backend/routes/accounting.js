@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission, getPaymentMethodPermissions } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, getPaymentMethodPermissions, hasAccountingPermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 
@@ -16,6 +16,12 @@ const TRANSACTION_ACCOUNT_PERMISSION_KEYS = {
   bank_transfer: "canUseBank",
   cheque: "canUseBank",
   card: "canUseCard",
+};
+const PAYMENT_METHOD_PERMISSION_SELECT = {
+  canUseCash: true,
+  canUseMobileMoney: true,
+  canUseBank: true,
+  canUseCard: true,
 };
 
 const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
@@ -41,10 +47,36 @@ const transactionAccountPermissionKey = (cashAccountType) => {
   return TRANSACTION_ACCOUNT_PERMISSION_KEYS[normalizeValue(cashAccountType)];
 };
 
-const canUseTransactionAccount = (req, cashAccountType) => {
+async function paymentMethodPermissionsForRequest(req) {
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  if (permissions.includes("*")) return getPaymentMethodPermissions(req);
+
+  const permissionKeys = Object.values(TRANSACTION_ACCOUNT_PERMISSION_KEYS);
+  if (permissionKeys.some((key) => permissions.includes(key))) {
+    return getPaymentMethodPermissions(req);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      permissions: {
+        select: PAYMENT_METHOD_PERMISSION_SELECT,
+      },
+    },
+  });
+
+  return getPaymentMethodPermissions(req, user?.permissions);
+}
+
+const canUseTransactionAccount = async (req, cashAccountType) => {
+  if (hasAccountingPermission(req)) {
+    return true;
+  }
+
   const permissionKey = transactionAccountPermissionKey(cashAccountType);
   if (!permissionKey) return false;
-  return Boolean(getPaymentMethodPermissions(req)[permissionKey]);
+  const permissions = await paymentMethodPermissionsForRequest(req);
+  return Boolean(permissions[permissionKey]);
 };
 
 const normalizeJournalLines = (lines) => {
@@ -285,7 +317,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
       if (!cashAccount) {
         return res.status(400).json({ error: `Linked transaction account for ${account.name} was not found or is inactive` });
       }
-      if (!canUseTransactionAccount(req, cashAccount.type)) {
+      if (!(await canUseTransactionAccount(req, cashAccount.type))) {
         return res.status(403).json({
           error: `You do not have permission to use ${cashAccount.type} as a transaction account. Please contact your administrator.`,
         });

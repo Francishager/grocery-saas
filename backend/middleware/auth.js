@@ -205,6 +205,20 @@ export const requirePermission = (permission) => {
   };
 };
 
+export const hasAccountingPermission = (req) => {
+  if (!req?.user) return false;
+  const permissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
+
+  if (permissions.includes('*')) return true;
+
+  return [
+    'canViewAccounting',
+    'canCreateAccounting',
+    'canEditAccounting',
+    'canDeleteAccounting',
+  ].some((permission) => permissions.includes(permission));
+};
+
 /**
  * Tenant isolation - ensure user can only access their own tenant's data
  */
