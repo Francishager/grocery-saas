@@ -1021,7 +1021,7 @@ export default function AccountingPage() {
           </Dialog>
 
           <Dialog open={Boolean(selectedHistoryAccount)} onOpenChange={(open) => { if (!open) setSelectedHistoryAccount(null) }}>
-            <DialogContent className="flex max-h-[92vh] w-[calc(100vw-1rem)] max-w-6xl flex-col overflow-hidden p-3 sm:max-h-[88vh] sm:w-[calc(100vw-2rem)] sm:p-6">
+            <DialogContent className="flex max-h-[94vh] w-[96vw] max-w-[1700px] flex-col overflow-hidden p-3 sm:max-h-[90vh] sm:p-5 lg:p-6">
               <DialogHeader className="gap-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
@@ -1107,7 +1107,7 @@ export default function AccountingPage() {
                 )}
               </div>
               <div className="hidden min-h-0 overflow-auto rounded-lg border lg:block">
-                <table className="min-w-[1120px] w-full text-sm">
+                <table className="min-w-[1200px] w-full text-sm xl:min-w-[1400px]">
                   <thead className="sticky top-0 bg-background">
                     <tr className="border-b">
                       <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Date</th>
