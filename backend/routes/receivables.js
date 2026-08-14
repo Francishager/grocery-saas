@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, checkPaymentMethodPermission } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 
@@ -12,6 +12,43 @@ const prisma = new PrismaClient()
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
+  cash: { name: 'Cash Box', type: 'cash' },
+  mobile_money: { name: 'Mobile Money', type: 'mobile_money' },
+  bank_transfer: { name: 'Bank Account', type: 'bank' },
+  card: { name: 'Card Payments', type: 'card' }
+}
+
+const DEFAULT_CASH_ACCOUNTS = [
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash,
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.mobile_money,
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.bank_transfer,
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD.card
+]
+
+const accountForPaymentMethod = (paymentMethod) =>
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD[paymentMethod] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
+
+async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = prisma) {
+  const account = accountForPaymentMethod(paymentMethod)
+
+  return client.cashAccount.upsert({
+    where: {
+      tenantId_name: {
+        tenantId,
+        name: account.name
+      }
+    },
+    update: { type: account.type, isActive: true },
+    create: {
+      tenantId,
+      name: account.name,
+      type: account.type,
+      currency: 'UGX'
+    }
+  })
 }
 
 const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
@@ -524,7 +561,7 @@ router.get('/payments', authenticateToken, requirePermission('canViewReceivable'
 })
 
 // Record customer payment
-router.post('/payments', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, requireCashAccount, async (req, res) => {
+router.post('/payments', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -582,17 +619,24 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       }
     })
 
-    // Add to user's cash account (money coming in) and record transaction
-    if (req.userCashAccountId) {
+    // Resolve a cash account to record the incoming money. Prefer user's assigned account,
+    // fall back to a tenant default account for the payment method.
+    let accountToUseId = req.userCashAccountId || null
+    if (!accountToUseId) {
+      const acc = await cashAccountForPaymentMethod(req.tenant.id, resolvedPaymentMethod)
+      accountToUseId = acc?.id || null
+    }
+
+    if (accountToUseId) {
       const updatedAccount = await prisma.cashAccount.update({
-        where: { id: req.userCashAccountId },
+        where: { id: accountToUseId },
         data: { balance: { increment: paidAmount } }
       })
 
       await prisma.cashTransaction.create({
         data: {
           tenantId: req.tenant.id,
-          accountId: req.userCashAccountId,
+          accountId: accountToUseId,
           type: 'receipt',
           amount: paidAmount,
           balanceAfter: updatedAccount.balance,
@@ -601,6 +645,9 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           userId: req.user.id
         }
       })
+    } else {
+      // If no account available, still allow the payment but log a warning
+      console.warn('No cash account available to record customer payment; payment recorded without cash transaction')
     }
 
     // Allocate payment: apply to sale first (if provided), then apply remainder to customer balance.
