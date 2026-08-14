@@ -189,9 +189,10 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       if (userRec?.cashAccountId) resolvedCashAccountId = userRec.cashAccountId
     }
 
-    // Require a cash account: if none resolved, fail
+    // Fall back to a tenant-level default cash account for the payment method
     if (!resolvedCashAccountId) {
-      return res.status(400).json({ error: 'No cash account available for this transaction' })
+      const defaultAcc = await cashAccountForPaymentMethod(req.tenant.id, resolvedPaymentMethod)
+      resolvedCashAccountId = defaultAcc.id
     }
 
     // Validate sufficient balance
