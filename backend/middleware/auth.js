@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../src/db.js';
-import { resolveEffectivePermissions } from '../src/utils/permissions.js';
+import { resolveEffectivePermissions, ROLE_DEFAULTS } from '../src/utils/permissions.js';
 import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -51,12 +51,27 @@ export const authenticateToken = async (req, res, next) => {
     // - saas_admin: wildcard "*" (bypasses all checks)
     // - owner: feature-aware access based on the tenant subscription and overrides
     // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
-    const userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
+    let userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
     const tenantId = decoded.tenantId || decoded.tenant_id || decoded.business_id;
     const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
+
+    if (!userPerm) {
+      const defaultPermissions = ROLE_DEFAULTS[decoded.role] || ROLE_DEFAULTS.attendant || {};
+      userPerm = await prisma.userPermission.create({
+        data: {
+          userId: decoded.id,
+          ...defaultPermissions,
+        },
+      }).catch((createErr) => {
+        console.error('Failed to create missing userPermission row:', createErr);
+        return null;
+      });
+    }
+
     const permissions = resolveEffectivePermissions(decoded, userPerm, [], tenantFeatures);
 
     req.user = { ...decoded, permissions, tenantFeatures };
+    req.userPermissions = userPerm;
     req.tenantFeatures = tenantFeatures;
   } catch (fetchErr) {
     console.error('Permission lookup error:', fetchErr);
