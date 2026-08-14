@@ -165,6 +165,8 @@ export default function ReceivablesPage() {
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [transactionId, setTransactionId] = useState('')
+  const [cashAccounts, setCashAccounts] = useState<any[]>([])
+  const [selectedCashAccountId, setSelectedCashAccountId] = useState<string | null>(null)
   const [saleForm, setSaleForm] = useState({
     customerId: '',
     paymentMethod: 'credit',
@@ -195,6 +197,15 @@ export default function ReceivablesPage() {
   useEffect(() => {
     loadBusinessProfile()
   }, [])
+
+  useEffect(() => {
+    if (showPaymentModal) {
+      loadCashAccounts()
+    } else {
+      setCashAccounts([])
+      setSelectedCashAccountId(null)
+    }
+  }, [showPaymentModal])
 
   useEffect(() => {
     if (!creditEnabled) {
@@ -501,6 +512,27 @@ export default function ReceivablesPage() {
     }
   }
 
+  const loadCashAccounts = async () => {
+    try {
+      const response = await apiFetch('/api/expenses/cash-accounts')
+      if (response.ok) {
+        const data = await response.json()
+        setCashAccounts(data || [])
+        // Auto-select first account if only one available
+        if (data?.length === 1 && !selectedCashAccountId) {
+          setSelectedCashAccountId(data[0].id)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load cash accounts:', error)
+      toast({
+        title: 'Warning',
+        description: 'Could not load cash accounts. Please select one manually.',
+        variant: 'destructive'
+      })
+    }
+  }
+
   const openSaleModal = () => {
     setShowSaleModal(true)
     loadCustomerOptions()
@@ -620,6 +652,10 @@ export default function ReceivablesPage() {
       toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
       return
     }
+    if (!selectedCashAccountId) {
+      toast({ variant: 'destructive', title: 'Select a cash account to record the payment' })
+      return
+    }
 
     try {
       const response = await apiFetch('/api/receivables/payments', {
@@ -629,6 +665,7 @@ export default function ReceivablesPage() {
           saleId: selectedSale?.id,
           amount: parseFloat(paymentAmount),
           paymentMethod,
+          cashAccountId: selectedCashAccountId || undefined,
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
           transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
@@ -1234,19 +1271,17 @@ export default function ReceivablesPage() {
                   </div>
                   
                   <div className="mt-4 flex gap-2">
-                    {Number(customer.balance || 0) > 0 && (
-                      <Button 
-                        size="sm"
-                        onClick={() => {
-                          setSelectedCustomer(customer)
-                          setSelectedSale(null)
-                          setShowPaymentModal(true)
-                        }}
-                      >
-                        <DollarSign className="h-4 w-4 mr-1" />
-                        Record Payment
-                      </Button>
-                    )}
+                    <Button 
+                      size="sm"
+                      onClick={() => {
+                        setSelectedCustomer(customer)
+                        setSelectedSale(null)
+                        setShowPaymentModal(true)
+                      }}
+                    >
+                      <DollarSign className="h-4 w-4 mr-1" />
+                      Record Payment
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => setSelectedCustomerDetail(customer)}>
                       <Eye className="h-4 w-4 mr-1" />
                       View Details
@@ -1312,13 +1347,13 @@ export default function ReceivablesPage() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {Number(sale.balance || 0) > 0 && sale.customer && (
+                    {sale.customer && (
                       <Button
                         size="sm"
                         onClick={() => {
                           setSelectedCustomer(sale.customer)
                           setSelectedSale(sale)
-                          setPaymentAmount(String(sale.balance))
+                          setPaymentAmount(String(sale.balance || ''))
                           setShowPaymentModal(true)
                         }}
                       >
@@ -1751,7 +1786,6 @@ export default function ReceivablesPage() {
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
-                  max={Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0)}
                 />
               </div>
               
@@ -1822,6 +1856,21 @@ export default function ReceivablesPage() {
                   </div>
                 </div>
               )}
+
+              <div>
+                <Label htmlFor="cashAccount">Record To Cash Account</Label>
+                <Select value={selectedCashAccountId || ''} onValueChange={(v) => setSelectedCashAccountId(v || null)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select cash account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cashAccounts.map((acc) => (
+                      <SelectItem key={acc.id} value={acc.id}>{acc.name} — {acc.balance?.toFixed?.(2) ?? acc.balance}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Select the staff till or tenant account to record this payment.</p>
+              </div>
             </div>
             
             <div className="flex gap-2 justify-end">
@@ -1830,12 +1879,16 @@ export default function ReceivablesPage() {
                 onClick={() => {
                   setShowPaymentModal(false)
                   setSelectedSale(null)
+                  setSelectedCustomer(null)
+                  setPaymentAmount('')
+                  setSelectedCashAccountId(null)
                 }}
               >
                 Cancel
               </Button>
               <Button onClick={recordPayment} disabled={
                 !paymentAmount || parseFloat(paymentAmount) <= 0 ||
+                !selectedCashAccountId ||
                 (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
                 (paymentMethod === 'card' ? !transactionId.trim() : false)
               }>

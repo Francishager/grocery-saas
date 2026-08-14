@@ -568,7 +568,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId } = req.body
+    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
     const paidAmount = toMoney(amount)
     if (!customerId) return res.status(400).json({ error: 'Customer is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
@@ -619,12 +619,17 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       }
     })
 
-    // Resolve a cash account to record the incoming money. Prefer user's assigned account,
-    // fall back to a tenant default account for the payment method.
-    let accountToUseId = req.userCashAccountId || null
-    if (!accountToUseId) {
-      const acc = await cashAccountForPaymentMethod(req.tenant.id, resolvedPaymentMethod)
-      accountToUseId = acc?.id || null
+    // Resolve a cash account to record the incoming money. Require either an explicit
+    // `cashAccountId` in the request, or that the staff user has an assigned `req.userCashAccountId`.
+    let accountToUseId = null
+    if (cashAccountId) {
+      const account = await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId: req.tenant.id, isActive: true } })
+      if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
+      accountToUseId = account.id
+    } else if (req.userCashAccountId) {
+      accountToUseId = req.userCashAccountId
+    } else {
+      return res.status(400).json({ error: 'Staff must have an assigned cash account or provide cashAccountId to record the payment' })
     }
 
     if (accountToUseId) {
