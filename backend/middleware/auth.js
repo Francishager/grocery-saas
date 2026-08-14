@@ -349,13 +349,48 @@ export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) 
 
 /**
  * Check if the user has permission to use a specific payment method.
- * Must be called after requireCashAccount.
+ * Must be called after requireCashAccount or loadUserPermissions.
  */
 export const checkPaymentMethodPermission = (req, paymentMethod) => {
   const permKey = PAYMENT_METHOD_PERMISSION_MAP[paymentMethod];
   if (!permKey) return false;
 
   return Boolean(getPaymentMethodPermissions(req)[permKey]);
+};
+
+/**
+ * Load user permissions without requiring a cash account.
+ * Used when cash account is optional (e.g., expenses with fallback account resolution).
+ * Loads userPermissions for payment method gating in routes.
+ */
+export const loadUserPermissions = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  // Platform admins bypass
+  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
+    return next();
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        cashAccountId: true,
+        permissions: true,
+      },
+    });
+
+    if (user) {
+      req.userCashAccountId = user.cashAccountId;
+      req.userPermissions = Array.isArray(user.permissions) ? user.permissions[0] : user.permissions;
+    }
+  } catch (err) {
+    console.error('loadUserPermissions error:', err);
+  }
+
+  next();
 };
 
 export default {
@@ -369,6 +404,7 @@ export default {
   requireFeature,
   enforceTenantIsolation,
   requireCashAccount,
+  loadUserPermissions,
   checkPaymentMethodPermission,
   getPaymentMethodPermissions,
   canUseCashTransactions,

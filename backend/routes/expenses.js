@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission, getPaymentMethodPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, loadUserPermissions, checkPaymentMethodPermission, getPaymentMethodPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
@@ -130,7 +130,7 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
+router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
