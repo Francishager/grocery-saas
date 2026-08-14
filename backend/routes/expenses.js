@@ -130,7 +130,7 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, requireCashAccount, async (req, res) => {
+router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -174,8 +174,8 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       })
     }
 
-    // Use user's assigned cash account as default, or the explicitly selected one
-    let resolvedCashAccountId = req.userCashAccountId || null
+    // Determine cash account: prefer explicitly selected, then user's assigned, then tenant default for method
+    let resolvedCashAccountId = null
     if (cashAccountId) {
       // Verify the selected account belongs to tenant and is active
       const account = await prisma.cashAccount.findFirst({
@@ -183,8 +183,13 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       })
       if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
       resolvedCashAccountId = account.id
+    } else {
+      // Try to use the user's assigned cash account if present
+      const userRec = await prisma.user.findUnique({ where: { id: req.user.id }, select: { cashAccountId: true } })
+      if (userRec?.cashAccountId) resolvedCashAccountId = userRec.cashAccountId
     }
 
+    // Require a cash account: if none resolved, fail
     if (!resolvedCashAccountId) {
       return res.status(400).json({ error: 'No cash account available for this transaction' })
     }
