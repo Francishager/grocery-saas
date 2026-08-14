@@ -188,14 +188,31 @@ export const optionalAuth = (req, res, next) => {
  * Check specific permission
  */
 export const requirePermission = (permission) => {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    const permissions = req.user.permissions || [];
-    if (permissions.includes(permission) || permissions.includes('*')) {
+    const fallbackPermissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
+    const hasDirectAccess = fallbackPermissions.includes(permission) || fallbackPermissions.includes('*');
+    if (hasDirectAccess) {
       return next();
+    }
+
+    try {
+      const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+      const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
+      const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+      const effectivePermissions = resolveEffectivePermissions(req.user, userPerm, [], tenantFeatures);
+
+      req.user.permissions = effectivePermissions;
+      req.userPermissions = userPerm;
+
+      if (effectivePermissions.includes(permission) || effectivePermissions.includes('*')) {
+        return next();
+      }
+    } catch (err) {
+      console.error('requirePermission fallback error:', err);
     }
 
     return res.status(403).json({ 
@@ -361,6 +378,17 @@ export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) 
   };
 };
 
+export const resolveReqPermissions = async (req) => {
+  if (!req?.user) return [];
+  const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+  const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
+  const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+  const effectivePermissions = resolveEffectivePermissions(req.user, userPerm, [], tenantFeatures);
+  req.user.permissions = effectivePermissions;
+  req.userPermissions = userPerm;
+  return effectivePermissions;
+};
+
 /**
  * Check if the user has permission to use a specific payment method.
  * Must be called after requireCashAccount or loadUserPermissions.
@@ -368,6 +396,10 @@ export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) 
 export const checkPaymentMethodPermission = (req, paymentMethod) => {
   const permKey = PAYMENT_METHOD_PERMISSION_MAP[paymentMethod];
   if (!permKey) return false;
+
+  if (hasAccountingPermission(req)) {
+    return true;
+  }
 
   return Boolean(getPaymentMethodPermissions(req)[permKey]);
 };
