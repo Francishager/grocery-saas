@@ -561,9 +561,8 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
         where: scopedWhere(scope, { id: saleId, customerId })
       })
       if (!sale) return res.status(404).json({ error: 'Sale not found for this customer' })
-      if (paidAmount > sale.balance) return res.status(400).json({ error: 'Payment exceeds sale balance' })
-    } else if (paidAmount > customer.balance) {
-      return res.status(400).json({ error: 'Payment exceeds customer balance' })
+      // Allow payment amounts larger than the sale balance. We'll allocate to the sale first,
+      // then apply any remainder to the customer's balance (resulting in a negative balance i.e. credit).
     }
 
     // Create payment
@@ -604,17 +603,13 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       })
     }
 
-    // Update customer balance
-    const newBalance = Math.max(0, customer.balance - paidAmount)
-    await prisma.customer.update({
-      where: { id: customerId },
-      data: { balance: newBalance }
-    })
+    // Allocate payment: apply to sale first (if provided), then apply remainder to customer balance.
+    let remaining = paidAmount
 
-    // Update sale payment status if fully paid
     if (sale) {
-      const newAmountPaid = Math.min(sale.total, sale.amountPaid + paidAmount)
-      const newSaleBalance = Math.max(0, sale.balance - paidAmount)
+      const allocateToSale = Math.min(remaining, sale.balance)
+      const newAmountPaid = Math.min(sale.total, (sale.amountPaid || 0) + allocateToSale)
+      const newSaleBalance = Math.max(0, sale.balance - allocateToSale)
 
       await prisma.saleRecord.update({
         where: { id: saleId },
@@ -624,7 +619,17 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           paymentStatus: newSaleBalance <= 0 ? 'paid' : 'partial'
         }
       })
+
+      remaining = Math.round((remaining - allocateToSale) * 100) / 100
     }
+
+    // Apply any remaining amount to customer balance. Allow negative balances (customer credit) so
+    // future receivables can be deducted from this prepayment.
+    const newBalance = Math.round(((customer.balance || 0) - remaining) * 100) / 100
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { balance: newBalance }
+    })
 
     res.status(201).json(payment)
   } catch (error) {
