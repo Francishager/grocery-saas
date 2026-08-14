@@ -35,7 +35,7 @@ interface Account {
 interface JournalLine {
   id: string
   accountId: string
-  account?: { code: string; name: string; type: string }
+  account?: { id: string; code: string; name: string; type: string }
   debit: number
   credit: number
   description?: string
@@ -137,8 +137,27 @@ const accountTypeColor: Record<string, string> = {
 }
 
 type AccountOption = { value: string; label: string; account: Account }
+type AccountHistoryRow = {
+  entry: JournalEntry
+  line: JournalLine
+  account: Account | null
+  debit: number
+  credit: number
+  delta: number
+  runningBalance: number
+  counterpartAccounts: string
+}
 
 const normalizeValue = (value?: string) => String(value || '').trim().toLowerCase()
+const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(['asset', 'expense', 'expenses'])
+
+const isDebitNormalAccount = (account?: Pick<Account, 'type'> | null) => (
+  DEBIT_NORMAL_ACCOUNT_TYPES.has(normalizeValue(account?.type))
+)
+
+const accountBalanceDelta = (account: Pick<Account, 'type'> | null | undefined, debit: number, credit: number) => (
+  isDebitNormalAccount(account) ? debit - credit : credit - debit
+)
 
 const getTransactionAccountType = (account: Account) => {
   const subType = normalizeValue(account.subType)
@@ -194,6 +213,32 @@ const buildAccountOptions = (accounts: Account[], typeFilter?: string): AccountO
   return accounts.flatMap((account) => flatten(account))
 }
 
+const flattenAccountTree = (accountList: Account[]): Account[] => {
+  const flattened: Account[] = []
+  const seen = new Set<string>()
+
+  const visit = (account: Account) => {
+    if (!account?.id || seen.has(account.id)) return
+    seen.add(account.id)
+    flattened.push(account)
+    for (const child of account.children || []) visit(child)
+  }
+
+  accountList.forEach(visit)
+  return flattened
+}
+
+const collectAccountIds = (account: Account | null): Set<string> => {
+  const ids = new Set<string>()
+  const visit = (current?: Account | null) => {
+    if (!current?.id || ids.has(current.id)) return
+    ids.add(current.id)
+    for (const child of current.children || []) visit(child)
+  }
+  visit(account)
+  return ids
+}
+
 export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -217,6 +262,7 @@ export default function AccountingPage() {
   const [accBranch, setAccBranch] = useState('')
   const [accCurrency, setAccCurrency] = useState('USD')
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set())
+  const [selectedHistoryAccount, setSelectedHistoryAccount] = useState<Account | null>(null)
   const [branchSearch, setBranchSearch] = useState('')
 
   // Journal entry form
@@ -350,6 +396,63 @@ export default function AccountingPage() {
       .filter(account => transactionAccountMatchesMethod(account, jePaymentMethod))
       .map(account => ({ value: account.id, label: `${account.name} - ${accountBalanceLabel(account)}`, account }))
   ), [transactionAccounts, jeAccount, jePaymentMethod])
+  const flatAccounts = useMemo(() => flattenAccountTree(accounts), [accounts])
+  const accountById = useMemo(() => new Map(flatAccounts.map(account => [account.id, account])), [flatAccounts])
+  const selectedHistoryAccountIds = useMemo(() => collectAccountIds(selectedHistoryAccount), [selectedHistoryAccount])
+  const accountHistoryRows = useMemo<AccountHistoryRow[]>(() => {
+    if (!selectedHistoryAccount || selectedHistoryAccountIds.size === 0) return []
+
+    const rows = entries
+      .flatMap((entry) => (
+        (entry.lines || [])
+          .filter((line) => selectedHistoryAccountIds.has(line.accountId))
+          .map((line) => {
+            const account = accountById.get(line.accountId) || null
+            const debit = Number(line.debit || 0)
+            const credit = Number(line.credit || 0)
+            const counterpartAccounts = (entry.lines || [])
+              .filter((otherLine) => otherLine.accountId !== line.accountId)
+              .map((otherLine) => (
+                otherLine.account
+                  ? `${otherLine.account.code} - ${otherLine.account.name}`
+                  : accountById.get(otherLine.accountId)
+                    ? `${accountById.get(otherLine.accountId)?.code} - ${accountById.get(otherLine.accountId)?.name}`
+                    : 'Unknown account'
+              ))
+              .filter(Boolean)
+              .join(', ')
+
+            return {
+              entry,
+              line,
+              account,
+              debit,
+              credit,
+              delta: accountBalanceDelta(account || line.account || selectedHistoryAccount, debit, credit),
+              runningBalance: 0,
+              counterpartAccounts: counterpartAccounts || '—',
+            }
+          })
+      ))
+      .sort((a, b) => {
+        const dateDiff = new Date(a.entry.date).getTime() - new Date(b.entry.date).getTime()
+        if (dateDiff !== 0) return dateDiff
+        return String(a.entry.createdAt || a.entry.id).localeCompare(String(b.entry.createdAt || b.entry.id))
+      })
+
+    let runningBalance = 0
+    return rows.map((row) => {
+      runningBalance += row.delta
+      return { ...row, runningBalance }
+    })
+  }, [accountById, entries, selectedHistoryAccount, selectedHistoryAccountIds])
+  const accountHistoryCurrentBalance = useMemo(() => (
+    selectedHistoryAccount
+      ? flattenAccountTree([selectedHistoryAccount]).reduce((sum, account) => sum + Number(account.balance || 0), 0)
+      : 0
+  ), [selectedHistoryAccount])
+  const accountHistoryTotalDebit = useMemo(() => accountHistoryRows.reduce((sum, row) => sum + row.debit, 0), [accountHistoryRows])
+  const accountHistoryTotalCredit = useMemo(() => accountHistoryRows.reduce((sum, row) => sum + row.credit, 0), [accountHistoryRows])
 
   const selectedMultipleJournalAccountIds = (currentIndex: number, currentField: 'debitAccount' | 'creditAccount') => new Set(
     mjLines.flatMap((line, lineIndex) => [
@@ -765,6 +868,77 @@ export default function AccountingPage() {
             </DialogContent>
           </Dialog>
 
+          <Dialog open={Boolean(selectedHistoryAccount)} onOpenChange={(open) => { if (!open) setSelectedHistoryAccount(null) }}>
+            <DialogContent className="flex max-h-[85vh] max-w-6xl flex-col overflow-hidden">
+              <DialogHeader>
+                <DialogTitle>{selectedHistoryAccount?.code} - {selectedHistoryAccount?.name}</DialogTitle>
+                <DialogDescription>
+                  Transaction history behind this account balance
+                  {selectedHistoryAccount?.children?.length ? ' including sub-accounts.' : '.'}
+                </DialogDescription>
+              </DialogHeader>
+              {selectedHistoryAccount && (
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Current Balance</div>
+                    <div className="font-mono text-lg font-semibold">{formatCurrency(accountHistoryCurrentBalance)}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Total Debit</div>
+                    <div className="font-mono text-lg font-semibold">{formatCurrency(accountHistoryTotalDebit)}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Total Credit</div>
+                    <div className="font-mono text-lg font-semibold">{formatCurrency(accountHistoryTotalCredit)}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Entries</div>
+                    <div className="font-mono text-lg font-semibold">{accountHistoryRows.length}</div>
+                  </div>
+                </div>
+              )}
+              <div className="min-h-0 overflow-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-background">
+                    <tr className="border-b">
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Date</th>
+                      <th className="min-w-48 px-3 py-2 text-left font-medium">Description</th>
+                      <th className="min-w-48 px-3 py-2 text-left font-medium">Source / Other Account</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Reference</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Method</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Debit</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Credit</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Running Balance</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Posted By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountHistoryRows.map((row, index) => (
+                      <tr key={`${row.entry.id}-${row.line.id || index}`} className="border-b hover:bg-muted/50">
+                        <td className="whitespace-nowrap px-3 py-2">{new Date(row.entry.date).toLocaleDateString()}</td>
+                        <td className="px-3 py-2">{row.line.description || row.entry.description || '—'}</td>
+                        <td className="px-3 py-2">{row.counterpartAccounts}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{row.entry.paymentMethod || '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{row.debit > 0 ? formatCurrency(row.debit) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{row.credit > 0 ? formatCurrency(row.credit) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-mono font-semibold">{formatCurrency(row.runningBalance)}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—'}</td>
+                      </tr>
+                    ))}
+                    {accountHistoryRows.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="py-8 text-center text-muted-foreground">
+                          No journal transactions were found for this account yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           {/* Account type groups with sub-accounts nested under parents */}
           {ACCOUNT_TYPES.map(typeDef => {
             const typeAccounts = accounts.filter(a => a.type === typeDef.value || (typeDef.value === 'income' && a.type === 'revenue') || (typeDef.value === 'expenses' && a.type === 'expense'))
@@ -795,12 +969,16 @@ export default function AccountingPage() {
                           const isExpanded = expandedAccounts.has(acc.id)
                           return (
                             <React.Fragment key={acc.id}>
-                              <tr className="border-b hover:bg-muted/50">
+                              <tr
+                                className="cursor-pointer border-b hover:bg-muted/50"
+                                onClick={() => setSelectedHistoryAccount(acc)}
+                              >
                                 <td className="py-2 px-3 font-medium">
                                   {childAccounts.length > 0 ? (
                                     <button
                                       type="button"
-                                      onClick={() => {
+                                      onClick={(event) => {
+                                        event.stopPropagation()
                                         setExpandedAccounts(prev => {
                                           const next = new Set(prev)
                                           if (next.has(acc.id)) next.delete(acc.id)
@@ -820,14 +998,21 @@ export default function AccountingPage() {
                                 <td className="py-2 px-3 font-mono font-bold">{acc.code}</td>
                                 <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
                                 <td className="py-2 px-3 text-right font-mono">{formatCurrency(acc.balance)}</td>
-                                <td className="py-2 px-3">
-                                  <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(acc.id)}>
+                                <td className="py-2 px-3 whitespace-nowrap">
+                                  <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setSelectedHistoryAccount(acc) }}>
+                                    History
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(acc.id) }}>
                                     <Trash2 className="h-4 w-4 text-red-500" />
                                   </Button>
                                 </td>
                               </tr>
                               {isExpanded && childAccounts.map(child => (
-                                <tr key={child.id} className="border-b bg-muted/20">
+                                <tr
+                                  key={child.id}
+                                  className="cursor-pointer border-b bg-muted/20 hover:bg-muted/50"
+                                  onClick={() => setSelectedHistoryAccount(child)}
+                                >
                                   <td className="py-2 px-3 pl-12 font-medium text-muted-foreground">
                                     └ {child.name}
                                     {child.subType && <Badge variant="outline" className="ml-2">{child.subType}</Badge>}
@@ -836,8 +1021,11 @@ export default function AccountingPage() {
                                   <td className="py-2 px-3 font-mono font-bold">{child.code}</td>
                                   <td className="py-2 px-3">{child.branch?.name || '—'}</td>
                                   <td className="py-2 px-3 text-right font-mono">{formatCurrency(child.balance)}</td>
-                                  <td className="py-2 px-3">
-                                    <Button size="sm" variant="ghost" onClick={() => handleDeleteAccount(child.id)}>
+                                  <td className="py-2 px-3 whitespace-nowrap">
+                                    <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setSelectedHistoryAccount(child) }}>
+                                      History
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(child.id) }}>
                                       <Trash2 className="h-4 w-4 text-red-500" />
                                     </Button>
                                   </td>
