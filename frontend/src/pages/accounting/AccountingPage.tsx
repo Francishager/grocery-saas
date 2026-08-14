@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
-import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown } from 'lucide-react'
+import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
@@ -238,6 +238,17 @@ const collectAccountIds = (account: Account | null): Set<string> => {
   visit(account)
   return ids
 }
+
+const escapeHtml = (value: unknown) => (
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+)
+
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
 
 export default function AccountingPage() {
   const { toast } = useToast()
@@ -733,6 +744,147 @@ export default function AccountingPage() {
   }
 
   const formatCurrency = (val: number) => Number(val || 0).toFixed(2)
+  const formatHistoryDate = (value?: string) => (value ? new Date(value).toLocaleDateString() : '—')
+  const selectedHistoryAccountLabel = selectedHistoryAccount ? `${selectedHistoryAccount.code} - ${selectedHistoryAccount.name}` : 'Account History'
+  const accountHistoryFileName = selectedHistoryAccountLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '') || 'account-history'
+
+  const downloadAccountHistory = () => {
+    if (!selectedHistoryAccount) return
+
+    const header = [
+      'Date',
+      'Description',
+      'Source / Other Account',
+      'Reference',
+      'Payment Method',
+      'Debit',
+      'Credit',
+      'Running Balance',
+      'Posted By',
+    ]
+    const rows = accountHistoryRows.map((row) => [
+      formatHistoryDate(row.entry.date),
+      row.line.description || row.entry.description || '—',
+      row.counterpartAccounts,
+      row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—',
+      row.entry.paymentMethod || '—',
+      row.debit > 0 ? formatCurrency(row.debit) : '',
+      row.credit > 0 ? formatCurrency(row.credit) : '',
+      formatCurrency(row.runningBalance),
+      row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—',
+    ])
+
+    const summaryRows = [
+      ['Account', selectedHistoryAccountLabel],
+      ['Current Balance', formatCurrency(accountHistoryCurrentBalance)],
+      ['Total Debit', formatCurrency(accountHistoryTotalDebit)],
+      ['Total Credit', formatCurrency(accountHistoryTotalCredit)],
+      ['Entries', String(accountHistoryRows.length)],
+      [],
+    ]
+    const csv = [
+      ...summaryRows.map((row) => row.map(csvCell).join(',')),
+      header.map(csvCell).join(','),
+      ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${accountHistoryFileName}.csv`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const printAccountHistory = () => {
+    if (!selectedHistoryAccount) return
+
+    const rowsHtml = accountHistoryRows.length > 0
+      ? accountHistoryRows.map((row) => `
+          <tr>
+            <td>${escapeHtml(formatHistoryDate(row.entry.date))}</td>
+            <td>${escapeHtml(row.line.description || row.entry.description || '—')}</td>
+            <td>${escapeHtml(row.counterpartAccounts)}</td>
+            <td>${escapeHtml(row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—')}</td>
+            <td>${escapeHtml(row.entry.paymentMethod || '—')}</td>
+            <td class="amount">${escapeHtml(row.debit > 0 ? formatCurrency(row.debit) : '—')}</td>
+            <td class="amount">${escapeHtml(row.credit > 0 ? formatCurrency(row.credit) : '—')}</td>
+            <td class="amount">${escapeHtml(formatCurrency(row.runningBalance))}</td>
+            <td>${escapeHtml(row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—')}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="9" class="empty">No journal transactions were found for this account yet.</td></tr>'
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800')
+    if (!printWindow) {
+      toast({ variant: 'destructive', title: 'Unable to open print window' })
+      return
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(selectedHistoryAccountLabel)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }
+            h1 { font-size: 20px; margin: 0 0 4px; }
+            .subtitle { color: #4b5563; margin-bottom: 18px; }
+            .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+            .summary div { border: 1px solid #d1d5db; padding: 10px; border-radius: 6px; }
+            .label { color: #6b7280; font-size: 11px; text-transform: uppercase; }
+            .value { font-family: Consolas, monospace; font-size: 16px; font-weight: 700; white-space: nowrap; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 7px 6px; vertical-align: top; text-align: left; }
+            th { background: #f3f4f6; font-weight: 700; }
+            .amount { text-align: right; font-family: Consolas, monospace; white-space: nowrap; }
+            .empty { text-align: center; color: #6b7280; padding: 24px; }
+            @media print {
+              body { margin: 12mm; }
+              .summary { break-inside: avoid; }
+              table { page-break-inside: auto; }
+              tr { page-break-inside: avoid; page-break-after: auto; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(selectedHistoryAccountLabel)}</h1>
+          <div class="subtitle">Transaction history behind this account balance${selectedHistoryAccount.children?.length ? ' including sub-accounts.' : '.'}</div>
+          <div class="summary">
+            <div><div class="label">Current Balance</div><div class="value">${escapeHtml(formatCurrency(accountHistoryCurrentBalance))}</div></div>
+            <div><div class="label">Total Debit</div><div class="value">${escapeHtml(formatCurrency(accountHistoryTotalDebit))}</div></div>
+            <div><div class="label">Total Credit</div><div class="value">${escapeHtml(formatCurrency(accountHistoryTotalCredit))}</div></div>
+            <div><div class="label">Entries</div><div class="value">${escapeHtml(accountHistoryRows.length)}</div></div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Source / Other Account</th>
+                <th>Reference</th>
+                <th>Method</th>
+                <th class="amount">Debit</th>
+                <th class="amount">Credit</th>
+                <th class="amount">Running Balance</th>
+                <th>Posted By</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
 
   return (
     <div className="space-y-6">
@@ -869,36 +1021,93 @@ export default function AccountingPage() {
           </Dialog>
 
           <Dialog open={Boolean(selectedHistoryAccount)} onOpenChange={(open) => { if (!open) setSelectedHistoryAccount(null) }}>
-            <DialogContent className="flex max-h-[85vh] max-w-6xl flex-col overflow-hidden">
-              <DialogHeader>
-                <DialogTitle>{selectedHistoryAccount?.code} - {selectedHistoryAccount?.name}</DialogTitle>
-                <DialogDescription>
-                  Transaction history behind this account balance
-                  {selectedHistoryAccount?.children?.length ? ' including sub-accounts.' : '.'}
-                </DialogDescription>
+            <DialogContent className="flex max-h-[92vh] w-[calc(100vw-1rem)] max-w-6xl flex-col overflow-hidden p-3 sm:max-h-[88vh] sm:w-[calc(100vw-2rem)] sm:p-6">
+              <DialogHeader className="gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <DialogTitle className="break-words text-lg sm:text-xl">{selectedHistoryAccount?.code} - {selectedHistoryAccount?.name}</DialogTitle>
+                    <DialogDescription className="mt-1">
+                      Transaction history behind this account balance
+                      {selectedHistoryAccount?.children?.length ? ' including sub-accounts.' : '.'}
+                    </DialogDescription>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                    <Button type="button" variant="outline" onClick={printAccountHistory} disabled={!selectedHistoryAccount}>
+                      <Printer className="mr-2 h-4 w-4" /> Print
+                    </Button>
+                    <Button type="button" variant="outline" onClick={downloadAccountHistory} disabled={!selectedHistoryAccount}>
+                      <Download className="mr-2 h-4 w-4" /> Download
+                    </Button>
+                  </div>
+                </div>
               </DialogHeader>
               {selectedHistoryAccount && (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <div className="rounded-md border p-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="min-w-0 rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Current Balance</div>
-                    <div className="font-mono text-lg font-semibold">{formatCurrency(accountHistoryCurrentBalance)}</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{formatCurrency(accountHistoryCurrentBalance)}</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="min-w-0 rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Total Debit</div>
-                    <div className="font-mono text-lg font-semibold">{formatCurrency(accountHistoryTotalDebit)}</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{formatCurrency(accountHistoryTotalDebit)}</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="min-w-0 rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Total Credit</div>
-                    <div className="font-mono text-lg font-semibold">{formatCurrency(accountHistoryTotalCredit)}</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{formatCurrency(accountHistoryTotalCredit)}</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="min-w-0 rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Entries</div>
-                    <div className="font-mono text-lg font-semibold">{accountHistoryRows.length}</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{accountHistoryRows.length}</div>
                   </div>
                 </div>
               )}
-              <div className="min-h-0 overflow-auto rounded-lg border">
-                <table className="w-full text-sm">
+              <div className="min-h-0 space-y-3 overflow-y-auto pr-1 lg:hidden">
+                {accountHistoryRows.map((row, index) => (
+                  <div key={`${row.entry.id}-${row.line.id || index}-mobile`} className="rounded-md border p-3 text-sm">
+                    <div className="mb-3 flex flex-col gap-1 border-b pb-3">
+                      <div className="font-medium">{formatHistoryDate(row.entry.date)}</div>
+                      <div className="break-words text-muted-foreground">{row.line.description || row.entry.description || '—'}</div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Source / Other Account</div>
+                        <div className="break-words">{row.counterpartAccounts}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Reference</div>
+                        <div className="break-words">{row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Payment Method</div>
+                        <div className="break-words">{row.entry.paymentMethod || '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Posted By</div>
+                        <div className="break-words">{row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Debit</div>
+                        <div className="overflow-x-auto whitespace-nowrap font-mono font-semibold">{row.debit > 0 ? formatCurrency(row.debit) : '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Credit</div>
+                        <div className="overflow-x-auto whitespace-nowrap font-mono font-semibold">{row.credit > 0 ? formatCurrency(row.credit) : '—'}</div>
+                      </div>
+                      <div className="min-w-0 sm:col-span-2">
+                        <div className="text-xs text-muted-foreground">Running Balance</div>
+                        <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold">{formatCurrency(row.runningBalance)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {accountHistoryRows.length === 0 && (
+                  <div className="rounded-md border py-8 text-center text-muted-foreground">
+                    No journal transactions were found for this account yet.
+                  </div>
+                )}
+              </div>
+              <div className="hidden min-h-0 overflow-auto rounded-lg border lg:block">
+                <table className="min-w-[1120px] w-full text-sm">
                   <thead className="sticky top-0 bg-background">
                     <tr className="border-b">
                       <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Date</th>
