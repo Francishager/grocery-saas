@@ -512,15 +512,33 @@ export default function ReceivablesPage() {
     }
   }
 
-  const loadCashAccounts = async () => {
+  const getAccountTypeForPaymentMethod = (method: string): string => {
+    const methodToType: { [key: string]: string } = {
+      cash: 'cash',
+      mobile_money: 'mobile_money',
+      bank_transfer: 'bank',
+      card: 'card'
+    }
+    return methodToType[method] || 'cash'
+  }
+
+  const loadCashAccounts = async (forPaymentMethod: string = paymentMethod) => {
     try {
       const response = await apiFetch('/api/expenses/cash-accounts')
       if (response.ok) {
         const data = await response.json()
-        setCashAccounts(data || [])
-        // Auto-select first account if only one available
-        if (data?.length === 1 && !selectedCashAccountId) {
-          setSelectedCashAccountId(data[0].id)
+        const accountType = getAccountTypeForPaymentMethod(forPaymentMethod)
+        
+        // Filter accounts: only show accounts matching the payment method type
+        const filteredAccounts = (data || []).filter((acc: any) => acc.type === accountType)
+        
+        setCashAccounts(filteredAccounts)
+        
+        // Auto-select first account if only one matches the payment method
+        if (filteredAccounts?.length === 1) {
+          setSelectedCashAccountId(filteredAccounts[0].id)
+        } else if (filteredAccounts?.length === 0) {
+          setSelectedCashAccountId(null)
         }
       }
     } catch (error) {
@@ -1791,7 +1809,15 @@ export default function ReceivablesPage() {
               
               <div>
                 <Label htmlFor="paymentMethod">Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <Select 
+                  value={paymentMethod} 
+                  onValueChange={(method) => {
+                    setPaymentMethod(method)
+                    setSelectedCashAccountId(null)
+                    // Reload cash accounts filtered by new payment method
+                    setTimeout(() => loadCashAccounts(method), 50)
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select payment method" />
                   </SelectTrigger>
@@ -1858,18 +1884,26 @@ export default function ReceivablesPage() {
               )}
 
               <div>
-                <Label htmlFor="cashAccount">Record To Cash Account</Label>
+                <Label htmlFor="cashAccount">Staff Till / Account</Label>
                 <Select value={selectedCashAccountId || ''} onValueChange={(v) => setSelectedCashAccountId(v || null)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select cash account" />
+                    <SelectValue placeholder={cashAccounts.length === 0 ? 'No accounts available for this payment method' : 'Select till or account'} />
                   </SelectTrigger>
                   <SelectContent>
-                    {cashAccounts.map((acc) => (
-                      <SelectItem key={acc.id} value={acc.id}>{acc.name} — {acc.balance?.toFixed?.(2) ?? acc.balance}</SelectItem>
-                    ))}
+                    {cashAccounts.length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground">No {getAccountTypeForPaymentMethod(paymentMethod)} accounts available</div>
+                    ) : (
+                      cashAccounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {acc.name} (Balance: {acc.balance?.toFixed?.(2) ?? acc.balance})
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">Select the staff till or tenant account to record this payment.</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select your staff till or tenant account. Transaction will be recorded under your name.
+                </p>
               </div>
             </div>
             
