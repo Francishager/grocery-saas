@@ -1021,7 +1021,7 @@ export default function AccountingPage() {
           </Dialog>
 
           <Dialog open={Boolean(selectedHistoryAccount)} onOpenChange={(open) => { if (!open) setSelectedHistoryAccount(null) }}>
-            <DialogContent className="flex max-h-[94vh] w-[96vw] max-w-[1700px] flex-col overflow-hidden p-3 sm:max-h-[90vh] sm:p-5 lg:p-6">
+            <DialogContent className="flex max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] flex-col overflow-hidden p-3 sm:max-h-[90vh] sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[96vw] lg:max-w-[96vw] lg:p-6 xl:max-w-[1700px] 2xl:max-w-[1800px]">
               <DialogHeader className="gap-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
