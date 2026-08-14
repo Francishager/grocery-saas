@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -119,6 +119,27 @@ const EXPENSE_CATEGORIES = [
 
 const CATEGORY_GROUPS = ['Operating', 'COGS', 'Personnel', 'Travel', 'Marketing', 'Professional', 'IT', 'Finance', 'Compliance', 'Assets', 'Other']
 
+const PAYMENT_METHOD_OPTIONS = [
+  { value: 'cash', label: 'Cash', permission: 'canUseCash' },
+  { value: 'mobile_money', label: 'Mobile Money', permission: 'canUseMobileMoney' },
+  { value: 'bank_transfer', label: 'Bank Transfer', permission: 'canUseBank' },
+  { value: 'cheque', label: 'Cheque', permission: 'canUseBank' },
+  { value: 'card', label: 'Card', permission: 'canUseCard' },
+]
+
+const accountMatchesPaymentMethod = (account: CashAccount, paymentMethod: string) => {
+  if (paymentMethod === 'cash') return account.type === 'cash' || account.type === 'safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque') return account.type === 'bank'
+  if (paymentMethod === 'mobile_money') return account.type === 'mobile_money'
+  if (paymentMethod === 'card') return account.type === 'card'
+  return false
+}
+
+const hasPaymentMethodPermission = (paymentPerms: PaymentMethodPermissions, paymentMethod: string) => {
+  const option = PAYMENT_METHOD_OPTIONS.find(method => method.value === paymentMethod)
+  return option ? Boolean(paymentPerms[option.permission as keyof PaymentMethodPermissions]) : false
+}
+
 export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initialData }: CreateExpenseModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
   const { toast } = useToast()
@@ -152,7 +173,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
   const [loading, setLoading] = useState(false)
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
   const [myCashAccount, setMyCashAccount] = useState<CashAccount | null>(null)
-  const [paymentPerms, setPaymentPerms] = useState<PaymentMethodPermissions>({ canUseCash: true, canUseMobileMoney: false, canUseBank: false, canUseCard: false })
+  const [paymentPerms, setPaymentPerms] = useState<PaymentMethodPermissions>({ canUseCash: false, canUseMobileMoney: false, canUseBank: false, canUseCard: false })
 
   useEffect(() => {
     if (isOpen) {
@@ -160,6 +181,48 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
       loadMyCashAccount()
     }
   }, [isOpen])
+
+  const permittedPaymentMethods = useMemo(() => (
+    PAYMENT_METHOD_OPTIONS.filter(method => Boolean(paymentPerms[method.permission as keyof PaymentMethodPermissions]))
+  ), [paymentPerms])
+
+  const selectableCashAccounts = useMemo(() => {
+    if (!formData.paymentMethod || !hasPaymentMethodPermission(paymentPerms, formData.paymentMethod)) return []
+
+    const byId = new Map<string, CashAccount>()
+    if (myCashAccount?.isActive !== false && accountMatchesPaymentMethod(myCashAccount, formData.paymentMethod)) {
+      byId.set(myCashAccount.id, myCashAccount)
+    }
+    for (const account of cashAccounts) {
+      if (!account.isActive) continue
+      if (!accountMatchesPaymentMethod(account, formData.paymentMethod)) continue
+      byId.set(account.id, account)
+    }
+
+    return [...byId.values()]
+  }, [cashAccounts, formData.paymentMethod, myCashAccount, paymentPerms])
+
+  useEffect(() => {
+    if (!isOpen) return
+    if (!permittedPaymentMethods.length) {
+      if (formData.paymentMethod || formData.cashAccountId) {
+        setFormData(prev => ({ ...prev, paymentMethod: '', cashAccountId: '' }))
+      }
+      return
+    }
+    if (!permittedPaymentMethods.some(method => method.value === formData.paymentMethod)) {
+      setFormData(prev => ({ ...prev, paymentMethod: permittedPaymentMethods[0].value, cashAccountId: '' }))
+    }
+  }, [formData.cashAccountId, formData.paymentMethod, isOpen, permittedPaymentMethods])
+
+  useEffect(() => {
+    if (!isOpen || !formData.paymentMethod) return
+    const selectedAccountIsValid = selectableCashAccounts.some(account => account.id === formData.cashAccountId)
+    if (selectedAccountIsValid) return
+
+    const preferredAccount = selectableCashAccounts.find(account => account.id === myCashAccount?.id) || selectableCashAccounts[0]
+    setFormData(prev => ({ ...prev, cashAccountId: preferredAccount?.id || '' }))
+  }, [formData.cashAccountId, formData.paymentMethod, isOpen, myCashAccount?.id, selectableCashAccounts])
 
   const loadCashAccounts = async () => {
     try {
@@ -181,10 +244,6 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
         setMyCashAccount(data.cashAccount)
         if (data.paymentMethodPermissions) {
           setPaymentPerms(data.paymentMethodPermissions)
-        }
-        // If user has an assigned account, set it as default
-        if (data.cashAccountId && !initialData?.cashAccountId) {
-          setFormData(prev => ({ ...prev, cashAccountId: data.cashAccountId }))
         }
       }
     } catch {
@@ -212,8 +271,16 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
       toast({ variant: 'destructive', title: 'Amount must be greater than 0' })
       return
     }
+    if (!formData.paymentMethod || !hasPaymentMethodPermission(paymentPerms, formData.paymentMethod)) {
+      toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
+      return
+    }
     if (!formData.cashAccountId) {
-      toast({ variant: 'destructive', title: 'Select the cash account this expense was paid from' })
+      toast({ variant: 'destructive', title: 'Select the account this expense was paid from' })
+      return
+    }
+    if (!selectableCashAccounts.some(account => account.id === formData.cashAccountId)) {
+      toast({ variant: 'destructive', title: 'Select an account that matches the payment method' })
       return
     }
     if (!formData.date) {
@@ -257,7 +324,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
         category: 'other',
         description: '',
         amount: '',
-        paymentMethod: 'mobile_money',
+        paymentMethod: permittedPaymentMethods[0]?.value || '',
         cashAccountId: '',
         reference: '',
         notes: '',
@@ -278,6 +345,18 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
   }
 
   const handleInputChange = (field: string, value: any) => {
+    if (field === 'paymentMethod') {
+      setFormData(prev => ({
+        ...prev,
+        paymentMethod: value,
+        cashAccountId: '',
+        mobileProvider: value === 'mobile_money' ? prev.mobileProvider : '',
+        phoneNumber: value === 'mobile_money' ? prev.phoneNumber : '',
+        transactionId: ['mobile_money', 'card'].includes(value) ? prev.transactionId : ''
+      }))
+      return
+    }
+
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -367,13 +446,32 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="cashAccountId">Pay From Account *</Label>
-              <Select value={formData.cashAccountId} onValueChange={(value) => handleInputChange('cashAccountId', value)}>
+              <Select
+                value={formData.cashAccountId}
+                onValueChange={(value) => handleInputChange('cashAccountId', value)}
+                disabled={!selectableCashAccounts.length}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select account to pay from" />
                 </SelectTrigger>
                 <SelectContent>
+                  {selectableCashAccounts.length > 0 ? selectableCashAccounts.map(acc => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <div className="flex flex-col">
+                          <span>{acc.name} {acc.id === myCashAccount?.id && <span className="text-xs text-blue-600">(My Account)</span>}</span>
+                          <span className="text-xs text-muted-foreground">{acc.type.replace(/_/g, ' ')}{acc.accountNumber ? ` - ${acc.accountNumber}` : ''}{acc.bankName ? ` - ${acc.bankName}` : ''}</span>
+                        </div>
+                        <span className={`text-xs font-semibold ${parseFloat(formData.amount) > acc.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
+                          {acc.currency} {acc.balance.toFixed(2)}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  )) : (
+                    <SelectItem value="no-accounts" disabled>No matching accounts</SelectItem>
+                  )}
                   {/* User's assigned CashAccount (default, always shown) */}
-                  {myCashAccount && (
+                  {false && myCashAccount && (
                     <SelectItem value={myCashAccount.id}>
                       <div className="flex items-center justify-between w-full gap-2">
                         <div className="flex flex-col">
@@ -387,7 +485,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
                     </SelectItem>
                   )}
                   {/* Other accounts the user can access based on permissions */}
-                  {cashAccounts
+                  {false && cashAccounts
                     .filter(acc => acc.id !== myCashAccount?.id)
                     .filter(acc => {
                       if (acc.type === 'cash') return false // cash accounts only for customer payments
@@ -413,34 +511,35 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
               </Select>
               {/* Show selected account balance warning */}
               {(() => {
-                const selected = myCashAccount && formData.cashAccountId === myCashAccount.id
-                  ? myCashAccount
-                  : cashAccounts.find(a => a.id === formData.cashAccountId)
+                const selected = selectableCashAccounts.find(a => a.id === formData.cashAccountId)
                 if (selected && parseFloat(formData.amount) > selected.balance) {
                   return <p className="text-xs text-red-600 font-medium">Insufficient funds: Balance is {selected.currency} {selected.balance.toFixed(2)} but amount is {parseFloat(formData.amount).toFixed(2)}</p>
                 }
                 if (selected) {
                   return <p className="text-xs text-muted-foreground">Available balance: {selected.currency} {selected.balance.toFixed(2)}</p>
                 }
-                return <p className="text-xs text-red-600">No account selected. Contact your administrator if you don't see your account.</p>
+                return <p className="text-xs text-red-600">No matching account available for this payment method.</p>
               })()}
             </div>
             
             <div className="space-y-2">
               <Label htmlFor="paymentMethod">Payment Method</Label>
-              <Select value={formData.paymentMethod} onValueChange={(value) => handleInputChange('paymentMethod', value)}>
+              <Select
+                value={formData.paymentMethod}
+                onValueChange={(value) => handleInputChange('paymentMethod', value)}
+                disabled={!permittedPaymentMethods.length}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
-                  {paymentPerms.canUseMobileMoney && <SelectItem value="mobile_money">Mobile Money</SelectItem>}
-                  {paymentPerms.canUseBank && <SelectItem value="bank_transfer">Bank Transfer</SelectItem>}
-                  {paymentPerms.canUseCard && <SelectItem value="card">Card</SelectItem>}
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="credit">On Credit</SelectItem>
+                  {permittedPaymentMethods.length > 0 ? permittedPaymentMethods.map(method => (
+                    <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>
+                  )) : (
+                    <SelectItem value="no-methods" disabled>No permitted payment methods</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Cash is not available for spending — only for receiving customer payments</p>
             </div>
           </div>
 

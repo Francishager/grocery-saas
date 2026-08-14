@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, loadUserPermissions, checkPaymentMethodPermission, getPaymentMethodPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 
 const router = express.Router()
@@ -10,8 +10,11 @@ const prisma = new PrismaClient()
 
 const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
   cash: { name: 'Cash Box', type: 'cash' },
+  safe: { name: 'Safe Account', type: 'safe' },
   mobile_money: { name: 'Mobile Money', type: 'mobile_money' },
   bank_transfer: { name: 'Bank Account', type: 'bank' },
+  bank: { name: 'Bank Account', type: 'bank' },
+  cheque: { name: 'Bank Account', type: 'bank' },
   card: { name: 'Card Payments', type: 'card' }
 }
 
@@ -22,13 +25,47 @@ const DEFAULT_CASH_ACCOUNTS = [
   CASH_ACCOUNTS_BY_PAYMENT_METHOD.card
 ]
 
+const PAYMENT_METHOD_PERMISSION_KEYS = {
+  cash: 'canUseCash',
+  safe: 'canUseCash',
+  mobile_money: 'canUseMobileMoney',
+  bank_transfer: 'canUseBank',
+  bank: 'canUseBank',
+  cheque: 'canUseBank',
+  card: 'canUseCard'
+}
+
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
 }
 
+const normalizePaymentMethod = (paymentMethod) =>
+  String(paymentMethod || '').trim().toLowerCase()
+
 const accountForPaymentMethod = (paymentMethod) =>
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD[paymentMethod] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD[normalizePaymentMethod(paymentMethod)] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
+
+const paymentMethodPermissionKey = (paymentMethod) =>
+  PAYMENT_METHOD_PERMISSION_KEYS[normalizePaymentMethod(paymentMethod)]
+
+const paymentMethodAccountTypes = (paymentMethod) => {
+  const method = normalizePaymentMethod(paymentMethod)
+  if (method === 'cash' || method === 'safe') return ['cash', 'safe']
+  if (method === 'bank_transfer' || method === 'bank' || method === 'cheque') return ['bank']
+  if (method === 'mobile_money') return ['mobile_money']
+  if (method === 'card') return ['card']
+  return []
+}
+
+const paymentMethodAccountLabel = (paymentMethod) => {
+  const method = normalizePaymentMethod(paymentMethod)
+  if (method === 'cash' || method === 'safe') return 'cash or safe'
+  if (method === 'bank_transfer' || method === 'bank' || method === 'cheque') return 'bank'
+  if (method === 'mobile_money') return 'mobile money'
+  if (method === 'card') return 'card'
+  return 'matching'
+}
 
 const userSelect = { select: { id: true, fname: true, lname: true } }
 
@@ -78,6 +115,36 @@ async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = pri
       currency: 'UGX'
     }
   })
+}
+
+async function paymentMethodPermissionsForRequest(req) {
+  if (req.userPermissions !== undefined) {
+    return getPaymentMethodPermissions(req)
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      permissions: {
+        select: {
+          canUseCash: true,
+          canUseMobileMoney: true,
+          canUseBank: true,
+          canUseCard: true
+        }
+      }
+    }
+  })
+
+  return getPaymentMethodPermissions(req, user?.permissions)
+}
+
+async function canUsePaymentMethod(req, paymentMethod) {
+  const permissionKey = paymentMethodPermissionKey(paymentMethod)
+  if (!permissionKey) return false
+
+  const permissions = await paymentMethodPermissionsForRequest(req)
+  return Boolean(permissions[permissionKey])
 }
 
 // === EXPENSES ===
@@ -130,7 +197,7 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, loadUserPermissions, async (req, res) => {
+router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -152,25 +219,25 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
     } = req.body
 
     const amountValue = toMoney(amount)
-    const resolvedPaymentMethod = paymentMethod || 'mobile_money'
+    const resolvedPaymentMethod = normalizePaymentMethod(paymentMethod || 'mobile_money')
 
     if (!category?.trim()) return res.status(400).json({ error: 'Expense category is required' })
     if (!description?.trim()) return res.status(400).json({ error: 'Expense description is required' })
     if (amountValue <= 0) return res.status(400).json({ error: 'Expense amount must be greater than zero' })
 
-    // Cash is not allowed for spending — only for receiving customer payments
-    if (resolvedPaymentMethod === 'cash') {
-      return res.status(400).json({
-        error: 'Cash payment method is not available for spending. Please use mobile money, bank transfer, or card.',
-        code: 'INVALID_PAYMENT_METHOD'
-      })
-    }
-
     // Gate payment method by permission
-    if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+    if (!(await canUsePaymentMethod(req, resolvedPaymentMethod))) {
       return res.status(403).json({
         error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
         code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    const allowedAccountTypes = paymentMethodAccountTypes(resolvedPaymentMethod)
+    if (!allowedAccountTypes.length) {
+      return res.status(400).json({
+        error: `Unsupported payment method: ${resolvedPaymentMethod}`,
+        code: 'INVALID_PAYMENT_METHOD'
       })
     }
 
@@ -182,11 +249,28 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
         where: { id: cashAccountId, tenantId: req.tenant.id, isActive: true }
       })
       if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
+      if (!allowedAccountTypes.includes(account.type)) {
+        return res.status(400).json({
+          error: `Selected account must be a ${paymentMethodAccountLabel(resolvedPaymentMethod)} account for ${resolvedPaymentMethod} payments.`,
+          code: 'PAYMENT_ACCOUNT_MISMATCH'
+        })
+      }
       resolvedCashAccountId = account.id
     } else {
-      // Try to use the user's assigned cash account if present
-      const userRec = await prisma.user.findUnique({ where: { id: req.user.id }, select: { cashAccountId: true } })
-      if (userRec?.cashAccountId) resolvedCashAccountId = userRec.cashAccountId
+      // Try to use the user's assigned account only when it matches the selected method.
+      const userRec = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: {
+          cashAccount: { select: { id: true, type: true, isActive: true, tenantId: true } }
+        }
+      })
+      if (
+        userRec?.cashAccount?.tenantId === req.tenant.id &&
+        userRec.cashAccount.isActive &&
+        allowedAccountTypes.includes(userRec.cashAccount.type)
+      ) {
+        resolvedCashAccountId = userRec.cashAccount.id
+      }
     }
 
     // Fall back to a tenant-level default cash account for the payment method
