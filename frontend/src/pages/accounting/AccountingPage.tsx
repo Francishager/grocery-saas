@@ -440,8 +440,12 @@ export default function AccountingPage() {
         }
         await fetchAccounts()
       } else {
-        const data = await res.json()
-        toast({ variant: 'destructive', title: data.error })
+        const data = await res.json().catch(() => ({}))
+        toast({
+          variant: 'destructive',
+          title: data.error || data.message || 'Failed to create account',
+          description: data.required ? `Required permission: ${data.required}` : undefined,
+        })
       }
     } catch {
       toast({ variant: 'destructive', title: 'Failed to create account' })
@@ -492,6 +496,13 @@ export default function AccountingPage() {
 
   // Submit single journal entry
   const handleSingleJournalSubmit = async () => {
+    if (!hasPermission('canCreateAccounting')) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to post accounting entries',
+        description: 'Required permission: canCreateAccounting',
+      })
+    }
     if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
     if (jeAccount === jePaymentAccount) return toast({ variant: 'destructive', title: 'Choose different debit and credit accounts' })
     if (!jePaymentMethod || !canUsePaymentMethod(jePaymentMethod)) return toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
@@ -533,8 +544,12 @@ export default function AccountingPage() {
         setJeDescription(''); setJeAmount(''); setJeVoucher(''); setJeComment(''); setJePaymentAccount('')
         fetchEntries(); fetchAccounts()
       } else {
-        const data = await res.json()
-        toast({ variant: 'destructive', title: data.error })
+        const data = await res.json().catch(() => ({}))
+        toast({
+          variant: 'destructive',
+          title: data.error || data.message || 'Failed to post journal entry',
+          description: data.required ? `Required permission: ${data.required}` : undefined,
+        })
       }
     } catch {
       toast({ variant: 'destructive', title: 'Failed to post journal entry' })
@@ -543,6 +558,13 @@ export default function AccountingPage() {
 
   // Submit multiple general journal
   const handleMultipleJournalSubmit = async () => {
+    if (!hasPermission('canCreateAccounting')) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to post accounting entries',
+        description: 'Required permission: canCreateAccounting',
+      })
+    }
     const validLines = mjLines.filter(l => l.debitAccount && l.creditAccount && l.amount)
     if (!validLines.length) return toast({ variant: 'destructive', title: 'Add at least one valid line' })
     const selectedAccountIds = validLines.flatMap(line => [line.debitAccount, line.creditAccount])
@@ -573,7 +595,7 @@ export default function AccountingPage() {
         })
         if (!res.ok) {
           const data = await res.json().catch(() => ({}))
-          throw new Error(data.error || 'Failed to post journal entry')
+          throw new Error(data.error || data.message || (data.required ? `Required permission: ${data.required}` : 'Failed to post journal entry'))
         }
       }
       toast({ title: `${validLines.length} journal entries posted` })

@@ -157,7 +157,7 @@ export async function pullAll(): Promise<void> {
     user: e.user, updatedAt: e.updatedAt || new Date().toISOString(),
   }))
 
-  if (canPull('payables', 'canViewSupplier'))
+  if (canPull('payables', 'canViewPayable'))
   total += await pullTable('/api/payables/suppliers?limit=500', 'suppliers', (s: any) => ({
     id: s.id, name: s.name, email: s.email, phone: s.phone,
     address: s.address, balance: s.balance ?? 0, status: s.status || 'active',
@@ -165,7 +165,7 @@ export async function pullAll(): Promise<void> {
     updatedAt: s.updatedAt || new Date().toISOString(),
   }))
 
-  if (canPull('payables', 'canViewPurchase'))
+  if (canPull('payables', 'canViewPayable'))
   total += await pullTable('/api/payables/purchases?limit=500', 'purchases', (p: any) => ({
     id: p.id, refNo: p.refNo, supplierId: p.supplierId, supplier: p.supplier,
     total: p.total ?? 0, amountPaid: p.amountPaid ?? 0, balance: p.balance ?? 0,

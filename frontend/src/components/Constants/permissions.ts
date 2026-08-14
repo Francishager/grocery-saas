@@ -218,9 +218,9 @@ export const permissions: Permission[] = [
 
   // Accounting
   { id: 'canViewAccounting', name: 'View Accounting Module', description: 'Open the accounting module and view transaction accounts', category: 'accounting', accessesBusinessData: true },
-  { id: 'canCreateAccounting', name: 'Create Transaction Accounts', description: 'Create new transaction accounts', category: 'accounting', accessesBusinessData: true },
-  { id: 'canEditAccounting', name: 'Edit Transaction Accounts', description: 'Edit existing transaction accounts', category: 'accounting', accessesBusinessData: true },
-  { id: 'canDeleteAccounting', name: 'Delete Transaction Accounts', description: 'Delete transaction accounts', category: 'accounting', accessesBusinessData: true },
+  { id: 'canCreateAccounting', name: 'Create Accounting Entries', description: 'Create journal entries and accounting transaction records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canEditAccounting', name: 'Edit Accounting Entries', description: 'Edit accounting records and transaction accounts', category: 'accounting', accessesBusinessData: true },
+  { id: 'canDeleteAccounting', name: 'Delete Accounting Entries', description: 'Delete accounting records and transaction accounts', category: 'accounting', accessesBusinessData: true },
   
   // Data Import
   { id: 'canImportInventory', name: 'Import Inventory Data', description: 'Bulk import products and inventory via CSV/Excel', category: 'inventory', accessesBusinessData: true },

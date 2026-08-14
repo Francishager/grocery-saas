@@ -255,7 +255,8 @@ const reportCategories: ReportCategoryDef[] = [
 ]
 
 const accountingSubItems = [
-  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport'] },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting'] },
+  { to: '/tenant/accounting/expenses', label: 'Expenses', icon: DollarSign, feature: 'expenses', permission: ['canViewExpense', 'canCreateExpense'] },
   { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: ['canViewAccounting', 'canViewFinancialReport'] },
   { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewFinancialReport'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },

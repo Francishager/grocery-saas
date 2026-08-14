@@ -33,7 +33,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries', canViewAgricultureReport:'Can view agriculture reports',
   canViewServiceBusiness:'Can view service business', canCreateServiceBusiness:'Can create service business entries', canEditServiceBusiness:'Can edit service business entries', canDeleteServiceBusiness:'Can delete service business entries', canViewServiceBusinessReport:'Can view service business reports',
   canViewCommunication:'Can view communication', canCreateCommunication:'Can create communication', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
-  canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create transaction accounts', canEditAccounting:'Can edit transaction accounts', canDeleteAccounting:'Can delete transaction accounts',
+  canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canDeleteAccounting:'Can delete accounting entries',
   canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock',
   canUseCash:'Can use cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
   canImportInventory:'Can import inventory',
