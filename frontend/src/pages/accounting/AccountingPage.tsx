@@ -16,6 +16,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { formatDisplayDate } from '@/lib/utils'
 
 interface Account {
   id: string
