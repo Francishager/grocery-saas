@@ -35,3 +35,36 @@ export function resolveSubscriptionCharge(plan = {}, tenant = {}) {
     isCustom: hasCustomPrice,
   };
 }
+
+export function calculateBillingReminder(tenant = {}) {
+  const subscriptionEnd = tenant.subscriptionEnd ? new Date(tenant.subscriptionEnd) : null;
+  const gracePeriodDays = Number(tenant.gracePeriodDays ?? 0) || 0;
+  const reminderDaysBeforeDue = Number(tenant.reminderDaysBeforeDue ?? 10) || 10;
+
+  if (!subscriptionEnd || Number.isNaN(subscriptionEnd.getTime())) {
+    return {
+      isDueSoon: false,
+      isGracePeriodActive: false,
+      daysRemaining: null,
+      gracePeriodEndsAt: null,
+      reminderDaysBeforeDue,
+      gracePeriodDays,
+    };
+  }
+
+  const now = new Date();
+  const diffMs = subscriptionEnd.getTime() - now.getTime();
+  const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  const gracePeriodEndsAt = new Date(subscriptionEnd.getTime() + (gracePeriodDays * 24 * 60 * 60 * 1000));
+  const isDueSoon = daysRemaining <= reminderDaysBeforeDue && daysRemaining >= 0;
+  const isGracePeriodActive = now > subscriptionEnd && now < gracePeriodEndsAt;
+
+  return {
+    isDueSoon,
+    isGracePeriodActive,
+    daysRemaining,
+    gracePeriodEndsAt: gracePeriodEndsAt.toISOString(),
+    reminderDaysBeforeDue,
+    gracePeriodDays,
+  };
+}

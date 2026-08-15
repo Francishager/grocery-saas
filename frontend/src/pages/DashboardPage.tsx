@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown } from 'lucide-react'
-import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData, type DailyPerformanceData } from '@/lib/api'
+import { apiFetch, dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData, type DailyPerformanceData } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
@@ -21,6 +21,9 @@ export default function DashboardPage() {
   const [topProducts, setTopProducts] = useState<TopProduct[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodData[]>([])
   const [dailyPerf, setDailyPerf] = useState<DailyPerformanceData | null>(null)
+  const [billingReminder, setBillingReminder] = useState<any>(null)
+  const [showBillingPrompt, setShowBillingPrompt] = useState(false)
+  const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: '', paymentMethod: 'mobile_money' })
   const [loading, setLoading] = useState(true)
   const [isOfflineData, setIsOfflineData] = useState(false)
   const { toast } = useToast()
@@ -29,10 +32,47 @@ export default function DashboardPage() {
   useEffect(() => {
     if (hasPermission('canViewDashboard') && hasFeature('dashboard')) {
       loadDashboard()
+      loadBillingReminder()
     } else {
       setLoading(false)
     }
   }, [hasPermission, hasFeature])
+
+  const loadBillingReminder = async () => {
+    try {
+      const res = await apiFetch('/api/tenants/me/billing-reminder')
+      if (!res.ok) return
+      const data = await res.json()
+      setBillingReminder(data)
+      setShowBillingPrompt(Boolean(data?.isDueSoon || data?.isGracePeriodActive))
+    } catch {
+      setBillingReminder(null)
+    }
+  }
+
+  const confirmBillingPrompt = async () => {
+    if (!billingForm.phoneNumber.trim()) {
+      toast({ variant: 'destructive', title: 'Phone number required', description: 'Enter the mobile money number with country code.' })
+      return
+    }
+
+    try {
+      const res = await apiFetch('/api/tenants/me/billing-reminder', {
+        method: 'POST',
+        body: JSON.stringify({
+          networkProvider: billingForm.networkProvider,
+          phoneNumber: billingForm.phoneNumber,
+          paymentMethod: billingForm.paymentMethod,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Unable to confirm payment prompt')
+      setShowBillingPrompt(false)
+      toast({ title: 'Payment prompt sent', description: `${billingForm.networkProvider} payment request is ready on ${billingForm.phoneNumber}.` })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Payment prompt failed', description: error.message })
+    }
+  }
 
   const loadDashboard = async () => {
     if (!online) {
@@ -183,6 +223,22 @@ export default function DashboardPage() {
           {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {billingReminder && (billingReminder.isDueSoon || billingReminder.isGracePeriodActive) && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold">Subscription payment reminder</p>
+              <p className="text-sm text-amber-800">
+                {billingReminder.isGracePeriodActive
+                  ? `Your grace period is active. Please settle ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your invoice'} before ${new Date(billingReminder.gracePeriodEndsAt).toLocaleDateString('en-GB')}.`
+                  : `Your subscription renews in ${billingReminder.daysRemaining} day${billingReminder.daysRemaining === 1 ? '' : 's'}. Please pay ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your due amount'} before the due date.`}
+              </p>
+            </div>
+            <button onClick={() => setShowBillingPrompt(true)} className="rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700">Pay now</button>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards Row 1 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -455,6 +511,63 @@ export default function DashboardPage() {
         </Card>
         )}
       </div>
+
+      {showBillingPrompt && billingReminder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Pay subscription</h2>
+              <button onClick={() => setShowBillingPrompt(false)} className="rounded-md p-1 text-gray-500 hover:bg-gray-100">✕</button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Network provider</label>
+                <select
+                  value={billingForm.networkProvider}
+                  onChange={(e) => setBillingForm({ ...billingForm, networkProvider: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="MTN">MTN</option>
+                  <option value="Airtel">Airtel</option>
+                  <option value="MPS">MPS</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">Phone number with country code</label>
+                <input
+                  type="tel"
+                  value={billingForm.phoneNumber}
+                  onChange={(e) => setBillingForm({ ...billingForm, phoneNumber: e.target.value })}
+                  placeholder="+256700000000"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">Payment method</label>
+                <select
+                  value={billingForm.paymentMethod}
+                  onChange={(e) => setBillingForm({ ...billingForm, paymentMethod: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="mobile_money">Mobile Money</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+
+              <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                <p className="font-medium">Amount due</p>
+                <p>{billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'Your subscription amount'}</p>
+              </div>
+
+              <button onClick={confirmBillingPrompt} className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Send payment prompt</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

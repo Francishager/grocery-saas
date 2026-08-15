@@ -248,6 +248,10 @@ model Tenant {
   billingPaymentMethod    String? // cash, mobile_money, card, bank_transfer, relwork, kamatera
   billingPaymentReference String?
   billingNotes            String?
+  gracePeriodDays         Int?    @default(0)
+  reminderDaysBeforeDue   Int?    @default(10)
+  paymentReminderSentAt   DateTime?
+  paymentReminderStatus   String? @default("not_started") // not_started, due_soon, grace_period, paid
 
   // =====================
   // MODULE DEFAULTS (based on businessType, overridable by feature control)

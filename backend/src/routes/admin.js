@@ -4,7 +4,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
-import { resolveSubscriptionCharge } from "../utils/subscriptionPricing.js";
+import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
 
 const router = Router();
 
@@ -52,6 +52,8 @@ function subscriptionPayload(tenant) {
     billingPaymentMethod: tenant.billingPaymentMethod || null,
     billingPaymentReference: tenant.billingPaymentReference || null,
     billingNotes: tenant.billingNotes || null,
+    gracePeriodDays: tenant.gracePeriodDays ?? 0,
+    reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
     price: effectiveCharge.price,
     currency: effectiveCharge.currency,
     billingCycle: effectiveCharge.billingCycle,
@@ -86,12 +88,14 @@ async function updateSubscription(req, res) {
       billingPaymentMethod,
       billingPaymentReference,
       billingNotes,
+      gracePeriodDays,
+      reminderDaysBeforeDue,
       maxUsers,
       maxProducts,
       autoEnd,
     } = req.body;
 
-    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
+    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && gracePeriodDays === undefined && reminderDaysBeforeDue === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
       return res.status(400).json({ error: "At least one subscription field is required" });
     }
 
@@ -191,6 +195,22 @@ async function updateSubscription(req, res) {
       data.billingNotes = billingNotes ? String(billingNotes) : null;
     }
 
+    if (gracePeriodDays !== undefined) {
+      const parsedGracePeriodDays = gracePeriodDays === '' || gracePeriodDays === null ? 0 : Number(gracePeriodDays);
+      if (!Number.isFinite(parsedGracePeriodDays) || parsedGracePeriodDays < 0) {
+        return res.status(400).json({ error: "Grace period must be a non-negative number" });
+      }
+      data.gracePeriodDays = Math.floor(parsedGracePeriodDays);
+    }
+
+    if (reminderDaysBeforeDue !== undefined) {
+      const parsedReminderDays = reminderDaysBeforeDue === '' || reminderDaysBeforeDue === null ? 10 : Number(reminderDaysBeforeDue);
+      if (!Number.isFinite(parsedReminderDays) || parsedReminderDays < 0) {
+        return res.status(400).json({ error: "Reminder days must be a non-negative number" });
+      }
+      data.reminderDaysBeforeDue = Math.floor(parsedReminderDays);
+    }
+
     if (maxUsers !== undefined) {
       const parsedMaxUsers = Number(maxUsers);
       if (maxUsers === '' || maxUsers === null || Number.isNaN(parsedMaxUsers)) {
@@ -254,6 +274,35 @@ async function updateSubscription(req, res) {
     res.status(500).json({ error: "Failed to update subscription" });
   }
 }
+
+router.get("/subscriptions/:id/reminder", authenticateToken, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.params.id },
+      include: { plan: true },
+    });
+
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+
+    const reminder = calculateBillingReminder({
+      subscriptionEnd: tenant.subscriptionEnd,
+      gracePeriodDays: tenant.gracePeriodDays,
+      reminderDaysBeforeDue: tenant.reminderDaysBeforeDue,
+    });
+
+    res.json({
+      tenantId: tenant.id,
+      status: tenant.status,
+      subscriptionEnd: tenant.subscriptionEnd,
+      gracePeriodDays: tenant.gracePeriodDays ?? 0,
+      reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
+      ...reminder,
+    });
+  } catch (err) {
+    console.error("Subscription reminder check error:", err);
+    res.status(500).json({ error: "Failed to load subscription reminder" });
+  }
+});
 
 // Helper: email content
 function getEmailContent(locale, { ownerFname, businessName, businessId, tempPassword, otp, loginUrl }) {

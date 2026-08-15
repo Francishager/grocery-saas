@@ -7,6 +7,14 @@ import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar } f
 interface Subscription {
   id: string; status: string; startDate: string; endDate: string | null; trialEndsAt: string | null
   tenant: { id: string; name: string; status: string }
+  customPrice?: number | null
+  customCurrency?: string | null
+  customBillingCycle?: string | null
+  monthlyServiceFee?: number | null
+  annualServiceFee?: number | null
+  staticIpFee?: number | null
+  gracePeriodDays?: number | null
+  reminderDaysBeforeDue?: number | null
   plan: { id: string; name: string; price: number; currency: string; billingCycle: string; maxUsers?: number; maxProducts?: number }
 }
 
@@ -34,6 +42,8 @@ export const SubscriptionsPage: React.FC = () => {
   const [monthlyServiceFee, setMonthlyServiceFee] = useState('0')
   const [annualServiceFee, setAnnualServiceFee] = useState('0')
   const [staticIpFee, setStaticIpFee] = useState('0')
+  const [gracePeriodDays, setGracePeriodDays] = useState('0')
+  const [reminderDaysBeforeDue, setReminderDaysBeforeDue] = useState('10')
   const [planMaxUsers, setPlanMaxUsers] = useState('')
   const [planMaxProducts, setPlanMaxProducts] = useState('')
 
@@ -66,6 +76,8 @@ export const SubscriptionsPage: React.FC = () => {
     setMonthlyServiceFee(String(sub.monthlyServiceFee ?? 0))
     setAnnualServiceFee(String(sub.annualServiceFee ?? 0))
     setStaticIpFee(String(sub.staticIpFee ?? 0))
+    setGracePeriodDays(String(sub.gracePeriodDays ?? 0))
+    setReminderDaysBeforeDue(String(sub.reminderDaysBeforeDue ?? 10))
     setPlanBillingCycle(sub.plan?.billingCycle || 'monthly')
     setPlanMaxUsers(String(sub.plan?.maxUsers || ''))
     setPlanMaxProducts(String(sub.plan?.maxProducts || ''))
@@ -86,6 +98,8 @@ export const SubscriptionsPage: React.FC = () => {
       if (monthlyServiceFee !== '') body.monthlyServiceFee = monthlyServiceFee
       if (annualServiceFee !== '') body.annualServiceFee = annualServiceFee
       if (staticIpFee !== '') body.staticIpFee = staticIpFee
+      if (gracePeriodDays !== '') body.gracePeriodDays = gracePeriodDays
+      if (reminderDaysBeforeDue !== '') body.reminderDaysBeforeDue = reminderDaysBeforeDue
       if (planBillingCycle) body.billingCycle = planBillingCycle
       if (planMaxUsers) body.maxUsers = planMaxUsers
       if (planMaxProducts) body.maxProducts = planMaxProducts
@@ -286,6 +300,16 @@ export const SubscriptionsPage: React.FC = () => {
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Static IP</label>
                     <input type="number" min="0" step="0.01" value={staticIpFee} onChange={(e) => setStaticIpFee(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Grace Period (days)</label>
+                    <input type="number" min="0" value={gracePeriodDays} onChange={(e) => setGracePeriodDays(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Reminder Window (days)</label>
+                    <input type="number" min="0" value={reminderDaysBeforeDue} onChange={(e) => setReminderDaysBeforeDue(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

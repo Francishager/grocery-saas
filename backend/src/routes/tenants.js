@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
+import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
 
 const router = Router();
 
@@ -65,6 +66,74 @@ router.get("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
 });
 
 // Get single tenant
+router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { plan: true },
+    });
+
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+
+    const reminder = calculateBillingReminder({
+      subscriptionEnd: tenant.subscriptionEnd,
+      gracePeriodDays: tenant.gracePeriodDays,
+      reminderDaysBeforeDue: tenant.reminderDaysBeforeDue,
+    });
+
+    const amountDue = resolveSubscriptionCharge(tenant.plan || {}, tenant).price;
+
+    res.json({
+      tenantId: tenant.id,
+      name: tenant.name,
+      currency: resolveSubscriptionCharge(tenant.plan || {}, tenant).currency,
+      amountDue,
+      subscriptionEnd: tenant.subscriptionEnd,
+      gracePeriodDays: tenant.gracePeriodDays ?? 0,
+      reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
+      ...reminder,
+    });
+  } catch (err) {
+    console.error("Billing reminder check error:", err);
+    res.status(500).json({ error: "Failed to load billing reminder" });
+  }
+});
+
+router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const { networkProvider, phoneNumber, paymentMethod } = req.body || {};
+    if (!networkProvider || !phoneNumber) {
+      return res.status(400).json({ error: "Network provider and phone number are required" });
+    }
+
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        billingPaymentMethod: paymentMethod || "mobile_money",
+        billingPaymentReference: `${networkProvider}:${phoneNumber}`,
+        paymentReminderStatus: "due_soon",
+        paymentReminderSentAt: new Date(),
+      },
+    });
+
+    res.json({
+      message: "Mobile money payment prompt confirmed",
+      provider: networkProvider,
+      phoneNumber,
+      status: updatedTenant.paymentReminderStatus,
+    });
+  } catch (err) {
+    console.error("Billing reminder save error:", err);
+    res.status(500).json({ error: "Failed to save payment prompt" });
+  }
+});
+
 router.get("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const tenant = await prisma.tenant.findUnique({
