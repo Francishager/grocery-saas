@@ -3,6 +3,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePermission, requireCashAccount } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
+import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 
 const router = Router();
 
@@ -206,6 +207,8 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
             userId,
           },
         });
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, req.userCashAccountId);
       }
 
       return created;
@@ -314,6 +317,8 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
             userId,
           },
         });
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, req.userCashAccountId);
       }
 
       return created;

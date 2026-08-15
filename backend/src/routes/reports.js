@@ -1361,10 +1361,13 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     // Sort by date
     transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    // Calculate running balances
-    let runningBalance = 0;
+    // Calculate running balances - START with opening balance
+    let runningBalance = openingBalanceAmount;
     transactions.forEach((txn) => {
-      runningBalance = runningBalance + txn.debit - txn.credit;
+      // Skip opening balance transaction in calculation (it's already in runningBalance)
+      if (txn.type !== "Opening Balance") {
+        runningBalance = runningBalance + txn.debit - txn.credit;
+      }
       txn.balance = runningBalance;
     });
 

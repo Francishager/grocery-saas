@@ -6,6 +6,7 @@ import { authenticateToken, requirePermission, requireTenant, requireCashAccount
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
+import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -607,6 +608,8 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
           userId: req.user.id
         }
       })
+
+      await syncLinkedTransactionAccountBalance(prisma, scope.tenantId, cashAccountUsed.id)
     }
 
     // Update supplier balance

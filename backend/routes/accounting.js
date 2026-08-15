@@ -3,6 +3,7 @@ import prisma from "../src/db.js";
 import { authenticateToken, requirePermission, getPaymentMethodPermissions, hasAccountingPermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
+import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -356,6 +357,10 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
           user: { select: { id: true, fname: true, lname: true } },
         },
       });
+
+      for (const cashAccountId of linkedCashAccountIds) {
+        await syncLinkedTransactionAccountBalance(tx, tenantId, cashAccountId).catch(() => null);
+      }
 
       for (const line of normalizedLines) {
         const account = accountsById.get(line.accountId);

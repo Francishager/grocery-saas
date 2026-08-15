@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -341,6 +342,8 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
           userId: req.user.id
         }
       })
+
+      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, account.id)
 
       return createdExpense
     })

@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant, checkPaymentMethodPermission } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
+import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -650,6 +651,8 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           userId: req.user.id
         }
       })
+
+      await syncLinkedTransactionAccountBalance(prisma, scope.tenantId, accountToUseId)
     } else {
       // If no account available, still allow the payment but log a warning
       console.warn('No cash account available to record customer payment; payment recorded without cash transaction')
