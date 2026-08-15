@@ -111,8 +111,11 @@ function toEndOfDay(value) {
 }
 
 function saleLineCogs(item) {
-  const savedCost = Number(item?.cost);
-  if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0);
+  const rawCost = item?.cost;
+  if (rawCost !== null && rawCost !== undefined && rawCost !== "") {
+    const savedCost = Number(rawCost);
+    if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0);
+  }
 
   const productCost = Number(item?.product?.cost || 0);
   const conversionFactor = Number(item?.conversionFactor || 1);
