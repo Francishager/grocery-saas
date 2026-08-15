@@ -3,6 +3,13 @@ import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 import { buildDecisionSupportSummary, buildSupplierStatementData } from "../utils/reportingHelpers.js";
+import {
+  transformSalesData,
+  transformExpenseData,
+  transformInventoryMovementData,
+  transformAgingData,
+  transformCashFlowData,
+} from "../utils/enrichedReportTransform.js";
 
 const router = Router();
 
@@ -171,19 +178,22 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, discount: true, tax: true, createdAt: true } }),
-      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true, discount: true, tax: true, createdAt: true } }),
+      prisma.sale.findMany({ 
+        where: scopedWhere(s, df(req)), 
+        select: { id: true, total: true, discount: true, tax: true, createdAt: true, paymentStatus: true },
+        orderBy: { createdAt: 'asc' }
+      }),
+      prisma.saleRecord.findMany({ 
+        where: scopedWhere(s, df(req)), 
+        select: { id: true, total: true, discount: true, tax: true, createdAt: true, status: true },
+        orderBy: { createdAt: 'asc' }
+      }),
     ]);
-    const map = {};
-    const addToMap = (sale, dayKey) => {
-      if (!map[dayKey]) map[dayKey] = { date: dayKey, count: 0, revenue: 0, discount: 0, tax: 0 };
-      map[dayKey].count++; map[dayKey].revenue += sale.total; map[dayKey].discount += sale.discount; map[dayKey].tax += sale.tax;
-    };
-    [...sales, ...saleRecords].forEach((sale) => {
-      const day = new Date(sale.createdAt).toISOString().slice(0, 10);
-      addToMap(sale, day);
-    });
-    res.json({ data: Object.values(map).sort((a, b) => a.date.localeCompare(b.date)) });
+    
+    // Combine and transform for enriched format
+    const allSales = [...sales, ...saleRecords].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const enriched = transformSalesData(allSales);
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -191,20 +201,12 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, discount: true, tax: true, createdAt: true } }),
-      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true, discount: true, tax: true, createdAt: true } }),
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
-    const map = {};
-    [...sales, ...saleRecords].forEach((sale) => {
-      const d = new Date(sale.createdAt);
-      const year = d.getFullYear();
-      const onejan = new Date(year, 0, 1);
-      const week = Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7);
-      const key = `${year}-W${week}`;
-      if (!map[key]) map[key] = { week: key, count: 0, revenue: 0, discount: 0, tax: 0 };
-      map[key].count++; map[key].revenue += sale.total; map[key].discount += sale.discount; map[key].tax += sale.tax;
-    });
-    res.json({ data: Object.values(map) });
+    const enriched = transformSalesData([...sales, ...saleRecords]);
+    enriched.title = 'Weekly Sales Report';
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -212,16 +214,12 @@ router.get("/sales/monthly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, discount: true, tax: true, createdAt: true } }),
-      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true, discount: true, tax: true, createdAt: true } }),
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
-    const map = {};
-    [...sales, ...saleRecords].forEach((sale) => {
-      const m = new Date(sale.createdAt).toISOString().slice(0, 7);
-      if (!map[m]) map[m] = { month: m, count: 0, revenue: 0, discount: 0, tax: 0 };
-      map[m].count++; map[m].revenue += sale.total; map[m].discount += sale.discount; map[m].tax += sale.tax;
-    });
-    res.json({ data: Object.values(map) });
+    const enriched = transformSalesData([...sales, ...saleRecords]);
+    enriched.title = 'Monthly Sales Report';
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -580,14 +578,34 @@ router.get("/inventory/stock-movement", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, purchases] = await Promise.all([
-      prisma.saleItem.findMany({ where: { sale: scopedWhere(s, df(req)) }, include: { product: { select: { name: true } }, sale: { select: { receiptNo: true, createdAt: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.purchaseItem.findMany({ where: { purchase: scopedWhere(s, df(req)) }, include: { product: { select: { name: true } }, purchase: { select: { refNo: true, createdAt: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleItem.findMany({ where: { sale: scopedWhere(s, df(req)) }, include: { product: { select: { name: true, id: true } }, sale: { select: { receiptNo: true, createdAt: true, id: true } } }, orderBy: { createdAt: "asc" } }),
+      prisma.purchaseItem.findMany({ where: { purchase: scopedWhere(s, df(req)) }, include: { product: { select: { name: true, id: true } }, purchase: { select: { refNo: true, createdAt: true, id: true } } }, orderBy: { createdAt: "asc" } }),
     ]);
     const movements = [
-      ...sales.map((i) => ({ type: "out", product: i.product?.name || "Unknown", quantity: i.quantity, ref: i.sale?.receiptNo, date: i.createdAt })),
-      ...purchases.map((i) => ({ type: "in", product: i.product?.name || "Unknown", quantity: i.quantity, ref: i.purchase?.refNo, date: i.createdAt })),
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
-    res.json({ data: movements });
+      ...sales.map((i) => ({
+        id: `sale-${i.sale?.id}-${i.product?.id}`,
+        date: i.createdAt,
+        type: 'Stock Out',
+        product: i.product?.name || 'Unknown',
+        quantity: i.quantity,
+        receiptNo: i.sale?.receiptNo,
+        reference: i.sale?.receiptNo,
+        isInbound: false,
+      })),
+      ...purchases.map((i) => ({
+        id: `purchase-${i.purchase?.id}-${i.product?.id}`,
+        date: i.createdAt,
+        type: 'Stock In',
+        product: i.product?.name || 'Unknown',
+        quantity: i.quantity,
+        receiptNo: i.purchase?.refNo,
+        reference: i.purchase?.refNo,
+        isInbound: true,
+      })),
+    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    const enriched = transformInventoryMovementData(movements);
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -797,11 +815,9 @@ router.get("/financial/income", authenticateToken, async (req, res) => {
 router.get("/financial/expense", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const expenses = await prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), orderBy: { date: "desc" } });
-    const byCategory = {};
-    expenses.forEach((e) => { byCategory[e.category] = (byCategory[e.category] || 0) + e.amount; });
-    const data = expenses.map((e) => ({ category: e.category, amount: e.amount, date: e.date, description: e.description || "" }));
-    res.json({ data, summary: { count: data.length, totalExpenses: data.reduce((a, e) => a + e.amount, 0), byCategory } });
+    const expenses = await prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), include: { user: { select: { fname: true, lname: true, name: true } } }, orderBy: { date: "asc" } });
+    const enriched = transformExpenseData(expenses);
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -982,8 +998,24 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
 router.get("/financial/bank-transactions", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const transactions = await prisma.cashTransaction.findMany({ where: { tenantId: s.tenantId, ...df(req), account: { type: "bank" } }, include: { account: { select: { name: true, type: true } } }, orderBy: { createdAt: "desc" } });
-    res.json({ data: transactions, summary: { count: transactions.length, totalIn: transactions.filter((t) => t.type === "income").reduce((a, t) => a + t.amount, 0), totalOut: transactions.filter((t) => t.type === "expense").reduce((a, t) => a + t.amount, 0) } });
+    const transactions = await prisma.cashTransaction.findMany({ where: { tenantId: s.tenantId, ...df(req), account: { type: "bank" } }, include: { account: { select: { name: true, type: true, balance: true } } }, orderBy: { createdAt: "asc" } });
+    
+    // Get opening balance from first transaction or account
+    const openingBalance = transactions.length > 0 ? Number(transactions[0].account?.balance || 0) : 0;
+    
+    const enriched = transformCashFlowData({
+      openingBalance,
+      data: transactions.map(t => ({
+        id: t.id,
+        date: t.createdAt,
+        type: t.type === 'income' ? 'Inflow' : 'Outflow',
+        description: t.description || t.type,
+        amount: t.amount,
+        paymentMethod: t.account?.name || 'Bank',
+        reference: t.reference || t.id.substring(0, 8),
+      })),
+    });
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -1975,23 +2007,61 @@ router.get("/receivables/outstanding", authenticateToken, async (req, res) => {
 router.get("/receivables/aging", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const customers = await prisma.customer.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { sales: { where: { balance: { gt: 0 } }, select: { balance: true, dueDate: true, createdAt: true } } } });
+    const [customers, openingBalances] = await Promise.all([
+      prisma.customer.findMany({ 
+        where: scopedWhere(s, { balance: { gt: 0 } }), 
+        include: { 
+          sales: { 
+            where: { balance: { gt: 0 }, ...df(req) }, 
+            select: { id: true, receiptNo: true, balance: true, dueDate: true, createdAt: true, total: true, amountPaid: true, paymentStatus: true } 
+          } 
+        },
+        orderBy: { name: 'asc' }
+      }),
+      prisma.customer.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true } }),
+    ]);
+    
+    const allTransactions = [];
     const now = new Date();
-    const buckets = { current: 0, "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
-    const data = customers.map((c) => {
-      const aging = { current: 0, "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
-      c.sales.forEach((sr) => {
-        const ref = sr.dueDate || sr.createdAt;
-        const days = Math.floor((now - new Date(ref)) / 86400000);
-        if (days <= 0) { aging.current += sr.balance; buckets.current += sr.balance; }
-        else if (days <= 30) { aging["1-30"] += sr.balance; buckets["1-30"] += sr.balance; }
-        else if (days <= 60) { aging["31-60"] += sr.balance; buckets["31-60"] += sr.balance; }
-        else if (days <= 90) { aging["61-90"] += sr.balance; buckets["61-90"] += sr.balance; }
-        else { aging["90+"] += sr.balance; buckets["90+"] += sr.balance; }
+    
+    // Add opening balance transactions
+    openingBalances.forEach((c) => {
+      allTransactions.push({
+        id: `opening-${c.id}`,
+        date: c.openingBalanceDate || new Date(0),
+        type: 'Opening Balance',
+        description: `Opening Balance - ${c.name}`,
+        details: `Opening balance for customer`,
+        debit: Number(c.openingBalance || 0),
+        credit: 0,
+        reference: '-',
       });
-      return { customer: c.name, phone: c.phone, totalBalance: c.balance, aging };
     });
-    res.json({ data, buckets });
+    
+    // Add sales invoices
+    customers.forEach((cust) => {
+      cust.sales.forEach((sale) => {
+        allTransactions.push({
+          id: sale.id,
+          date: sale.createdAt,
+          type: 'Invoice',
+          description: `Sales Invoice - ${cust.name}`,
+          details: `Ref: ${sale.receiptNo}, Status: ${sale.paymentStatus}, Paid: ${Number(sale.amountPaid || 0)}, Balance: ${Number(sale.balance || 0)}`,
+          debit: Number(sale.total || 0),
+          credit: Number(sale.amountPaid || 0),
+          reference: sale.receiptNo,
+        });
+      });
+    });
+    
+    allTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    const totalOutstanding = customers.reduce((sum, c) => sum + Number(c.balance || 0), 0);
+    const enriched = transformAgingData(allTransactions, false);
+    enriched.currentBalance = totalOutstanding;
+    enriched.summary.totalOutstanding = totalOutstanding;
+    
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -2037,23 +2107,62 @@ router.get("/payables/outstanding", authenticateToken, async (req, res) => {
 router.get("/payables/aging", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const suppliers = await prisma.supplier.findMany({ where: scopedWhere(s, { balance: { gt: 0 } }), include: { purchases: { where: { balance: { gt: 0 } }, select: { balance: true, dueDate: true, createdAt: true } } } });
+    const [suppliers, openingBalances] = await Promise.all([
+      prisma.supplier.findMany({ 
+        where: scopedWhere(s, { balance: { gt: 0 } }), 
+        include: { 
+          purchases: { 
+            where: { balance: { gt: 0 }, ...df(req) }, 
+            select: { id: true, refNo: true, balance: true, dueDate: true, createdAt: true, total: true, amountPaid: true, status: true } 
+          } 
+        },
+        orderBy: { name: 'asc' }
+      }),
+      prisma.supplier.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true } }),
+    ]);
+    
+    const allTransactions = [];
     const now = new Date();
-    const buckets = { current: 0, "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
-    const data = suppliers.map((sup) => {
-      const aging = { current: 0, "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
-      sup.purchases.forEach((p) => {
-        const ref = p.dueDate || p.createdAt;
-        const days = Math.floor((now - new Date(ref)) / 86400000);
-        if (days <= 0) { aging.current += p.balance; buckets.current += p.balance; }
-        else if (days <= 30) { aging["1-30"] += p.balance; buckets["1-30"] += p.balance; }
-        else if (days <= 60) { aging["31-60"] += p.balance; buckets["31-60"] += p.balance; }
-        else if (days <= 90) { aging["61-90"] += p.balance; buckets["61-90"] += p.balance; }
-        else { aging["90+"] += p.balance; buckets["90+"] += p.balance; }
+    
+    // Add opening balance transactions
+    openingBalances.forEach((s) => {
+      allTransactions.push({
+        id: `opening-${s.id}`,
+        date: s.openingBalanceDate || new Date(0),
+        type: 'Opening Balance',
+        description: `Opening Balance - ${s.name}`,
+        details: `Opening balance for supplier`,
+        debit: Number(s.openingBalance || 0),
+        credit: 0,
+        reference: '-',
       });
-      return { supplier: sup.name, phone: sup.phone, totalBalance: sup.balance, aging };
     });
-    res.json({ data, buckets });
+    
+    // Add purchase bills
+    suppliers.forEach((supp) => {
+      supp.purchases.forEach((purchase) => {
+        allTransactions.push({
+          id: purchase.id,
+          date: purchase.createdAt,
+          type: 'Bill',
+          description: `Purchase Bill - ${supp.name}`,
+          details: `Ref: ${purchase.refNo}, Status: ${purchase.status}, Paid: ${Number(purchase.amountPaid || 0)}, Balance: ${Number(purchase.balance || 0)}`,
+          debit: Number(purchase.total || 0),
+          credit: Number(purchase.amountPaid || 0),
+          reference: purchase.refNo,
+        });
+      });
+    });
+    
+    allTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    const totalOutstanding = suppliers.reduce((sum, s) => sum + Number(s.balance || 0), 0);
+    const enriched = transformAgingData(allTransactions, true);
+    enriched.currentBalance = totalOutstanding;
+    enriched.summary.totalOutstanding = totalOutstanding;
+    enriched.title = 'Payables Aging Report';
+    
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 

@@ -21,6 +21,7 @@ import { exportToExcel, exportToPDF, printReport, type BusinessInfo } from '@/li
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReportData } from '@/db/hybrid'
+import { EnrichedReport, type EnrichedReportData } from '@/components/EnrichedReportRenderer'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -28,7 +29,7 @@ interface ReportItem {
   id: string
   label: string
   apiFn: (params?: ReportParams) => Promise<any>
-  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement'
+  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched'
   columns?: { key: string; label: string; format?: 'currency' | 'number' | 'date' | 'text' }[]
   summaryKeys?: { key: string; label: string; format?: 'currency' | 'number' | 'text' }[]
   entityType?: 'customer' | 'supplier' | 'product'
@@ -66,14 +67,29 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'avgSale', label: 'Average Sale', format: 'currency' },
         ]
       },
-      { id: 'salesDaily', label: 'Daily Sales Report', apiFn: reportsApiV2.salesDaily, renderType: 'table',
-        columns: [dateCol('date', 'Date'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount'), currencyCol('tax', 'Tax')]
+      { id: 'salesDaily', label: 'Daily Sales Report', apiFn: reportsApiV2.salesDaily, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Sales', format: 'number' },
+          { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
+          { key: 'totalDiscount', label: 'Discount', format: 'currency' },
+          { key: 'totalTax', label: 'Tax', format: 'currency' },
+        ]
       },
-      { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'table',
-        columns: [textCol('week', 'Week'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount'), currencyCol('tax', 'Tax')]
+      { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Sales', format: 'number' },
+          { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
+          { key: 'totalDiscount', label: 'Discount', format: 'currency' },
+          { key: 'totalTax', label: 'Tax', format: 'currency' },
+        ]
       },
-      { id: 'salesMonthly', label: 'Monthly Sales Report', apiFn: reportsApiV2.salesMonthly, renderType: 'table',
-        columns: [textCol('month', 'Month'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount'), currencyCol('tax', 'Tax')]
+      { id: 'salesMonthly', label: 'Monthly Sales Report', apiFn: reportsApiV2.salesMonthly, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Sales', format: 'number' },
+          { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
+          { key: 'totalDiscount', label: 'Discount', format: 'currency' },
+          { key: 'totalTax', label: 'Tax', format: 'currency' },
+        ]
       },
       { id: 'salesByProduct', label: 'Sales by Product', apiFn: reportsApiV2.salesByProduct, renderType: 'table',
         columns: [textCol('product', 'Product'), numberCol('quantity', 'Quantity'), currencyCol('revenue', 'Revenue'), currencyCol('cost', 'Cost'), currencyCol('profit', 'Profit')]
@@ -113,8 +129,13 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'inventoryOutOfStock', label: 'Out of Stock Report', apiFn: reportsApiV2.inventoryOutOfStock, renderType: 'table',
         columns: [textCol('name', 'Product'), textCol('category', 'Category'), textCol('branch', 'Branch')]
       },
-      { id: 'inventoryStockMovement', label: 'Stock Movement Report', apiFn: reportsApiV2.inventoryStockMovement, renderType: 'table',
-        columns: [textCol('type', 'Type'), textCol('product', 'Product'), numberCol('quantity', 'Qty'), textCol('ref', 'Reference'), dateCol('date', 'Date')]
+      { id: 'inventoryStockMovement', label: 'Stock Movement Report', apiFn: reportsApiV2.inventoryStockMovement, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalInbound', label: 'Total In', format: 'number' },
+          { key: 'totalOutbound', label: 'Total Out', format: 'number' },
+          { key: 'currentStock', label: 'Current Stock', format: 'number' },
+          { key: 'netChange', label: 'Net Change', format: 'number' },
+        ]
       },
       { id: 'inventoryAdjustments', label: 'Inventory Adjustment Report', apiFn: reportsApiV2.inventoryAdjustments, renderType: 'table',
         columns: [textCol('action', 'Action'), textCol('model', 'Model'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
@@ -147,8 +168,11 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'totalIncome', label: 'Total Income', format: 'currency' },
         ]
       },
-      { id: 'financialExpense', label: 'Expense Report', apiFn: reportsApiV2.financialExpense, renderType: 'table',
-        columns: [textCol('category', 'Category'), currencyCol('amount', 'Amount'), dateCol('date', 'Date'), textCol('description', 'Description')]
+      { id: 'financialExpense', label: 'Expense Report', apiFn: reportsApiV2.financialExpense, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalExpense', label: 'Total Expense', format: 'currency' },
+          { key: 'expenseCount', label: 'Total Transactions', format: 'number' },
+        ]
       },
       { id: 'financialCashFlow', label: 'Cash Flow Report', apiFn: reportsApiV2.financialCashFlow, renderType: 'summary',
         summaryKeys: [
@@ -162,8 +186,13 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'financialGeneralLedger', label: 'General Ledger', apiFn: reportsApiV2.financialGeneralLedger, renderType: 'ledger', ledgerType: 'financial', showBranchFilter: true,
         columns: [dateCol('date', 'Date'), textCol('account', 'Account'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit')]
       },
-      { id: 'financialBankTransactions', label: 'Bank Transactions Report', apiFn: reportsApiV2.financialBankTransactions, renderType: 'table',
-        columns: [dateCol('createdAt', 'Date'), textCol('type', 'Type'), currencyCol('amount', 'Amount'), textCol('description', 'Description')]
+      { id: 'financialBankTransactions', label: 'Bank Transactions Report', apiFn: reportsApiV2.financialBankTransactions, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
+          { key: 'totalInflow', label: 'Inflow', format: 'currency' },
+          { key: 'totalOutflow', label: 'Outflow', format: 'currency' },
+          { key: 'closingBalance', label: 'Closing Balance', format: 'currency' },
+        ]
       },
       { id: 'financialTax', label: 'Tax Report (VAT, GST)', apiFn: reportsApiV2.financialTax, renderType: 'summary',
         summaryKeys: [
@@ -185,8 +214,11 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'customersSales', label: 'Customer Sales Report', apiFn: reportsApiV2.customersSales, renderType: 'table',
         columns: [textCol('customer', 'Customer'), numberCol('count', 'Orders'), currencyCol('total', 'Total'), currencyCol('paid', 'Paid'), currencyCol('balance', 'Balance')]
       },
-      { id: 'customersBalance', label: 'Customer Balance Report', apiFn: reportsApiV2.customersBalance, renderType: 'table',
-        columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), currencyCol('balance', 'Balance')]
+      { id: 'customersBalance', label: 'Customer Balance Report', apiFn: reportsApiV2.customersBalance, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalBalance', label: 'Total Balance', format: 'currency' },
+          { key: 'customerCount', label: 'Customer Count', format: 'number' },
+        ]
       },
       { id: 'customersReceivables', label: 'Customer Receivables Report', apiFn: reportsApiV2.customersReceivables, renderType: 'table',
         columns: [textCol('customer', 'Customer'), currencyCol('total', 'Total'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance')]
@@ -226,8 +258,11 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'suppliersPayables', label: 'Supplier Payables Report', apiFn: reportsApiV2.suppliersPayables, renderType: 'table',
         columns: [textCol('supplier', 'Supplier'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance')]
       },
-      { id: 'suppliersBalance', label: 'Supplier Balance Report', apiFn: reportsApiV2.suppliersBalance, renderType: 'table',
-        columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), currencyCol('balance', 'Balance')]
+      { id: 'suppliersBalance', label: 'Supplier Balance Report', apiFn: reportsApiV2.suppliersBalance, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalBalance', label: 'Total Balance', format: 'currency' },
+          { key: 'supplierCount', label: 'Supplier Count', format: 'number' },
+        ]
       },
       { id: 'suppliersStatement', label: 'Supplier Statement', apiFn: reportsApiV2.suppliersStatement, renderType: 'statement', entityType: 'supplier', showBranchFilter: true,
         summaryKeys: [
@@ -255,7 +290,12 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'receivablesOutstanding', label: 'Outstanding Invoices', apiFn: reportsApiV2.receivablesOutstanding, renderType: 'table',
         columns: [textCol('customer', 'Customer'), textCol('status', 'Status'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
       },
-      { id: 'receivablesAging', label: 'Customer Aging Report', apiFn: reportsApiV2.receivablesAging, renderType: 'aging' },
+      { id: 'receivablesAging', label: 'Customer Aging Report', apiFn: reportsApiV2.receivablesAging, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalOutstanding', label: 'Outstanding', format: 'currency' },
+          { key: 'invoiceCount', label: 'Invoice Count', format: 'number' },
+        ]
+      },
       { id: 'receivablesCollection', label: 'Collection Report', apiFn: reportsApiV2.receivablesCollection, renderType: 'table',
         columns: [dateCol('createdAt', 'Date'), textCol('customer', 'Customer'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method')]
       },
@@ -273,7 +313,12 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'payablesOutstanding', label: 'Outstanding Bills Report', apiFn: reportsApiV2.payablesOutstanding, renderType: 'table',
         columns: [textCol('supplier', 'Supplier'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance'), dateCol('createdAt', 'Date')]
       },
-      { id: 'payablesAging', label: 'Supplier Aging Report', apiFn: reportsApiV2.payablesAging, renderType: 'aging' },
+      { id: 'payablesAging', label: 'Supplier Aging Report', apiFn: reportsApiV2.payablesAging, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalOutstanding', label: 'Outstanding', format: 'currency' },
+          { key: 'invoiceCount', label: 'Bill Count', format: 'number' },
+        ]
+      },
       { id: 'payablesPaymentHistory', label: 'Payment History Report', apiFn: reportsApiV2.payablesPaymentHistory, renderType: 'table',
         columns: [dateCol('createdAt', 'Date'), textCol('supplier', 'Supplier'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method')]
       },
@@ -1878,6 +1923,7 @@ export default function ReportsPage() {
                     {currentReport.id === 'financialExpense' && reportData?.summary?.byCategory && <ExpenseCategoryBreakdown summary={reportData.summary} />}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
+                    {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}
                     {currentReport.renderType === 'summary' && (
                       <>
                         {currentReport.id === 'salesSummary' ? (

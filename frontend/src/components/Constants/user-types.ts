@@ -68,7 +68,7 @@ export const timezoneOptions = [
 export const defaultUserPreferences = {
   language: 'en',
   timezone: 'Africa/Kampala',
-  dateFormat: 'DD/MM/YYYY',
+  dateFormat: 'DD/MM/YY',
   timeFormat: '24h',
   currency: 'UGX',
   notifications: {

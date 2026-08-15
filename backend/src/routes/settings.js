@@ -25,7 +25,7 @@ router.get("/", authenticateToken, requirePermission("canViewSettings"), async (
       where: { id: tenantId },
       select: {
         id: true, name: true, slug: true, email: true, phone: true, address: true,
-        logo: true, status: true, currency: true, timezone: true, taxRate: true,
+        logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
         createdAt: true, updatedAt: true,
       },
@@ -49,7 +49,7 @@ router.get("/business-profile", authenticateToken, async (req, res) => {
       where: { id: tenantId },
       select: {
         id: true, name: true, slug: true, email: true, phone: true, address: true,
-        logo: true, currency: true, taxRate: true, taxEnabled: true, taxId: true,
+        logo: true, currency: true, timezone: true, dateFormat: true, taxRate: true, taxEnabled: true, taxId: true,
         receiptHeader: true, receiptFooter: true,
       },
     });
@@ -67,7 +67,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    const { name, email, phone, address, currency, timezone, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
+    const { name, email, phone, address, currency, timezone, dateFormat, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
     const data = {};
     if (name !== undefined) data.name = name;
     if (email !== undefined) data.email = email;
@@ -75,6 +75,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     if (address !== undefined) data.address = address || null;
     if (currency !== undefined) data.currency = currency;
     if (timezone !== undefined) data.timezone = timezone;
+    if (dateFormat !== undefined) data.dateFormat = dateFormat || 'DD/MM/YY';
     if (taxRate !== undefined) data.taxRate = parseFloat(taxRate) || 0;
     if (taxEnabled !== undefined) data.taxEnabled = Boolean(taxEnabled);
     if (taxId !== undefined) data.taxId = taxId || null;
@@ -86,7 +87,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
       data,
       select: {
         id: true, name: true, slug: true, email: true, phone: true, address: true,
-        logo: true, status: true, currency: true, timezone: true, taxRate: true,
+        logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
         createdAt: true, updatedAt: true,
       },

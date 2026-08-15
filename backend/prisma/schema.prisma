@@ -229,6 +229,7 @@ model Tenant {
   // =====================
   currency      String   @default("UGX")
   timezone      String   @default("Africa/Kampala")
+  dateFormat    String   @default("DD/MM/YY")
   taxRate       Float    @default(0) // e.g. 18 for 18% VAT
   taxEnabled    Boolean  @default(false) // toggle tax on/off
   taxId         String?  // VAT/GST registration number

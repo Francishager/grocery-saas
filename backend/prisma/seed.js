@@ -93,6 +93,7 @@ async function main() {
       slug: 'kyengo-mart',
       email: 'kyengo@tenant.local',
       businessType: 'retail',
+      dateFormat: 'DD/MM/YY',
       plan: {
         connect: { id: plans[1].id }
       },

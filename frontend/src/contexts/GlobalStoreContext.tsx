@@ -43,7 +43,7 @@ const initialState: GlobalState = {
   density: 'comfortable',
   locale: 'en',
   currency: 'UGX',
-  dateFormat: 'DD/MM/YYYY',
+  dateFormat: 'DD/MM/YY',
   timeFormat: '24h',
   notifications: {
     enabled: true,

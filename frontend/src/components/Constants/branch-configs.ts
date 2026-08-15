@@ -30,7 +30,7 @@ export const defaultBranchSettings: BranchSettings = {
   currency: 'UGX',
   taxRate: 18,
   timezone: 'Africa/Kampala',
-  dateFormat: 'DD/MM/YYYY',
+  dateFormat: 'DD/MM/YY',
   lowStockThreshold: 10,
   enableInventory: true,
   enableSales: true,
@@ -82,6 +82,7 @@ export const timezoneOptions = [
 
 // Date format options
 export const dateFormatOptions = [
+  { value: 'DD/MM/YY', label: 'DD/MM/YY' },
   { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
   { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
   { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },

@@ -205,7 +205,7 @@ router.post("/businesses", authenticateToken, requirePlatformAdmin, async (req, 
     if (!name) return res.status(400).json({ error: "Business name required" });
 
     const slug = (requestedSlug || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    const tenant = await prisma.tenant.create({ data: { name, slug, email: email || `${slug}@placeholder.com`, phone, address, planId, status: "active" } });
+    const tenant = await prisma.tenant.create({ data: { name, slug, email: email || `${slug}@placeholder.com`, phone, address, planId, status: "active", dateFormat: "DD/MM/YY" } });
     res.status(201).json({ message: "Business created", tenant, id: tenant.id, tenantId: tenant.id });
   } catch (err) {
     console.error("Create business error:", err);
@@ -588,7 +588,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
 
     const { tenant } = await prisma.$transaction(async (tx) => {
       const createdTenant = await tx.tenant.create({
-        data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, businessType: business.businessType || null, status: "active", planId: business.planId },
+        data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, businessType: business.businessType || null, status: "active", planId: business.planId, dateFormat: "DD/MM/YY" },
       });
 
       const user = await tx.user.create({

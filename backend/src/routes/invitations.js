@@ -221,7 +221,7 @@ router.post("/accept", async (req, res) => {
     if (!tenantId && finalBusinessName) {
       const slug = finalBusinessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
       const tenant = await prisma.tenant.create({
-        data: { name: finalBusinessName, slug, email: inv.email, phone: phone || inv.phone || businessDetail(inv.message, "Business phone"), address: businessDetail(inv.message, "Business location") || undefined, status: "active", planId: inv.planId },
+        data: { name: finalBusinessName, slug, email: inv.email, phone: phone || inv.phone || businessDetail(inv.message, "Business phone"), address: businessDetail(inv.message, "Business location") || undefined, status: "active", planId: inv.planId, dateFormat: "DD/MM/YY" },
       });
       tenantId = tenant.id;
     }
