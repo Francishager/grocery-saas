@@ -813,7 +813,13 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                 {transactions.map((txn: any, idx: number) => (
                   <tr key={txn.id || idx} className="border-t hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 whitespace-nowrap text-xs">
-                      {new Date(txn.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                      {(() => {
+                        const d = new Date(txn.date)
+                        const day = String(d.getDate()).padStart(2, '0')
+                        const month = String(d.getMonth() + 1).padStart(2, '0')
+                        const year = d.getFullYear()
+                        return `${day}/${month}/${year}`
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTransactionBadgeColor(txn.type)}`}>
@@ -853,7 +859,13 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                       {txn.type}
                     </span>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(txn.date).toLocaleDateString()}
+                      {(() => {
+                        const d = new Date(txn.date)
+                        const day = String(d.getDate()).padStart(2, '0')
+                        const month = String(d.getMonth() + 1).padStart(2, '0')
+                        const year = d.getFullYear()
+                        return `${day}/${month}/${year}`
+                      })()}
                     </p>
                   </div>
                   <p className="font-medium text-sm mb-1">{txn.description}</p>
@@ -1690,33 +1702,56 @@ export default function ReportsPage() {
 
   const canExport = hasPermission('canExportReport')
 
+  // Statement columns definition with proper formatting
+  const statementColumns = [
+    { key: 'date', label: 'Date', format: 'date' },
+    { key: 'type', label: 'Transaction Type', format: 'text' },
+    { key: 'description', label: 'Description', format: 'text' },
+    { key: 'reference', label: 'Reference', format: 'text' },
+    { key: 'paymentMethod', label: 'Payment Method', format: 'text' },
+    { key: 'debit', label: 'Debit', format: 'currency' },
+    { key: 'credit', label: 'Credit', format: 'currency' },
+    { key: 'balance', label: 'Balance', format: 'currency' },
+  ]
+
+  // Get data and columns for export based on report type
+  const getExportData = () => {
+    if (currentReport?.renderType === 'statement' && reportData?.transactions) {
+      return { data: reportData.transactions, columns: statementColumns }
+    }
+    return { data: reportData?.data || reportData, columns: currentReport?.columns }
+  }
+
   const handlePrint = () => {
+    const { data, columns } = getExportData()
     printReport(
-      reportData?.data || reportData,
+      data,
       currentReport?.label || 'Report',
       currentReport?.categoryLabel || '',
-      currentReport?.columns,
+      columns,
       reportData?.summary,
       businessInfo || undefined
     )
   }
 
   const handleExportExcel = () => {
+    const { data, columns } = getExportData()
     exportToExcel(
-      reportData?.data || reportData,
+      data,
       currentReport?.label || 'Report',
-      currentReport?.columns,
+      columns,
       reportData?.summary,
       businessInfo || undefined
     )
   }
 
   const handleExportPDF = () => {
+    const { data, columns } = getExportData()
     exportToPDF(
-      reportData?.data || reportData,
+      data,
       currentReport?.label || 'Report',
       currentReport?.categoryLabel,
-      currentReport?.columns,
+      columns,
       reportData?.summary,
       businessInfo || undefined
     )

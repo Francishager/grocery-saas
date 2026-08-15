@@ -36,14 +36,23 @@ function formatExportValue(value: any, format?: string): string {
   switch (format) {
     case 'currency': return formatCurrency(Number(value) || 0)
     case 'number': return new Intl.NumberFormat('en-US').format(Number(value) || 0)
-    case 'date': return value ? new Date(value).toLocaleDateString() : ''
+    case 'date': {
+      if (!value) return ''
+      const d = new Date(value)
+      const day = String(d.getDate()).padStart(2, '0')
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const year = d.getFullYear()
+      return `${day}/${month}/${year}`
+    }
     default:
       if (typeof value === 'object') {
         if (value.name) return String(value.name)
         if (value.label) return String(value.label)
         if (value.email) return String(value.email)
+        if (value.description) return String(value.description)
+        // For transactions and other objects, try to extract a meaningful value
         const firstVal = Object.values(value)[0]
-        return firstVal != null ? String(firstVal) : ''
+        return firstVal != null ? String(firstVal) : '[Data]'
       }
       return String(value)
   }
@@ -56,6 +65,9 @@ function extractRows(data: any, columns?: ExportColumn[]): { headers: string[]; 
   let rowsArr: any[] = []
   if (Array.isArray(data)) {
     rowsArr = data
+  } else if (data.transactions && Array.isArray(data.transactions)) {
+    // Handle statement data with transactions array
+    rowsArr = data.transactions
   } else if (data.data && Array.isArray(data.data)) {
     rowsArr = data.data
   } else if (data.accounts && Array.isArray(data.accounts)) {
@@ -74,9 +86,17 @@ function extractRows(data: any, columns?: ExportColumn[]): { headers: string[]; 
     rows = rowsArr.map(row => columns.map(c => formatExportValue(row[c.key], c.format)))
   } else {
     // Auto-detect columns from first row
-    const keys = Object.keys(rowsArr[0])
+    const keys = Object.keys(rowsArr[0]).filter(k => !k.startsWith('_') && k !== 'id' && k !== 'relatedId')
     headers = keys.map(k => k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()))
-    rows = rowsArr.map(row => keys.map(k => formatExportValue(row[k])) )
+    rows = rowsArr.map(row => keys.map(k => {
+      const val = row[k]
+      // Auto-detect format based on key name and value
+      let fmt = undefined
+      if (k.toLowerCase().includes('date')) fmt = 'date'
+      else if (k.toLowerCase().includes('balance') || k.toLowerCase().includes('debit') || k.toLowerCase().includes('credit') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('total') || k.toLowerCase().includes('currency')) fmt = 'currency'
+      else if (k.toLowerCase().includes('count') || k.toLowerCase().includes('quantity') || k.toLowerCase().includes('number')) fmt = 'number'
+      return formatExportValue(val, fmt)
+    }))
   }
 
   return { headers, rows }
@@ -106,9 +126,19 @@ export function exportToExcel(
   sheetData.push([])
 
   // Summary rows if present
-  if (summary) {
-    for (const [k, v] of Object.entries(summary)) {
-      sheetData.push([k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()), typeof v === 'number' ? formatCurrency(v) : String(v)])
+  if (summary && typeof summary === 'object') {
+    const summaryEntries = Object.entries(summary).filter(([_, v]) => v != null && v !== '')
+    for (const [k, v] of summaryEntries) {
+      let displayVal = String(v)
+      if (typeof v === 'number') {
+        // Check if it looks like currency
+        if (k.toLowerCase().includes('balance') || k.toLowerCase().includes('total') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('revenue') || k.toLowerCase().includes('payment')) {
+          displayVal = formatCurrency(v)
+        } else if (!k.toLowerCase().includes('count')) {
+          displayVal = new Intl.NumberFormat('en-US').format(v)
+        }
+      }
+      sheetData.push([k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()), displayVal])
     }
     sheetData.push([])
   }
@@ -116,6 +146,10 @@ export function exportToExcel(
   if (headers.length > 0) {
     sheetData.push(headers)
     sheetData.push(...rows)
+  } else if (Array.isArray(data)) {
+    // Fallback for array data
+    sheetData.push(['Data'])
+    sheetData.push(...data.map(d => [String(d)]))
   }
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData.length > 0 ? sheetData : [[reportLabel], ['No data available']])
@@ -173,16 +207,23 @@ export function exportToPDF(
   startY += 6
 
   // Summary section
-  if (summary) {
-    const summaryEntries = Object.entries(summary)
+  if (summary && typeof summary === 'object') {
+    const summaryEntries = Object.entries(summary).filter(([_, v]) => v != null && v !== '')
     if (summaryEntries.length > 0) {
       autoTable(doc, {
         startY,
         head: [['Metric', 'Value']],
-        body: summaryEntries.map(([k, v]) => [
-          k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()),
-          typeof v === 'number' ? formatCurrency(v) : String(v)
-        ]),
+        body: summaryEntries.map(([k, v]) => {
+          let displayVal = String(v)
+          if (typeof v === 'number') {
+            if (k.toLowerCase().includes('balance') || k.toLowerCase().includes('total') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('revenue') || k.toLowerCase().includes('payment') || k.toLowerCase().includes('discount') || k.toLowerCase().includes('tax')) {
+              displayVal = formatCurrency(v)
+            } else if (!k.toLowerCase().includes('count')) {
+              displayVal = new Intl.NumberFormat('en-US').format(v)
+            }
+          }
+          return [k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()), displayVal]
+        }),
         theme: 'striped',
         headStyles: { fillColor: [217, 91, 60] },
         margin: { left: margin, right: margin },
@@ -229,7 +270,7 @@ export function printReport(
   const styles = `
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; padding: 24px; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; padding: 24px; line-height: 1.4; }
       .business-header { text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #333; }
       .business-header .biz-name { font-size: 22px; font-weight: bold; }
       .business-header .biz-address { font-size: 12px; color: #555; margin-top: 2px; }
@@ -240,14 +281,23 @@ export function printReport(
       .generated { font-size: 11px; color: #999; margin-bottom: 20px; text-align: center; }
       .summary { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
       .summary-item { background: #f5f5f5; padding: 10px 16px; border-radius: 6px; }
-      .summary-item .label { font-size: 11px; color: #666; }
-      .summary-item .value { font-size: 16px; font-weight: bold; margin-top: 2px; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; }
-      thead th { background: #2980b9; color: #fff; text-align: left; padding: 8px 10px; }
-      tbody td { padding: 6px 10px; border-bottom: 1px solid #e0e0e0; }
+      .summary-item .label { font-size: 11px; color: #666; font-weight: 500; }
+      .summary-item .value { font-size: 14px; font-weight: bold; margin-top: 4px; color: #1a1a1a; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+      thead th { background: #2980b9; color: #fff; text-align: left; padding: 10px; font-weight: 600; border: 1px solid #1f5b8b; }
+      tbody td { padding: 8px 10px; border: 1px solid #e0e0e0; }
       tbody tr:nth-child(even) { background: #f9f9f9; }
+      tbody tr:hover { background: #f0f0f0; }
+      .text-right { text-align: right; }
+      .text-center { text-align: center; }
+      .currency { text-align: right; font-family: 'Courier New', monospace; }
+      .number { text-align: right; font-family: 'Courier New', monospace; }
       .no-data { text-align: center; padding: 40px; color: #999; }
-      @media print { body { padding: 12px; } }
+      @media print { 
+        body { padding: 12px; } 
+        table { page-break-inside: avoid; }
+        tr { page-break-inside: avoid; }
+      }
     </style>
   `
 
@@ -264,23 +314,45 @@ export function printReport(
   }
 
   let summaryHtml = ''
-  if (summary) {
-    summaryHtml = '<div class="summary">' +
-      Object.entries(summary).map(([k, v]) => `
-        <div class="summary-item">
-          <div class="label">${k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</div>
-          <div class="value">${typeof v === 'number' ? formatCurrency(Number(v) || 0) : String(v)}</div>
-        </div>
-      `).join('') + '</div>'
+  if (summary && typeof summary === 'object') {
+    const summaryEntries = Object.entries(summary).filter(([_, v]) => v != null && v !== '')
+    if (summaryEntries.length > 0) {
+      summaryHtml = '<div class="summary">' +
+        summaryEntries.map(([k, v]) => {
+          let displayVal = String(v)
+          if (typeof v === 'number') {
+            if (k.toLowerCase().includes('balance') || k.toLowerCase().includes('total') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('revenue') || k.toLowerCase().includes('payment') || k.toLowerCase().includes('discount') || k.toLowerCase().includes('tax')) {
+              displayVal = formatCurrency(v)
+            } else if (!k.toLowerCase().includes('count')) {
+              displayVal = new Intl.NumberFormat('en-US').format(Number(v) || 0)
+            }
+          }
+          return `
+            <div class="summary-item">
+              <div class="label">${k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</div>
+              <div class="value">${displayVal}</div>
+            </div>
+          `
+        }).join('') + '</div>'
+    }
   }
 
   let tableHtml = ''
   if (headers.length > 0) {
+    // Determine column alignments based on headers
+    const columnAlignments = headers.map(h => {
+      const lh = h.toLowerCase()
+      if (lh.includes('date') || lh.includes('time')) return 'text-center'
+      if (lh.includes('amount') || lh.includes('balance') || lh.includes('debit') || lh.includes('credit') || lh.includes('total') || lh.includes('revenue') || lh.includes('cost') || lh.includes('profit') || lh.includes('tax') || lh.includes('discount')) return 'text-right'
+      if (lh.includes('quantity') || lh.includes('count') || lh.includes('number')) return 'text-right'
+      return ''
+    })
+    
     tableHtml = `
       <table>
         <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
         <tbody>
-          ${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}
+          ${rows.map(r => `<tr>${r.map((c, idx) => `<td class="${columnAlignments[idx]}">${c}</td>`).join('')}</tr>`).join('')}
         </tbody>
       </table>
     `
