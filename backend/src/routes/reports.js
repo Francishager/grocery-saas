@@ -180,18 +180,21 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ 
         where: scopedWhere(s, df(req)), 
-        select: { id: true, total: true, discount: true, tax: true, createdAt: true, paymentStatus: true },
+        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, createdAt: true, paymentStatus: true },
         orderBy: { createdAt: 'asc' }
       }),
       prisma.saleRecord.findMany({ 
         where: scopedWhere(s, df(req)), 
-        select: { id: true, total: true, discount: true, tax: true, createdAt: true, status: true },
+        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, createdAt: true, status: true },
         orderBy: { createdAt: 'asc' }
       }),
     ]);
     
-    // Combine and transform for enriched format
-    const allSales = [...sales, ...saleRecords].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    // Combine and normalize status field, then transform
+    const allSales = [...sales, ...saleRecords].map(sale => ({
+      ...sale,
+      status: sale.status || sale.paymentStatus || 'Completed'
+    })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const enriched = transformSalesData(allSales);
     res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
@@ -201,10 +204,14 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, paymentStatus: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
       prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
-    const enriched = transformSalesData([...sales, ...saleRecords]);
+    const allSales = [...sales, ...saleRecords].map(sale => ({
+      ...sale,
+      status: sale.status || sale.paymentStatus || 'Completed'
+    })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const enriched = transformSalesData(allSales);
     enriched.title = 'Weekly Sales Report';
     res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
@@ -214,10 +221,14 @@ router.get("/sales/monthly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, paymentStatus: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
       prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
-    const enriched = transformSalesData([...sales, ...saleRecords]);
+    const allSales = [...sales, ...saleRecords].map(sale => ({
+      ...sale,
+      status: sale.status || sale.paymentStatus || 'Completed'
+    })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const enriched = transformSalesData(allSales);
     enriched.title = 'Monthly Sales Report';
     res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
@@ -397,11 +408,27 @@ router.get("/sales/returns", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), include: { items: { include: { product: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), include: { items: { include: { product: true } }, User: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ 
+        where: scopedWhere(s, { ...df(req), paymentStatus: { in: ["refunded", "cancelled"] } }), 
+        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, paymentStatus: true, createdAt: true, paymentMethod: true },
+        orderBy: { createdAt: "asc" }
+      }),
+      prisma.saleRecord.findMany({ 
+        where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), 
+        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, revenue: true, status: true, createdAt: true, paymentMethod: true },
+        orderBy: { createdAt: "asc" }
+      }),
     ]);
-    const data = [...sales, ...saleRecords].map((sale) => ({ receiptNo: sale.receiptNo, status: sale.status, total: sale.total, paymentMethod: sale.paymentMethod }));
-    res.json({ data, summary: { count: data.length, totalRefunded: data.reduce((a, x) => a + x.total, 0) } });
+    
+    // Transform to enriched format
+    const allReturns = [...sales, ...saleRecords].map(sale => ({
+      ...sale,
+      status: sale.status || sale.paymentStatus || 'Refunded'
+    })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    
+    const enriched = transformSalesData(allReturns);
+    enriched.title = 'Returns & Refunds Report';
+    res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
 

@@ -109,8 +109,12 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'salesDiscounts', label: 'Discount Report', apiFn: reportsApiV2.salesDiscounts, renderType: 'table',
         columns: [textCol('receiptNo', 'Receipt'), textCol('status', 'Status'), currencyCol('discount', 'Discount'), currencyCol('total', 'Total')]
       },
-      { id: 'salesReturns', label: 'Returns & Refunds Report', apiFn: reportsApiV2.salesReturns, renderType: 'table',
-        columns: [textCol('receiptNo', 'Receipt'), textCol('status', 'Status'), currencyCol('total', 'Amount'), textCol('paymentMethod', 'Payment Method')]
+      { id: 'salesReturns', label: 'Returns & Refunds Report', apiFn: reportsApiV2.salesReturns, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Returns', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Amount', format: 'currency' },
+          { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
+        ]
       },
     ]
   },
