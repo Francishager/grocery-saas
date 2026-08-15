@@ -178,6 +178,7 @@ export function transformAgingData(data, isPayables = false) {
   
   const transactions = recordsArray.map((record) => {
     const balance = Number(record.balance || record.outstanding || 0);
+    const paid = Number(record.paid || record.amountPaid || 0);
     totalOutstanding += balance;
     
     const daysOverdue = Math.floor((new Date().getTime() - new Date(record.dueDate || record.date).getTime()) / (1000 * 60 * 60 * 24));
@@ -186,15 +187,17 @@ export function transformAgingData(data, isPayables = false) {
     else if (daysOverdue > 60) ageGroup = '60+ Days';
     else if (daysOverdue > 30) ageGroup = '30+ Days';
     ageGroups[ageGroup] = (ageGroups[ageGroup] || 0) + balance;
+    const entityName = record.supplier?.name || record.customer?.name || record.supplier || record.customer || record.name || 'N/A';
     
     return {
       id: record.id,
       date: record.dueDate || record.date || record.createdAt,
-      type: isPayables ? 'Bill' : 'Invoice',
-      description: `${isPayables ? 'Supplier' : 'Customer'}: ${record.supplier?.name || record.customer?.name || record.name || 'N/A'}`,
-      details: `Status: ${record.status || 'Open'}, Days Overdue: ${Math.max(0, daysOverdue)}`,
-      debit: balance,
-      credit: Number(record.paid || record.amountPaid || 0),
+      type: record.type || (isPayables ? 'Bill' : 'Invoice'),
+      description: record.description || `${isPayables ? 'Supplier' : 'Customer'}: ${entityName}`,
+      details: record.details || `Status: ${record.status || 'Open'}, Days Overdue: ${Math.max(0, daysOverdue)}`,
+      debit: record.debit !== undefined ? Number(record.debit || 0) : (isPayables ? 0 : balance),
+      credit: record.credit !== undefined ? Number(record.credit || 0) : (isPayables ? balance : paid),
+      balance,
       reference: record.invoiceNo || record.billNo || record.receiptNo || record.id?.substring(0, 8) || '',
       status: record.status || (balance > 0 ? 'Open' : 'Paid'),
     };

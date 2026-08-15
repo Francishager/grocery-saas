@@ -131,7 +131,7 @@ const CATEGORIES: ReportCategory[] = [
         columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('branch', 'Branch')]
       },
       { id: 'inventoryOutOfStock', label: 'Out of Stock Report', apiFn: reportsApiV2.inventoryOutOfStock, renderType: 'table',
-        columns: [textCol('name', 'Product'), textCol('category', 'Category'), textCol('branch', 'Branch')]
+        columns: [textCol('name', 'Product'), textCol('sku', 'SKU'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), numberCol('minStock', 'Min Stock'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price'), textCol('branch', 'Branch'), textCol('status', 'Status')]
       },
       { id: 'inventoryStockMovement', label: 'Stock Movement Report', apiFn: reportsApiV2.inventoryStockMovement, renderType: 'enriched',
         summaryKeys: [
