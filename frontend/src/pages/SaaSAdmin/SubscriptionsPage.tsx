@@ -28,6 +28,7 @@ export const SubscriptionsPage: React.FC = () => {
   const [autoEnd, setAutoEnd] = useState(true)
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [planPrice, setPlanPrice] = useState('')
+  const [planBillingCycle, setPlanBillingCycle] = useState('monthly')
   const [customCurrency, setCustomCurrency] = useState('UGX')
   const [customBillingCycle, setCustomBillingCycle] = useState('monthly')
   const [monthlyServiceFee, setMonthlyServiceFee] = useState('0')
