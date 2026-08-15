@@ -38,6 +38,8 @@ async function checkedPurchaseItems(items, scope) {
       quantity: item.quantity,
       cost,
       total: cost * item.quantity,
+      oldCost: product.cost,
+      productName: product.name,
     };
   });
 }
@@ -69,7 +71,7 @@ router.post("/", authenticateToken, requirePermission("canCreatePurchase"), asyn
           paymentMethod: paymentMethod || "cash",
           total,
           notes,
-          items: { create: purchaseItems },
+          items: { create: purchaseItems.map(({ oldCost, productName, ...item }) => item) },
         },
         include: { items: true, branch: true },
       });
@@ -82,6 +84,21 @@ router.post("/", authenticateToken, requirePermission("canCreatePurchase"), asyn
             cost: item.cost,
           },
         });
+        if (Number(item.oldCost || 0) !== Number(item.cost || 0)) {
+          await tx.productPriceHistory.create({
+            data: {
+              productId: item.productId,
+              tenantId: scope.tenantId,
+              branchId: scope.branchId,
+              oldCost: item.oldCost,
+              newCost: item.cost,
+              source: "purchase",
+              reference: created.refNo,
+              reason: "Purchase cost update",
+              changedByUserId: userId || null,
+            },
+          });
+        }
         if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
           await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
         }
@@ -122,7 +139,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreatePurchase
           paymentMethod: paymentMethod || "cash",
           total,
           notes,
-          items: { create: purchaseItems },
+          items: { create: purchaseItems.map(({ oldCost, productName, ...item }) => item) },
         },
         include: { items: true, branch: true },
       });
@@ -135,6 +152,21 @@ router.post("/checkout", authenticateToken, requirePermission("canCreatePurchase
             cost: item.cost,
           },
         });
+        if (Number(item.oldCost || 0) !== Number(item.cost || 0)) {
+          await tx.productPriceHistory.create({
+            data: {
+              productId: item.productId,
+              tenantId: scope.tenantId,
+              branchId: scope.branchId,
+              oldCost: item.oldCost,
+              newCost: item.cost,
+              source: "purchase",
+              reference: created.refNo,
+              reason: "Purchase cost update",
+              changedByUserId: userId || null,
+            },
+          });
+        }
         if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
           await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
         }

@@ -319,6 +319,11 @@ export const inventoryApi = {
   adjustStock: (id: string, data: { adjustmentType: 'stock_in' | 'stock_out'; quantity: number; reason?: string; branchId?: string | null }) =>
     api.post<any>(`/api/inventory/${id}/stock-adjust`, { body: data }),
 
+  getPriceHistory: async (id: string) => {
+    const data = await api.get<{ history: ProductPriceHistory[] }>(`/api/inventory/${id}/price-history`)
+    return Array.isArray(data?.history) ? data.history : []
+  },
+
   delete: (id: string) =>
     api.delete<{ message: string }>(`/api/inventory/${id}`),
 
@@ -1060,6 +1065,24 @@ export interface InventoryMovementDetail {
   reason?: string
   staff?: string
   status?: string
+}
+
+export interface ProductPriceHistory {
+  id: string
+  productId: string
+  oldCost?: number | null
+  newCost?: number | null
+  oldPrice?: number | null
+  newPrice?: number | null
+  source?: string | null
+  reference?: string | null
+  reason?: string | null
+  createdAt: string
+  changedBy?: {
+    fname?: string | null
+    lname?: string | null
+    email?: string | null
+  } | null
 }
 
 export interface ReceiptPreview {

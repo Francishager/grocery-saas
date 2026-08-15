@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff } from 'lucide-react'
-import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail } from '@/lib/api'
+import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff, History } from 'lucide-react'
+import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -69,6 +69,12 @@ interface StockAdjustState {
   adjustmentType: StockAdjustmentType
   quantity: string
   reason: string
+}
+
+interface PriceHistoryState {
+  item: InventoryItem
+  rows: ProductPriceHistory[]
+  loading: boolean
 }
 
 const initialFormData: FormData = {
@@ -169,6 +175,7 @@ export default function InventoryPage() {
   const [movementModal, setMovementModal] = useState<MovementModalState | null>(null)
   const [stockAdjust, setStockAdjust] = useState<StockAdjustState | null>(null)
   const [stockAdjustSaving, setStockAdjustSaving] = useState(false)
+  const [priceHistory, setPriceHistory] = useState<PriceHistoryState | null>(null)
   const { tab: urlTab } = useParams()
   const lockedType = urlTab === 'products' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
@@ -539,6 +546,21 @@ export default function InventoryPage() {
     }
   }
 
+  const openPriceHistory = async (item: InventoryItem) => {
+    setPriceHistory({ item, rows: [], loading: true })
+    try {
+      const rows = await inventoryApi.getPriceHistory(String(item.id))
+      setPriceHistory({ item, rows, loading: false })
+    } catch (error: any) {
+      setPriceHistory({ item, rows: [], loading: false })
+      toast({
+        variant: 'destructive',
+        title: 'Failed to load price history',
+        description: error?.message || 'Unknown error',
+      })
+    }
+  }
+
   const openEditForm = (item: InventoryItem) => {
     setEditingItem(item)
     setFormData({
@@ -665,6 +687,12 @@ export default function InventoryPage() {
       ? Number(stockAdjust.item.quantity || 0) + (Number.isFinite(stockAdjustQuantity) ? stockAdjustQuantity : 0)
       : Number(stockAdjust.item.quantity || 0) - (Number.isFinite(stockAdjustQuantity) ? stockAdjustQuantity : 0)
     : 0
+
+  const priceHistoryUser = (row: ProductPriceHistory) =>
+    [row.changedBy?.fname, row.changedBy?.lname].filter(Boolean).join(' ').trim() || row.changedBy?.email || '-'
+
+  const priceHistorySource = (source?: string | null) =>
+    String(source || 'manual_update').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -1363,6 +1391,14 @@ export default function InventoryPage() {
                               <Plus className="h-4 w-4 text-green-700" />
                             </Button>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Price History"
+                            onClick={() => openPriceHistory(item)}
+                          >
+                            <History className="h-4 w-4" />
+                          </Button>
                           {canEditCurrent && (
                             <Button
                               variant="ghost"
@@ -1411,6 +1447,9 @@ export default function InventoryPage() {
                             <Plus className="h-4 w-4 text-green-700" />
                           </Button>
                         )}
+                        <Button variant="ghost" size="icon" title="Price History" className="h-8 w-8" onClick={() => openPriceHistory(item)}>
+                          <History className="h-4 w-4" />
+                        </Button>
                         {canEditCurrent && (
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditForm(item)}>
                             <Edit className="h-4 w-4" />
@@ -1523,6 +1562,62 @@ export default function InventoryPage() {
           />
         </CardContent>
       </Card>
+
+      {priceHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-5xl rounded-lg bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <h2 className="text-lg font-semibold">Price History</h2>
+                <p className="text-sm text-muted-foreground">{priceHistory.item.product_name}</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setPriceHistory(null)}>
+                Close
+              </Button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto p-4">
+              {priceHistory.loading ? (
+                <div className="flex h-32 items-center justify-center">
+                  <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-primary" />
+                </div>
+              ) : priceHistory.rows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No price or cost changes have been recorded yet.</p>
+              ) : (
+                <table className="w-full min-w-[820px] text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="pb-2 font-medium">Date</th>
+                      <th className="pb-2 font-medium">Source</th>
+                      <th className="pb-2 text-right font-medium">Old Cost</th>
+                      <th className="pb-2 text-right font-medium">New Cost</th>
+                      <th className="pb-2 text-right font-medium">Old Selling</th>
+                      <th className="pb-2 text-right font-medium">New Selling</th>
+                      <th className="pb-2 font-medium">Reference</th>
+                      <th className="pb-2 font-medium">Reason</th>
+                      <th className="pb-2 font-medium">User</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priceHistory.rows.map((row) => (
+                      <tr key={row.id} className="border-b last:border-0">
+                        <td className="py-2 whitespace-nowrap">{new Date(row.createdAt).toLocaleString()}</td>
+                        <td className="py-2">{priceHistorySource(row.source)}</td>
+                        <td className="py-2 text-right tabular-nums">{row.oldCost == null ? '-' : formatCurrency(row.oldCost)}</td>
+                        <td className="py-2 text-right font-semibold tabular-nums">{row.newCost == null ? '-' : formatCurrency(row.newCost)}</td>
+                        <td className="py-2 text-right tabular-nums">{row.oldPrice == null ? '-' : formatCurrency(row.oldPrice)}</td>
+                        <td className="py-2 text-right font-semibold tabular-nums">{row.newPrice == null ? '-' : formatCurrency(row.newPrice)}</td>
+                        <td className="py-2">{row.reference || '-'}</td>
+                        <td className="py-2">{row.reason || '-'}</td>
+                        <td className="py-2">{priceHistoryUser(row)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {stockAdjust && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

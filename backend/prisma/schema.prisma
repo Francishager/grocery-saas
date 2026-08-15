@@ -393,6 +393,7 @@ model User {
   serviceTechnicianProfiles ServiceTechnician[]
   appointmentTechnician Appointment[] @relation("AppointmentTechnician")
   workOrderTechnician   WorkOrder[]   @relation("WorkOrderTechnician")
+  productPriceChanges   ProductPriceHistory[]
 
   // =========================
   // BRANCH ASSIGNMENTS
@@ -663,11 +664,34 @@ model Product {
   harvests              Harvest[]
   appointmentProducts   Appointment[]
   workOrderProducts     WorkOrder[]
+  priceHistory          ProductPriceHistory[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
   @@index([tenantId, branchId])
   @@map("products")
+}
+
+model ProductPriceHistory {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenantId        String
+  branchId        String?
+  oldCost         Float?
+  newCost         Float?
+  oldPrice        Float?
+  newPrice        Float?
+  source          String   @default("manual_update")
+  reference       String?
+  reason          String?
+  changedByUserId String?
+  changedBy       User?    @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, branchId])
+  @@index([productId, createdAt])
+  @@map("product_price_history")
 }
 
 // Product Selling Units (Multi-UOM)

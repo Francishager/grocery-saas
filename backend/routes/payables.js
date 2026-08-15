@@ -384,7 +384,8 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
         productId: item.productId,
         quantity,
         cost,
-        total: cost * quantity
+        total: cost * quantity,
+        oldCost: product.cost
       }
     })
 
@@ -450,6 +451,21 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
           cost: item.cost
         }
       })
+      if (Number(item.oldCost || 0) !== Number(item.cost || 0)) {
+        await prisma.productPriceHistory.create({
+          data: {
+            productId: item.productId,
+            tenantId: scope.tenantId,
+            branchId: scope.branchId,
+            oldCost: item.oldCost,
+            newCost: item.cost,
+            source: 'supplier_purchase',
+            reference: purchase.refNo,
+            reason: 'Supplier purchase cost update',
+            changedByUserId: req.user?.id || null
+          }
+        })
+      }
     }
 
     res.status(201).json(withUser(purchase))

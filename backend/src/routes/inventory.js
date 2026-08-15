@@ -681,6 +681,29 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// Product price/cost history
+router.get("/:id/price-history", authenticateToken, requirePermission("canViewProduct"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const product = await prisma.product.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      select: { id: true },
+    });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    const history = await prisma.productPriceHistory.findMany({
+      where: { tenantId: scope.tenantId, productId: product.id, ...(scope.branchId ? { branchId: scope.branchId } : {}) },
+      include: { changedBy: { select: { id: true, fname: true, lname: true, email: true } } },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(Number(req.query.limit || 100), 500),
+    });
+
+    res.json({ history });
+  } catch (err) {
+    handleBranchError(res, err);
+  }
+});
+
 // Create product
 router.post("/", authenticateToken, requireItemTypePermission('create'), async (req, res) => {
   try {
@@ -786,9 +809,26 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
 
     await checkUsageLimit(scope.tenantId, 'products');
 
-    const product = await prisma.product.create({
-      data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
-      include: { category: true, branch: true, units: true },
+    const product = await prisma.$transaction(async (tx) => {
+      const created = await tx.product.create({
+        data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
+        include: { category: true, branch: true, units: true },
+      });
+      if (created.itemType !== "service") {
+        await tx.productPriceHistory.create({
+          data: {
+            productId: created.id,
+            tenantId: created.tenantId,
+            branchId: created.branchId || null,
+            newCost: created.cost,
+            newPrice: created.price,
+            source: "initial_setup",
+            reason: "Initial product price",
+            changedByUserId: req.user?.id || null,
+          },
+        });
+      }
+      return created;
     });
     res.status(201).json({ message: "Product created", product });
   } catch (err) {
@@ -921,43 +961,62 @@ router.put("/:id", authenticateToken, async (req, res) => {
       data.branchId = targetScope.branchId;
     }
 
-    const product = await prisma.product.update({
-      where: { id: existing.id },
-      data,
-      include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
-    });
-
-    const priceChanged = body.price !== undefined && Number(existing.price || 0) !== Number(product.price || 0);
-    const costChanged = body.cost !== undefined && Number(existing.cost || 0) !== Number(product.cost || 0);
-    if (priceChanged || costChanged) {
-      await prisma.auditLog.create({
-        data: {
-          tenantId: existing.tenantId,
-          userId: req.user?.id || "system",
-          userEmail: req.user?.email || "",
-          action: "update",
-          model: "Product",
-          recordId: existing.id,
-          changes: {
-            before: {
-              ...(priceChanged ? { price: existing.price } : {}),
-              ...(costChanged ? { cost: existing.cost } : {}),
-            },
-            after: {
-              ...(priceChanged ? { price: product.price } : {}),
-              ...(costChanged ? { cost: product.cost } : {}),
-            },
-            priceMovement: {
-              reason: String(req.body.priceChangeReason || req.body.reason || "Market price update"),
-              productName: product.name,
-            },
-          },
-          ip: req.ip || req.connection?.remoteAddress || null,
-          statusCode: 200,
-          severity: "info",
-        },
+    const product = await prisma.$transaction(async (tx) => {
+      const updated = await tx.product.update({
+        where: { id: existing.id },
+        data,
+        include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
       });
-    }
+
+      const priceChanged = body.price !== undefined && Number(existing.price || 0) !== Number(updated.price || 0);
+      const costChanged = body.cost !== undefined && Number(existing.cost || 0) !== Number(updated.cost || 0);
+      if (priceChanged || costChanged) {
+        const reason = String(req.body.priceChangeReason || req.body.reason || "Market price update");
+        await tx.auditLog.create({
+          data: {
+            tenantId: existing.tenantId,
+            userId: req.user?.id || "system",
+            userEmail: req.user?.email || "",
+            action: "update",
+            model: "Product",
+            recordId: existing.id,
+            changes: {
+              before: {
+                ...(priceChanged ? { price: existing.price } : {}),
+                ...(costChanged ? { cost: existing.cost } : {}),
+              },
+              after: {
+                ...(priceChanged ? { price: updated.price } : {}),
+                ...(costChanged ? { cost: updated.cost } : {}),
+              },
+              priceMovement: {
+                reason,
+                productName: updated.name,
+              },
+            },
+            ip: req.ip || req.connection?.remoteAddress || null,
+            statusCode: 200,
+            severity: "info",
+          },
+        });
+        await tx.productPriceHistory.create({
+          data: {
+            productId: existing.id,
+            tenantId: existing.tenantId,
+            branchId: updated.branchId || existing.branchId || null,
+            oldCost: costChanged ? existing.cost : null,
+            newCost: costChanged ? updated.cost : null,
+            oldPrice: priceChanged ? existing.price : null,
+            newPrice: priceChanged ? updated.price : null,
+            source: "manual_update",
+            reason,
+            changedByUserId: req.user?.id || null,
+          },
+        });
+      }
+
+      return updated;
+    });
 
     res.json({ message: "Product updated", product });
   } catch (err) {
@@ -1107,9 +1166,37 @@ router.post("/:productId/units", authenticateToken, requirePermission("canCreate
 router.put("/:productId/units/:unitId", authenticateToken, requirePermission("canEditProduct"), async (req, res) => {
   try {
     const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
-    const unit = await prisma.productUnit.findUnique({ where: { id: req.params.unitId } });
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const unit = await prisma.productUnit.findFirst({
+      where: {
+        id: req.params.unitId,
+        productId: req.params.productId,
+        product: scopedWhere(scope, { id: req.params.productId }),
+      },
+      include: { product: true },
+    });
     if (!unit) return res.status(404).json({ error: "Unit not found" });
-    const updated = await prisma.productUnit.update({ where: { id: unit.id }, data: { ...(unitName && { unitName }), ...(conversionFactor != null && { conversionFactor: parseFloat(conversionFactor) }), ...(sellingPrice != null && { sellingPrice: parseFloat(sellingPrice) }), ...(isDefault != null && { isDefault }) } });
+    const oldSellingPrice = Number(unit.sellingPrice || 0);
+    const parsedSellingPrice = sellingPrice != null ? parseFloat(sellingPrice) : null;
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.productUnit.update({ where: { id: unit.id }, data: { ...(unitName && { unitName }), ...(conversionFactor != null && { conversionFactor: parseFloat(conversionFactor) }), ...(sellingPrice != null && { sellingPrice: parsedSellingPrice }), ...(isDefault != null && { isDefault }) } });
+      if (parsedSellingPrice != null && Number.isFinite(parsedSellingPrice) && parsedSellingPrice !== oldSellingPrice) {
+        await tx.productPriceHistory.create({
+          data: {
+            productId: unit.productId,
+            tenantId: unit.product.tenantId,
+            branchId: unit.product.branchId || null,
+            oldPrice: oldSellingPrice,
+            newPrice: parsedSellingPrice,
+            source: "unit_price_update",
+            reference: saved.unitName,
+            reason: String(req.body.priceChangeReason || req.body.reason || `Selling unit price update: ${saved.unitName}`),
+            changedByUserId: req.user?.id || null,
+          },
+        });
+      }
+      return saved;
+    });
     res.json(updated);
   } catch (err) { handleBranchError(res, err); }
 });
@@ -1278,9 +1365,28 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
     // Bulk create — skip rows with errors, import the rest
     let created = [];
     if (validRows.length > 0) {
-      created = await prisma.$transaction(
-        validRows.map(data => prisma.product.create({ data }))
-      );
+      created = await prisma.$transaction(async (tx) => {
+        const products = [];
+        for (const data of validRows) {
+          const product = await tx.product.create({ data });
+          products.push(product);
+          if (product.itemType !== "service") {
+            await tx.productPriceHistory.create({
+              data: {
+                productId: product.id,
+                tenantId: product.tenantId,
+                branchId: product.branchId || null,
+                newCost: product.cost,
+                newPrice: product.price,
+                source: "import",
+                reason: "Initial imported product price",
+                changedByUserId: req.user?.id || null,
+              },
+            });
+          }
+        }
+        return products;
+      });
     }
 
     res.status(201).json({
