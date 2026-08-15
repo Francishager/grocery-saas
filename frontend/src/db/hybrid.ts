@@ -151,15 +151,17 @@ export async function getLocalSales(limit = 50): Promise<any[]> {
 }
 
 export async function getLocalDashboardKpis(): Promise<any> {
-  const [products, sales, customers] = await Promise.all([
+  const [products, sales, customers, expenses] = await Promise.all([
     db.products.toArray(),
     db.sales.toArray(),
     db.customers.count(),
+    db.expenses.toArray(),
   ])
 
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const monthSales = sales.filter(s => new Date(s.createdAt) >= monthStart && s.status === 'completed')
+  const monthExpenses = expenses.filter(e => new Date(e.date) >= monthStart).reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
 
   const revenue = monthSales.reduce((sum, s) => sum + s.total, 0)
   const cogs = monthSales.reduce((sum, s) => {
@@ -169,13 +171,15 @@ export async function getLocalDashboardKpis(): Promise<any> {
     }, 0)
   }, 0)
 
+  const grossProfit = revenue - cogs
+  const netProfit = grossProfit - monthExpenses
   const lowStockCount = products.filter(p => p.quantity <= (p.minStock || 10)).length
 
   return {
     revenue,
-    grossProfit: revenue - cogs,
-    netProfit: revenue - cogs,
-    expenses: 0,
+    grossProfit,
+    netProfit,
+    expenses: monthExpenses,
     salesCount: monthSales.length,
     taxCollected: monthSales.reduce((sum, s) => sum + (s.tax || 0), 0),
     customerCount: customers,
@@ -188,13 +192,19 @@ export async function getLocalDashboardKpis(): Promise<any> {
 }
 
 export async function getLocalDashboardCharts(): Promise<any> {
-  const sales = await db.sales.toArray()
+  const [sales, expenses, products] = await Promise.all([
+    db.sales.toArray(),
+    db.expenses.toArray(),
+    db.products.toArray(),
+  ])
   const now = new Date()
 
   // Last 12 months
   const labels: string[] = []
   const revenue: number[] = []
-  const expenses: number[] = []
+  const expensesByMonth: number[] = []
+  const grossProfit: number[] = []
+  const netProfit: number[] = []
 
   for (let i = 11; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
@@ -203,9 +213,27 @@ export async function getLocalDashboardCharts(): Promise<any> {
       const sd = new Date(s.createdAt)
       return sd >= d && sd < next && s.status === 'completed'
     })
+    const monthExpenses = expenses.filter(e => {
+      const ed = new Date(e.date)
+      return ed >= d && ed < next
+    }).reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+
+    const monthRevenue = monthSales.reduce((sum, s) => sum + s.total, 0)
+    const monthCogs = monthSales.reduce((sum, s) => {
+      return sum + (s.items || []).reduce((itemSum, i: any) => {
+        const product = products.find(p => p.id === i.productId)
+        return itemSum + lineCogs(i, product)
+      }, 0)
+    }, 0)
+
     labels.push(d.toLocaleString('en-US', { month: 'short' }))
-    revenue.push(monthSales.reduce((sum, s) => sum + s.total, 0))
-    expenses.push(0)
+    revenue.push(monthRevenue)
+    expensesByMonth.push(monthExpenses)
+
+    const monthGrossProfit = monthRevenue - monthCogs
+    const monthNetProfit = monthGrossProfit - monthExpenses
+    grossProfit.push(monthGrossProfit)
+    netProfit.push(monthNetProfit)
   }
 
   // Top products
@@ -231,9 +259,8 @@ export async function getLocalDashboardCharts(): Promise<any> {
   const paymentMethods = Object.entries(payMap).map(([method, v]) => ({ method, ...v }))
 
   return {
-    salesChart: { labels, revenue, expenses },
-    profitLoss: { labels: labels.slice(-6), grossProfit: revenue.slice(-6), netProfit: revenue.slice(-6) },
-    topProducts,
+    salesChart: { labels, revenue, expenses: expensesByMonth },
+    profitLoss: { labels: labels.slice(-6), grossProfit: grossProfit.slice(-6), netProfit: netProfit.slice(-6) },
     paymentMethods,
   }
 }
