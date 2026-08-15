@@ -185,7 +185,9 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'netCashFlow', label: 'Net Cash Flow', format: 'currency' },
         ]
       },
-      { id: 'financialTrialBalance', label: 'Trial Balance', apiFn: reportsApiV2.financialTrialBalance, renderType: 'trialBalance' },
+      { id: 'financialTrialBalance', label: 'Trial Balance', apiFn: reportsApiV2.financialTrialBalance, renderType: 'trialBalance',
+        columns: [textCol('account', 'Account'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit')]
+      },
       { id: 'financialBalanceSheet', label: 'Balance Sheet', apiFn: reportsApiV2.financialBalanceSheet, renderType: 'balanceSheet' },
       { id: 'financialGeneralLedger', label: 'General Ledger', apiFn: reportsApiV2.financialGeneralLedger, renderType: 'ledger', ledgerType: 'financial', showBranchFilter: true,
         columns: [dateCol('date', 'Date'), textCol('account', 'Account'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit')]
