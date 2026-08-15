@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
@@ -1340,7 +1340,7 @@ export default function ReceivablesPage() {
                           {sale.customer?.name || 'Walk-in customer'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(sale.createdAt).toLocaleDateString()}
+                          {formatDisplayDate(sale.createdAt)}
                         </p>
                       </div>
                     </div>
@@ -1420,7 +1420,7 @@ export default function ReceivablesPage() {
                           From {payment.customer?.name || 'Customer'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(payment.createdAt).toLocaleDateString()}
+                          {formatDisplayDate(payment.createdAt)}
                         </p>
                       </div>
                     </div>
@@ -1485,7 +1485,7 @@ export default function ReceivablesPage() {
                           {card.status}
                         </Badge>
                       </td>
-                      <td className="p-2">{card.expiresAt ? new Date(card.expiresAt).toLocaleDateString() : '—'}</td>
+                      <td className="p-2">{card.expiresAt ? formatDisplayDate(card.expiresAt) : '—'}</td>
                       <td className="p-2 space-x-1 whitespace-nowrap">
                         <Button size="sm" variant="outline" onClick={() => reloadFuelCard(card.id)}>Reload</Button>
                         <Button size="sm" variant="ghost" onClick={() => {
@@ -1961,7 +1961,7 @@ export default function ReceivablesPage() {
                 <DetailRow label="Opening Balance" value={formatCurrency(selectedCustomerDetail.openingBalance || 0)} />
                 <DetailRow
                   label="Opening Balance Date"
-                  value={selectedCustomerDetail.openingBalanceDate ? new Date(selectedCustomerDetail.openingBalanceDate).toLocaleDateString() : 'Not set'}
+                  value={selectedCustomerDetail.openingBalanceDate ? formatDisplayDate(selectedCustomerDetail.openingBalanceDate) : 'Not set'}
                 />
                 <DetailRow label="Opening Balance Note" value={selectedCustomerDetail.openingBalanceNote} />
                 <DetailRow
@@ -1997,7 +1997,7 @@ export default function ReceivablesPage() {
                   <DetailRow label="Balance" value={formatCurrency(Number(selectedSaleDetail.balance || 0))} />
                   <DetailRow
                     label="Due Date"
-                    value={selectedSaleDetail.dueDate ? new Date(selectedSaleDetail.dueDate).toLocaleDateString() : 'Not set'}
+                    value={selectedSaleDetail.dueDate ? formatDisplayDate(selectedSaleDetail.dueDate) : 'Not set'}
                   />
                   <DetailRow label="Recorded By" value={formatUserName(selectedSaleDetail.user || selectedSaleDetail.User)} />
                   <DetailRow label="Created" value={new Date(selectedSaleDetail.createdAt).toLocaleString()} />

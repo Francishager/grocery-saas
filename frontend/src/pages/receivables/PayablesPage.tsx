@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDisplayDate } from '@/lib/utils'
 import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalSuppliers, getLocalPurchases, getLocalPayablePayments, getLocalProducts } from '@/db/hybrid'
@@ -626,7 +626,7 @@ export default function PayablesPage() {
                         From {purchase.supplier.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(purchase.createdAt).toLocaleDateString()}
+                        {formatDisplayDate(purchase.createdAt)}
                       </p>
                     </div>
                     <div className="text-right">
@@ -692,7 +692,7 @@ export default function PayablesPage() {
                         To {payment.supplier.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(payment.createdAt).toLocaleDateString()}
+                        {formatDisplayDate(payment.createdAt)}
                       </p>
                     </div>
                     <div className="text-right">
@@ -1030,7 +1030,7 @@ export default function PayablesPage() {
                   <DetailRow label="Opening Balance" value={formatCurrency(selectedSupplierDetail.openingBalance || 0)} />
                   <DetailRow
                     label="Opening Balance Date"
-                    value={selectedSupplierDetail.openingBalanceDate ? new Date(selectedSupplierDetail.openingBalanceDate).toLocaleDateString() : 'Not set'}
+                    value={selectedSupplierDetail.openingBalanceDate ? formatDisplayDate(selectedSupplierDetail.openingBalanceDate) : 'Not set'}
                   />
                   <DetailRow label="Opening Balance Note" value={selectedSupplierDetail.openingBalanceNote} />
                   <DetailRow label="Notes" value={selectedSupplierDetail.notes} />
@@ -1048,7 +1048,7 @@ export default function PayablesPage() {
                   <DetailRow label="Balance" value={formatCurrency(selectedPurchaseDetail.balance)} />
                   <DetailRow
                     label="Due Date"
-                    value={selectedPurchaseDetail.dueDate ? new Date(selectedPurchaseDetail.dueDate).toLocaleDateString() : 'Not set'}
+                    value={selectedPurchaseDetail.dueDate ? formatDisplayDate(selectedPurchaseDetail.dueDate) : 'Not set'}
                   />
                   <DetailRow label="Recorded By" value={formatUserName(selectedPurchaseDetail.user)} />
                   <DetailRow label="Created" value={new Date(selectedPurchaseDetail.createdAt).toLocaleString()} />
