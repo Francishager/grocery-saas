@@ -42,9 +42,9 @@ const slugify = (value = "") =>
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
 
 const movementTypes = {
-  stockIn: new Set(["PURCHASE", "SUPPLIER_PURCHASE", "TRANSFER_IN", "ADJUSTMENT_IN", "PRODUCTION_IN"]),
+  stockIn: new Set(["PURCHASE", "SUPPLIER_PURCHASE", "TRANSFER_IN", "STOCK_IN", "ADJUSTMENT_IN", "PRODUCTION_IN"]),
   sold: new Set(["SALE", "RECEIVABLE_SALE"]),
-  otherOut: new Set(["TRANSFER_OUT", "ADJUSTMENT_OUT", "PRODUCTION_OUT", "DAMAGE", "EXPIRY", "RENTAL_OUT"]),
+  otherOut: new Set(["TRANSFER_OUT", "STOCK_OUT", "ADJUSTMENT_OUT", "PRODUCTION_OUT", "DAMAGE", "EXPIRY", "RENTAL_OUT"]),
   returns: new Set(["SALE_RETURN", "RENTAL_RETURN"]),
 };
 
@@ -124,6 +124,34 @@ function addInventoryMovement(buckets, productId, movement) {
   }
 }
 
+function auditLogStockMovement(log) {
+  const beforeQty = Number(log.changes?.before?.quantity);
+  const afterQty = Number(log.changes?.after?.quantity);
+  if (!Number.isFinite(beforeQty) || !Number.isFinite(afterQty) || beforeQty === afterQty) return null;
+
+  const stockMovement = log.changes?.stockMovement || {};
+  const movementType = String(stockMovement.type || log.changes?.movementType || "").toLowerCase();
+  const qty = Math.abs(afterQty - beforeQty);
+  const isIn = afterQty > beforeQty;
+  const type = movementType === "stock_in" ? "STOCK_IN" : movementType === "stock_out" ? "STOCK_OUT" : isIn ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT";
+  const label = movementType === "stock_in" ? "Stock In" : movementType === "stock_out" ? "Stock Out" : isIn ? "Adjustment In" : "Adjustment Out";
+
+  return {
+    type,
+    direction: isIn ? "IN" : "OUT",
+    quantity: qty,
+    detail: {
+      time: log.createdAt,
+      type: label,
+      reference: log.id.slice(-8),
+      referenceId: log.id,
+      quantity: qty,
+      reason: stockMovement.reason || log.changes?.reason || (movementType === "stock_in" ? "Restock" : "Manual stock adjustment"),
+      staff: log.userEmail || "Unknown",
+    },
+  };
+}
+
 async function buildInventoryMovementSummary(scope, products, range) {
   const productIds = products.map((product) => product.id).filter(Boolean);
   const buckets = new Map(productIds.map((id) => [id, createMovementBucket()]));
@@ -158,6 +186,7 @@ async function buildInventoryMovementSummary(scope, products, range) {
     afterTransferItems,
     afterProductionOrders,
     afterProductionWaste,
+    afterAdjustmentLogs,
   ] = await Promise.all([
     prisma.saleItem.findMany({
       where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
@@ -214,6 +243,9 @@ async function buildInventoryMovementSummary(scope, products, range) {
     }),
     prisma.productionOrder.findMany({ where: scopedWhere(scope, { productId: { in: productIds }, status: "completed", updatedAt: afterWhere }), select: { productId: true, actualQuantity: true, quantity: true } }),
     prisma.productionWaste.findMany({ where: { productId: { in: productIds }, tenantId: scope.tenantId, createdAt: afterWhere, ...(scope.branchId ? { productionOrder: { branchId: scope.branchId } } : {}) }, select: { productId: true, quantity: true } }),
+    prisma.auditLog.findMany({
+      where: { tenantId: scope.tenantId, model: "Product", action: "update", recordId: { in: productIds }, createdAt: afterWhere },
+    }),
   ]);
 
   saleItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
@@ -277,17 +309,8 @@ async function buildInventoryMovementSummary(scope, products, range) {
   }));
 
   adjustmentLogs.forEach((log) => {
-    const beforeQty = Number(log.changes?.before?.quantity);
-    const afterQty = Number(log.changes?.after?.quantity);
-    if (!Number.isFinite(beforeQty) || !Number.isFinite(afterQty) || beforeQty === afterQty) return;
-    const qty = Math.abs(afterQty - beforeQty);
-    const isIn = afterQty > beforeQty;
-    addInventoryMovement(buckets, log.recordId, {
-      type: isIn ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT",
-      direction: isIn ? "IN" : "OUT",
-      quantity: qty,
-      detail: { time: log.createdAt, type: isIn ? "Adjustment In" : "Adjustment Out", reference: log.id.slice(-8), referenceId: log.id, quantity: qty, reason: "Manual product quantity update", staff: log.userEmail || "Unknown" },
-    });
+    const movement = auditLogStockMovement(log);
+    if (movement) addInventoryMovement(buckets, log.recordId, movement);
   });
 
   afterSaleItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "SALE", direction: "OUT", quantity: itemBaseQuantity(item) }));
@@ -302,6 +325,10 @@ async function buildInventoryMovementSummary(scope, products, range) {
   });
   afterProductionOrders.forEach((order) => addInventoryMovement(buckets, order.productId, { period: "after", type: "PRODUCTION_IN", direction: "IN", quantity: Math.ceil(Number(order.actualQuantity || order.quantity || 0)) }));
   afterProductionWaste.forEach((waste) => addInventoryMovement(buckets, waste.productId, { period: "after", type: "PRODUCTION_OUT", direction: "OUT", quantity: waste.quantity }));
+  afterAdjustmentLogs.forEach((log) => {
+    const movement = auditLogStockMovement(log);
+    if (movement) addInventoryMovement(buckets, log.recordId, { ...movement, period: "after" });
+  });
 
   let productsSold = 0;
   let unitsSold = 0;
@@ -796,7 +823,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `Permission denied: ${requiredPerm} required` });
     }
 
-    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, ...body } = req.body;
+    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, quantity, ...body } = req.body;
     const data = { ...body };
 
     if (data.batchNumber !== undefined && data.batchNumber !== null) {
@@ -812,14 +839,18 @@ router.put("/:id", authenticateToken, async (req, res) => {
     if (categoryId !== undefined && (categoryId === null || categoryId === "")) {
       return res.status(400).json({ error: "Category cannot be empty if provided" });
     }
-    if (body.quantity === undefined || body.quantity === null || body.quantity === "") {
-      return res.status(400).json({ error: "Stock quantity is required" });
+    const quantityWasProvided = quantity !== undefined && quantity !== null && quantity !== "";
+    if (quantityWasProvided) {
+      const parsedQuantity = Number(quantity);
+      if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
+        return res.status(400).json({ error: "Stock quantity must be a non-negative integer" });
+      }
+      if (parsedQuantity !== Number(existing.quantity || 0) && itemType !== "service") {
+        return res.status(400).json({
+          error: "Stock quantity cannot be changed from Edit Item. Use Stock In or Adjust Stock so the stock movement is recorded.",
+        });
+      }
     }
-    const parsedQuantity = Number(body.quantity);
-    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
-      return res.status(400).json({ error: "Stock quantity must be a non-negative integer" });
-    }
-    data.quantity = parsedQuantity;
 
     if (body.cost === undefined || body.cost === null || body.cost === "") {
       return res.status(400).json({ error: "Cost price is required" });
@@ -899,6 +930,93 @@ router.put("/:id", authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("Update product error:", err);
     if (err?.code === "P2002") return res.status(409).json({ error: "SKU or barcode already exists in this branch" });
+    handleBranchError(res, err);
+  }
+});
+
+// Adjust product stock separately from product detail updates
+router.post("/:id/stock-adjust", authenticateToken, requirePermission("canAdjustStock"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const product = await prisma.product.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      include: { category: true, branch: true },
+    });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.itemType === "service") {
+      return res.status(400).json({ error: "Services do not track stock quantity" });
+    }
+
+    const adjustmentType = String(req.body.adjustmentType || req.body.type || "stock_in").toLowerCase();
+    if (!["stock_in", "stock_out"].includes(adjustmentType)) {
+      return res.status(400).json({ error: "Adjustment type must be stock_in or stock_out" });
+    }
+
+    const parsedQuantity = Number(req.body.quantity);
+    if (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ error: "Adjustment quantity must be a positive integer" });
+    }
+
+    const currentQuantity = Number(product.quantity || 0);
+    const nextQuantity = adjustmentType === "stock_in"
+      ? currentQuantity + parsedQuantity
+      : currentQuantity - parsedQuantity;
+
+    if (nextQuantity < 0) {
+      return res.status(400).json({ error: "Stock out quantity cannot exceed current stock" });
+    }
+
+    const reason = String(req.body.reason || "").trim() || (adjustmentType === "stock_in" ? "Restock" : "Stock adjustment");
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const savedProduct = await tx.product.update({
+        where: { id: product.id },
+        data: { quantity: nextQuantity },
+        include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: product.tenantId,
+          userId: req.user?.id || "system",
+          userEmail: req.user?.email || "",
+          action: "update",
+          model: "Product",
+          recordId: product.id,
+          changes: {
+            before: { quantity: currentQuantity },
+            after: { quantity: nextQuantity },
+            stockMovement: {
+              type: adjustmentType,
+              quantity: parsedQuantity,
+              reason,
+              productName: product.name,
+              previousQuantity: currentQuantity,
+              newQuantity: nextQuantity,
+            },
+          },
+          ip: req.ip || req.connection?.remoteAddress || null,
+          statusCode: 200,
+          severity: "info",
+        },
+      });
+
+      return savedProduct;
+    });
+
+    res.json({
+      message: adjustmentType === "stock_in" ? "Stock received" : "Stock adjusted",
+      product: updated,
+      adjustment: {
+        type: adjustmentType,
+        quantity: parsedQuantity,
+        previousQuantity: currentQuantity,
+        newQuantity: nextQuantity,
+        reason,
+      },
+    });
+  } catch (err) {
+    console.error("Adjust stock error:", err);
     handleBranchError(res, err);
   }
 });

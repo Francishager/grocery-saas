@@ -297,7 +297,6 @@ export const inventoryApi = {
       name: data.product_name,
       price: data.unit_price,
       cost: data.cost_price !== '' && data.cost_price != null ? Number(data.cost_price) : 0,
-      quantity: data.quantity !== '' && data.quantity != null ? Number(data.quantity) : 0,
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
@@ -316,6 +315,9 @@ export const inventoryApi = {
       depositAmount: data.depositAmount || null,
       replacementValue: data.replacementValue || null,
     } }),
+
+  adjustStock: (id: string, data: { adjustmentType: 'stock_in' | 'stock_out'; quantity: number; reason?: string; branchId?: string | null }) =>
+    api.post<any>(`/api/inventory/${id}/stock-adjust`, { body: data }),
 
   delete: (id: string) =>
     api.delete<{ message: string }>(`/api/inventory/${id}`),

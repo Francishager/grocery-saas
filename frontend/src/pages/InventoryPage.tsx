@@ -45,6 +45,7 @@ interface FormData {
 }
 
 type MovementPreset = 'today' | 'yesterday' | 'week' | 'custom'
+type StockAdjustmentType = 'stock_in' | 'stock_out'
 
 interface MovementSummary {
   productsSold: number
@@ -61,6 +62,13 @@ interface MovementModalState {
   title: string
   rows: InventoryMovementDetail[]
   total: number
+}
+
+interface StockAdjustState {
+  item: InventoryItem
+  adjustmentType: StockAdjustmentType
+  quantity: string
+  reason: string
 }
 
 const initialFormData: FormData = {
@@ -159,6 +167,8 @@ export default function InventoryPage() {
   const [customMovementDate, setCustomMovementDate] = useState(formatDateInput(new Date()))
   const [movementSummary, setMovementSummary] = useState<MovementSummary>(emptyMovementSummary)
   const [movementModal, setMovementModal] = useState<MovementModalState | null>(null)
+  const [stockAdjust, setStockAdjust] = useState<StockAdjustState | null>(null)
+  const [stockAdjustSaving, setStockAdjustSaving] = useState(false)
   const { tab: urlTab } = useParams()
   const lockedType = urlTab === 'products' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
@@ -336,7 +346,7 @@ export default function InventoryPage() {
       toast({ variant: 'destructive', title: 'Category is required' })
       return
     }
-    if (formData.quantity === '' || typeof formData.quantity !== 'number' || !Number.isFinite(formData.quantity) || formData.quantity < 0) {
+    if (!editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !Number.isFinite(formData.quantity) || formData.quantity < 0)) {
       toast({ variant: 'destructive', title: 'Stock quantity is required and must be a non-negative number' })
       return
     }
@@ -389,7 +399,7 @@ export default function InventoryPage() {
             expiryDate: formData.expiryDate || undefined,
             price: formData.unit_price,
             cost: formData.cost_price,
-            quantity: formData.quantity,
+            quantity: editingItem.quantity,
             minStock: formData.low_stock_alert,
             baseUnit: formData.baseUnit,
             categoryId: formData.categoryId || undefined,
@@ -398,7 +408,10 @@ export default function InventoryPage() {
             description: formData.description,
             updatedAt: new Date().toISOString(),
           })
-          await queueMutation('products', 'update', String(editingItem.id), formData)
+          await queueMutation('products', 'update', String(editingItem.id), {
+            ...formData,
+            quantity: editingItem.quantity,
+          })
         }
         toast({ title: 'Item updated successfully' })
       } else {
@@ -465,6 +478,64 @@ export default function InventoryPage() {
         title: 'Failed to delete item',
         description: error?.message || 'Unknown error',
       })
+    }
+  }
+
+  const openStockAdjust = (item: InventoryItem, adjustmentType: StockAdjustmentType = 'stock_in') => {
+    if (!canAdjustStock) {
+      toast({ variant: 'destructive', title: 'You do not have permission to adjust stock' })
+      return
+    }
+    if (!online) {
+      toast({ variant: 'destructive', title: 'Stock adjustment requires an internet connection' })
+      return
+    }
+    setStockAdjust({
+      item,
+      adjustmentType,
+      quantity: '',
+      reason: adjustmentType === 'stock_in' ? 'Restock' : '',
+    })
+  }
+
+  const closeStockAdjust = () => {
+    setStockAdjust(null)
+    setStockAdjustSaving(false)
+  }
+
+  const handleStockAdjustSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!stockAdjust) return
+
+    const quantity = Number(stockAdjust.quantity)
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a positive whole-number quantity' })
+      return
+    }
+    if (stockAdjust.adjustmentType === 'stock_out' && quantity > Number(stockAdjust.item.quantity || 0)) {
+      toast({ variant: 'destructive', title: 'Stock out cannot exceed current stock' })
+      return
+    }
+
+    setStockAdjustSaving(true)
+    try {
+      await inventoryApi.adjustStock(String(stockAdjust.item.id), {
+        adjustmentType: stockAdjust.adjustmentType,
+        quantity,
+        reason: stockAdjust.reason.trim() || undefined,
+        branchId: stockAdjust.item.branchId || stockAdjust.item.branch?.id || null,
+      })
+      toast({ title: stockAdjust.adjustmentType === 'stock_in' ? 'Stock received' : 'Stock adjusted' })
+      closeStockAdjust()
+      loadInventory()
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to adjust stock',
+        description: error?.message || 'Unknown error',
+      })
+    } finally {
+      setStockAdjustSaving(false)
     }
   }
 
@@ -563,13 +634,17 @@ export default function InventoryPage() {
     return customMovementDate ? new Date(customMovementDate).toLocaleDateString() : 'Custom Date'
   }, [movementPreset, customMovementDate])
 
-  const openMovementModal = (item: InventoryItem, kind: 'sold' | 'other') => {
+  const openMovementModal = (item: InventoryItem, kind: 'sold' | 'other' | 'stock_in') => {
     const movement = item.dailyMovement || defaultMovementForItem(item)
-    const rows = kind === 'sold' ? movement.soldDetails || [] : movement.otherStockOutDetails || []
+    const rows = kind === 'sold'
+      ? movement.soldDetails || []
+      : kind === 'stock_in'
+        ? movement.stockInDetails || []
+        : movement.otherStockOutDetails || []
     setMovementModal({
-      title: `${item.product_name} - ${kind === 'sold' ? 'Sold Today' : 'Other Stock Out'}`,
+      title: `${item.product_name} - ${kind === 'sold' ? 'Sold Today' : kind === 'stock_in' ? 'Stock In' : 'Other Stock Out'}`,
       rows,
-      total: kind === 'sold' ? movement.soldToday : movement.otherStockOut,
+      total: kind === 'sold' ? movement.soldToday : kind === 'stock_in' ? movement.stockIn : movement.otherStockOut,
     })
   }
 
@@ -583,6 +658,13 @@ export default function InventoryPage() {
     { label: 'Low Stock', value: movementSummary.lowStockProducts },
     { label: 'Out of Stock', value: movementSummary.outOfStockProducts },
   ]
+
+  const stockAdjustQuantity = Number(stockAdjust?.quantity || 0)
+  const stockAdjustProjectedQuantity = stockAdjust
+    ? stockAdjust.adjustmentType === 'stock_in'
+      ? Number(stockAdjust.item.quantity || 0) + (Number.isFinite(stockAdjustQuantity) ? stockAdjustQuantity : 0)
+      : Number(stockAdjust.item.quantity || 0) - (Number.isFinite(stockAdjustQuantity) ? stockAdjustQuantity : 0)
+    : 0
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -975,22 +1057,39 @@ export default function InventoryPage() {
               {/* Product: Quantity, Low Stock, Cost Price, Base Unit */}
               {formData.itemType === 'product' && (
                 <>
-              <div className="space-y-2">
-                <Label htmlFor="quantity">Quantity <span className="text-red-500">*</span></Label>
-                <Input
-                  id="quantity"
-                  type="number"
-                  min="0"
-                  required
-                  value={formData.quantity}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      quantity: e.target.value === '' ? '' : parseFloat(e.target.value),
-                    }))
-                  }
-                />
-              </div>
+              {editingItem ? (
+                <div className="space-y-2">
+                  <Label>Current Stock</Label>
+                  <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
+                    <span className="font-semibold tabular-nums">
+                      {formatQty(editingItem.quantity)} {formData.baseUnit || 'Piece'}
+                    </span>
+                    {canAdjustStock && (
+                      <Button type="button" variant="secondary" size="sm" onClick={() => openStockAdjust(editingItem, 'stock_in')}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Stock In
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="quantity">Opening Stock <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    min="0"
+                    required
+                    value={formData.quantity}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        quantity: e.target.value === '' ? '' : parseFloat(e.target.value),
+                      }))
+                    }
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="low_stock_alert">Low Stock Alert</Label>
                 <Input
@@ -1169,7 +1268,19 @@ export default function InventoryPage() {
                         </td>
                       )}
                       <td className="py-3 text-right tabular-nums">{formatQty(movement.openingStock)}</td>
-                      <td className="py-3 text-right tabular-nums">{formatQty(movement.stockIn)}</td>
+                      <td className="py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => openMovementModal(item, 'stock_in')}
+                          disabled={!movement.stockIn}
+                          className={cn(
+                            "rounded px-2 py-1 text-right font-semibold tabular-nums",
+                            movement.stockIn ? "text-green-700 hover:bg-green-100" : "cursor-default text-muted-foreground"
+                          )}
+                        >
+                          {formatQty(movement.stockIn)}
+                        </button>
+                      </td>
                       <td className="py-3 text-right">
                         <button
                           type="button"
@@ -1242,6 +1353,16 @@ export default function InventoryPage() {
                       </td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">
+                          {canAdjustStock && item.itemType !== 'service' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Stock In"
+                              onClick={() => openStockAdjust(item, 'stock_in')}
+                            >
+                              <Plus className="h-4 w-4 text-green-700" />
+                            </Button>
+                          )}
                           {canEditCurrent && (
                             <Button
                               variant="ghost"
@@ -1285,6 +1406,11 @@ export default function InventoryPage() {
                         <p className="text-xs text-muted-foreground">{item.product_id || '-'}</p>
                       </div>
                       <div className="flex gap-1 shrink-0">
+                        {canAdjustStock && item.itemType !== 'service' && (
+                          <Button variant="ghost" size="icon" title="Stock In" className="h-8 w-8" onClick={() => openStockAdjust(item, 'stock_in')}>
+                            <Plus className="h-4 w-4 text-green-700" />
+                          </Button>
+                        )}
                         {canEditCurrent && (
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditForm(item)}>
                             <Edit className="h-4 w-4" />
@@ -1320,7 +1446,14 @@ export default function InventoryPage() {
                       </div>
                       <div>
                         <span className="text-muted-foreground">Stock In: </span>
-                        {formatQty(movement.stockIn)}
+                        <button
+                          type="button"
+                          disabled={!movement.stockIn}
+                          onClick={() => openMovementModal(item, 'stock_in')}
+                          className={cn("font-semibold", movement.stockIn ? "text-green-700 underline-offset-2 hover:underline" : "text-muted-foreground")}
+                        >
+                          {formatQty(movement.stockIn)}
+                        </button>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Sold Today: </span>
@@ -1390,6 +1523,88 @@ export default function InventoryPage() {
           />
         </CardContent>
       </Card>
+
+      {stockAdjust && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-background shadow-xl">
+            <form onSubmit={handleStockAdjustSubmit}>
+              <div className="border-b px-4 py-3">
+                <h2 className="text-lg font-semibold">Adjust Stock</h2>
+                <p className="text-sm text-muted-foreground">{stockAdjust.item.product_name}</p>
+              </div>
+              <div className="space-y-4 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Current Stock</p>
+                    <p className="mt-1 font-bold tabular-nums">{formatQty(stockAdjust.item.quantity)}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">New Stock</p>
+                    <p className={cn("mt-1 font-bold tabular-nums", stockAdjustProjectedQuantity < 0 && "text-destructive")}>
+                      {formatQty(stockAdjustProjectedQuantity)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Operation</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      ['stock_in', 'Stock In'],
+                      ['stock_out', 'Stock Out'],
+                    ] as Array<[StockAdjustmentType, string]>).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setStockAdjust((prev) => prev ? { ...prev, adjustmentType: value, reason: value === 'stock_in' && !prev.reason ? 'Restock' : prev.reason } : prev)}
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                          stockAdjust.adjustmentType === value
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-input bg-background text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="stockAdjustQuantity">Quantity</Label>
+                  <Input
+                    id="stockAdjustQuantity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={stockAdjust.quantity}
+                    onChange={(event) => setStockAdjust((prev) => prev ? { ...prev, quantity: event.target.value } : prev)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="stockAdjustReason">Reason</Label>
+                  <Input
+                    id="stockAdjustReason"
+                    value={stockAdjust.reason}
+                    onChange={(event) => setStockAdjust((prev) => prev ? { ...prev, reason: event.target.value } : prev)}
+                    placeholder={stockAdjust.adjustmentType === 'stock_in' ? 'Restock' : 'Damage, expiry, correction'}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 border-t px-4 py-3">
+                <Button type="button" variant="outline" onClick={closeStockAdjust} disabled={stockAdjustSaving}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={stockAdjustSaving || stockAdjustProjectedQuantity < 0}>
+                  {stockAdjustSaving ? 'Saving...' : stockAdjust.adjustmentType === 'stock_in' ? 'Record Stock In' : 'Record Stock Out'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {movementModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
