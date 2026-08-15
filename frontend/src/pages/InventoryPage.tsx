@@ -1242,26 +1242,26 @@ export default function InventoryPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1500px] hidden md:table">
+              <table className="w-full min-w-[1800px] hidden md:table">
                 <thead>
                   <tr className="border-b text-left">
-                    {!lockedType && <th className="pb-3 font-medium whitespace-nowrap">Type</th>}
-                    <th className="pb-3 font-medium whitespace-nowrap">SKU</th>
-                    <th className="pb-3 font-medium whitespace-nowrap">Name</th>
-                    <th className="pb-3 font-medium whitespace-nowrap">Category</th>
-                    {canManageInventory && <th className="pb-3 font-medium whitespace-nowrap">Branch</th>}
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Opening Stock</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Stock In</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Sold Today</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Other Stock Out</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Returns</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}</th>
-                    <th className="pb-3 font-medium whitespace-nowrap">Batch</th>
-                    <th className="pb-3 font-medium whitespace-nowrap">Expiry</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Cost</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Price</th>
-                    <th className="pb-3 font-medium whitespace-nowrap">Status</th>
-                    <th className="pb-3 font-medium text-right whitespace-nowrap">Actions</th>
+                    {!lockedType && <th className="pb-3 pr-4 font-medium whitespace-nowrap">Type</th>}
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">SKU</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Name</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Category</th>
+                    {canManageInventory && <th className="pb-3 pr-4 font-medium whitespace-nowrap">Branch</th>}
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Opening Stock</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Stock In</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Sold Today</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Other Stock Out</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Returns</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Batch</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Expiry</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Cost</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Price</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Status</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1275,7 +1275,7 @@ export default function InventoryPage() {
                     return (
                     <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                       {!lockedType && (
-                      <td className="py-3">
+                      <td className="py-3 pr-4">
                         <span className={cn(
                           "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
                           "bg-green-100 text-green-700"
@@ -1286,18 +1286,18 @@ export default function InventoryPage() {
                         </span>
                       </td>
                       )}
-                      <td className="py-3 whitespace-nowrap">{item.product_id || '-'}</td>
-                      <td className="py-3 font-medium whitespace-nowrap">{item.product_name}</td>
-                      <td className="py-3 text-sm text-muted-foreground whitespace-nowrap">
+                      <td className="py-3 pr-4 whitespace-nowrap">{item.product_id || '-'}</td>
+                      <td className="py-3 pr-4 font-medium whitespace-nowrap">{item.product_name}</td>
+                      <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
                       </td>
                       {canManageInventory && (
-                        <td className="py-3 text-sm text-muted-foreground whitespace-nowrap">
+                        <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
                         </td>
                       )}
-                      <td className="py-3 text-right tabular-nums whitespace-nowrap">{formatQty(movement.openingStock)}</td>
-                      <td className="py-3 text-right whitespace-nowrap">
+                      <td className="py-3 pr-4 text-right tabular-nums whitespace-nowrap">{formatQty(movement.openingStock)}</td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => openMovementModal(item, 'stock_in')}
@@ -1310,7 +1310,7 @@ export default function InventoryPage() {
                           {formatQty(movement.stockIn)}
                         </button>
                       </td>
-                      <td className="py-3 text-right whitespace-nowrap">
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => openMovementModal(item, 'sold')}
@@ -1328,7 +1328,7 @@ export default function InventoryPage() {
                           </p>
                         )}
                       </td>
-                      <td className="py-3 text-right whitespace-nowrap">
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => openMovementModal(item, 'other')}
@@ -1341,8 +1341,8 @@ export default function InventoryPage() {
                           {formatQty(movement.otherStockOut)}
                         </button>
                       </td>
-                      <td className="py-3 text-right tabular-nums whitespace-nowrap">{formatQty(movement.returns)}</td>
-                      <td className="py-3 text-right whitespace-nowrap">
+                      <td className="py-3 pr-4 text-right tabular-nums whitespace-nowrap">{formatQty(movement.returns)}</td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
                         <span className={cn(
                           "font-bold tabular-nums",
                           movement.currentStock <= item.low_stock_alert ? "text-orange-600" : ""
@@ -1355,15 +1355,15 @@ export default function InventoryPage() {
                           </p>
                         )}
                       </td>
-                      <td className="py-3 whitespace-nowrap">{(item as any).batchNumber || '-'}</td>
-                      <td className="py-3 whitespace-nowrap">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
-                      <td className="py-3 text-right whitespace-nowrap">
+                      <td className="py-3 pr-4 whitespace-nowrap">{(item as any).batchNumber || '-'}</td>
+                      <td className="py-3 pr-4 whitespace-nowrap">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
                         {formatCurrency(item.cost_price)}
                       </td>
-                      <td className="py-3 text-right whitespace-nowrap">
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
                         {formatCurrency(item.unit_price)}
                       </td>
-                      <td className="py-3 whitespace-nowrap">
+                      <td className="py-3 pr-4 whitespace-nowrap">
                         <span className={cn(
                           "inline-block rounded px-2 py-0.5 text-xs font-semibold",
                           stockStatus === 'Out of Stock'
@@ -1380,7 +1380,7 @@ export default function InventoryPage() {
                           </span>
                         )}
                       </td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 pr-4 text-right">
                         <div className="relative flex justify-end">
                           <Button
                             variant="ghost"
