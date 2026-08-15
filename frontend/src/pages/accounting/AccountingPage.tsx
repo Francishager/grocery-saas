@@ -744,7 +744,7 @@ export default function AccountingPage() {
   }
 
   const formatCurrency = (val: number) => Number(val || 0).toFixed(2)
-  const formatHistoryDate = (value?: string) => (value ? new Date(value).toLocaleDateString() : '—')
+  const formatHistoryDate = (value?: string) => (value ? formatDisplayDate(value) : '—')
   const selectedHistoryAccountLabel = selectedHistoryAccount ? `${selectedHistoryAccount.code} - ${selectedHistoryAccount.name}` : 'Account History'
   const accountHistoryFileName = selectedHistoryAccountLabel
     .toLowerCase()

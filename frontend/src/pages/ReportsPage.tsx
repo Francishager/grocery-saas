@@ -577,7 +577,7 @@ function formatValue(value: any, format?: string): string {
   switch (format) {
     case 'currency': return formatCurrency(Number(value) || 0)
     case 'number': return new Intl.NumberFormat('en-US').format(Number(value) || 0)
-    case 'date': return value ? new Date(value).toLocaleDateString() : '—'
+    case 'date': return value ? formatDisplayDate(value) : '—'
     default:
       if (typeof value === 'object') {
         // Extract name from nested objects like {id, name}, {name}, etc.

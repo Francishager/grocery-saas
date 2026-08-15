@@ -75,7 +75,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     if (address !== undefined) data.address = address || null;
     if (currency !== undefined) data.currency = currency;
     if (timezone !== undefined) data.timezone = timezone;
-    if (dateFormat !== undefined) data.dateFormat = dateFormat || 'DD/MM/YY';
+    if (dateFormat !== undefined) data.dateFormat = 'DD/MM/YY';
     if (taxRate !== undefined) data.taxRate = parseFloat(taxRate) || 0;
     if (taxEnabled !== undefined) data.taxEnabled = Boolean(taxEnabled);
     if (taxId !== undefined) data.taxId = taxId || null;

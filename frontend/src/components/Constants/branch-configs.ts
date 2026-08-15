@@ -83,9 +83,6 @@ export const timezoneOptions = [
 // Date format options
 export const dateFormatOptions = [
   { value: 'DD/MM/YY', label: 'DD/MM/YY' },
-  { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
-  { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
-  { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
 ]
 
 // Get branch by ID

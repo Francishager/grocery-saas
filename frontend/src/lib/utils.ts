@@ -3,10 +3,14 @@ import { twMerge } from "tailwind-merge"
 
 export const DEFAULT_SYSTEM_DATE_FORMAT = 'DD/MM/YY'
 
+const getDateFormatter = () => new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: '2-digit',
+})
+
 export function normalizeDateFormat(value?: string | null): string {
-  if (!value) return DEFAULT_SYSTEM_DATE_FORMAT
-  if (value === 'DD/MM/YYYY') return DEFAULT_SYSTEM_DATE_FORMAT
-  return value
+  return DEFAULT_SYSTEM_DATE_FORMAT
 }
 
 export function formatDisplayDate(value: Date | string | null | undefined, options?: Intl.DateTimeFormatOptions): string {
@@ -24,6 +28,39 @@ export function formatDisplayDate(value: Date | string | null | undefined, optio
 
   return new Intl.DateTimeFormat('en-GB', safeOptions).format(date)
 }
+
+export function formatDateForTable(value: Date | string | null | undefined): string {
+  return formatDisplayDate(value)
+}
+
+export function formatDateRangeForDisplay(from: Date | string | null | undefined, to: Date | string | null | undefined): string {
+  const fromText = formatDisplayDate(from)
+  const toText = formatDisplayDate(to)
+  if (fromText === '—' || toText === '—') return fromText === '—' ? toText : fromText
+  return `${fromText} - ${toText}`
+}
+
+export function enforceSystemDateFormat(): void {
+  if ((Date.prototype as any).__grocerySystemDateFormatEnforced) return
+
+  const systemDateFormatter = getDateFormatter()
+
+  Date.prototype.toLocaleDateString = function () {
+    const date = this
+    if (Number.isNaN(date.getTime())) return '—'
+    return systemDateFormatter.format(date)
+  }
+
+  Date.prototype.toLocaleString = function () {
+    const date = this
+    if (Number.isNaN(date.getTime())) return '—'
+    return systemDateFormatter.format(date)
+  }
+
+  ;(Date.prototype as any).__grocerySystemDateFormatEnforced = true
+}
+
+enforceSystemDateFormat()
 
 export function formatDisplayDateRange(from: Date | string | null | undefined, to: Date | string | null | undefined): string {
   const fromText = formatDisplayDate(from)

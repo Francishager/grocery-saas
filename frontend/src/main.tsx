@@ -4,6 +4,7 @@ import App from './App.tsx'
 import { JWTAuthProvider } from './contexts/JWTAuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { getApiBaseUrl } from './lib/apiConfig'
+import './lib/utils'
 import './index.css'
 
 const API_URL = getApiBaseUrl()
