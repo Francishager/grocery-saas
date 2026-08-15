@@ -190,8 +190,8 @@ router.put("/:id/plan", authenticateToken, requirePlatformAdmin, async (req, res
     const startDate = subscriptionStart ? new Date(subscriptionStart) : new Date();
     data.subscriptionStart = startDate;
 
-    // Set subscription end date — use provided value or auto-calculate from billingCycle
-    if (subscriptionEnd) {
+    // Set subscription end date — explicit date wins, otherwise auto-calculate from billing cycle
+    if (subscriptionEnd !== undefined && subscriptionEnd !== null && subscriptionEnd !== '') {
       data.subscriptionEnd = new Date(subscriptionEnd);
     } else {
       const endDate = new Date(startDate);

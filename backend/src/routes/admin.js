@@ -4,7 +4,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
-import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
+import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 
 const router = Router();
 
@@ -237,25 +237,21 @@ async function updateSubscription(req, res) {
       await prisma.plan.update({ where: { id: targetPlanId }, data: planUpdateData });
     }
 
-    const shouldAutoCalculateEndDate = autoEnd === true || autoEnd === 'true';
-    if (targetPlanId && plan && shouldAutoCalculateEndDate && subscriptionEnd === undefined) {
+    const shouldAutoCalculateEndDate = (autoEnd === true || autoEnd === 'true') && subscriptionEnd === undefined;
+    if (targetPlanId && plan && shouldAutoCalculateEndDate) {
       const startDate = data.subscriptionStart || tenant.subscriptionStart || new Date();
-      const endDate = new Date(startDate);
-      if (plan.billingCycle === 'yearly') {
-        endDate.setFullYear(endDate.getFullYear() + 1);
-      } else {
-        endDate.setMonth(endDate.getMonth() + 1);
-      }
-      data.subscriptionEnd = endDate;
+      const autoEndDate = calculateDefaultSubscriptionEndDate({
+        subscriptionStart: startDate,
+        billingCycle: plan.billingCycle || tenant.plan?.billingCycle || 'monthly',
+      });
+      if (autoEndDate) data.subscriptionEnd = autoEndDate;
     } else if (targetPlanId && subscriptionStart !== undefined && subscriptionEnd === undefined && tenant.subscriptionEnd === null && plan) {
       const startDate = data.subscriptionStart || tenant.subscriptionStart || new Date();
-      const endDate = new Date(startDate);
-      if (plan.billingCycle === 'yearly') {
-        endDate.setFullYear(endDate.getFullYear() + 1);
-      } else {
-        endDate.setMonth(endDate.getMonth() + 1);
-      }
-      data.subscriptionEnd = endDate;
+      const autoEndDate = calculateDefaultSubscriptionEndDate({
+        subscriptionStart: startDate,
+        billingCycle: plan.billingCycle || tenant.plan?.billingCycle || 'monthly',
+      });
+      if (autoEndDate) data.subscriptionEnd = autoEndDate;
     }
 
     const updatedTenant = await prisma.tenant.update({

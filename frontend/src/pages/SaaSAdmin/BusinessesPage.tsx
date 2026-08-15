@@ -112,7 +112,7 @@ export const BusinessesPage: React.FC = () => {
     setPlanTenant(tenant)
     setSubStart(tenant.subscriptionStart ? tenant.subscriptionStart.split('T')[0] : new Date().toISOString().split('T')[0])
     setSubEnd(tenant.subscriptionEnd ? tenant.subscriptionEnd.split('T')[0] : '')
-    setAutoEnd(true)
+    setAutoEnd(!tenant.subscriptionEnd)
   }
 
   const statusBadge = (s: string) => {

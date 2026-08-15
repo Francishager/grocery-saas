@@ -4,6 +4,23 @@ export function normalizeBillingCycle(value) {
   return 'monthly';
 }
 
+export function calculateDefaultSubscriptionEndDate({ subscriptionStart, billingCycle }) {
+  const startDate = subscriptionStart ? new Date(subscriptionStart) : new Date();
+  if (Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+
+  const endDate = new Date(startDate);
+  const normalizedCycle = String(billingCycle || 'monthly').trim().toLowerCase();
+  if (normalizedCycle === 'yearly' || normalizedCycle === 'annual') {
+    endDate.setFullYear(endDate.getFullYear() + 1);
+  } else {
+    endDate.setMonth(endDate.getMonth() + 1);
+  }
+
+  return endDate;
+}
+
 export function resolveSubscriptionCharge(plan = {}, tenant = {}) {
   const customPriceValue = tenant.customPrice ?? tenant.priceOverride ?? tenant.subscriptionPrice ?? null;
   const customBillingCycle = tenant.customBillingCycle ?? tenant.subscriptionBillingCycle ?? null;
