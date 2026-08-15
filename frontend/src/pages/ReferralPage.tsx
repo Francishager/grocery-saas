@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { formatDisplayDate } from '@/lib/utils'
 
 const statusConfig: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   pending: { label: 'Pending', color: 'text-slate-500 bg-slate-100', icon: Clock },
@@ -240,7 +241,7 @@ export default function ReferralPage() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-semibold text-green-600">{reward.value}{reward.type === 'subscription_discount' ? '%' : reward.type === 'free_months' ? ' mo' : ''}</p>
-                    <p className="text-xs text-muted-foreground">{new Date(reward.claimedAt).toLocaleDateString()}</p>
+                    <p className="text-xs text-muted-foreground">{formatDisplayDate(reward.claimedAt)}</p>
                   </div>
                 </div>
               ))}
@@ -289,7 +290,7 @@ export default function ReferralPage() {
                           {rewardTypeLabels[ref.rewardType] || ref.rewardType}: {ref.rewardValue}{ref.rewardType === 'subscription_discount' ? '%' : ref.rewardType === 'free_months' ? ' mo' : ''}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{new Date(ref.createdAt).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{formatDisplayDate(ref.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
                         {ref.status === 'completed' && ref.rewardStatus === 'unclaimed' ? (
                           <Button

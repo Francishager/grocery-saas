@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
@@ -814,7 +814,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
               <p className={`text-2xl font-bold mt-1 ${(data.summary?.currentBalance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
                 {formatCurrency(data.summary?.currentBalance || 0)}
               </p>
-              <p className="text-xs text-muted-foreground mt-2">Statement Date: {new Date(data.generatedAt).toLocaleDateString()}</p>
+              <p className="text-xs text-muted-foreground mt-2">Statement Date: {formatDisplayDate(data.generatedAt)}</p>
             </div>
           </div>
         </div>
@@ -1160,11 +1160,11 @@ function PnLReport({ data }: { data: any }) {
         <div className="flex flex-wrap gap-4 text-sm">
           <div className="rounded-lg bg-blue-50 px-4 py-2">
             <span className="text-muted-foreground">Current: </span>
-            <span className="font-semibold">{data.periods.current?.from ? `${new Date(data.periods.current.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(data.periods.current.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</span>
+            <span className="font-semibold">{data.periods.current?.from ? `${formatDisplayDate(data.periods.current.from)} – ${formatDisplayDate(data.periods.current.to)}` : ''}</span>
           </div>
           <div className="rounded-lg bg-gray-100 px-4 py-2">
             <span className="text-muted-foreground">Previous: </span>
-            <span className="font-semibold">{data.periods.previous?.from ? `${new Date(data.periods.previous.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(data.periods.previous.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</span>
+            <span className="font-semibold">{data.periods.previous?.from ? `${formatDisplayDate(data.periods.previous.from)} – ${formatDisplayDate(data.periods.previous.to)}` : ''}</span>
           </div>
         </div>
       )}
@@ -1365,7 +1365,7 @@ function ExecutiveSummaryReport({ data }: { data: any }) {
 
   const fmtPeriod = (p: any) => {
     if (!p?.from) return ''
-    return `${new Date(p.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(p.to).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    return `${formatDisplayDate(p.from)} – ${formatDisplayDate(p.to)}`
   }
 
   const categoryChartData = (categoryAnalysis || []).slice(0, 8).map((c: any) => ({
