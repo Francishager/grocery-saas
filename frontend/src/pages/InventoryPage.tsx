@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff, History } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
@@ -176,6 +176,7 @@ export default function InventoryPage() {
   const [stockAdjust, setStockAdjust] = useState<StockAdjustState | null>(null)
   const [stockAdjustSaving, setStockAdjustSaving] = useState(false)
   const [priceHistory, setPriceHistory] = useState<PriceHistoryState | null>(null)
+  const [openActionMenu, setOpenActionMenu] = useState<string | number | null>(null)
   const { tab: urlTab } = useParams()
   const lockedType = urlTab === 'products' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
@@ -417,7 +418,7 @@ export default function InventoryPage() {
           })
           await queueMutation('products', 'update', String(editingItem.id), {
             ...formData,
-            quantity: editingItem.quantity,
+            quantity: Number(editingItem.quantity ?? 0),
           })
         }
         toast({ title: 'Item updated successfully' })
@@ -1241,26 +1242,26 @@ export default function InventoryPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1280px] hidden md:table">
+              <table className="w-full min-w-[1500px] hidden md:table">
                 <thead>
                   <tr className="border-b text-left">
-                    {!lockedType && <th className="pb-3 font-medium">Type</th>}
-                    <th className="pb-3 font-medium">SKU</th>
-                    <th className="pb-3 font-medium">Name</th>
-                    <th className="pb-3 font-medium">Category</th>
-                    {canManageInventory && <th className="pb-3 font-medium">Branch</th>}
-                    <th className="pb-3 font-medium text-right">Opening Stock</th>
-                    <th className="pb-3 font-medium text-right">Stock In</th>
-                    <th className="pb-3 font-medium text-right">Sold Today</th>
-                    <th className="pb-3 font-medium text-right">Other Stock Out</th>
-                    <th className="pb-3 font-medium text-right">Returns</th>
-                    <th className="pb-3 font-medium text-right">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}</th>
-                    <th className="pb-3 font-medium">Batch</th>
-                    <th className="pb-3 font-medium">Expiry</th>
-                    <th className="pb-3 font-medium text-right">Cost</th>
-                    <th className="pb-3 font-medium text-right">Price</th>
-                    <th className="pb-3 font-medium">Status</th>
-                    <th className="pb-3 font-medium text-right">Actions</th>
+                    {!lockedType && <th className="pb-3 font-medium whitespace-nowrap">Type</th>}
+                    <th className="pb-3 font-medium whitespace-nowrap">SKU</th>
+                    <th className="pb-3 font-medium whitespace-nowrap">Name</th>
+                    <th className="pb-3 font-medium whitespace-nowrap">Category</th>
+                    {canManageInventory && <th className="pb-3 font-medium whitespace-nowrap">Branch</th>}
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Opening Stock</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Stock In</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Sold Today</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Other Stock Out</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Returns</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}</th>
+                    <th className="pb-3 font-medium whitespace-nowrap">Batch</th>
+                    <th className="pb-3 font-medium whitespace-nowrap">Expiry</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Cost</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Price</th>
+                    <th className="pb-3 font-medium whitespace-nowrap">Status</th>
+                    <th className="pb-3 font-medium text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1285,18 +1286,18 @@ export default function InventoryPage() {
                         </span>
                       </td>
                       )}
-                      <td className="py-3">{item.product_id || '-'}</td>
-                      <td className="py-3 font-medium">{item.product_name}</td>
-                      <td className="py-3 text-sm text-muted-foreground">
+                      <td className="py-3 whitespace-nowrap">{item.product_id || '-'}</td>
+                      <td className="py-3 font-medium whitespace-nowrap">{item.product_name}</td>
+                      <td className="py-3 text-sm text-muted-foreground whitespace-nowrap">
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
                       </td>
                       {canManageInventory && (
-                        <td className="py-3 text-sm text-muted-foreground">
+                        <td className="py-3 text-sm text-muted-foreground whitespace-nowrap">
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
                         </td>
                       )}
-                      <td className="py-3 text-right tabular-nums">{formatQty(movement.openingStock)}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right tabular-nums whitespace-nowrap">{formatQty(movement.openingStock)}</td>
+                      <td className="py-3 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => openMovementModal(item, 'stock_in')}
@@ -1309,7 +1310,7 @@ export default function InventoryPage() {
                           {formatQty(movement.stockIn)}
                         </button>
                       </td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => openMovementModal(item, 'sold')}
@@ -1327,7 +1328,7 @@ export default function InventoryPage() {
                           </p>
                         )}
                       </td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => openMovementModal(item, 'other')}
@@ -1340,8 +1341,8 @@ export default function InventoryPage() {
                           {formatQty(movement.otherStockOut)}
                         </button>
                       </td>
-                      <td className="py-3 text-right tabular-nums">{formatQty(movement.returns)}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right tabular-nums whitespace-nowrap">{formatQty(movement.returns)}</td>
+                      <td className="py-3 text-right whitespace-nowrap">
                         <span className={cn(
                           "font-bold tabular-nums",
                           movement.currentStock <= item.low_stock_alert ? "text-orange-600" : ""
@@ -1354,15 +1355,15 @@ export default function InventoryPage() {
                           </p>
                         )}
                       </td>
-                      <td className="py-3">{(item as any).batchNumber || '-'}</td>
-                      <td className="py-3">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 whitespace-nowrap">{(item as any).batchNumber || '-'}</td>
+                      <td className="py-3 whitespace-nowrap">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
+                      <td className="py-3 text-right whitespace-nowrap">
                         {formatCurrency(item.cost_price)}
                       </td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right whitespace-nowrap">
                         {formatCurrency(item.unit_price)}
                       </td>
-                      <td className="py-3">
+                      <td className="py-3 whitespace-nowrap">
                         <span className={cn(
                           "inline-block rounded px-2 py-0.5 text-xs font-semibold",
                           stockStatus === 'Out of Stock'
@@ -1380,42 +1381,70 @@ export default function InventoryPage() {
                         )}
                       </td>
                       <td className="py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          {canAdjustStock && item.itemType !== 'service' && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Stock In"
-                              onClick={() => openStockAdjust(item, 'stock_in')}
-                            >
-                              <Plus className="h-4 w-4 text-green-700" />
-                            </Button>
-                          )}
+                        <div className="relative flex justify-end">
                           <Button
                             variant="ghost"
                             size="icon"
-                            title="Price History"
-                            onClick={() => openPriceHistory(item)}
+                            className="h-8 w-8"
+                            title="More actions"
+                            onClick={() => setOpenActionMenu(openActionMenu === item.id ? null : item.id)}
                           >
-                            <History className="h-4 w-4" />
+                            <MoreHorizontal className="h-4 w-4" />
                           </Button>
-                          {canEditCurrent && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEditForm(item)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {canDeleteCurrent && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(item.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+
+                          {openActionMenu === item.id && (
+                            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
+                              {canAdjustStock && item.itemType !== 'service' && (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                  onClick={() => {
+                                    setOpenActionMenu(null)
+                                    openStockAdjust(item, 'stock_in')
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 text-green-700" />
+                                  Stock In
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  openPriceHistory(item)
+                                }}
+                              >
+                                <History className="h-4 w-4" />
+                                Price History
+                              </button>
+                              {canEditCurrent && (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                  onClick={() => {
+                                    setOpenActionMenu(null)
+                                    openEditForm(item)
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                  Edit
+                                </button>
+                              )}
+                              {canDeleteCurrent && (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent text-destructive"
+                                  onClick={() => {
+                                    setOpenActionMenu(null)
+                                    handleDelete(item.id)
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </td>
@@ -1441,24 +1470,69 @@ export default function InventoryPage() {
                         <p className="font-medium truncate">{item.product_name}</p>
                         <p className="text-xs text-muted-foreground">{item.product_id || '-'}</p>
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        {canAdjustStock && item.itemType !== 'service' && (
-                          <Button variant="ghost" size="icon" title="Stock In" className="h-8 w-8" onClick={() => openStockAdjust(item, 'stock_in')}>
-                            <Plus className="h-4 w-4 text-green-700" />
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="icon" title="Price History" className="h-8 w-8" onClick={() => openPriceHistory(item)}>
-                          <History className="h-4 w-4" />
+                      <div className="relative shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="More actions"
+                          onClick={() => setOpenActionMenu(openActionMenu === item.id ? null : item.id)}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
                         </Button>
-                        {canEditCurrent && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditForm(item)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {canDeleteCurrent && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(item.id)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                        {openActionMenu === item.id && (
+                          <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
+                            {canAdjustStock && item.itemType !== 'service' && (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  openStockAdjust(item, 'stock_in')
+                                }}
+                              >
+                                <Plus className="h-4 w-4 text-green-700" />
+                                Stock In
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                              onClick={() => {
+                                setOpenActionMenu(null)
+                                openPriceHistory(item)
+                              }}
+                            >
+                              <History className="h-4 w-4" />
+                              Price History
+                            </button>
+                            {canEditCurrent && (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  openEditForm(item)
+                                }}
+                              >
+                                <Edit className="h-4 w-4" />
+                                Edit
+                              </button>
+                            )}
+                            {canDeleteCurrent && (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent text-destructive"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  handleDelete(item.id)
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
