@@ -725,208 +725,165 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
   const entityName = data.customer?.name || data.supplier?.name || ''
   const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : ''
   const isCustomer = !!data.customer
-  const openingBalance = typeof data.openingBalance === 'object' ? data.openingBalance : null
-  const openingAmount = Number(openingBalance?.amount ?? data.summary?.openingBalance ?? 0)
+  const transactions = data.transactions || []
+
+  const getTransactionBadgeColor = (type: string) => {
+    switch (type) {
+      case 'Sale':
+        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+      case 'Payment Received':
+        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+      case 'Credit Note':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+      case 'Return/Refund':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+      case 'Discount':
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+    }
+  }
 
   return (
-    <div className="space-y-4">
-      {/* Entity header */}
+    <div className="space-y-6">
+      {/* Entity header - Bank Statement Style */}
       {entityName && (
-        <div className="rounded-lg border bg-muted/30 px-4 py-3">
-          <p className="text-xs text-muted-foreground">{entityType} Statement</p>
-          <p className="text-lg font-semibold">{entityName}</p>
-          {(data.customer?.phone || data.supplier?.phone) && <p className="text-sm text-muted-foreground">{data.customer?.phone || data.supplier?.phone}</p>}
-          {(data.customer?.email || data.supplier?.email) && <p className="text-sm text-muted-foreground">{data.customer?.email || data.supplier?.email}</p>}
+        <div className="rounded-lg border-2 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 px-6 py-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{entityType} Account Statement</p>
+              <p className="text-2xl font-bold mt-1">{entityName}</p>
+              <div className="flex gap-6 mt-3 text-sm text-muted-foreground">
+                {(data.customer?.phone || data.supplier?.phone) && <p>{data.customer?.phone || data.supplier?.phone}</p>}
+                {(data.customer?.email || data.supplier?.email) && <p>{data.customer?.email || data.supplier?.email}</p>}
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">Current Balance</p>
+              <p className={`text-2xl font-bold mt-1 ${(data.summary?.currentBalance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatCurrency(data.summary?.currentBalance || 0)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">Statement Date: {new Date(data.generatedAt).toLocaleDateString()}</p>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Summary cards */}
+      {/* Summary cards - Enhanced */}
       {data.summary && keys && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {keys.map(k => (
-            <Card key={k.key}>
+            <Card key={k.key} className="border-l-4 border-l-blue-500">
               <CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">{k.label}</p>
-                <p className="mt-1 text-2xl font-bold">{formatValue(data.summary[k.key], k.format)}</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase">{k.label}</p>
+                <p className="mt-2 text-xl font-bold">{formatValue(data.summary[k.key], k.format)}</p>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
 
-      {openingAmount > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">Opening Balance</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Description</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Debit</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Credit</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-t bg-muted/20">
-                  <td className="px-4 py-2">{openingBalance?.date ? new Date(openingBalance.date).toLocaleDateString() : 'N/A'}</td>
-                  <td className="px-4 py-2">Opening Balance</td>
-                  <td className="px-4 py-2 text-right">{isCustomer ? formatCurrency(openingAmount) : 'N/A'}</td>
-                  <td className="px-4 py-2 text-right">{isCustomer ? 'N/A' : formatCurrency(openingAmount)}</td>
-                  <td className="px-4 py-2 text-right">{formatCurrency(openingAmount)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
-      {/* Sales/Purchases section */}
-      {isCustomer && data.sales && (
+
+      {/* Placeholder - Transactions merged into comprehensive ledger below */}
+
+      {/* Comprehensive Transaction Ledger - Bank Statement Style */}
+      {transactions.length > 0 && (
         <div>
-          <h3 className="mb-2 text-sm font-semibold">Sales Transactions</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Transaction History - Complete Ledger</h3>
+            <p className="text-xs text-muted-foreground">{transactions.length} transactions</p>
+          </div>
+          {/* Desktop view */}
+          <div className="hidden lg:block overflow-x-auto rounded-lg border">
+            <table className="min-w-[1400px] w-full text-sm">
+              <thead className="sticky top-0 bg-muted/50 border-b">
                 <tr>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Receipt No</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Total</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Paid</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Balance</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Status</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-20">Date</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground flex-1">Description</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28">Reference</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Method</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Debit</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Credit</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Balance</th>
                 </tr>
               </thead>
               <tbody>
-                {data.sales.map((s: any, i: number) => (
-                  <tr key={i} className="border-t hover:bg-muted/30">
-                    <td className="px-4 py-2">{s.receiptNo}</td>
-                    <td className="px-4 py-2">{s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(s.total)}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(s.amountPaid)}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(s.balance)}</td>
-                    <td className="px-4 py-2">{s.paymentStatus}</td>
+                {transactions.map((txn: any, idx: number) => (
+                  <tr key={txn.id || idx} className="border-t hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 whitespace-nowrap text-xs">
+                      {new Date(txn.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTransactionBadgeColor(txn.type)}`}>
+                        {txn.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="truncate">{txn.description}</div>
+                      {txn.details && <div className="text-xs text-muted-foreground truncate">{txn.details}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap font-mono">{txn.reference}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{txn.paymentMethod}</td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {txn.debit > 0 ? formatCurrency(txn.debit) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {txn.credit > 0 ? formatCurrency(txn.credit) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold">
+                      <span className={txn.balance > 0 ? 'text-red-600' : 'text-green-600'}>
+                        {formatCurrency(txn.balance)}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
 
-      {!isCustomer && data.purchases && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">Purchase Transactions</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Ref No</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Total</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.purchases.map((p: any, i: number) => (
-                  <tr key={i} className="border-t hover:bg-muted/30">
-                    <td className="px-4 py-2">{p.refNo || 'N/A'}</td>
-                    <td className="px-4 py-2">{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(p.total)}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(p.balance)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Mobile/Tablet view */}
+          <div className="lg:hidden space-y-3">
+            {transactions.map((txn: any, idx: number) => (
+              <Card key={txn.id || idx} className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTransactionBadgeColor(txn.type)}`}>
+                      {txn.type}
+                    </span>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(txn.date).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <p className="font-medium text-sm mb-1">{txn.description}</p>
+                  {txn.details && <p className="text-xs text-muted-foreground mb-3">{txn.details}</p>}
+                  <div className="grid grid-cols-3 gap-2 pt-3 border-t text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Debit</p>
+                      <p className="font-semibold">{txn.debit > 0 ? formatCurrency(txn.debit) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Credit</p>
+                      <p className="font-semibold">{txn.credit > 0 ? formatCurrency(txn.credit) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Balance</p>
+                      <p className={`font-bold ${txn.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(txn.balance)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Payments section */}
-      {data.payments && data.payments.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">Payments</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Amount</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Method</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Reference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.payments.map((p: any, i: number) => (
-                  <tr key={i} className="border-t hover:bg-muted/30">
-                    <td className="px-4 py-2">{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(p.amount)}</td>
-                    <td className="px-4 py-2">{p.paymentMethod}</td>
-                    <td className="px-4 py-2">{p.reference || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Credit Notes section (customer statement) */}
-      {isCustomer && data.creditNotes && data.creditNotes.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">Credit Notes</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Note No</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Amount</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.creditNotes.map((cn: any, i: number) => (
-                  <tr key={i} className="border-t hover:bg-muted/30">
-                    <td className="px-4 py-2">{cn.noteNo}</td>
-                    <td className="px-4 py-2">{cn.createdAt ? new Date(cn.createdAt).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(cn.amount)}</td>
-                    <td className="px-4 py-2">{cn.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Debit Notes section (supplier statement) */}
-      {!isCustomer && data.debitNotes && data.debitNotes.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">Debit Notes</h3>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Note No</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Date</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Amount</th>
-                  <th className="px-4 py-2 text-left font-medium text-muted-foreground">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.debitNotes.map((dn: any, i: number) => (
-                  <tr key={i} className="border-t hover:bg-muted/30">
-                    <td className="px-4 py-2">{dn.noteNo}</td>
-                    <td className="px-4 py-2">{dn.createdAt ? new Date(dn.createdAt).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-2 text-right">{formatCurrency(dn.amount)}</td>
-                    <td className="px-4 py-2">{dn.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {transactions.length === 0 && (
+        <div className="rounded-lg border border-dashed p-8 text-center">
+          <p className="text-muted-foreground">No transactions found for this {isCustomer ? 'customer' : 'supplier'}.</p>
         </div>
       )}
     </div>

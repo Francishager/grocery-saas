@@ -1221,7 +1221,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
   } catch (err) { handleBranchError(res, err); }
 });
 
-// Customer Statement — summary of customer activity
+// Customer Statement — comprehensive bank statement with all transactions and running balance
 router.get("/customers/statement", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
@@ -1231,61 +1231,166 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }) });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
-    const [sales, payments, creditNotes, saleReturns] = await Promise.all([
+    const [sales, payments, creditNotes, saleReturns, discounts] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(s, { customerId, ...df(req) }),
         include: { items: { include: { product: { select: { name: true } } } } },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "asc" },
       }),
       prisma.customerPayment.findMany({
         where: scopedWhere(s, { customerId, ...df(req) }),
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "asc" },
       }),
       prisma.creditNote.findMany({
         where: scopedWhere(s, { customerId, ...df(req), status: { not: "cancelled" } }),
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "asc" },
         select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
       }),
       prisma.saleReturn.findMany({
         where: scopedWhere(s, { customerId, ...df(req), status: "completed" }),
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "asc" },
         select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true },
       }),
+      prisma.saleRecord.findMany({
+        where: scopedWhere(s, { customerId, discount: { gt: 0 }, ...df(req) }),
+        select: { id: true, receiptNo: true, discount: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      }),
     ]);
+
+    // Compile all transactions chronologically
+    const transactions = [];
+    const openingBalanceAmount = positiveOpeningBalance(customer);
+    
+    // Add opening balance as first transaction
+    if (openingBalanceAmount > 0) {
+      transactions.push({
+        id: `opening-${customer.id}`,
+        date: openingBalanceDate(customer),
+        type: "Opening Balance",
+        description: "Opening Balance",
+        debit: openingBalanceAmount,
+        credit: 0,
+        reference: "-",
+        details: customer.openingBalanceNote || "-",
+        paymentMethod: "-",
+        relatedId: null,
+      });
+    }
+
+    // Add sales as debits (charges)
+    sales.forEach((sale) => {
+      transactions.push({
+        id: sale.id,
+        date: sale.createdAt,
+        type: "Sale",
+        description: `Sale Invoice - ${sale.paymentStatus}`,
+        debit: sale.total,
+        credit: 0,
+        reference: sale.receiptNo,
+        details: `Status: ${sale.paymentStatus}, Paid: ${sale.amountPaid}, Balance: ${sale.balance}`,
+        paymentMethod: sale.paymentMethod || "-",
+        relatedId: sale.id,
+      });
+    });
+
+    // Add discounts if any
+    discounts.forEach((disc) => {
+      transactions.push({
+        id: `disc-${disc.id}`,
+        date: disc.createdAt,
+        type: "Discount",
+        description: "Sale Discount",
+        debit: 0,
+        credit: disc.discount,
+        reference: disc.receiptNo,
+        details: `Discount applied on sale`,
+        paymentMethod: "-",
+        relatedId: disc.id,
+      });
+    });
+
+    // Add payments as credits
+    payments.forEach((payment) => {
+      transactions.push({
+        id: `payment-${payment.id}`,
+        date: payment.createdAt,
+        type: "Payment Received",
+        description: "Payment Received",
+        debit: 0,
+        credit: payment.amount,
+        reference: payment.reference || payment.id.substring(0, 8),
+        details: `Method: ${payment.paymentMethod}`,
+        paymentMethod: payment.paymentMethod,
+        relatedId: payment.id,
+      });
+    });
+
+    // Add credit notes (allowances/adjustments)
+    creditNotes.forEach((cn) => {
+      transactions.push({
+        id: `creditnote-${cn.id}`,
+        date: cn.createdAt,
+        type: "Credit Note",
+        description: "Credit Adjustment",
+        debit: 0,
+        credit: cn.amount,
+        reference: cn.noteNo,
+        details: `Reason: ${cn.reason}`,
+        paymentMethod: "-",
+        relatedId: cn.id,
+      });
+    });
+
+    // Add sale returns as credits
+    saleReturns.forEach((ret) => {
+      transactions.push({
+        id: `return-${ret.id}`,
+        date: ret.createdAt,
+        type: "Return/Refund",
+        description: "Sale Return",
+        debit: 0,
+        credit: ret.total,
+        reference: ret.returnNo,
+        details: `Reason: ${ret.reason}, Refund: ${ret.refundMethod}`,
+        paymentMethod: ret.refundMethod || "-",
+        relatedId: ret.id,
+      });
+    });
+
+    // Sort by date
+    transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // Calculate running balances
+    let runningBalance = 0;
+    transactions.forEach((txn) => {
+      runningBalance = runningBalance + txn.debit - txn.credit;
+      txn.balance = runningBalance;
+    });
 
     const totalSales = sales.reduce((a, x) => a + x.total, 0);
     const totalPayments = payments.reduce((a, x) => a + x.amount, 0);
     const totalCreditNotes = creditNotes.reduce((a, x) => a + x.amount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
-    const openingBalanceAmount = positiveOpeningBalance(customer);
-    const openingBalanceTxn = {
-      date: openingBalanceDate(customer),
-      description: "Opening Balance",
-      debit: openingBalanceAmount,
-      credit: 0,
-      balance: openingBalanceAmount,
-      note: customer.openingBalanceNote || "",
-      type: "Opening Balance",
-      isSystem: true,
-      systemTransaction: true,
-    };
+    const totalDiscounts = discounts.reduce((a, x) => a + x.discount, 0);
     const currentBalance = customer.balance || 0;
 
     res.json({
-      customer: { id: customer.id, name: customer.name, phone: customer.phone || "", email: customer.email || "" },
-      openingBalance: openingBalanceTxn,
+      customer: { id: customer.id, name: customer.name, phone: customer.phone || "", email: customer.email || "", address: customer.address || "" },
+      generatedAt: new Date().toISOString(),
       summary: {
         openingBalance: openingBalanceAmount,
         totalSales,
+        totalDiscounts,
         totalPayments,
         totalCreditNotes,
-        totalSaleReturns,
+        totalReturns: totalSaleReturns,
         currentBalance,
-        salesCount: sales.length,
-        paymentCount: payments.length,
-        creditNoteCount: creditNotes.length,
-        saleReturnCount: saleReturns.length,
+        totalTransactions: transactions.length,
+        lastUpdated: customer.updatedAt,
       },
+      transactions,
+      // Legacy format for backward compatibility
       sales: sales.map((x) => ({
         id: x.id,
         receiptNo: x.receiptNo,
