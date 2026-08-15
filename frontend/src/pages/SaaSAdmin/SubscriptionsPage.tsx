@@ -28,7 +28,11 @@ export const SubscriptionsPage: React.FC = () => {
   const [autoEnd, setAutoEnd] = useState(true)
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [planPrice, setPlanPrice] = useState('')
-  const [planBillingCycle, setPlanBillingCycle] = useState('monthly')
+  const [customCurrency, setCustomCurrency] = useState('UGX')
+  const [customBillingCycle, setCustomBillingCycle] = useState('monthly')
+  const [monthlyServiceFee, setMonthlyServiceFee] = useState('0')
+  const [annualServiceFee, setAnnualServiceFee] = useState('0')
+  const [staticIpFee, setStaticIpFee] = useState('0')
   const [planMaxUsers, setPlanMaxUsers] = useState('')
   const [planMaxProducts, setPlanMaxProducts] = useState('')
 
@@ -55,7 +59,12 @@ export const SubscriptionsPage: React.FC = () => {
     setTrialEnd(sub.trialEndsAt ? sub.trialEndsAt.split('T')[0] : '')
     setAutoEnd(!sub.endDate)
     setSelectedPlanId(sub.plan?.id || '')
-    setPlanPrice(String(sub.plan?.price || ''))
+    setPlanPrice(String(sub.customPrice ?? sub.plan?.price ?? ''))
+    setCustomCurrency(sub.customCurrency || sub.plan?.currency || 'UGX')
+    setCustomBillingCycle(sub.customBillingCycle || sub.plan?.billingCycle || 'monthly')
+    setMonthlyServiceFee(String(sub.monthlyServiceFee ?? 0))
+    setAnnualServiceFee(String(sub.annualServiceFee ?? 0))
+    setStaticIpFee(String(sub.staticIpFee ?? 0))
     setPlanBillingCycle(sub.plan?.billingCycle || 'monthly')
     setPlanMaxUsers(String(sub.plan?.maxUsers || ''))
     setPlanMaxProducts(String(sub.plan?.maxProducts || ''))
@@ -70,7 +79,12 @@ export const SubscriptionsPage: React.FC = () => {
       if (subStart) body.subscriptionStart = subStart
       if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
       if (trialEnd) body.trialEndsAt = trialEnd
-      if (planPrice) body.price = planPrice
+      if (planPrice !== '') body.customPrice = planPrice
+      if (customCurrency) body.customCurrency = customCurrency
+      if (customBillingCycle) body.customBillingCycle = customBillingCycle
+      if (monthlyServiceFee !== '') body.monthlyServiceFee = monthlyServiceFee
+      if (annualServiceFee !== '') body.annualServiceFee = annualServiceFee
+      if (staticIpFee !== '') body.staticIpFee = staticIpFee
       if (planBillingCycle) body.billingCycle = planBillingCycle
       if (planMaxUsers) body.maxUsers = planMaxUsers
       if (planMaxProducts) body.maxProducts = planMaxProducts
@@ -240,6 +254,37 @@ export const SubscriptionsPage: React.FC = () => {
                       <option value="monthly">Monthly</option>
                       <option value="yearly">Yearly</option>
                     </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Currency</label>
+                    <select value={customCurrency} onChange={(e) => setCustomCurrency(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
+                      <option value="UGX">UGX</option>
+                      <option value="USD">USD</option>
+                      <option value="KES">KES</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Custom Billing Cycle</label>
+                    <select value={customBillingCycle} onChange={(e) => setCustomBillingCycle(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
+                      <option value="monthly">Monthly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Monthly Fee</label>
+                    <input type="number" min="0" step="0.01" value={monthlyServiceFee} onChange={(e) => setMonthlyServiceFee(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Annual Fee</label>
+                    <input type="number" min="0" step="0.01" value={annualServiceFee} onChange={(e) => setAnnualServiceFee(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Static IP</label>
+                    <input type="number" min="0" step="0.01" value={staticIpFee} onChange={(e) => setStaticIpFee(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

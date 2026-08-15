@@ -237,6 +237,19 @@ model Tenant {
   receiptFooter String?  // Custom text at bottom of receipts
 
   // =====================
+  // BILLING OVERRIDES
+  // =====================
+  customPrice             Float? // Per-tenant override on the base plan fee
+  customCurrency          String? // Per-tenant override currency, e.g. UGX / USD
+  customBillingCycle      String? // monthly, yearly
+  monthlyServiceFee       Float?  @default(0)
+  annualServiceFee        Float?  @default(0)
+  staticIpFee             Float?  @default(0)
+  billingPaymentMethod    String? // cash, mobile_money, card, bank_transfer, relwork, kamatera
+  billingPaymentReference String?
+  billingNotes            String?
+
+  // =====================
   // MODULE DEFAULTS (based on businessType, overridable by feature control)
   // =====================
   inventoryEnabled  Boolean @default(true)  // On for product-based, off for service-based

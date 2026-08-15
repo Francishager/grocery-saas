@@ -4,6 +4,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
+import { resolveSubscriptionCharge } from "../utils/subscriptionPricing.js";
 
 const router = Router();
 
@@ -33,6 +34,8 @@ function frontendOrigin() {
 }
 
 function subscriptionPayload(tenant) {
+  const effectiveCharge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+
   return {
     id: tenant.id,
     status: tenant.status || "active",
@@ -40,6 +43,18 @@ function subscriptionPayload(tenant) {
     endDate: tenant.subscriptionEnd || null,
     trialEndsAt: tenant.trialEndsAt || null,
     tenant: { id: tenant.id, name: tenant.name, status: tenant.status },
+    customPrice: tenant.customPrice ?? null,
+    customCurrency: tenant.customCurrency || null,
+    customBillingCycle: tenant.customBillingCycle || null,
+    monthlyServiceFee: tenant.monthlyServiceFee ?? 0,
+    annualServiceFee: tenant.annualServiceFee ?? 0,
+    staticIpFee: tenant.staticIpFee ?? 0,
+    billingPaymentMethod: tenant.billingPaymentMethod || null,
+    billingPaymentReference: tenant.billingPaymentReference || null,
+    billingNotes: tenant.billingNotes || null,
+    price: effectiveCharge.price,
+    currency: effectiveCharge.currency,
+    billingCycle: effectiveCharge.billingCycle,
     plan: tenant.plan ? {
       id: tenant.plan.id,
       name: tenant.plan.name,
@@ -62,12 +77,21 @@ async function updateSubscription(req, res) {
       trialEndsAt,
       price,
       billingCycle,
+      customPrice,
+      customBillingCycle,
+      customCurrency,
+      monthlyServiceFee,
+      annualServiceFee,
+      staticIpFee,
+      billingPaymentMethod,
+      billingPaymentReference,
+      billingNotes,
       maxUsers,
       maxProducts,
       autoEnd,
     } = req.body;
 
-    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && price === undefined && billingCycle === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
+    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
       return res.status(400).json({ error: "At least one subscription field is required" });
     }
 
@@ -95,11 +119,11 @@ async function updateSubscription(req, res) {
     if (trialEndsAt !== undefined) data.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
 
     if (price !== undefined) {
-      const parsedPrice = Number(price);
-      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      const parsedPrice = price === '' || price === null ? null : Number(price);
+      if (parsedPrice !== null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
         return res.status(400).json({ error: "Price must be a non-negative number" });
       }
-      planUpdateData.price = parsedPrice;
+      data.customPrice = parsedPrice;
     }
 
     if (billingCycle !== undefined) {
@@ -107,6 +131,64 @@ async function updateSubscription(req, res) {
         return res.status(400).json({ error: "Billing cycle must be monthly or yearly" });
       }
       planUpdateData.billingCycle = billingCycle ? String(billingCycle).toLowerCase() : undefined;
+    }
+
+    if (customPrice !== undefined) {
+      const parsedCustomPrice = customPrice === '' || customPrice === null ? null : Number(customPrice);
+      if (parsedCustomPrice !== null && (!Number.isFinite(parsedCustomPrice) || parsedCustomPrice < 0)) {
+        return res.status(400).json({ error: "Custom price must be a non-negative number" });
+      }
+      data.customPrice = parsedCustomPrice;
+    }
+
+    if (customBillingCycle !== undefined) {
+      if (customBillingCycle === '' || customBillingCycle === null) {
+        data.customBillingCycle = null;
+      } else if (!['monthly', 'yearly'].includes(String(customBillingCycle).toLowerCase())) {
+        return res.status(400).json({ error: "Custom billing cycle must be monthly or yearly" });
+      } else {
+        data.customBillingCycle = String(customBillingCycle).toLowerCase();
+      }
+    }
+
+    if (customCurrency !== undefined) {
+      data.customCurrency = customCurrency ? String(customCurrency).toUpperCase() : null;
+    }
+
+    if (monthlyServiceFee !== undefined) {
+      const parsedMonthlyServiceFee = monthlyServiceFee === '' || monthlyServiceFee === null ? 0 : Number(monthlyServiceFee);
+      if (!Number.isFinite(parsedMonthlyServiceFee) || parsedMonthlyServiceFee < 0) {
+        return res.status(400).json({ error: "Monthly service fee must be a non-negative number" });
+      }
+      data.monthlyServiceFee = parsedMonthlyServiceFee;
+    }
+
+    if (annualServiceFee !== undefined) {
+      const parsedAnnualServiceFee = annualServiceFee === '' || annualServiceFee === null ? 0 : Number(annualServiceFee);
+      if (!Number.isFinite(parsedAnnualServiceFee) || parsedAnnualServiceFee < 0) {
+        return res.status(400).json({ error: "Annual service fee must be a non-negative number" });
+      }
+      data.annualServiceFee = parsedAnnualServiceFee;
+    }
+
+    if (staticIpFee !== undefined) {
+      const parsedStaticIpFee = staticIpFee === '' || staticIpFee === null ? 0 : Number(staticIpFee);
+      if (!Number.isFinite(parsedStaticIpFee) || parsedStaticIpFee < 0) {
+        return res.status(400).json({ error: "Static IP fee must be a non-negative number" });
+      }
+      data.staticIpFee = parsedStaticIpFee;
+    }
+
+    if (billingPaymentMethod !== undefined) {
+      data.billingPaymentMethod = billingPaymentMethod ? String(billingPaymentMethod) : null;
+    }
+
+    if (billingPaymentReference !== undefined) {
+      data.billingPaymentReference = billingPaymentReference ? String(billingPaymentReference) : null;
+    }
+
+    if (billingNotes !== undefined) {
+      data.billingNotes = billingNotes ? String(billingNotes) : null;
     }
 
     if (maxUsers !== undefined) {
