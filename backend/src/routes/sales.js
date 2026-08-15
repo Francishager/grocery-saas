@@ -106,6 +106,9 @@ async function checkedSaleItems(items, scope) {
       throw error;
     }
 
+    const costPerBaseUnit = Number(product.cost || 0);
+    const costConversionFactor = Number(conversionFactor || 1);
+    const effectiveCost = costPerBaseUnit * (Number.isFinite(costConversionFactor) && costConversionFactor > 0 ? costConversionFactor : 1);
     const lineTotal = effectivePrice * item.quantity;
     const totalDiscount = item.discount + item.cashDiscount;
     return {
@@ -113,6 +116,7 @@ async function checkedSaleItems(items, scope) {
       quantity: item.quantity, // quantity in selling units
       baseQty, // quantity in base units (for stock deduction)
       price: effectivePrice,
+      cost: effectiveCost,
       discount: item.discount,
       cashDiscount: item.cashDiscount,
       unitName,

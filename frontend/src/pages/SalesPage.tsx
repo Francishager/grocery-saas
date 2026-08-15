@@ -1200,7 +1200,7 @@ export default function SalesPage() {
               )}
             </div>
             <div>
-              <Label>Cost Price</Label>
+              <Label>Current Cost Price</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -1211,7 +1211,7 @@ export default function SalesPage() {
               />
             </div>
             <div>
-              <Label>Selling Price</Label>
+              <Label>Current Selling Price</Label>
               <Input
                 type="number"
                 step="0.01"

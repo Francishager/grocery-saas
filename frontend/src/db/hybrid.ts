@@ -3,6 +3,15 @@ import { db } from './index'
 import { queueMutation } from './sync'
 import { useOnlineStatus } from './hooks'
 
+const lineCogs = (item: any, product?: any) => {
+  const savedCost = Number(item?.cost)
+  if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0)
+  const productCost = Number(product?.cost || item?.product?.cost || 0)
+  const conversionFactor = Number(item?.conversionFactor || 1)
+  const effectiveCost = productCost * (Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1)
+  return effectiveCost * Number(item?.quantity || 0)
+}
+
 // ─── Hybrid Query: API-first, IndexedDB fallback ───
 
 export function useHybridQuery<T>(
@@ -156,7 +165,7 @@ export async function getLocalDashboardKpis(): Promise<any> {
   const cogs = monthSales.reduce((sum, s) => {
     return sum + (s.items || []).reduce((itemSum, i: any) => {
       const product = products.find(p => p.id === i.productId)
-      return itemSum + ((product?.cost || 0) * i.quantity)
+      return itemSum + lineCogs(i, product)
     }, 0)
   }, 0)
 
@@ -410,7 +419,7 @@ export async function getLocalReportData(reportId: string, params?: any): Promis
           if (!map[name]) map[name] = { product: name, quantity: 0, revenue: 0, cost: 0, profit: 0 }
           map[name].quantity += item.quantity || 0
           map[name].revenue += item.total || 0
-          map[name].cost += (p?.cost || 0) * (item.quantity || 0)
+          map[name].cost += lineCogs(item, p)
           map[name].profit = map[name].revenue - map[name].cost
         }
       }
@@ -478,7 +487,7 @@ export async function getLocalReportData(reportId: string, params?: any): Promis
       const cogs = filteredSales.reduce((s, x) => {
         return s + (x.items || []).reduce((is: number, i: any) => {
           const p = products.find(p => p.id === i.productId)
-          return is + (p?.cost || 0) * (i.quantity || 0)
+          return is + lineCogs(i, p)
         }, 0)
       }, 0)
       const expenses = filteredExpenses.reduce((s, e) => s + e.amount, 0)

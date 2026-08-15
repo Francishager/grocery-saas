@@ -492,6 +492,15 @@ export const categoriesApi = {
 }
 
 // Reports endpoints
+const lineCogs = (item: any) => {
+  const savedCost = Number(item?.cost)
+  if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0)
+  const productCost = Number(item?.product?.cost || 0)
+  const conversionFactor = Number(item?.conversionFactor || 1)
+  const effectiveCost = productCost * (Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1)
+  return effectiveCost * Number(item?.quantity || 0)
+}
+
 export const reportsApi = {
   getProducts: async () => {
     const data = await api.get<any>('/api/reports/sales')
@@ -504,7 +513,7 @@ export const reportsApi = {
         if (!productMap[name]) productMap[name] = { product: name, quantity: 0, revenue: 0, profit: 0 }
         productMap[name].quantity += item.quantity || 0
         productMap[name].revenue += item.total || 0
-        productMap[name].profit += (item.total || 0) - ((item.product?.cost || 0) * (item.quantity || 0))
+        productMap[name].profit += (item.total || 0) - lineCogs(item)
       }
     }
     return Object.values(productMap).sort((a, b) => b.profit - a.profit)
@@ -520,7 +529,7 @@ export const reportsApi = {
       if (!staffMap[name]) staffMap[name] = { staff: name, sales_count: 0, total_revenue: 0, profit: 0 }
       staffMap[name].sales_count += 1
       staffMap[name].total_revenue += sale.total || 0
-      const itemProfit = (sale.items || []).reduce((s: number, i: any) => s + ((i.total || 0) - ((i.product?.cost || 0) * (i.quantity || 0))), 0)
+      const itemProfit = (sale.items || []).reduce((s: number, i: any) => s + ((i.total || 0) - lineCogs(i)), 0)
       staffMap[name].profit += itemProfit
     }
     return Object.values(staffMap).sort((a, b) => b.profit - a.profit)
@@ -537,7 +546,7 @@ export const reportsApi = {
       dayMap[day].gross += sale.total || 0
       dayMap[day].discount += sale.discount || 0
       dayMap[day].tax += sale.tax || 0
-      const cost = (sale.items || []).reduce((s: number, i: any) => s + ((i.product?.cost || 0) * (i.quantity || 0)), 0)
+      const cost = (sale.items || []).reduce((s: number, i: any) => s + lineCogs(i), 0)
       dayMap[day].cost += cost
       dayMap[day].profit += (sale.total || 0) - cost - (sale.discount || 0)
     }
@@ -555,7 +564,7 @@ export const reportsApi = {
       monthMap[m].gross += sale.total || 0
       monthMap[m].discount += sale.discount || 0
       monthMap[m].tax += sale.tax || 0
-      const cost = (sale.items || []).reduce((s: number, i: any) => s + ((i.product?.cost || 0) * (i.quantity || 0)), 0)
+      const cost = (sale.items || []).reduce((s: number, i: any) => s + lineCogs(i), 0)
       monthMap[m].cost += cost
       monthMap[m].profit += (sale.total || 0) - cost - (sale.discount || 0)
     }

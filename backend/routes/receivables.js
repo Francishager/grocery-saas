@@ -400,6 +400,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       const product = productsById.get(item.productId)
       const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1)
       const price = toMoney(item.price, product?.price || 0)
+      const cost = toMoney(item.cost, product?.cost || 0)
       const itemDiscount = toMoney(item.discount)
       const lineTotal = Math.max(0, price * quantity - itemDiscount)
 
@@ -411,6 +412,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         productId: item.productId,
         quantity,
         price,
+        cost,
         discount: itemDiscount,
         total: lineTotal
       }
@@ -472,6 +474,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         productId: item.productId,
         quantity: item.quantity,
         price: item.price,
+        cost: item.cost,
         discount: item.discount,
         total: item.total
       }))

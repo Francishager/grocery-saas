@@ -5,6 +5,20 @@ import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/bra
 
 const router = Router();
 
+function saleLineCogs(item) {
+  const savedCost = Number(item?.cost);
+  if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0);
+
+  const productCost = Number(item?.product?.cost || 0);
+  const conversionFactor = Number(item?.conversionFactor || 1);
+  const effectiveCost = productCost * (Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1);
+  return effectiveCost * Number(item?.quantity || 0);
+}
+
+function saleCogs(sale) {
+  return (sale?.items || []).reduce((sum, item) => sum + saleLineCogs(item), 0);
+}
+
 // Dashboard KPIs
 router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
@@ -25,7 +39,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.customer.aggregate({ where: scopedWhere(scope, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
 
@@ -34,8 +48,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const revenueChange = revenueLastMonth ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1) : 0;
     const totalExpenses = expensesThisMonth._sum.amount || 0;
     const totalPurchases = purchasesThisMonth._sum.total || 0;
-    const cogs = salesWithItemsThisMonth.reduce((sum, sale) =>
-      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const cogs = salesWithItemsThisMonth.reduce((sum, sale) => sum + saleCogs(sale), 0);
     const grossProfit = revenueThisMonth - cogs;
     const netProfit = grossProfit - totalExpenses;
 
@@ -111,12 +124,11 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
         prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: start, lt: end } }), _sum: { amount: true } }),
         prisma.sale.findMany({
           where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
-          select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+          select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
         }),
       ]);
       const rev = saleAgg._sum.total || 0;
-      const cogs = salesWithItems.reduce((sum, sale) =>
-        sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+      const cogs = salesWithItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
       const exp = expAgg._sum.amount || 0;
       grossProfit.push(rev - cogs);
       netProfit.push(rev - cogs - exp);
@@ -140,7 +152,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     const [sales, expenses, salesWithItems] = await Promise.all([
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
-        select: { total: true, createdAt: true, items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { total: true, createdAt: true, items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
         orderBy: { createdAt: "asc" },
       }),
       prisma.expense.findMany({
@@ -150,7 +162,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
       }),
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
 
@@ -167,8 +179,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
       if (dayMap[day]) {
         dayMap[day].revenue += sale.total || 0;
         dayMap[day].salesCount += 1;
-        const saleCogs = sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0);
-        dayMap[day].cogs += saleCogs;
+        dayMap[day].cogs += saleCogs(sale);
       }
     });
 

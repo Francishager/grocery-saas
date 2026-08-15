@@ -926,6 +926,39 @@ router.put("/:id", authenticateToken, async (req, res) => {
       data,
       include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
     });
+
+    const priceChanged = body.price !== undefined && Number(existing.price || 0) !== Number(product.price || 0);
+    const costChanged = body.cost !== undefined && Number(existing.cost || 0) !== Number(product.cost || 0);
+    if (priceChanged || costChanged) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: existing.tenantId,
+          userId: req.user?.id || "system",
+          userEmail: req.user?.email || "",
+          action: "update",
+          model: "Product",
+          recordId: existing.id,
+          changes: {
+            before: {
+              ...(priceChanged ? { price: existing.price } : {}),
+              ...(costChanged ? { cost: existing.cost } : {}),
+            },
+            after: {
+              ...(priceChanged ? { price: product.price } : {}),
+              ...(costChanged ? { cost: product.cost } : {}),
+            },
+            priceMovement: {
+              reason: String(req.body.priceChangeReason || req.body.reason || "Market price update"),
+              productName: product.name,
+            },
+          },
+          ip: req.ip || req.connection?.remoteAddress || null,
+          statusCode: 200,
+          severity: "info",
+        },
+      });
+    }
+
     res.json({ message: "Product updated", product });
   } catch (err) {
     console.error("Update product error:", err);

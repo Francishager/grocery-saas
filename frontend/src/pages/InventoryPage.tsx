@@ -860,7 +860,7 @@ export default function InventoryPage() {
 
               {/* Common: Selling Price */}
               <div className="space-y-2">
-                <Label htmlFor="unit_price">Selling Price</Label>
+                <Label htmlFor="unit_price">Current Selling Price</Label>
                 <Input
                   id="unit_price"
                   type="number"
@@ -1106,7 +1106,7 @@ export default function InventoryPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="cost_price">Cost Price <span className="text-red-500">*</span></Label>
+                <Label htmlFor="cost_price">Current Cost Price <span className="text-red-500">*</span></Label>
                 <Input
                   id="cost_price"
                   type="number"

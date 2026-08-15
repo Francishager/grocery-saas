@@ -812,6 +812,7 @@ model SaleItem {
   product   Product  @relation(fields: [productId], references: [id])
   quantity  Int
   price     Float
+  cost      Float?
   discount         Float    @default(0)
   cashDiscount     Float    @default(0) // Cash discount amount on this line item
   unitName         String?  // Selling unit name (e.g. "Half KG", "Pack")
@@ -968,6 +969,7 @@ model SaleRecordItem {
   product   Product    @relation(fields: [productId], references: [id])
   quantity  Int
   price     Float
+  cost      Float?
   discount         Float      @default(0)
   cashDiscount     Float      @default(0) // Cash discount on this line item
   unitName         String?    // Selling unit name

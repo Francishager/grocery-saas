@@ -110,6 +110,24 @@ function toEndOfDay(value) {
   return date;
 }
 
+function saleLineCogs(item) {
+  const savedCost = Number(item?.cost);
+  if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0);
+
+  const productCost = Number(item?.product?.cost || 0);
+  const conversionFactor = Number(item?.conversionFactor || 1);
+  const effectiveCost = productCost * (Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1);
+  return effectiveCost * Number(item?.quantity || 0);
+}
+
+function saleCogs(sale) {
+  return (sale?.items || []).reduce((sum, item) => sum + saleLineCogs(item), 0);
+}
+
+function saleItemProfit(item) {
+  return Number(item?.total || 0) - saleLineCogs(item);
+}
+
 function saleStatus(sale) {
   return sale.status || sale.paymentStatus || "Completed";
 }
@@ -199,16 +217,15 @@ router.get("/profit", authenticateToken, async (req, res) => {
       prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
       prisma.saleRecord.findMany({
         where: scopedWhere(s, df(req)),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
     const revenue = (salesAgg._sum.total || 0) + (saleRecordAgg._sum.total || 0);
-    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) =>
-      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const expenses = expensesAgg._sum.amount || 0;
     res.json({ revenue, cogs, grossProfit: revenue - cogs, expenses, netProfit: revenue - cogs - expenses });
   } catch (err) { console.error("Profit report error:", err); handleBranchError(res, err); }
@@ -308,7 +325,7 @@ router.get("/sales/by-product", authenticateToken, async (req, res) => {
         if (!map[name]) map[name] = { product: name, quantity: 0, revenue: 0, cost: 0, profit: 0 };
         map[name].quantity += item.quantity;
         map[name].revenue += item.total;
-        map[name].cost += (item.product?.cost || 0) * item.quantity;
+        map[name].cost += saleLineCogs(item);
         map[name].profit = map[name].revenue - map[name].cost;
       });
     });
@@ -813,28 +830,26 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
       prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
       prisma.sale.count({ where: curWhere }),
       prisma.saleRecord.count({ where: curWhere }),
-      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, product: { select: { cost: true } } } } } }),
-      prisma.saleRecord.findMany({ where: curWhere, select: { items: { select: { quantity: true, product: { select: { cost: true } } } } } }),
+      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
+      prisma.saleRecord.findMany({ where: curWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
       prisma.sale.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true } }),
       prisma.saleRecord.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true } }),
       prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
       prisma.sale.count({ where: prevWhere }),
       prisma.saleRecord.count({ where: prevWhere }),
-      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, product: { select: { cost: true } } } } } }),
-      prisma.saleRecord.findMany({ where: prevWhere, select: { items: { select: { quantity: true, product: { select: { cost: true } } } } } }),
+      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
+      prisma.saleRecord.findMany({ where: prevWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
     ]);
 
     const revenue = (salesAgg._sum.total || 0) + (saleRecordAgg._sum.total || 0);
-    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) =>
-      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const expenses = expensesAgg._sum.amount || 0;
     const grossProfit = revenue - cogs;
     const netProfit = grossProfit - expenses;
 
     // Previous period
     const prevRevenue = (prevSalesAgg._sum.total || 0) + (prevSaleRecordAgg._sum.total || 0);
-    const prevCogs = [...prevSalesWithItems, ...prevSaleRecordsWithItems].reduce((sum, sale) =>
-      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const prevCogs = [...prevSalesWithItems, ...prevSaleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const prevExpenses = prevExpensesAgg._sum.amount || 0;
     const prevGrossProfit = prevRevenue - prevCogs;
     const prevNetProfit = prevGrossProfit - prevExpenses;
@@ -958,12 +973,11 @@ router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
       prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
     const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
-    const cogs = salesWithItems.reduce((sum, sale) =>
-      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const cogs = salesWithItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
     res.json({
       accounts: [
         { account: "Cash & Bank", debit: cashAccounts._sum.balance || 0, credit: 0 },
@@ -990,12 +1004,11 @@ router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
       prisma.expense.aggregate({ where: scopedWhere(s), _sum: { amount: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
     const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
-    const cogs = salesWithItems.reduce((sum, sale) =>
-      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const cogs = salesWithItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
     const retainedEarnings = (salesAgg._sum.total || 0) - cogs - (expensesAgg._sum.amount || 0);
     const totalAssets = (cashAccounts._sum.balance || 0) + (customerBalances._sum.balance || 0) + inventoryValue;
     const totalLiabilities = supplierBalances._sum.balance || 0;
@@ -1016,9 +1029,9 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
     const combinedFilter = { ...customerFilter, ...branchFilter };
     const [sales, saleRecords, purchases, supplierPurchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes, saleReturns, openingCustomers, openingSuppliers] = await Promise.all([
       // POS sales
-      prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...combinedFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...combinedFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       // Credit sales (SaleRecord)
-      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       // Quick purchases
       prisma.purchase.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Credit purchases (SupplierPurchase)
@@ -1056,7 +1069,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       ]),
       // POS Sales: credit Sales Revenue, debit COGS (perpetual inventory)
       ...sales.flatMap((x) => {
-        const cogs = x.items.reduce((sum, item) => sum + (item.product?.cost || 0) * item.quantity, 0);
+        const cogs = saleCogs(x);
         return [
           { date: x.createdAt, account: "Sales Revenue", description: `Sale ${x.receiptNo}`, debit: 0, credit: x.total },
           { date: x.createdAt, account: "Cost of Goods Sold", description: `Sale ${x.receiptNo}`, debit: cogs, credit: 0 },
@@ -1064,7 +1077,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       }),
       // Credit Sales (SaleRecord): credit Sales Revenue, debit COGS + Accounts Receivable
       ...saleRecords.flatMap((x) => {
-        const cogs = x.items.reduce((sum, item) => sum + (item.product?.cost || 0) * item.quantity, 0);
+        const cogs = saleCogs(x);
         return [
           { date: x.createdAt, account: "Sales Revenue", description: `Credit Sale ${x.receiptNo}`, debit: 0, credit: x.total },
           { date: x.createdAt, account: "Cost of Goods Sold", description: `Credit Sale ${x.receiptNo}`, debit: cogs, credit: 0 },
@@ -2372,16 +2385,15 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
       prisma.supplier.findMany({ where: scopedWhere(s), select: { balance: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
       prisma.saleRecord.findMany({
         where: scopedWhere(s, df(req)),
-        select: { items: { select: { quantity: true, product: { select: { cost: true } } } } },
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
 
-    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) =>
-      sum + sale.items.reduce((s, item) => s + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
 
     const summary = buildDecisionSupportSummary({
       sales: [...sales, ...saleRecords],
@@ -2700,7 +2712,7 @@ router.get("/performance/product", authenticateToken, async (req, res) => {
         if (!map[name]) map[name] = { product: name, quantity: 0, revenue: 0, profit: 0, transactions: 0 };
         map[name].quantity += item.quantity;
         map[name].revenue += item.total;
-        map[name].profit += item.total - (item.product?.cost || 0) * item.quantity;
+        map[name].profit += saleItemProfit(item);
         map[name].transactions++;
       });
     });
@@ -2722,7 +2734,7 @@ router.get("/performance/category", authenticateToken, async (req, res) => {
         if (!map[cat]) map[cat] = { category: cat, quantity: 0, revenue: 0, profit: 0 };
         map[cat].quantity += item.quantity;
         map[cat].revenue += item.total;
-        map[cat].profit += item.total - (item.product?.cost || 0) * item.quantity;
+        map[cat].profit += saleItemProfit(item);
       });
     });
     res.json({ data: Object.values(map).sort((a, b) => b.revenue - a.revenue) });
@@ -2759,7 +2771,7 @@ router.get("/performance/top-products", authenticateToken, async (req, res) => {
         if (!map[name]) map[name] = { product: name, quantity: 0, revenue: 0, profit: 0 };
         map[name].quantity += item.quantity;
         map[name].revenue += item.total;
-        map[name].profit += item.total - (item.product?.cost || 0) * item.quantity;
+        map[name].profit += saleItemProfit(item);
       });
     });
     res.json({ data: Object.values(map).sort((a, b) => b.quantity - a.quantity).slice(0, 20) });
@@ -2780,7 +2792,7 @@ router.get("/performance/least-products", authenticateToken, async (req, res) =>
         if (!map[name]) map[name] = { product: name, quantity: 0, revenue: 0, profit: 0 };
         map[name].quantity += item.quantity;
         map[name].revenue += item.total;
-        map[name].profit += item.total - (item.product?.cost || 0) * item.quantity;
+        map[name].profit += saleItemProfit(item);
       });
     });
     res.json({ data: Object.values(map).sort((a, b) => a.quantity - b.quantity).slice(0, 20) });
@@ -3462,8 +3474,8 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       prisma.sale.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
       prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
       prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
-      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, productId: true, total: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
-      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
       prisma.sale.findMany({ where: curWhere, include: { items: { include: { product: { select: { name: true, category: { select: { name: true } } } } }, branch: { select: { name: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" }, take: 50 } }),
       prisma.sale.findMany({ where: prevWhere, include: { items: { include: { product: { select: { name: true } } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 50 } }),
       prisma.purchase.aggregate({ where: curWhere, _sum: { total: true } }),
@@ -3477,10 +3489,8 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     ]);
 
     // Calculate COGS
-    const curCogs = curSalesItems.reduce((sum, sale) =>
-      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
-    const prevCogs = prevSalesItems.reduce((sum, sale) =>
-      sum + sale.items.reduce((si, item) => si + (item.product?.cost || 0) * item.quantity, 0), 0);
+    const curCogs = curSalesItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const prevCogs = prevSalesItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
 
     // Core metrics
     const curRevenue = curSalesAgg._sum.total || 0;
@@ -3521,7 +3531,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
         if (!curProductMap[item.productId]) curProductMap[item.productId] = { name, category: cat, revenue: 0, qty: 0, cogs: 0 };
         curProductMap[item.productId].revenue += item.total || 0;
         curProductMap[item.productId].qty += item.quantity || 0;
-        curProductMap[item.productId].cogs += (item.product?.cost || 0) * item.quantity;
+        curProductMap[item.productId].cogs += saleLineCogs(item);
       });
     });
     const prevProductMap = {};
@@ -3532,7 +3542,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
         if (!prevProductMap[item.productId]) prevProductMap[item.productId] = { name, category: cat, revenue: 0, qty: 0, cogs: 0 };
         prevProductMap[item.productId].revenue += item.total || 0;
         prevProductMap[item.productId].qty += item.quantity || 0;
-        prevProductMap[item.productId].cogs += (item.product?.cost || 0) * item.quantity;
+        prevProductMap[item.productId].cogs += saleLineCogs(item);
       });
     });
 
