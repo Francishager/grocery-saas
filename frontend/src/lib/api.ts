@@ -241,6 +241,27 @@ export const inventoryApi = {
     return products.map(mapProductToInventory)
   },
 
+  listWithDailyMovements: async (
+    q?: string,
+    branchId?: string,
+    itemType?: string,
+    movementParams?: { from?: string; to?: string }
+  ) => {
+    const data = await api.get<any>('/api/inventory', {
+      params: {
+        search: q,
+        branchId,
+        itemType,
+        limit: 1000000,
+        includeDailyMovements: true,
+        from: movementParams?.from,
+        to: movementParams?.to,
+      },
+    })
+    const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
+    return { ...data, products: products.map(mapProductToInventory) }
+  },
+
   get: async (id: string) => {
     const data = await api.get<any>(`/api/inventory/${id}`)
     return mapProductToInventory(data)
@@ -345,6 +366,7 @@ function mapProductToInventory(p: any): InventoryItem {
     rentalPeriod: p.rentalPeriod || null,
     depositAmount: p.depositAmount || null,
     replacementValue: p.replacementValue || null,
+    dailyMovement: p.dailyMovement || undefined,
   }
 }
 
@@ -1000,6 +1022,33 @@ export interface InventoryItem {
   depositAmount?: number | null
   replacementValue?: number | null
   isUncategorized?: boolean
+  dailyMovement?: {
+    openingStock: number
+    stockIn: number
+    soldToday: number
+    posSold: number
+    receivableSold: number
+    otherStockOut: number
+    returns: number
+    closingStock: number
+    currentStock: number
+    stockInDetails?: InventoryMovementDetail[]
+    soldDetails?: InventoryMovementDetail[]
+    otherStockOutDetails?: InventoryMovementDetail[]
+    returnDetails?: InventoryMovementDetail[]
+  }
+}
+
+export interface InventoryMovementDetail {
+  time?: string
+  type?: string
+  reference?: string
+  referenceId?: string
+  quantity?: number
+  unit?: string
+  reason?: string
+  staff?: string
+  status?: string
 }
 
 export interface ReceiptPreview {

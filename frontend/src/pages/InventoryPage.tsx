@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff } from 'lucide-react'
-import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem } from '@/lib/api'
+import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,6 +44,25 @@ interface FormData {
   description: string
 }
 
+type MovementPreset = 'today' | 'yesterday' | 'week' | 'custom'
+
+interface MovementSummary {
+  productsSold: number
+  unitsSold: number
+  receivableUnitsSold: number
+  stockReceived: number
+  otherStockOut: number
+  returns: number
+  lowStockProducts: number
+  outOfStockProducts: number
+}
+
+interface MovementModalState {
+  title: string
+  rows: InventoryMovementDetail[]
+  total: number
+}
+
 const initialFormData: FormData = {
   product_id: '',
   product_name: '',
@@ -61,6 +80,62 @@ const initialFormData: FormData = {
   itemType: 'product',
   description: '',
 }
+
+const emptyMovementSummary: MovementSummary = {
+  productsSold: 0,
+  unitsSold: 0,
+  receivableUnitsSold: 0,
+  stockReceived: 0,
+  otherStockOut: 0,
+  returns: 0,
+  lowStockProducts: 0,
+  outOfStockProducts: 0,
+}
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const movementParamsForPreset = (preset: MovementPreset, customDate: string) => {
+  const today = new Date()
+  const start = new Date(today)
+  const end = new Date(today)
+
+  if (preset === 'yesterday') {
+    start.setDate(start.getDate() - 1)
+    end.setDate(end.getDate() - 1)
+  } else if (preset === 'week') {
+    const day = start.getDay()
+    const mondayOffset = day === 0 ? -6 : 1 - day
+    start.setDate(start.getDate() + mondayOffset)
+  } else if (preset === 'custom' && customDate) {
+    return { from: customDate, to: customDate }
+  }
+
+  return { from: formatDateInput(start), to: formatDateInput(end) }
+}
+
+const defaultMovementForItem = (item: InventoryItem) => ({
+  openingStock: item.quantity || 0,
+  stockIn: 0,
+  soldToday: 0,
+  posSold: 0,
+  receivableSold: 0,
+  otherStockOut: 0,
+  returns: 0,
+  closingStock: item.quantity || 0,
+  currentStock: item.quantity || 0,
+  stockInDetails: [],
+  soldDetails: [],
+  otherStockOutDetails: [],
+  returnDetails: [],
+})
+
+const formatQty = (value: number | undefined | null) =>
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value || 0))
 
 export default function InventoryPage() {
   const [categoryOpen, setCategoryOpen] = useState(false)
@@ -80,6 +155,10 @@ export default function InventoryPage() {
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
   const [itemTypeFilter, setItemTypeFilter] = useState<'all' | 'product'>('all')
+  const [movementPreset, setMovementPreset] = useState<MovementPreset>('today')
+  const [customMovementDate, setCustomMovementDate] = useState(formatDateInput(new Date()))
+  const [movementSummary, setMovementSummary] = useState<MovementSummary>(emptyMovementSummary)
+  const [movementModal, setMovementModal] = useState<MovementModalState | null>(null)
   const { tab: urlTab } = useParams()
   const lockedType = urlTab === 'products' ? 'product' as const : null
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
@@ -134,7 +213,7 @@ export default function InventoryPage() {
 
   useEffect(() => {
     loadInventory()
-  }, [branchFilter, itemTypeFilter])
+  }, [branchFilter, itemTypeFilter, movementPreset, customMovementDate])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -195,18 +274,26 @@ export default function InventoryPage() {
     try {
       if (online) {
         const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
-        const data = await inventoryApi.list(searchQuery, canManageInventory ? branchFilter : undefined, typeFilter)
-        setItems(Array.isArray(data) ? data : [])
+        const data = await inventoryApi.listWithDailyMovements(
+          searchQuery,
+          canManageInventory ? branchFilter : undefined,
+          typeFilter,
+          movementParams
+        )
+        setItems(Array.isArray(data?.products) ? data.products : [])
+        setMovementSummary({ ...emptyMovementSummary, ...(data?.movementSummary || {}) })
       } else {
         const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
         const local = await getLocalProducts(searchQuery, canManageInventory ? branchFilter : undefined, typeFilter)
         setItems(local)
+        setMovementSummary(emptyMovementSummary)
       }
     } catch (error: any) {
       // API failed — fall back to local
       try {
         const local = await getLocalProducts(searchQuery, canManageInventory ? branchFilter : undefined, itemTypeFilter === 'all' ? undefined : itemTypeFilter)
         setItems(local)
+        setMovementSummary(emptyMovementSummary)
       } catch {
         toast({ variant: 'destructive', title: 'Failed to load inventory', description: error?.message || 'Unknown error' })
       }
@@ -464,6 +551,39 @@ export default function InventoryPage() {
     return new Map(branches.map((branch) => [String(branch.id), branch.name]))
   }, [branches])
 
+  const movementParams = useMemo(
+    () => movementParamsForPreset(movementPreset, customMovementDate),
+    [movementPreset, customMovementDate]
+  )
+
+  const movementPeriodLabel = useMemo(() => {
+    if (movementPreset === 'today') return 'Today'
+    if (movementPreset === 'yesterday') return 'Yesterday'
+    if (movementPreset === 'week') return 'This Week'
+    return customMovementDate ? new Date(customMovementDate).toLocaleDateString() : 'Custom Date'
+  }, [movementPreset, customMovementDate])
+
+  const openMovementModal = (item: InventoryItem, kind: 'sold' | 'other') => {
+    const movement = item.dailyMovement || defaultMovementForItem(item)
+    const rows = kind === 'sold' ? movement.soldDetails || [] : movement.otherStockOutDetails || []
+    setMovementModal({
+      title: `${item.product_name} - ${kind === 'sold' ? 'Sold Today' : 'Other Stock Out'}`,
+      rows,
+      total: kind === 'sold' ? movement.soldToday : movement.otherStockOut,
+    })
+  }
+
+  const movementCards = [
+    { label: 'Products Sold', value: movementSummary.productsSold },
+    { label: 'Units Sold', value: movementSummary.unitsSold },
+    { label: 'Receivable Units', value: movementSummary.receivableUnitsSold },
+    { label: 'Stock Received', value: movementSummary.stockReceived },
+    { label: 'Other Stock Out', value: movementSummary.otherStockOut },
+    { label: 'Returns', value: movementSummary.returns },
+    { label: 'Low Stock', value: movementSummary.lowStockProducts },
+    { label: 'Out of Stock', value: movementSummary.outOfStockProducts },
+  ]
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
@@ -549,6 +669,36 @@ export default function InventoryPage() {
             ))}
           </select>
         )}
+        <div className="flex flex-wrap gap-1">
+          {([
+            ['today', 'Today'],
+            ['yesterday', 'Yesterday'],
+            ['week', 'This Week'],
+            ['custom', 'Custom Date'],
+          ] as Array<[MovementPreset, string]>).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setMovementPreset(value)}
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                movementPreset === value
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input bg-background text-muted-foreground hover:bg-muted"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {movementPreset === 'custom' && (
+          <Input
+            type="date"
+            value={customMovementDate}
+            onChange={(event) => setCustomMovementDate(event.target.value)}
+            className="h-10 w-auto"
+          />
+        )}
         <button
           type="button"
           onClick={() => setShowUncategorizedOnly(!showUncategorizedOnly)}
@@ -565,6 +715,23 @@ export default function InventoryPage() {
           Search
         </Button>
       </form>
+
+      {!online && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <WifiOff className="h-4 w-4" />
+          Daily movement figures are available when the device is online.
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {movementCards.map((card) => (
+          <div key={card.label} className="rounded-lg border bg-card p-3">
+            <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
+            <p className="mt-1 text-xl font-bold">{formatQty(card.value)}</p>
+            <p className="text-[11px] text-muted-foreground">{movementPeriodLabel}</p>
+          </div>
+        ))}
+      </div>
 
       {/* Add/Edit Form */}
       {showForm && (
@@ -947,7 +1114,7 @@ export default function InventoryPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px] hidden md:table">
+              <table className="w-full min-w-[1280px] hidden md:table">
                 <thead>
                   <tr className="border-b text-left">
                     {!lockedType && <th className="pb-3 font-medium">Type</th>}
@@ -955,7 +1122,12 @@ export default function InventoryPage() {
                     <th className="pb-3 font-medium">Name</th>
                     <th className="pb-3 font-medium">Category</th>
                     {canManageInventory && <th className="pb-3 font-medium">Branch</th>}
-                    <th className="pb-3 font-medium text-right">Qty</th>
+                    <th className="pb-3 font-medium text-right">Opening Stock</th>
+                    <th className="pb-3 font-medium text-right">Stock In</th>
+                    <th className="pb-3 font-medium text-right">Sold Today</th>
+                    <th className="pb-3 font-medium text-right">Other Stock Out</th>
+                    <th className="pb-3 font-medium text-right">Returns</th>
+                    <th className="pb-3 font-medium text-right">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}</th>
                     <th className="pb-3 font-medium">Batch</th>
                     <th className="pb-3 font-medium">Expiry</th>
                     <th className="pb-3 font-medium text-right">Cost</th>
@@ -966,6 +1138,12 @@ export default function InventoryPage() {
                 </thead>
                 <tbody>
                   {paginatedItems.map((item) => {
+                    const movement = item.dailyMovement || defaultMovementForItem(item)
+                    const stockStatus = movement.currentStock <= 0
+                      ? 'Out of Stock'
+                      : movement.currentStock <= item.low_stock_alert
+                        ? 'Low Stock'
+                        : 'In Stock'
                     return (
                     <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                       {!lockedType && (
@@ -990,16 +1168,52 @@ export default function InventoryPage() {
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
                         </td>
                       )}
+                      <td className="py-3 text-right tabular-nums">{formatQty(movement.openingStock)}</td>
+                      <td className="py-3 text-right tabular-nums">{formatQty(movement.stockIn)}</td>
                       <td className="py-3 text-right">
-                        <span
-                          className={
-                            item.quantity <= item.low_stock_alert
-                              ? 'text-orange-600 font-bold'
-                              : ''
-                          }
+                        <button
+                          type="button"
+                          onClick={() => openMovementModal(item, 'sold')}
+                          disabled={!movement.soldToday}
+                          className={cn(
+                            "rounded px-2 py-1 text-right font-semibold tabular-nums",
+                            movement.soldToday ? "text-primary hover:bg-primary/10" : "cursor-default text-muted-foreground"
+                          )}
                         >
-                          {item.quantity}
+                          {formatQty(movement.soldToday)}
+                        </button>
+                        {movement.receivableSold > 0 && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {formatQty(movement.receivableSold)} receivable
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => openMovementModal(item, 'other')}
+                          disabled={!movement.otherStockOut}
+                          className={cn(
+                            "rounded px-2 py-1 text-right font-semibold tabular-nums",
+                            movement.otherStockOut ? "text-orange-700 hover:bg-orange-100" : "cursor-default text-muted-foreground"
+                          )}
+                        >
+                          {formatQty(movement.otherStockOut)}
+                        </button>
+                      </td>
+                      <td className="py-3 text-right tabular-nums">{formatQty(movement.returns)}</td>
+                      <td className="py-3 text-right">
+                        <span className={cn(
+                          "font-bold tabular-nums",
+                          movement.currentStock <= item.low_stock_alert ? "text-orange-600" : ""
+                        )}>
+                          {formatQty(movementPreset === 'today' ? movement.currentStock : movement.closingStock)}
                         </span>
+                        {movementPreset !== 'today' && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Current today: {formatQty(movement.currentStock)}
+                          </p>
+                        )}
                       </td>
                       <td className="py-3">{(item as any).batchNumber || '-'}</td>
                       <td className="py-3">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
@@ -1010,8 +1224,18 @@ export default function InventoryPage() {
                         {formatCurrency(item.unit_price)}
                       </td>
                       <td className="py-3">
+                        <span className={cn(
+                          "inline-block rounded px-2 py-0.5 text-xs font-semibold",
+                          stockStatus === 'Out of Stock'
+                            ? "bg-red-100 text-red-700"
+                            : stockStatus === 'Low Stock'
+                              ? "bg-orange-100 text-orange-700"
+                              : "bg-green-100 text-green-700"
+                        )}>
+                          {stockStatus}
+                        </span>
                         {(item as any).isUncategorized && (
-                          <span className="inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                          <span className="ml-1 inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
                             Uncategorized
                           </span>
                         )}
@@ -1046,7 +1270,14 @@ export default function InventoryPage() {
 
               {/* Mobile card layout */}
               <div className="md:hidden space-y-3">
-                {paginatedItems.map((item) => (
+                {paginatedItems.map((item) => {
+                  const movement = item.dailyMovement || defaultMovementForItem(item)
+                  const stockStatus = movement.currentStock <= 0
+                    ? 'Out of Stock'
+                    : movement.currentStock <= item.low_stock_alert
+                      ? 'Low Stock'
+                      : 'In Stock'
+                  return (
                   <div key={item.id} className="rounded-lg border p-3 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
@@ -1084,16 +1315,59 @@ export default function InventoryPage() {
                         </span>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Price: </span>
-                        {formatCurrency(item.unit_price)}
+                        <span className="text-muted-foreground">Opening: </span>
+                        {formatQty(movement.openingStock)}
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Cost: </span>
-                        {formatCurrency(item.cost_price)}
+                        <span className="text-muted-foreground">Stock In: </span>
+                        {formatQty(movement.stockIn)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Sold Today: </span>
+                        <button
+                          type="button"
+                          disabled={!movement.soldToday}
+                          onClick={() => openMovementModal(item, 'sold')}
+                          className={cn("font-semibold", movement.soldToday ? "text-primary underline-offset-2 hover:underline" : "text-muted-foreground")}
+                        >
+                          {formatQty(movement.soldToday)}
+                        </button>
+                        {movement.receivableSold > 0 && (
+                          <span className="text-muted-foreground"> ({formatQty(movement.receivableSold)} receivable)</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Other Out: </span>
+                        <button
+                          type="button"
+                          disabled={!movement.otherStockOut}
+                          onClick={() => openMovementModal(item, 'other')}
+                          className={cn("font-semibold", movement.otherStockOut ? "text-orange-700 underline-offset-2 hover:underline" : "text-muted-foreground")}
+                        >
+                          {formatQty(movement.otherStockOut)}
+                        </button>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Returns: </span>
+                        {formatQty(movement.returns)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}: </span>
+                        <span className={movement.currentStock <= item.low_stock_alert ? 'text-orange-600 font-bold' : 'font-semibold'}>
+                          {formatQty(movementPreset === 'today' ? movement.currentStock : movement.closingStock)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Status: </span>
+                        {stockStatus}
                       </div>
                       <div>
                         <span className="text-muted-foreground">Expiry: </span>
                         {(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Price: </span>
+                        {formatCurrency(item.unit_price)}
                       </div>
                     </div>
                     {(item as any).isUncategorized && (
@@ -1102,7 +1376,8 @@ export default function InventoryPage() {
                       </span>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1115,6 +1390,59 @@ export default function InventoryPage() {
           />
         </CardContent>
       </Card>
+
+      {movementModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-lg bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <h2 className="text-lg font-semibold">{movementModal.title}</h2>
+                <p className="text-sm text-muted-foreground">{movementPeriodLabel} total: {formatQty(movementModal.total)}</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setMovementModal(null)}>
+                Close
+              </Button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto p-4">
+              {movementModal.rows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No movement details for this period.</p>
+              ) : (
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="pb-2 font-medium">Time</th>
+                      <th className="pb-2 font-medium">Type</th>
+                      <th className="pb-2 font-medium">Reference</th>
+                      <th className="pb-2 text-right font-medium">Qty</th>
+                      <th className="pb-2 font-medium">Reason/Status</th>
+                      <th className="pb-2 font-medium">Staff</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movementModal.rows.map((row, index) => (
+                      <tr key={`${row.reference || index}-${index}`} className="border-b last:border-0">
+                        <td className="py-2">{row.time ? new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        <td className="py-2">{row.type || '-'}</td>
+                        <td className="py-2 font-mono text-xs">{row.reference || '-'}</td>
+                        <td className="py-2 text-right font-semibold tabular-nums">{formatQty(row.quantity)}</td>
+                        <td className="py-2">{row.reason || row.status || '-'}</td>
+                        <td className="py-2">{row.staff || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t font-bold">
+                      <td className="py-2" colSpan={3}>Total</td>
+                      <td className="py-2 text-right tabular-nums">{formatQty(movementModal.total)}</td>
+                      <td className="py-2" colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

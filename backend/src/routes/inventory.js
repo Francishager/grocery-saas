@@ -41,6 +41,355 @@ const slugify = (value = "") =>
 
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
 
+const movementTypes = {
+  stockIn: new Set(["PURCHASE", "SUPPLIER_PURCHASE", "TRANSFER_IN", "ADJUSTMENT_IN", "PRODUCTION_IN"]),
+  sold: new Set(["SALE", "RECEIVABLE_SALE"]),
+  otherOut: new Set(["TRANSFER_OUT", "ADJUSTMENT_OUT", "PRODUCTION_OUT", "DAMAGE", "EXPIRY", "RENTAL_OUT"]),
+  returns: new Set(["SALE_RETURN", "RENTAL_RETURN"]),
+};
+
+function parseDateOnly(value) {
+  if (!value) return null;
+  const parts = String(value).slice(0, 10).split("-").map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null;
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function inventoryDateRange(req) {
+  const start = parseDateOnly(req.query.from || req.query.date) || new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const end = parseDateOnly(req.query.to || req.query.from || req.query.date) || new Date(start);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
+
+function userDisplayName(user) {
+  return [user?.fname, user?.lname].filter(Boolean).join(" ").trim() || user?.email || "Unknown";
+}
+
+function itemBaseQuantity(item) {
+  const quantity = Number(item?.quantity || 0);
+  const conversionFactor = Number(item?.conversionFactor || 1);
+  return quantity * (Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1);
+}
+
+function createMovementBucket() {
+  return {
+    period: { stockIn: 0, soldToday: 0, posSold: 0, receivableSold: 0, otherStockOut: 0, returns: 0 },
+    afterNet: 0,
+    stockInDetails: [],
+    soldDetails: [],
+    otherStockOutDetails: [],
+    returnDetails: [],
+  };
+}
+
+function addInventoryMovement(buckets, productId, movement) {
+  if (!productId || !buckets.has(productId)) return;
+  const bucket = buckets.get(productId);
+  const qty = Number(movement.quantity || 0);
+  if (!Number.isFinite(qty) || qty <= 0) return;
+  const direction = movement.direction === "IN" ? 1 : -1;
+
+  if (movement.period === "after") {
+    bucket.afterNet += direction * qty;
+    return;
+  }
+
+  if (movementTypes.sold.has(movement.type)) {
+    bucket.period.soldToday += qty;
+    if (movement.type === "RECEIVABLE_SALE") bucket.period.receivableSold += qty;
+    else bucket.period.posSold += qty;
+    bucket.soldDetails.push(movement.detail);
+    return;
+  }
+
+  if (movementTypes.returns.has(movement.type)) {
+    bucket.period.returns += qty;
+    bucket.returnDetails.push(movement.detail);
+    return;
+  }
+
+  if (movementTypes.stockIn.has(movement.type)) {
+    bucket.period.stockIn += qty;
+    bucket.stockInDetails.push(movement.detail);
+    return;
+  }
+
+  if (movementTypes.otherOut.has(movement.type)) {
+    bucket.period.otherStockOut += qty;
+    bucket.otherStockOutDetails.push(movement.detail);
+  }
+}
+
+async function buildInventoryMovementSummary(scope, products, range) {
+  const productIds = products.map((product) => product.id).filter(Boolean);
+  const buckets = new Map(productIds.map((id) => [id, createMovementBucket()]));
+  if (!productIds.length) {
+    return {
+      byProductId: buckets,
+      summary: { productsSold: 0, unitsSold: 0, receivableUnitsSold: 0, stockReceived: 0, otherStockOut: 0, returns: 0, lowStockProducts: 0, outOfStockProducts: 0 },
+    };
+  }
+
+  const dateWhere = { gte: range.start, lte: range.end };
+  const afterWhere = { gt: range.end };
+  const productWhere = { productId: { in: productIds } };
+  const productSelect = { id: true, name: true, sku: true };
+  const userSelect = { id: true, fname: true, lname: true, email: true };
+
+  const [
+    saleItems,
+    receivableItems,
+    purchaseItems,
+    supplierPurchaseItems,
+    saleReturnItems,
+    transferItems,
+    productionOrders,
+    productionWaste,
+    adjustmentLogs,
+    afterSaleItems,
+    afterReceivableItems,
+    afterPurchaseItems,
+    afterSupplierPurchaseItems,
+    afterSaleReturnItems,
+    afterTransferItems,
+    afterProductionOrders,
+    afterProductionWaste,
+  ] = await Promise.all([
+    prisma.saleItem.findMany({
+      where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
+      include: { sale: { select: { id: true, receiptNo: true, createdAt: true, user: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.saleRecordItem.findMany({
+      where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
+      include: { sale: { select: { id: true, receiptNo: true, createdAt: true, paymentStatus: true, User: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.purchaseItem.findMany({
+      where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: dateWhere }) },
+      include: { purchase: { select: { id: true, refNo: true, createdAt: true, user: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.supplierPurchaseItem.findMany({
+      where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: dateWhere }) },
+      include: { purchase: { select: { id: true, refNo: true, createdAt: true, User: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.saleReturnItem.findMany({
+      where: { ...productWhere, return: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
+      include: { return: { select: { id: true, returnNo: true, createdAt: true, reason: true, user: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.stockTransferItem.findMany({
+      where: { ...productWhere, transfer: { tenantId: scope.tenantId, createdAt: dateWhere, status: { not: "cancelled" }, ...(scope.branchId ? { OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] } : {}) } },
+      include: { transfer: { select: { id: true, transferNo: true, createdAt: true, fromBranchId: true, toBranchId: true, user: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.productionOrder.findMany({
+      where: scopedWhere(scope, { productId: { in: productIds }, status: "completed", updatedAt: dateWhere }),
+      select: { id: true, orderNo: true, productId: true, actualQuantity: true, quantity: true, updatedAt: true, user: { select: userSelect } },
+      orderBy: { updatedAt: "asc" },
+    }),
+    prisma.productionWaste.findMany({
+      where: { productId: { in: productIds }, tenantId: scope.tenantId, createdAt: dateWhere, ...(scope.branchId ? { productionOrder: { branchId: scope.branchId } } : {}) },
+      select: { id: true, productId: true, quantity: true, reason: true, createdAt: true, productionOrder: { select: { orderNo: true, user: { select: userSelect } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.auditLog.findMany({
+      where: { tenantId: scope.tenantId, model: "Product", action: "update", recordId: { in: productIds }, createdAt: dateWhere },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.saleItem.findMany({ where: { ...productWhere, sale: scopedWhere(scope, { createdAt: afterWhere, status: "completed" }) }, select: { productId: true, quantity: true, conversionFactor: true } }),
+    prisma.saleRecordItem.findMany({ where: { ...productWhere, sale: scopedWhere(scope, { createdAt: afterWhere, status: "completed" }) }, select: { productId: true, quantity: true, conversionFactor: true } }),
+    prisma.purchaseItem.findMany({ where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: afterWhere }) }, select: { productId: true, quantity: true } }),
+    prisma.supplierPurchaseItem.findMany({ where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: afterWhere }) }, select: { productId: true, quantity: true } }),
+    prisma.saleReturnItem.findMany({ where: { ...productWhere, return: scopedWhere(scope, { createdAt: afterWhere, status: "completed" }) }, select: { productId: true, quantity: true } }),
+    prisma.stockTransferItem.findMany({
+      where: { ...productWhere, transfer: { tenantId: scope.tenantId, createdAt: afterWhere, status: { not: "cancelled" }, ...(scope.branchId ? { OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] } : {}) } },
+      include: { transfer: { select: { fromBranchId: true, toBranchId: true } } },
+    }),
+    prisma.productionOrder.findMany({ where: scopedWhere(scope, { productId: { in: productIds }, status: "completed", updatedAt: afterWhere }), select: { productId: true, actualQuantity: true, quantity: true } }),
+    prisma.productionWaste.findMany({ where: { productId: { in: productIds }, tenantId: scope.tenantId, createdAt: afterWhere, ...(scope.branchId ? { productionOrder: { branchId: scope.branchId } } : {}) }, select: { productId: true, quantity: true } }),
+  ]);
+
+  saleItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
+    type: "SALE",
+    direction: "OUT",
+    quantity: itemBaseQuantity(item),
+    detail: { time: item.sale?.createdAt, type: "Sale", reference: item.sale?.receiptNo || item.saleId, referenceId: item.saleId, quantity: itemBaseQuantity(item), unit: item.unitName || "Base", staff: userDisplayName(item.sale?.user) },
+  }));
+
+  receivableItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
+    type: "RECEIVABLE_SALE",
+    direction: "OUT",
+    quantity: itemBaseQuantity(item),
+    detail: { time: item.sale?.createdAt, type: "Receivable Sale", reference: item.sale?.receiptNo || item.saleId, referenceId: item.saleId, quantity: itemBaseQuantity(item), unit: item.unitName || "Base", staff: userDisplayName(item.sale?.User), status: item.sale?.paymentStatus },
+  }));
+
+  purchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
+    type: "PURCHASE",
+    direction: "IN",
+    quantity: item.quantity,
+    detail: { time: item.purchase?.createdAt, type: "Purchase", reference: item.purchase?.refNo || item.purchaseId, referenceId: item.purchaseId, quantity: item.quantity, staff: userDisplayName(item.purchase?.user) },
+  }));
+
+  supplierPurchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
+    type: "SUPPLIER_PURCHASE",
+    direction: "IN",
+    quantity: item.quantity,
+    detail: { time: item.purchase?.createdAt, type: "Supplier Purchase", reference: item.purchase?.refNo || item.purchaseId, referenceId: item.purchaseId, quantity: item.quantity, staff: userDisplayName(item.purchase?.User) },
+  }));
+
+  saleReturnItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
+    type: "SALE_RETURN",
+    direction: "IN",
+    quantity: item.quantity,
+    detail: { time: item.return?.createdAt, type: "Sale Return", reference: item.return?.returnNo || item.returnId, referenceId: item.returnId, quantity: item.quantity, reason: item.reason || item.return?.reason || "", staff: userDisplayName(item.return?.user) },
+  }));
+
+  transferItems.forEach((item) => {
+    if (!scope.branchId) return;
+    const isIn = scope.branchId && item.transfer?.toBranchId === scope.branchId;
+    addInventoryMovement(buckets, item.productId, {
+      type: isIn ? "TRANSFER_IN" : "TRANSFER_OUT",
+      direction: isIn ? "IN" : "OUT",
+      quantity: item.quantity,
+      detail: { time: item.transfer?.createdAt, type: isIn ? "Transfer In" : "Transfer Out", reference: item.transfer?.transferNo || item.transferId, referenceId: item.transferId, quantity: item.quantity, reason: item.notes || "", staff: userDisplayName(item.transfer?.user) },
+    });
+  });
+
+  productionOrders.forEach((order) => addInventoryMovement(buckets, order.productId, {
+    type: "PRODUCTION_IN",
+    direction: "IN",
+    quantity: Math.ceil(Number(order.actualQuantity || order.quantity || 0)),
+    detail: { time: order.updatedAt, type: "Production In", reference: order.orderNo, referenceId: order.id, quantity: Math.ceil(Number(order.actualQuantity || order.quantity || 0)), staff: userDisplayName(order.user) },
+  }));
+
+  productionWaste.forEach((waste) => addInventoryMovement(buckets, waste.productId, {
+    type: "PRODUCTION_OUT",
+    direction: "OUT",
+    quantity: waste.quantity,
+    detail: { time: waste.createdAt, type: "Production/Waste", reference: waste.productionOrder?.orderNo || waste.id, referenceId: waste.id, quantity: waste.quantity, reason: waste.reason || "", staff: userDisplayName(waste.productionOrder?.user) },
+  }));
+
+  adjustmentLogs.forEach((log) => {
+    const beforeQty = Number(log.changes?.before?.quantity);
+    const afterQty = Number(log.changes?.after?.quantity);
+    if (!Number.isFinite(beforeQty) || !Number.isFinite(afterQty) || beforeQty === afterQty) return;
+    const qty = Math.abs(afterQty - beforeQty);
+    const isIn = afterQty > beforeQty;
+    addInventoryMovement(buckets, log.recordId, {
+      type: isIn ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT",
+      direction: isIn ? "IN" : "OUT",
+      quantity: qty,
+      detail: { time: log.createdAt, type: isIn ? "Adjustment In" : "Adjustment Out", reference: log.id.slice(-8), referenceId: log.id, quantity: qty, reason: "Manual product quantity update", staff: log.userEmail || "Unknown" },
+    });
+  });
+
+  afterSaleItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "SALE", direction: "OUT", quantity: itemBaseQuantity(item) }));
+  afterReceivableItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "RECEIVABLE_SALE", direction: "OUT", quantity: itemBaseQuantity(item) }));
+  afterPurchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "PURCHASE", direction: "IN", quantity: item.quantity }));
+  afterSupplierPurchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "SUPPLIER_PURCHASE", direction: "IN", quantity: item.quantity }));
+  afterSaleReturnItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "SALE_RETURN", direction: "IN", quantity: item.quantity }));
+  afterTransferItems.forEach((item) => {
+    if (!scope.branchId) return;
+    const isIn = scope.branchId && item.transfer?.toBranchId === scope.branchId;
+    addInventoryMovement(buckets, item.productId, { period: "after", type: isIn ? "TRANSFER_IN" : "TRANSFER_OUT", direction: isIn ? "IN" : "OUT", quantity: item.quantity });
+  });
+  afterProductionOrders.forEach((order) => addInventoryMovement(buckets, order.productId, { period: "after", type: "PRODUCTION_IN", direction: "IN", quantity: Math.ceil(Number(order.actualQuantity || order.quantity || 0)) }));
+  afterProductionWaste.forEach((waste) => addInventoryMovement(buckets, waste.productId, { period: "after", type: "PRODUCTION_OUT", direction: "OUT", quantity: waste.quantity }));
+
+  let productsSold = 0;
+  let unitsSold = 0;
+  let receivableUnitsSold = 0;
+  let stockReceived = 0;
+  let otherStockOut = 0;
+  let returns = 0;
+
+  products.forEach((product) => {
+    const bucket = buckets.get(product.id);
+    const period = bucket.period;
+    const currentStock = Number(product.quantity || 0);
+    const closingStock = currentStock - bucket.afterNet;
+    const netPeriod = period.stockIn + period.returns - period.soldToday - period.otherStockOut;
+    bucket.openingStock = closingStock - netPeriod;
+    bucket.closingStock = closingStock;
+    bucket.currentStock = currentStock;
+    if (period.soldToday > 0) productsSold += 1;
+    unitsSold += period.soldToday;
+    receivableUnitsSold += period.receivableSold;
+    stockReceived += period.stockIn;
+    otherStockOut += period.otherStockOut;
+    returns += period.returns;
+  });
+
+  return {
+    byProductId: buckets,
+    summary: {
+      productsSold,
+      unitsSold,
+      receivableUnitsSold,
+      stockReceived,
+      otherStockOut,
+      returns,
+      lowStockProducts: products.filter((product) => Number(product.quantity || 0) <= Number(product.minStock || 0)).length,
+      outOfStockProducts: products.filter((product) => Number(product.quantity || 0) <= 0).length,
+    },
+  };
+}
+
+function startOfLocalDay(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function endOfLocalDay(date) {
+  const value = new Date(date);
+  value.setHours(23, 59, 59, 999);
+  return value;
+}
+
+function resolveMovementRange(query = {}) {
+  const period = String(query.period || "today");
+  const now = new Date();
+  let start = startOfLocalDay(now);
+  let end = endOfLocalDay(now);
+
+  if (period === "yesterday") {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    start = startOfLocalDay(yesterday);
+    end = endOfLocalDay(yesterday);
+  } else if (period === "week") {
+    const weekStart = new Date(now);
+    const day = weekStart.getDay();
+    weekStart.setDate(weekStart.getDate() - (day === 0 ? 6 : day - 1));
+    start = startOfLocalDay(weekStart);
+    end = endOfLocalDay(now);
+  } else if (period === "custom" && query.date) {
+    const customDate = new Date(query.date);
+    if (!Number.isNaN(customDate.getTime())) {
+      start = startOfLocalDay(customDate);
+      end = endOfLocalDay(customDate);
+    }
+  }
+
+  return { period, start, end, now };
+}
+
+function qtyInBaseUnits(item) {
+  return Number(item?.quantity || 0) * Number(item?.conversionFactor || 1);
+}
+
+function userName(user) {
+  return `${user?.fname || ""} ${user?.lname || ""}`.trim() || user?.name || "System";
+}
+
 export function mapImportRouteError(err) {
   if (err?.code === 'LIMIT_REACHED') {
     return { statusCode: 403, message: err.message || 'Product limit reached' };
@@ -158,6 +507,46 @@ router.get("/", authenticateToken, async (req, res) => {
     const tenantId = scope.tenantId;
     const { search, category, page = 1, limit = 100, lowStock, barcode, itemType } = req.query;
     const where = scopedWhere(scope, { isActive: { not: false } });
+    const includeDailyMovements = String(req.query.includeDailyMovements || "").toLowerCase() === "true";
+    const buildListResponse = async (products, total, responsePage = Number(page), responseLimit = Number(limit)) => {
+      if (!includeDailyMovements) {
+        return { products, total, page: responsePage, limit: responseLimit };
+      }
+
+      const range = inventoryDateRange(req);
+      const { byProductId, summary } = await buildInventoryMovementSummary(scope, products, range);
+      return {
+        products: products.map((product) => {
+          const bucket = byProductId.get(product.id) || createMovementBucket();
+          return {
+            ...product,
+            dailyMovement: {
+              openingStock: bucket.openingStock ?? Number(product.quantity || 0),
+              stockIn: bucket.period.stockIn,
+              soldToday: bucket.period.soldToday,
+              posSold: bucket.period.posSold,
+              receivableSold: bucket.period.receivableSold,
+              otherStockOut: bucket.period.otherStockOut,
+              returns: bucket.period.returns,
+              closingStock: bucket.closingStock ?? Number(product.quantity || 0),
+              currentStock: bucket.currentStock ?? Number(product.quantity || 0),
+              stockInDetails: bucket.stockInDetails,
+              soldDetails: bucket.soldDetails,
+              otherStockOutDetails: bucket.otherStockOutDetails,
+              returnDetails: bucket.returnDetails,
+            },
+          };
+        }),
+        total,
+        page: responsePage,
+        limit: responseLimit,
+        movementRange: {
+          from: range.start.toISOString(),
+          to: range.end.toISOString(),
+        },
+        movementSummary: summary,
+      };
+    };
 
     // Filter by itemType if provided
     if (itemType) where.itemType = String(itemType);
@@ -168,7 +557,7 @@ router.get("/", authenticateToken, async (req, res) => {
         where: scopedWhere(scope, { barcode, isActive: { not: false } }),
         include: { category: true, branch: true },
       });
-      return res.json({ products: product ? [product] : [], total: product ? 1 : 0, page: 1, limit: 1 });
+      return res.json(await buildListResponse(product ? [product] : [], product ? 1 : 0, 1, 1));
     }
 
     if (search) {
@@ -186,7 +575,7 @@ router.get("/", authenticateToken, async (req, res) => {
         take: Number(limit),
       });
       const total = await prisma.product.count({ where });
-      return res.json({ products, total, page: Number(page), limit: Number(limit) });
+      return res.json(await buildListResponse(products, total));
     }
 
     if (category) where.categoryId = category;
@@ -200,7 +589,7 @@ router.get("/", authenticateToken, async (req, res) => {
       take: Number(limit),
     });
     const total = await prisma.product.count({ where });
-    res.json({ products, total, page: Number(page), limit: Number(limit) });
+    res.json(await buildListResponse(products, total));
   } catch (err) {
     // Log full error and request context for debugging 500s
     try {
