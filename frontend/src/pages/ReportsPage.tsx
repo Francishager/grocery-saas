@@ -610,8 +610,26 @@ function formatValue(value: any, format?: string): string {
   }
 }
 
-function BreakdownList({ title, data }: { title: string; data?: Record<string, number> }) {
-  const entries = Object.entries(data || {}).filter(([, value]) => Number(value) > 0)
+function BreakdownList({ title, data }: { title: string; data?: Record<string, number | any> }) {
+  const entries = Object.entries(data || {}).map(([label, value]) => {
+    let numValue = 0
+    if (typeof value === 'number') {
+      numValue = value
+    } else if (typeof value === 'object' && value !== null) {
+      // If value is an object, try to extract a numeric value
+      const numKeys = ['amount', 'total', 'value', 'count']
+      for (const key of numKeys) {
+        if (typeof value[key] === 'number') {
+          numValue = value[key]
+          break
+        }
+      }
+    } else {
+      numValue = Number(value) || 0
+    }
+    return [label, numValue] as [string, number]
+  }).filter(([, value]) => Number(value) > 0)
+
   if (!entries.length) return null
 
   return (
@@ -1928,12 +1946,16 @@ export default function ReportsPage() {
                   <div className="space-y-4">
                     {reportData.summary && (
                       <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
-                        {Object.entries(reportData.summary).map(([k, v]) => (
-                          <div key={k}>
-                            <p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p>
-                            <p className="font-semibold">{typeof v === 'number' ? formatCurrency(v) : String(v)}</p>
-                          </div>
-                        ))}
+                        {Object.entries(reportData.summary).map(([k, v]) => {
+                          // Skip complex objects that should be displayed as breakdowns
+                          if (typeof v === 'object' && v !== null) return null
+                          return (
+                            <div key={k}>
+                              <p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p>
+                              <p className="font-semibold">{typeof v === 'number' ? formatCurrency(v) : String(v)}</p>
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
                     {currentReport.id === 'salesDiscounts' && reportData?.summary && (
@@ -1945,6 +1967,11 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {currentReport.id === 'financialExpense' && reportData?.summary?.byCategory && <ExpenseCategoryBreakdown summary={reportData.summary} />}
+                    {(currentReport.id === 'receivablesAging' || currentReport.id === 'payablesAging') && reportData?.summary?.ageGroups && (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <BreakdownList title="Age Groups" data={reportData.summary.ageGroups} />
+                      </div>
+                    )}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}
