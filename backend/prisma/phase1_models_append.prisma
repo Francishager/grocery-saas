@@ -1,0 +1,265 @@
+
+
+// =====================================================
+// PHASE 1: HR CORE MODULE - NEW MODELS
+// =====================================================
+
+// =====================================================
+// ORGANIZATION STRUCTURE
+// =====================================================
+
+model Department {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation("TenantDepartments", fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String
+  code        String    // e.g., "SALES", "HR", "IT"
+  description String?
+  headId      String?   // Department head/manager (Employee ID)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  employees   Employee[]
+  units       Unit[]
+  teams       Team[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, branchId])
+  @@map("departments")
+}
+
+model Unit {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation("TenantUnits", fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentId  String
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  name          String
+  code          String    // e.g., "SALES-FIELD"
+  description   String?
+  headId        String?   // Unit head (Employee ID)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  employees     Employee[]
+  teams         Team[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, departmentId])
+  @@map("units")
+}
+
+model Team {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation("TenantTeams", fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentId  String
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  unitId        String?
+  unit          Unit?     @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  name          String
+  code          String    // e.g., "SALES-FIELD-A"
+  description   String?
+  leaderId      String?   // Team lead (Employee ID)
+  size          Int       @default(0)  // Team size
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  employees     Employee[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, departmentId, unitId])
+  @@map("teams")
+}
+
+model Position {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation("TenantPositions", fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String    // e.g., "Sales Manager", "Accountant"
+  code        String    // e.g., "SAL-MGR"
+  description String?
+  level       String?   // e.g., "Management", "Supervisory", "Staff"
+  department  String?   // Primary department
+  minSalary   Float     @default(0)
+  maxSalary   Float     @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  employees   Employee[] @relation("EmployeePositions")
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("positions")
+}
+
+// =====================================================
+// CONTRACTS
+// =====================================================
+
+model EmployeeContract {
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation("TenantContracts", fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee  @relation("EmployeeContracts", fields: [employeeId], references: [id], onDelete: Cascade)
+  contractNo        String    @unique // e.g., "CONTRACT-2025-001"
+  contractType      String    // employment, service, consulting, other
+  status            String    @default("active") // draft, active, expiring, expired, renewed, terminated
+  startDate         DateTime
+  endDate           DateTime?
+  renewalStatus     String?   // up_for_renewal, renewed, not_renewed
+  position          String?
+  department        String?
+  salary            Float?    // Base salary per contract
+  benefits          Json?     // Benefits configuration
+  probationPeriod   Int?      // in days
+  probationStartDate DateTime?
+  probationEndDate  DateTime?
+  terms             String?   // Full text of terms
+  notes             String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  documentUrl       String?   // URL to contract document
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([tenantId, contractNo])
+  @@index([tenantId, employeeId])
+  @@index([status])
+  @@map("employee_contracts")
+}
+
+// =====================================================
+// EMPLOYEE DOCUMENTS
+// =====================================================
+
+model EmployeeDocument {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation("TenantEmployeeDocuments", fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
+  documentType    String    // employment_contract, national_id, passport, academic_certificate, professional_certificate, cv, appointment_letter, promotion_letter, warning_letter, training_certificate, medical_document, other
+  fileName        String
+  fileUrl         String    // URL to document (S3, Cloudinary, etc.)
+  issueDate       DateTime?
+  expiryDate      DateTime? // For certificates, IDs, etc
+  expiryAlertDays Int?      // Alert X days before expiry
+  uploadedBy      String
+  uploadedAt      DateTime  @default(now())
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, employeeId])
+  @@index([documentType])
+  @@index([expiryDate])
+  @@map("employee_documents")
+}
+
+// =====================================================
+// SALARY HISTORY (Never overwrite, always track changes)
+// =====================================================
+
+model SalaryHistory {
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation("TenantSalaryHistory", fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId        String
+  employee          Employee  @relation("EmployeeSalaryHistory", fields: [employeeId], references: [id], onDelete: Cascade)
+  basicSalary       Float
+  transportAllowance Float    @default(0)
+  houseAllowance    Float     @default(0)
+  mobileAllowance   Float     @default(0)
+  otherAllowances   Float     @default(0)
+  totalAllowances   Float     @default(0)
+  grossSalary       Float
+  paye              Float     @default(0)
+  socialSecurityTax Float     @default(0)
+  healthInsurance   Float     @default(0)
+  otherDeductions   Float     @default(0)
+  totalDeductions   Float     @default(0)
+  effectiveDate     DateTime  // When this salary became effective
+  reason            String    // new_employment, salary_review, promotion, adjustment, demotion, contract_renewal, other
+  approvedBy        String?
+  approvedAt        DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  @@index([tenantId, employeeId])
+  @@index([effectiveDate])
+  @@unique([employeeId, effectiveDate]) // One salary per employee per effective date
+  @@map("salary_histories")
+}
+
+// =====================================================
+// EMPLOYMENT HISTORY (Track status and role changes)
+// =====================================================
+
+model EmploymentHistory {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation("TenantEmploymentHistory", fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId       String
+  employee         Employee  @relation("EmployeeEmploymentHistory", fields: [employeeId], references: [id], onDelete: Cascade)
+  employmentStatus String    // active, on_probation, on_leave, suspended, notice_period, resigned, terminated, etc
+  position         String?
+  department       String?
+  branch           String?
+  salary           Float?
+  reason           String?   // promotion, transfer, demotion, status_change, etc
+  effectiveDate    DateTime
+  endDate          DateTime? // When this assignment ended
+  notes            String?
+  recordedBy       String
+  recordedAt       DateTime  @default(now())
+
+  @@index([tenantId, employeeId])
+  @@index([effectiveDate])
+  @@map("employment_histories")
+}
+
+// =====================================================
+// HR MODULE FEATURES (SaaS Feature Control)
+// =====================================================
+
+model HRModuleFeature {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation("TenantHRFeatures", fields: [tenantId], references: [id], onDelete: Cascade)
+  featureName String    // attendance_tracking, shift_management, leave_management, payroll_processing, etc
+  isEnabled   Boolean   @default(false)
+  config      Json?     // Feature-specific configuration
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([tenantId, featureName])
+  @@index([tenantId])
+  @@map("hr_module_features")
+}
+
+// =====================================================
+// HR PERMISSIONS (Granular RBAC)
+// =====================================================
+
+model HRPermission {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation("TenantHRPermissions", fields: [tenantId], references: [id], onDelete: Cascade)
+  roleId         String    // Reference to a role (User.role or custom role)
+  permissionCode String    // e.g., "hr.dashboard.view", "employee.create", "payroll.approve"
+  description    String?
+  createdAt      DateTime  @default(now())
+
+  @@unique([tenantId, roleId, permissionCode])
+  @@index([tenantId, roleId])
+  @@map("hr_permissions")
+}

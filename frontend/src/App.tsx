@@ -37,6 +37,14 @@ import TransactionAccountsPage from '@/pages/accounting/TransactionAccountsPage'
 import StaffTillSheetPage from '@/pages/accounting/StaffTillSheetPage'
 import DataImporterPage from '@/pages/inventory/DataImporterPage'
 import HRPage from '@/pages/HRPage'
+import HRDashboardPage from '@/pages/hr/HRDashboardPage'
+import DepartmentManagementPage from '@/pages/hr/DepartmentManagementPage'
+import PositionManagementPage from '@/pages/hr/PositionManagementPage'
+import EmployeeManagementPage from '@/pages/hr/EmployeeManagementPage'
+import ContractManagementPage from '@/pages/hr/ContractManagementPage'
+import DocumentManagementPage from '@/pages/hr/DocumentManagementPage'
+import UnitTeamManagementPage from '@/pages/hr/UnitTeamManagementPage'
+import HRSettingsPage from '@/pages/hr/HRSettingsPage'
 import TransfersPage from '@/pages/TransfersPage'
 import CommunicationPage from '@/pages/CommunicationPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
@@ -160,7 +168,15 @@ function App() {
           <Route path="accounting/transactions" element={<FeatureGuard feature="accounting"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="inventory"><DataImporterPage /></FeatureGuard>} />
-          <Route path="hr" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
+          <Route path="hr" element={<FeatureGuard feature="hr"><HRDashboardPage /></FeatureGuard>} />
+          <Route path="hr/departments" element={<FeatureGuard feature="hr"><DepartmentManagementPage /></FeatureGuard>} />
+          <Route path="hr/positions" element={<FeatureGuard feature="hr"><PositionManagementPage /></FeatureGuard>} />
+          <Route path="hr/employees" element={<FeatureGuard feature="hr"><EmployeeManagementPage /></FeatureGuard>} />
+          <Route path="hr/contracts" element={<FeatureGuard feature="hr"><ContractManagementPage /></FeatureGuard>} />
+          <Route path="hr/documents" element={<FeatureGuard feature="hr"><DocumentManagementPage /></FeatureGuard>} />
+          <Route path="hr/units-teams" element={<FeatureGuard feature="hr"><UnitTeamManagementPage /></FeatureGuard>} />
+          <Route path="hr/settings" element={<FeatureGuard feature="hr"><HRSettingsPage /></FeatureGuard>} />
+          <Route path="hr/legacy" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />

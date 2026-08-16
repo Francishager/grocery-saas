@@ -44,6 +44,18 @@ import userGuideRoutes from "./routes/user-guide.js";
 import widgetsRouter from "../routes/widgets.js";
 import creditDebitNotesRouter from "../routes/credit-debit-notes.js";
 
+// Phase 1 HR Core Routes
+import positionRoutes from "./routes/positionRoutes.js";
+import departmentRoutes from "./routes/departmentRoutes.js";
+import unitRoutes from "./routes/unitRoutes.js";
+import teamRoutes from "./routes/teamRoutes.js";
+import employeeRoutes from "./routes/employeeRoutes.js";
+import contractRoutes from "./routes/contractRoutes.js";
+import documentRoutes from "./routes/documentRoutes.js";
+import salaryHistoryRoutes from "./routes/salaryHistoryRoutes.js";
+import employmentHistoryRoutes from "./routes/employmentHistoryRoutes.js";
+import hrSettingsRoutes from "./routes/hrSettingsRoutes.js";
+
 import { auditMiddleware } from "./utils/audit.js";
 
 dotenv.config();
@@ -188,6 +200,19 @@ app.use("/api/rentals", rentalsRouter);
 app.use("/api/returns", returnsRouter);
 app.use("/api/accounting", accountingRouter);
 app.use("/api/hr", hrRouter);
+
+// Phase 1 HR Core API routes
+app.use("/api/hr/positions", positionRoutes);
+app.use("/api/hr/departments", departmentRoutes);
+app.use("/api/hr/units", unitRoutes);
+app.use("/api/hr/teams", teamRoutes);
+app.use("/api/hr/employees", employeeRoutes);
+app.use("/api/hr/contracts", contractRoutes);
+app.use("/api/hr/documents", documentRoutes);
+app.use("/api/hr/salary-history", salaryHistoryRoutes);
+app.use("/api/hr/employment-history", employmentHistoryRoutes);
+app.use("/api/hr/settings", hrSettingsRoutes);
+
 app.use("/api/transfers", transfersRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/push", pushRouter);
