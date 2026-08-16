@@ -45,6 +45,12 @@ import ContractManagementPage from '@/pages/hr/ContractManagementPage'
 import DocumentManagementPage from '@/pages/hr/DocumentManagementPage'
 import UnitTeamManagementPage from '@/pages/hr/UnitTeamManagementPage'
 import HRSettingsPage from '@/pages/hr/HRSettingsPage'
+// Phase 2 HR Pages
+import AttendanceListPage from '@/pages/hr/AttendanceListPage'
+import AttendanceCheckPage from '@/pages/hr/AttendanceCheckPage'
+import ShiftManagementPage from '@/pages/hr/ShiftManagementPage'
+import LeaveRequestPage from '@/pages/hr/LeaveRequestPage'
+import LeaveApprovalPage from '@/pages/hr/LeaveApprovalPage'
 import TransfersPage from '@/pages/TransfersPage'
 import CommunicationPage from '@/pages/CommunicationPage'
 import IntegrationsPage from '@/pages/IntegrationsPage'
@@ -169,6 +175,7 @@ function App() {
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="inventory"><DataImporterPage /></FeatureGuard>} />
           <Route path="hr" element={<FeatureGuard feature="hr"><HRDashboardPage /></FeatureGuard>} />
+          {/* Phase 1 HR Core Routes */}
           <Route path="hr/departments" element={<FeatureGuard feature="hr"><DepartmentManagementPage /></FeatureGuard>} />
           <Route path="hr/positions" element={<FeatureGuard feature="hr"><PositionManagementPage /></FeatureGuard>} />
           <Route path="hr/employees" element={<FeatureGuard feature="hr"><EmployeeManagementPage /></FeatureGuard>} />
@@ -177,6 +184,12 @@ function App() {
           <Route path="hr/units-teams" element={<FeatureGuard feature="hr"><UnitTeamManagementPage /></FeatureGuard>} />
           <Route path="hr/settings" element={<FeatureGuard feature="hr"><HRSettingsPage /></FeatureGuard>} />
           <Route path="hr/legacy" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
+          {/* Phase 2 HR Attendance, Shift, Leave Routes */}
+          <Route path="hr/attendance" element={<FeatureGuard feature="hr"><AttendanceListPage /></FeatureGuard>} />
+          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr"><AttendanceCheckPage /></FeatureGuard>} />
+          <Route path="hr/shifts" element={<FeatureGuard feature="hr"><ShiftManagementPage /></FeatureGuard>} />
+          <Route path="hr/leaves" element={<FeatureGuard feature="hr"><LeaveRequestPage /></FeatureGuard>} />
+          <Route path="hr/leaves/approval" element={<FeatureGuard feature="hr"><LeaveApprovalPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />

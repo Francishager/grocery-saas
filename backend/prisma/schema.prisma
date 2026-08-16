@@ -2049,23 +2049,40 @@ model Attendance {
 }
 
 model LeaveRequest {
-  id         String    @id @default(cuid())
-  tenantId   String
-  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId String
-  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType  String    @default("annual") // annual, sick, casual, maternity
-  startDate  DateTime
-  endDate    DateTime
-  days       Int
-  reason     String?
-  status     String    @default("pending") // pending, approved, rejected
-  approvedBy String?
-  approvedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                   String   @id @default(cuid())
+  tenantId             String
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId           String
+  employee             Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId          String
+  leaveTypeName        String // Denormalized
+  startDate            DateTime
+  endDate              DateTime
+  totalDays            Float // Calculated
+  reason               String
+  contactDuringLeave   String?
+  replacementEmployeeId String?
+  attachments          String[] // File URLs
+
+  // Level 1 Approval
+  approverLevel1Id     String?
+  approverLevel1Status String? // approved, rejected, pending
+  approverLevel1Date   DateTime?
+  approverLevel1Notes  String?
+
+  // Level 2 Approval
+  approverLevel2Id     String?
+  approverLevel2Status String? // approved, rejected, pending
+  approverLevel2Date   DateTime?
+  approverLevel2Notes  String?
+
+  status               String   @default("draft") // draft, pending_l1, pending_l2, approved, rejected, on_leave, completed, cancelled
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@index([tenantId, employeeId])
+  @@index([startDate, endDate])
+  @@index([status])
   @@map("leave_requests")
 }
 
@@ -3642,3 +3659,235 @@ model HRPermission {
   @@index([tenantId, roleId])
   @@map("hr_permissions")
 }
+
+// =====================================================
+// PHASE 2: LEAVE TYPE CONFIGURATION
+// =====================================================
+
+model LeaveType {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  name                String // "Annual Leave", "Sick Leave"
+  code                String // "AL", "SL"
+  description         String?
+  daysAllowedPerYear  Int
+  carryoverAllowed    Boolean  @default(false)
+  maxCarryover        Int? // Max carryover days
+  requiresMedical     Boolean  @default(false)
+  requiresApproval    Boolean  @default(true)
+  approvalLevels      Int      @default(1) // 1 or 2 level
+  color               String? // For calendar
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("leave_types")
+}
+
+model LeaveBalance {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  employeeId           String
+  leaveTypeId          String
+  leaveTypeName        String // Denormalized
+  year                 Int // 2024, 2025
+  allocatedDays        Float
+  usedDays             Float    @default(0)
+  approvedPendingDays  Float    @default(0)
+  pendingApprovalDays  Float    @default(0)
+  carryoverDays        Float    @default(0)
+  remainingDays        Float // Calculated
+  lastUpdatedAt        DateTime @updatedAt
+
+  @@unique([employeeId, leaveTypeId, year])
+  @@index([tenantId, employeeId])
+  @@index([year])
+  @@map("leave_balances")
+}
+
+model LeaveHistory {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  employeeId         String
+  leaveTypeId        String
+  leaveTypeName      String
+  leaveRequestId     String? // Link to request
+  startDate          DateTime
+  endDate            DateTime
+  totalDays          Float
+  reason             String?
+  manualEntry        Boolean  @default(false)
+  createdBy          String // UserId
+  createdAt          DateTime @default(now())
+
+  @@index([tenantId, employeeId])
+  @@index([startDate, endDate])
+  @@map("leave_histories")
+}
+
+// =====================================================
+// PHASE 2: ATTENDANCE TRACKING
+// =====================================================
+
+model AttendanceConfiguration {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  branchId             String?
+  workingHoursPerDay   Float    @default(8.0)
+  workWeekDays         String[] @default(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
+  overtimeStartHour    Float    @default(8.0)
+  lateTolerance        Int      @default(0) // minutes
+  earlyCheckoutAllowed Boolean  @default(true)
+  geofencingEnabled    Boolean  @default(false)
+  biometricRequired    Boolean  @default(false)
+  qrCodeRequired       Boolean  @default(false)
+  methods              String[] @default(["MANUAL"]) // MANUAL, QR_CODE, BIOMETRIC
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([tenantId, branchId])
+  @@index([tenantId])
+  @@map("attendance_configurations")
+}
+
+model AttendanceRecord {
+  id            String   @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  attendanceDate DateTime
+  checkInTime   DateTime?
+  checkOutTime  DateTime?
+  duration      Float? // hours worked
+  lateMinutes   Int?
+  overtimeMinutes Int?
+  method        String   @default("MANUAL") // MANUAL, QR_CODE, BIOMETRIC
+  location      String? // GPS location
+  notes         String?
+  status        String   @default("present") // present, absent, on_leave, half_day, leave
+  approvedBy    String? // UserId
+  approvedAt    DateTime?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, employeeId, attendanceDate])
+  @@index([tenantId, employeeId])
+  @@index([attendanceDate])
+  @@map("attendance_records")
+}
+
+model AttendanceSummary {
+  id              String   @id @default(cuid())
+  tenantId        String
+  employeeId      String
+  periodStart     DateTime // Month start
+  periodEnd       DateTime // Month end
+  presentDays     Int      @default(0)
+  absentDays      Int      @default(0)
+  leaveDays       Int      @default(0)
+  overtimeHours   Float    @default(0)
+  averageCheckInTime  String? // HH:MM
+  averageCheckOutTime String? // HH:MM
+  workingDaysInPeriod Int @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, employeeId, periodStart])
+  @@index([tenantId, employeeId])
+  @@map("attendance_summaries")
+}
+
+model AttendanceAudit {
+  id        String   @id @default(cuid())
+  tenantId  String
+  recordId  String
+  changedBy String // UserId
+  changeType String // created, edited, approved, deleted
+  oldValues Json?
+  newValues Json?
+  reason    String?
+  timestamp DateTime @default(now())
+
+  @@index([tenantId, recordId])
+  @@index([timestamp])
+  @@map("attendance_audits")
+}
+
+// =====================================================
+// PHASE 2: SHIFT MANAGEMENT
+// =====================================================
+
+model ShiftTemplate {
+  id              String   @id @default(cuid())
+  tenantId        String
+  branchId        String?
+  name            String // "Morning Shift", "Night Shift"
+  code            String // "MS", "NS"
+  description     String?
+  startTime       String // "09:00"
+  endTime         String // "17:00"
+  breakDuration   Int      @default(60) // minutes
+  workingHours    Float
+  isDefault       Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, branchId, code])
+  @@index([tenantId])
+  @@map("shift_templates")
+}
+
+model ShiftAssignment {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  employeeId          String
+  shiftTemplateId     String
+  shiftTemplateName   String // Denormalized
+  assignmentStartDate DateTime // When assignment begins
+  assignmentEndDate   DateTime? // When assignment ends (NULL = ongoing)
+  rotationType        String   @default("FIXED") // FIXED, ROTATING, TEMPORARY
+  reason              String?
+  approvedBy          String?
+  approvedAt          DateTime?
+  status              String   @default("pending") // pending, active, ended, on_hold
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([tenantId, employeeId, assignmentStartDate])
+  @@index([tenantId, employeeId])
+  @@index([assignmentStartDate])
+  @@map("shift_assignments")
+}
+
+model ShiftSwap {
+  id                String   @id @default(cuid())
+  tenantId          String
+  requesterId       String // Who wants to swap
+  targetEmployeeId  String // Who they want to swap with
+  originalShiftDate DateTime // Employee 1's original shift
+  swapDate          DateTime // Employee 2's shift date (what Employee 1 wants)
+  reason            String?
+  requestedAt       DateTime @default(now())
+  approverIds       String[] // Manager/HR who can approve
+  approvedAt        DateTime?
+  approvedBy        String?
+  status            String   @default("pending") // pending, approved, rejected, executed, cancelled
+  executedAt        DateTime?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, requesterId])
+  @@index([status])
+  @@map("shift_swaps")
+}
+
+// =====================================================
+// PHASE 2: LEAVE MANAGEMENT (LeaveType, LeaveBalance, LeaveHistory added)
+// =====================================================
+

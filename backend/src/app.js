@@ -56,6 +56,11 @@ import salaryHistoryRoutes from "./routes/salaryHistoryRoutes.js";
 import employmentHistoryRoutes from "./routes/employmentHistoryRoutes.js";
 import hrSettingsRoutes from "./routes/hrSettingsRoutes.js";
 
+// Phase 2 HR Attendance, Shift, Leave Routes
+import attendanceRoutes from "./routes/attendanceRoutes.js";
+import shiftRoutes from "./routes/shiftRoutes.js";
+import leaveRoutes from "./routes/leaveRoutes.js";
+
 import { auditMiddleware } from "./utils/audit.js";
 
 dotenv.config();
@@ -212,6 +217,11 @@ app.use("/api/hr/documents", documentRoutes);
 app.use("/api/hr/salary-history", salaryHistoryRoutes);
 app.use("/api/hr/employment-history", employmentHistoryRoutes);
 app.use("/api/hr/settings", hrSettingsRoutes);
+
+// Phase 2 HR Attendance, Shift, Leave API routes
+app.use("/api/hr", attendanceRoutes);
+app.use("/api/hr", shiftRoutes);
+app.use("/api/hr", leaveRoutes);
 
 app.use("/api/transfers", transfersRouter);
 app.use("/api/notifications", notificationsRouter);
