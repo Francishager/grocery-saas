@@ -68,6 +68,7 @@ export function calculateBillingReminder(tenant = {}) {
     return {
       isDueSoon: false,
       isGracePeriodActive: false,
+      isOverdue: false,
       daysRemaining: null,
       gracePeriodEndsAt: null,
       reminderDaysBeforeDue,
@@ -82,10 +83,12 @@ export function calculateBillingReminder(tenant = {}) {
   const gracePeriodEndsAt = new Date(dueDate.getTime() + (gracePeriodDays * 24 * 60 * 60 * 1000));
   const isDueSoon = daysRemaining <= reminderDaysBeforeDue && daysRemaining >= 0;
   const isGracePeriodActive = now > dueDate && now < gracePeriodEndsAt;
+  const isOverdue = now >= gracePeriodEndsAt; // Subscription fully expired, including grace period
 
   return {
     isDueSoon,
     isGracePeriodActive,
+    isOverdue,
     daysRemaining,
     gracePeriodEndsAt: gracePeriodEndsAt.toISOString(),
     reminderDaysBeforeDue,

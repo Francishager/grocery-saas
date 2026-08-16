@@ -46,7 +46,7 @@ export default function DashboardPage() {
       if (!res.ok) return
       const data = await res.json()
       setBillingReminder(data)
-      setShowBillingPrompt(Boolean(data?.isDueSoon || data?.isGracePeriodActive))
+      setShowBillingPrompt(Boolean(data?.isDueSoon || data?.isGracePeriodActive || data?.isOverdue))
     } catch {
       setBillingReminder(null)
     }
@@ -289,18 +289,20 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {billingReminder && (billingReminder.isDueSoon || billingReminder.isGracePeriodActive) && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+      {billingReminder && (billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
+        <div className={`rounded-xl border p-4 ${billingReminder.isOverdue ? 'border-red-300 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold">Subscription payment reminder</p>
-              <p className="text-sm text-amber-800">
-                {billingReminder.isGracePeriodActive
+              <p className="text-sm font-semibold">{billingReminder.isOverdue ? 'Subscription payment overdue' : 'Subscription payment reminder'}</p>
+              <p className={`text-sm ${billingReminder.isOverdue ? 'text-red-800' : 'text-amber-800'}`}>
+                {billingReminder.isOverdue
+                  ? `Your subscription has expired. Payment of ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your invoice'} is now overdue. Please settle immediately to continue using your account.`
+                  : billingReminder.isGracePeriodActive
                   ? `Your grace period is active. Please settle ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your invoice'} before ${formatDisplayDate(billingReminder.gracePeriodEndsAt)}.`
                   : `Your subscription renews in ${billingReminder.daysRemaining} day${billingReminder.daysRemaining === 1 ? '' : 's'}. Please pay ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your due amount'} before the due date.`}
               </p>
             </div>
-            <button onClick={() => setShowBillingPrompt(true)} className="rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700">Pay now</button>
+            <button onClick={() => setShowBillingPrompt(true)} className={`rounded-md px-3 py-2 text-sm font-medium text-white ${billingReminder.isOverdue ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}>Pay now</button>
           </div>
         </div>
       )}
