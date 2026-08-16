@@ -18,6 +18,20 @@ test('calculateBillingReminder marks billing as due soon and tracks the grace pe
   assert.equal(summary.isGracePeriodActive, false);
 });
 
+test('calculateBillingReminder treats an expired trial as payment-due within grace period', () => {
+  const now = new Date();
+  const trialEndsAt = new Date(now.getTime() - (2 * 24 * 60 * 60 * 1000));
+  const summary = calculateBillingReminder({
+    trialEndsAt: trialEndsAt.toISOString(),
+    gracePeriodDays: 5,
+    reminderDaysBeforeDue: 10,
+  });
+
+  assert.equal(summary.isGracePeriodActive, true);
+  assert.equal(summary.daysRemaining, -2);
+  assert.equal(summary.dueDate !== null, true);
+});
+
 test('resolveSubscriptionCharge prefers tenant override values over plan defaults', () => {
   const charge = resolveSubscriptionCharge({
     price: 49,

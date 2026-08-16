@@ -55,10 +55,16 @@ export function resolveSubscriptionCharge(plan = {}, tenant = {}) {
 
 export function calculateBillingReminder(tenant = {}) {
   const subscriptionEnd = tenant.subscriptionEnd ? new Date(tenant.subscriptionEnd) : null;
+  const trialEndsAt = tenant.trialEndsAt ? new Date(tenant.trialEndsAt) : null;
+  const dueDate = subscriptionEnd && !Number.isNaN(subscriptionEnd.getTime())
+    ? subscriptionEnd
+    : trialEndsAt && !Number.isNaN(trialEndsAt.getTime())
+      ? trialEndsAt
+      : null;
   const gracePeriodDays = Number(tenant.gracePeriodDays ?? 0) || 0;
   const reminderDaysBeforeDue = Number(tenant.reminderDaysBeforeDue ?? 10) || 10;
 
-  if (!subscriptionEnd || Number.isNaN(subscriptionEnd.getTime())) {
+  if (!dueDate || Number.isNaN(dueDate.getTime())) {
     return {
       isDueSoon: false,
       isGracePeriodActive: false,
@@ -66,15 +72,16 @@ export function calculateBillingReminder(tenant = {}) {
       gracePeriodEndsAt: null,
       reminderDaysBeforeDue,
       gracePeriodDays,
+      dueDate: null,
     };
   }
 
   const now = new Date();
-  const diffMs = subscriptionEnd.getTime() - now.getTime();
+  const diffMs = dueDate.getTime() - now.getTime();
   const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  const gracePeriodEndsAt = new Date(subscriptionEnd.getTime() + (gracePeriodDays * 24 * 60 * 60 * 1000));
+  const gracePeriodEndsAt = new Date(dueDate.getTime() + (gracePeriodDays * 24 * 60 * 60 * 1000));
   const isDueSoon = daysRemaining <= reminderDaysBeforeDue && daysRemaining >= 0;
-  const isGracePeriodActive = now > subscriptionEnd && now < gracePeriodEndsAt;
+  const isGracePeriodActive = now > dueDate && now < gracePeriodEndsAt;
 
   return {
     isDueSoon,
@@ -83,5 +90,6 @@ export function calculateBillingReminder(tenant = {}) {
     gracePeriodEndsAt: gracePeriodEndsAt.toISOString(),
     reminderDaysBeforeDue,
     gracePeriodDays,
+    dueDate: dueDate.toISOString(),
   };
 }

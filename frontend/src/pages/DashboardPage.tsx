@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [billingReminder, setBillingReminder] = useState<any>(null)
   const [showBillingPrompt, setShowBillingPrompt] = useState(false)
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: '', paymentMethod: 'mobile_money' })
+  const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
+  const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [isOfflineData, setIsOfflineData] = useState(false)
   const { toast } = useToast()
@@ -50,6 +52,48 @@ export default function DashboardPage() {
     }
   }
 
+  const pollBillingStatus = async (reference?: string, attemptsLeft = 24) => {
+    if (!reference && !billingPollRef) return
+
+    const activeReference = reference || billingPollRef
+    try {
+      const res = await apiFetch(`/api/tenants/me/billing-reminder/status?reference=${encodeURIComponent(activeReference || '')}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Unable to check payment status')
+
+      const status = String(data?.payment?.status || data?.status || 'PENDING').toUpperCase()
+      if (status === 'COMPLETED') {
+        setBillingPaymentState('success')
+        setShowBillingPrompt(false)
+        setBillingPollRef(null)
+        await loadBillingReminder()
+        toast({ title: 'Payment completed', description: 'Your subscription payment has been confirmed.' })
+        return
+      }
+
+      if (status === 'FAILED') {
+        setBillingPaymentState('failed')
+        setBillingPollRef(null)
+        toast({ variant: 'destructive', title: 'Payment failed', description: 'The mobile money payment was not completed. Please try again.' })
+        return
+      }
+
+      if (attemptsLeft > 0) {
+        setBillingPaymentState('pending')
+        setTimeout(() => pollBillingStatus(activeReference, attemptsLeft - 1), 5000)
+        return
+      }
+
+      setBillingPaymentState('failed')
+      setBillingPollRef(null)
+      toast({ variant: 'destructive', title: 'Payment timed out', description: 'The payment request did not complete in time. Please try again.' })
+    } catch (error: any) {
+      setBillingPaymentState('failed')
+      setBillingPollRef(null)
+      toast({ variant: 'destructive', title: 'Payment status check failed', description: error.message })
+    }
+  }
+
   const confirmBillingPrompt = async () => {
     if (!billingForm.phoneNumber.trim()) {
       toast({ variant: 'destructive', title: 'Phone number required', description: 'Enter the mobile money number with country code.' })
@@ -57,6 +101,7 @@ export default function DashboardPage() {
     }
 
     try {
+      setBillingPaymentState('pending')
       const res = await apiFetch('/api/tenants/me/billing-reminder', {
         method: 'POST',
         body: JSON.stringify({
@@ -67,9 +112,29 @@ export default function DashboardPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data?.error || 'Unable to confirm payment prompt')
+
+      const paymentReference = data?.payment?.reference || data?.reference || null
+      if (paymentReference) {
+        setBillingPollRef(paymentReference)
+      }
+
+      const providerStatus = String(data?.payment?.status || data?.status || 'PENDING').toUpperCase()
+      if (providerStatus === 'COMPLETED') {
+        setBillingPaymentState('success')
+        setShowBillingPrompt(false)
+        setBillingPollRef(null)
+        await loadBillingReminder()
+        toast({ title: 'Payment completed', description: `${billingForm.networkProvider} payment confirmed successfully.` })
+        return
+      }
+
       setShowBillingPrompt(false)
+      if (paymentReference) {
+        setTimeout(() => pollBillingStatus(paymentReference, 24), 500)
+      }
       toast({ title: 'Payment prompt sent', description: `${billingForm.networkProvider} payment request is ready on ${billingForm.phoneNumber}.` })
     } catch (error: any) {
+      setBillingPaymentState('failed')
       toast({ variant: 'destructive', title: 'Payment prompt failed', description: error.message })
     }
   }
@@ -520,51 +585,79 @@ export default function DashboardPage() {
               <button onClick={() => setShowBillingPrompt(false)} className="rounded-md p-1 text-gray-500 hover:bg-gray-100">✕</button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Network provider</label>
-                <select
-                  value={billingForm.networkProvider}
-                  onChange={(e) => setBillingForm({ ...billingForm, networkProvider: e.target.value })}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="MTN">MTN</option>
-                  <option value="Airtel">Airtel</option>
-                  <option value="MPS">MPS</option>
-                </select>
+            {billingPaymentState === 'pending' ? (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">Waiting for payment approval</p>
+                  <p className="text-sm text-slate-600">The provider is checking the payment prompt on your phone.</p>
+                </div>
               </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Phone number with country code</label>
-                <input
-                  type="tel"
-                  value={billingForm.phoneNumber}
-                  onChange={(e) => setBillingForm({ ...billingForm, phoneNumber: e.target.value })}
-                  placeholder="+256700000000"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
+            ) : billingPaymentState === 'success' ? (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-xl text-green-600">✓</div>
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">Payment completed</p>
+                  <p className="text-sm text-slate-600">Your subscription has been confirmed and your account is up to date.</p>
+                </div>
+                <button onClick={() => setBillingPaymentState('idle')} className="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">Close</button>
               </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Payment method</label>
-                <select
-                  value={billingForm.paymentMethod}
-                  onChange={(e) => setBillingForm({ ...billingForm, paymentMethod: e.target.value })}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="mobile_money">Mobile Money</option>
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="card">Card</option>
-                </select>
+            ) : billingPaymentState === 'failed' ? (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-xl text-red-600">!</div>
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">Payment failed</p>
+                  <p className="text-sm text-slate-600">The request was not approved or timed out. Please try again.</p>
+                </div>
+                <button onClick={() => setBillingPaymentState('idle')} className="w-full rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Try again</button>
               </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Network provider</label>
+                  <select
+                    value={billingForm.networkProvider}
+                    onChange={(e) => setBillingForm({ ...billingForm, networkProvider: e.target.value })}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="MTN">MTN</option>
+                    <option value="Airtel">Airtel</option>
+                    <option value="MPS">MPS</option>
+                  </select>
+                </div>
 
-              <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                <p className="font-medium">Amount due</p>
-                <p>{billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'Your subscription amount'}</p>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Phone number with country code</label>
+                  <input
+                    type="tel"
+                    value={billingForm.phoneNumber}
+                    onChange={(e) => setBillingForm({ ...billingForm, phoneNumber: e.target.value })}
+                    placeholder="+256700000000"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Payment method</label>
+                  <select
+                    value={billingForm.paymentMethod}
+                    onChange={(e) => setBillingForm({ ...billingForm, paymentMethod: e.target.value })}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="mobile_money">Mobile Money</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="card">Card</option>
+                  </select>
+                </div>
+
+                <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="font-medium">Amount due</p>
+                  <p>{billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'Your subscription amount'}</p>
+                </div>
+
+                <button onClick={confirmBillingPrompt} className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Send payment prompt</button>
               </div>
-
-              <button onClick={confirmBillingPrompt} className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Send payment prompt</button>
-            </div>
+            )}
           </div>
         </div>
       )}
