@@ -3,7 +3,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
-import { buildBillingPaymentRequest, processTenantBillingPayment } from "../services/paymentGateway.js";
+import { buildBillingPaymentRequest, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 
 const router = Router();
 
@@ -203,6 +203,58 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
     console.error("Billing reminder save error:", err);
     const message = err instanceof Error ? err.message : "Failed to save payment prompt";
     res.status(500).json({ error: message });
+  }
+});
+
+router.post("/billing-reminder/relworx/webhook", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const signatureHeader = req.headers["x-relworx-signature"] || req.headers["relworx-signature"];
+    const webhookUrl = process.env.RELWORX_WEBHOOK_URL || `${process.env.BASE_URL || 'http://localhost:3000'}/api/tenants/billing-reminder/relworx/webhook`;
+
+    if (process.env.RELWORX_WEBHOOK_KEY && signatureHeader && !verifyRelworxWebhookSignature(signatureHeader, payload, webhookUrl)) {
+      return res.status(401).json({ error: "Invalid webhook signature" });
+    }
+
+    const reference = payload.customer_reference || payload.reference || payload.internal_reference || payload.external_reference;
+    const requestStatus = normalizeRelworxStatus(payload.request_status || payload.status || payload.payment_status);
+
+    if (!reference) {
+      return res.status(400).json({ error: "Missing payment reference in webhook payload" });
+    }
+
+    const tenant = await prisma.tenant.findFirst({
+      where: {
+        billingPaymentReference: {
+          contains: String(reference),
+        },
+      },
+    });
+
+    if (!tenant) {
+      return res.status(200).json({ received: true, matched: false, reference });
+    }
+
+    const normalizedStatus = requestStatus === "COMPLETED" ? "paid" : "due_soon";
+
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: {
+        paymentReminderStatus: normalizedStatus,
+        paymentReminderSentAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      received: true,
+      matched: true,
+      tenantId: tenant.id,
+      status: normalizedStatus,
+      reference,
+    });
+  } catch (err) {
+    console.error("Relworx billing webhook error:", err);
+    return res.status(500).json({ error: "Webhook processing failed" });
   }
 });
 

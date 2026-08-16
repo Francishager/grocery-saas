@@ -40,6 +40,51 @@ export function getBillingGatewaySummary() {
   };
 }
 
+export function normalizeRelworxStatus(value) {
+  const status = String(value || '').trim().toLowerCase();
+
+  if (['completed', 'successful', 'success', 'approved', 'paid'].includes(status)) return 'COMPLETED';
+  if (['failed', 'rejected', 'cancelled', 'declined', 'error'].includes(status)) return 'FAILED';
+  if (['pending', 'processing', 'in_progress', 'in-progress'].includes(status)) return 'PENDING';
+  return 'PENDING';
+}
+
+export function parseRelworxSignatureHeader(signatureHeader) {
+  if (!signatureHeader) return { timestamp: null, signature: null };
+
+  return signatureHeader.split(',').reduce((acc, part) => {
+    const [key, value] = part.split('=');
+    if (!key || value === undefined) return acc;
+
+    if (key.trim() === 't') acc.timestamp = value.trim();
+    if (key.trim() === 'v') acc.signature = value.trim();
+    return acc;
+  }, { timestamp: null, signature: null });
+}
+
+export function verifyRelworxWebhookSignature(signatureHeader, payload, webhookUrl = process.env.RELWORX_WEBHOOK_URL || `${process.env.BASE_URL || 'http://localhost:3000'}/api/tenants/billing-reminder/relworx/webhook`) {
+  const webhookKey = process.env.RELWORX_WEBHOOK_KEY;
+  if (!webhookKey || !signatureHeader) return true;
+
+  const { timestamp, signature } = parseRelworxSignatureHeader(signatureHeader);
+  if (!timestamp || !signature) return false;
+
+  const params = {
+    customer_reference: payload?.customer_reference,
+    internal_reference: payload?.internal_reference,
+    status: payload?.status || payload?.request_status || payload?.payment_status,
+  };
+
+  const sortedEntries = Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const signedData = sortedEntries.reduce((acc, [key, value]) => `${acc}${key}${value}`, `${webhookUrl}${timestamp}`);
+  const expectedSignature = crypto.createHmac('sha256', webhookKey).update(signedData).digest('hex');
+
+  return expectedSignature === signature;
+}
+
 export async function processTenantBillingPayment({ amount, msisdn, networkProvider, tenantId, tenantName }) {
   const payload = buildBillingPaymentRequest({
     amount,
