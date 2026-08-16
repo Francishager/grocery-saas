@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -64,7 +64,7 @@ const navItems = [
   { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: 'canViewServiceBusiness', isService: true },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport', isAccounting: true },
-  { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewStaff', isHR: true },
   { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication', permission: 'canViewCommunication' },
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
@@ -263,6 +263,22 @@ const accountingSubItems = [
   { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: ['canViewAccounting', 'canViewStaffTillSheet'] },
 ]
 
+const hrSubItems = [
+  { to: '/tenant/hr', label: 'Dashboard', icon: LayoutDashboard, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/departments', label: 'Departments', icon: Building2, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/positions', label: 'Positions', icon: Badge, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/units-teams', label: 'Teams', icon: Users, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/contracts', label: 'Contracts', icon: FileText, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/documents', label: 'Documents', icon: ClipboardList, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr/settings', label: 'HR Settings', icon: Settings, feature: 'hr', permission: 'canViewStaff' },
+]
+
 const settingsSubItems = [
   { to: '/tenant/settings', label: 'Business Profile', icon: Building2, feature: 'settings', permission: 'canViewSettings' },
   { to: '/tenant/branches', label: 'Branches', icon: GitBranch, feature: 'multi_branch', permission: 'canViewBranch' },
@@ -280,6 +296,7 @@ export function TenantLayout() {
   const [fuelStationExpanded, setFuelStationExpanded] = useState(false)
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
+  const [hrExpanded, setHRExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
   const [showOnboardingModal, setShowOnboardingModal] = useState(false)
@@ -319,16 +336,21 @@ export function TenantLayout() {
   }
   const toggleService = () => {
     setServiceExpanded(prev => !prev)
-    if (!serviceExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false) }
+    if (!serviceExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setHRExpanded(false) }
+  }
+  const toggleHR = () => {
+    setHRExpanded(prev => !prev)
+    if (!hrExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
   }
 
-  // Auto-expand inventory when on an inventory page
+  // Auto-expand when on relevant pages
   useEffect(() => {
     if (location.pathname.startsWith('/tenant/inventory')) setInventoryExpanded(true)
     if (location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers') setAccountingExpanded(true)
     if (location.pathname.startsWith('/tenant/fuel-station')) setFuelStationExpanded(true)
     if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
+    if (location.pathname.startsWith('/tenant/hr')) setHRExpanded(true)
   }, [location.pathname, location.search])
   function hasRequiredPermission(permission?: string | string[]) {
     if (!permission) return true
@@ -341,6 +363,7 @@ export function TenantLayout() {
     if (item.permission && !hasRequiredPermission(item.permission)) return false
     return true
   }
+  const visibleHRSubItems = hrSubItems.filter(subItemVisible)
   const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
   const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
   const visibleFuelStationSubItems = fuelStationSubItems.filter((item) => {
@@ -380,6 +403,7 @@ export function TenantLayout() {
       if (item.isFuelStation && visibleFuelStationSubItems.length > 0) return true
       if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
       if (item.isService && visibleServiceSubItems.length > 0) return true
+      if (item.isHR && visibleHRSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
       // For standalone items like Communication with no sub-items, hide strictly.
@@ -394,6 +418,7 @@ export function TenantLayout() {
       if (item.isFuelStation && visibleFuelStationSubItems.length > 0) return true
       if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
       if (item.isService && visibleServiceSubItems.length > 0) return true
+      if (item.isHR && visibleHRSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
       // For standalone items with no sub-items, hide strictly
@@ -635,6 +660,27 @@ export function TenantLayout() {
                           </div>
                         )
                       })}
+                    </div>
+                  )}
+                </div>
+              ) : item.isHR ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleHR()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', hrExpanded || location.pathname.startsWith('/tenant/hr') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {hrExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {hrExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleHRSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
                     </div>
                   )}
                 </div>
