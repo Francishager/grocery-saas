@@ -169,8 +169,8 @@ export default function AuditLogPage() {
                   {logs.map((log) => (
                     <tr key={log.id} className="border-b last:border-0 hover:bg-muted/50">
                       <td className="py-3 text-sm text-muted-foreground whitespace-nowrap">
-                        {new Date(log.createdAt).toLocaleString('en-US', {
-                          month: 'short', day: 'numeric',
+                        {new Date(log.createdAt).toLocaleString('en-GB', {
+                          day: '2-digit', month: '2-digit', year: '2-digit',
                           hour: '2-digit', minute: '2-digit',
                         })}
                       </td>

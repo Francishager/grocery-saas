@@ -1066,7 +1066,7 @@ export default function SalesPage() {
               {recentSales.slice(0, 10).map((sale) => {
                 const payLabel = (sale.paymentMethod || "cash").split("_").join(" ")
                 const staff = sale.user ? [sale.user.fname, sale.user.lname].filter(Boolean).join(" ") || "—" : "—"
-                const dateStr = new Date(sale.createdAt).toLocaleString("en-US", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"})
+                const dateStr = new Date(sale.createdAt).toLocaleString("en-GB", {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"})
                 return (
                   <div key={sale.id} className="flex items-center justify-between rounded-lg border p-3">
                     <div className="flex-1 min-w-0">

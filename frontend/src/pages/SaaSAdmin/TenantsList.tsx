@@ -142,10 +142,10 @@ export const TenantsList: React.FC<TenantsListProps> = ({
   }
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    return new Date(dateStr).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
     })
   }
 

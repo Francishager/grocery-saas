@@ -111,7 +111,7 @@ export const WorkflowTasks: React.FC<WorkflowTasksProps> = ({
 
   const formatDate = (date: Date | string) => {
     const d = new Date(date)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
   }
 
   const popoverContent = isOpen && (

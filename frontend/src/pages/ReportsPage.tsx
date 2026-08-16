@@ -578,17 +578,35 @@ function formatValue(value: any, format?: string): string {
     case 'currency': return formatCurrency(Number(value) || 0)
     case 'number': return new Intl.NumberFormat('en-US').format(Number(value) || 0)
     case 'date': return value ? formatDisplayDate(value) : '—'
-    default:
+    default: {
+      if (Array.isArray(value)) return value.map(v => formatValue(v)).filter(v => v !== '—').join(', ')
       if (typeof value === 'object') {
-        // Extract name from nested objects like {id, name}, {name}, etc.
-        if (value.name) return String(value.name)
-        if (value.label) return String(value.label)
-        if (value.email) return String(value.email)
-        // Fallback: stringify first key's value
-        const firstVal = Object.values(value)[0]
-        return firstVal != null ? String(firstVal) : '—'
+        const objectValue = value as Record<string, any>
+        const preferredKeys = ['name', 'label', 'email', 'description', 'title', 'code', 'reference', 'number', 'type']
+        for (const key of preferredKeys) {
+          const candidate = objectValue[key]
+          if (candidate !== null && candidate !== undefined && candidate !== '') return String(candidate)
+        }
+
+        const numericKeys = ['amount', 'total', 'balance', 'value', 'price', 'cost', 'revenue', 'profit', 'quantity', 'count']
+        for (const key of numericKeys) {
+          const candidate = objectValue[key]
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return String(candidate)
+        }
+
+        for (const entry of Object.values(objectValue)) {
+          if (entry == null || entry === '') continue
+          if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') return String(entry)
+          if (typeof entry === 'object') {
+            const nestedText = formatValue(entry)
+            if (nestedText !== '—') return nestedText
+          }
+        }
+
+        return '—'
       }
       return String(value)
+    }
   }
 }
 

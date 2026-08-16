@@ -53,7 +53,7 @@ export const PlatformAuditPage: React.FC = () => {
     setPage(1)
   }
 
-  const fmtDateTime = (d: string) => new Date(d).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const fmtDateTime = (d: string) => new Date(d).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 
   // Get unique IPs for summary
   const uniqueIPs = [...new Set(logs.map(l => l.ip).filter(Boolean))]

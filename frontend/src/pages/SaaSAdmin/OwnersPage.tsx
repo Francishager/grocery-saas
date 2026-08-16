@@ -41,7 +41,7 @@ export const OwnersPage: React.FC = () => {
     setResetting(null)
   }
 
-  const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Never'
+  const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' }) : 'Never'
 
   return (
     <div className="space-y-6">

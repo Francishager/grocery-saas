@@ -39,22 +39,41 @@ function formatExportValue(value: any, format?: string): string {
     case 'date': {
       if (!value) return ''
       const d = new Date(value)
+      if (Number.isNaN(d.getTime())) return ''
       const day = String(d.getDate()).padStart(2, '0')
       const month = String(d.getMonth() + 1).padStart(2, '0')
-      const year = d.getFullYear()
+      const year = String(d.getFullYear()).slice(-2)
       return `${day}/${month}/${year}`
     }
-    default:
+    default: {
+      if (Array.isArray(value)) return value.map(v => formatExportValue(v)).filter(Boolean).join(', ')
       if (typeof value === 'object') {
-        if (value.name) return String(value.name)
-        if (value.label) return String(value.label)
-        if (value.email) return String(value.email)
-        if (value.description) return String(value.description)
-        // For transactions and other objects, try to extract a meaningful value
-        const firstVal = Object.values(value)[0]
-        return firstVal != null ? String(firstVal) : '[Data]'
+        const objectValue = value as Record<string, any>
+        const preferredKeys = ['name', 'label', 'email', 'description', 'title', 'code', 'reference', 'number', 'type']
+        for (const key of preferredKeys) {
+          const candidate = objectValue[key]
+          if (candidate !== null && candidate !== undefined && candidate !== '') return String(candidate)
+        }
+
+        const numericKeys = ['amount', 'total', 'balance', 'value', 'price', 'cost', 'revenue', 'profit', 'quantity', 'count']
+        for (const key of numericKeys) {
+          const candidate = objectValue[key]
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return String(candidate)
+        }
+
+        for (const entry of Object.values(objectValue)) {
+          if (entry == null || entry === '') continue
+          if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') return String(entry)
+          if (typeof entry === 'object') {
+            const nestedText = formatExportValue(entry)
+            if (nestedText) return nestedText
+          }
+        }
+
+        return ''
       }
       return String(value)
+    }
   }
 }
 

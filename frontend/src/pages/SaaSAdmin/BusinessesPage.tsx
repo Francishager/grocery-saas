@@ -120,7 +120,7 @@ export const BusinessesPage: React.FC = () => {
     return <span className={`px-2 py-1 rounded-full text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-800'}`}>{s.charAt(0).toUpperCase() + s.slice(1)}</span>
   }
 
-  const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
   const fmtMoney = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
 
   return (

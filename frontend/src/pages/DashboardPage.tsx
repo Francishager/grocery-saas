@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown } from 'lucide-react'
 import { apiFetch, dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData, type DailyPerformanceData } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDisplayDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
@@ -285,7 +285,7 @@ export default function DashboardPage() {
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+          {formatDisplayDate(new Date())}
         </p>
       </div>
 
@@ -296,7 +296,7 @@ export default function DashboardPage() {
               <p className="text-sm font-semibold">Subscription payment reminder</p>
               <p className="text-sm text-amber-800">
                 {billingReminder.isGracePeriodActive
-                  ? `Your grace period is active. Please settle ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your invoice'} before ${new Date(billingReminder.gracePeriodEndsAt).toLocaleDateString('en-GB')}.`
+                  ? `Your grace period is active. Please settle ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your invoice'} before ${formatDisplayDate(billingReminder.gracePeriodEndsAt)}.`
                   : `Your subscription renews in ${billingReminder.daysRemaining} day${billingReminder.daysRemaining === 1 ? '' : 's'}. Please pay ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your due amount'} before the due date.`}
               </p>
             </div>
@@ -427,7 +427,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-blue-500" /> Daily Performance</CardTitle>
-              <CardDescription>Revenue & profit per day — {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</CardDescription>
+              <CardDescription>Revenue & profit per day — {formatDisplayDate(new Date())}</CardDescription>
             </div>
             {dailyPerf.summary.bestDay && (
               <div className="flex gap-4 text-xs">
