@@ -1,155 +1,99 @@
-/**
- * Attendance Configuration Service - Manages attendance system settings
- */
-
-const db = require('../../config/db');
+import prisma from '../db.js';
 
 class AttendanceConfigService {
-  /**
-   * Get configuration for tenant/branch
-   */
   async getConfig(tenantId, branchId = null) {
-    try {
-      let config = await db.attendance_configurations.findUnique({
-        where: {
-          tenantId_branchId: { tenantId, branchId },
+    let config = await prisma.attendanceConfiguration.findFirst({
+      where: { tenantId, branchId },
+    });
+
+    if (!config) {
+      config = await prisma.attendanceConfiguration.create({
+        data: {
+          tenantId,
+          branchId,
+          workingHoursPerDay: 8,
+          overtimeStartHour: 8,
+          lateTolerance: 0,
+          methods: ['MANUAL'],
+          isActive: true,
         },
       });
-
-      // Create default if not exists
-      if (!config) {
-        config = await db.attendance_configurations.create({
-          data: {
-            tenantId,
-            branchId,
-            workingHoursPerDay: 8.0,
-            overtimeStartHour: 8.0,
-            lateTolerance: 0,
-            methods: ['MANUAL'],
-            isActive: true,
-          },
-        });
-      }
-
-      return config;
-    } catch (error) {
-      throw new Error(`Failed to get config: ${error.message}`);
     }
+
+    return config;
   }
 
-  /**
-   * Update configuration
-   */
   async updateConfig(tenantId, branchId, updates) {
-    try {
-      const validated = this.validateSettings({
-        workingHoursPerDay: updates.workingHoursPerDay,
-        overtimeStartHour: updates.overtimeStartHour,
-        lateTolerance: updates.lateTolerance,
-        methods: updates.methods,
-      });
+    const validated = this.validateSettings(updates);
+    if (!validated.valid) throw new Error(`Validation failed: ${validated.errors.join(', ')}`);
 
-      if (!validated.valid) {
-        throw new Error(`Validation failed: ${validated.errors.join(', ')}`);
-      }
-
-      const config = await db.attendance_configurations.update({
-        where: {
-          tenantId_branchId: { tenantId, branchId },
-        },
-        data: updates,
-      });
-
-      return config;
-    } catch (error) {
-      throw new Error(`Failed to update config: ${error.message}`);
-    }
+    const config = await this.getConfig(tenantId, branchId);
+    return prisma.attendanceConfiguration.update({
+      where: { id: config.id },
+      data: {
+        ...(updates.workingHoursPerDay !== undefined && { workingHoursPerDay: Number(updates.workingHoursPerDay) }),
+        ...(updates.workWeekDays !== undefined && { workWeekDays: updates.workWeekDays }),
+        ...(updates.overtimeStartHour !== undefined && { overtimeStartHour: Number(updates.overtimeStartHour) }),
+        ...(updates.lateTolerance !== undefined && { lateTolerance: Number(updates.lateTolerance) }),
+        ...(updates.earlyCheckoutAllowed !== undefined && { earlyCheckoutAllowed: Boolean(updates.earlyCheckoutAllowed) }),
+        ...(updates.geofencingEnabled !== undefined && { geofencingEnabled: Boolean(updates.geofencingEnabled) }),
+        ...(updates.biometricRequired !== undefined && { biometricRequired: Boolean(updates.biometricRequired) }),
+        ...(updates.qrCodeRequired !== undefined && { qrCodeRequired: Boolean(updates.qrCodeRequired) }),
+        ...(updates.methods !== undefined && { methods: updates.methods }),
+        ...(updates.isActive !== undefined && { isActive: Boolean(updates.isActive) }),
+      },
+    });
   }
 
-  /**
-   * Validate configuration settings
-   */
-  validateSettings(config) {
+  validateSettings(config = {}) {
     const errors = [];
+    const workingHours = config.workingHoursPerDay !== undefined ? Number(config.workingHoursPerDay) : null;
+    const overtimeStart = config.overtimeStartHour !== undefined ? Number(config.overtimeStartHour) : null;
+    const lateTolerance = config.lateTolerance !== undefined ? Number(config.lateTolerance) : null;
 
-    if (config.workingHoursPerDay && (config.workingHoursPerDay < 1 || config.workingHoursPerDay > 24)) {
+    if (workingHours !== null && (!Number.isFinite(workingHours) || workingHours < 1 || workingHours > 24)) {
       errors.push('Working hours must be between 1 and 24');
     }
-
-    if (config.overtimeStartHour && config.overtimeStartHour > config.workingHoursPerDay) {
+    if (overtimeStart !== null && workingHours !== null && overtimeStart > workingHours) {
       errors.push('Overtime threshold cannot exceed working hours');
     }
-
-    if (config.lateTolerance && config.lateTolerance < 0) {
+    if (lateTolerance !== null && (!Number.isFinite(lateTolerance) || lateTolerance < 0)) {
       errors.push('Late tolerance cannot be negative');
     }
-
-    if (config.methods && !Array.isArray(config.methods)) {
+    if (config.methods !== undefined && !Array.isArray(config.methods)) {
       errors.push('Methods must be an array');
     }
 
-    return {
-      valid: errors.length === 0,
-      errors,
-    };
+    return { valid: errors.length === 0, errors };
   }
 
-  /**
-   * Set working hours for tenant
-   */
   async setWorkingHours(tenantId, branchId, hours) {
-    if (hours < 1 || hours > 24) {
-      throw new Error('Working hours must be between 1 and 24');
-    }
-
     return this.updateConfig(tenantId, branchId, { workingHoursPerDay: hours });
   }
 
-  /**
-   * Set overtime threshold
-   */
   async setOvertimeThreshold(tenantId, branchId, hours) {
-    const config = await this.getConfig(tenantId, branchId);
-
-    if (hours > config.workingHoursPerDay) {
-      throw new Error('Overtime threshold cannot exceed working hours');
-    }
-
     return this.updateConfig(tenantId, branchId, { overtimeStartHour: hours });
   }
 
-  /**
-   * Enable biometric attendance
-   */
   async enableBiometric(tenantId, branchId = null) {
     const config = await this.getConfig(tenantId, branchId);
-    const methods = [...(config.methods || []), 'BIOMETRIC'];
-
     return this.updateConfig(tenantId, branchId, {
       biometricRequired: true,
-      methods: [...new Set(methods)],
+      methods: [...new Set([...(config.methods || []), 'BIOMETRIC'])],
     });
   }
 
-  /**
-   * Enable QR code attendance
-   */
   async enableQRCode(tenantId, branchId = null) {
     const config = await this.getConfig(tenantId, branchId);
-    const methods = [...(config.methods || []), 'QR_CODE'];
-
     return this.updateConfig(tenantId, branchId, {
       qrCodeRequired: true,
-      methods: [...new Set(methods)],
+      methods: [...new Set([...(config.methods || []), 'QR_CODE'])],
     });
   }
 
-  /**
-   * Enable geofencing
-   */
   async enableGeofencing(tenantId, branchId = null) {
     return this.updateConfig(tenantId, branchId, { geofencingEnabled: true });
   }
 }
 
-module.exports = new AttendanceConfigService();
+export default new AttendanceConfigService();

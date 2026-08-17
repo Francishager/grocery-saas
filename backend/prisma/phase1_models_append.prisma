@@ -245,21 +245,3 @@ model HRModuleFeature {
   @@index([tenantId])
   @@map("hr_module_features")
 }
-
-// =====================================================
-// HR PERMISSIONS (Granular RBAC)
-// =====================================================
-
-model HRPermission {
-  id             String    @id @default(cuid())
-  tenantId       String
-  tenant         Tenant    @relation("TenantHRPermissions", fields: [tenantId], references: [id], onDelete: Cascade)
-  roleId         String    // Reference to a role (User.role or custom role)
-  permissionCode String    // e.g., "hr.dashboard.view", "employee.create", "payroll.approve"
-  description    String?
-  createdAt      DateTime  @default(now())
-
-  @@unique([tenantId, roleId, permissionCode])
-  @@index([tenantId, roleId])
-  @@map("hr_permissions")
-}

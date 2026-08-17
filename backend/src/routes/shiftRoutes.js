@@ -4,15 +4,22 @@
  */
 
 import express from 'express';
-import { requireAuth, requirePermission, requireTenant } from '../middleware/auth.js';
+import { requireAuth, requireTenant } from '../middleware/authMiddleware.js';
 import shiftService from '../services/shiftService.js';
 import shiftSwapService from '../services/shiftSwapService.js';
+import hrPermissionService from '../services/hrPermissionService.js';
 
 const router = express.Router();
 
 // Middleware
 router.use(requireAuth);
 router.use(requireTenant);
+
+const requireHRPermission = (permissionCode) => async (req, res, next) => {
+  const tenantId = req.tenant?.id || req.user?.tenantId || req.user?.tenant_id;
+  if (await hrPermissionService.hasPermission(tenantId, req.user.id, permissionCode)) return next();
+  return res.status(403).json({ success: false, message: 'Permission denied', required: permissionCode });
+};
 
 /**
  * Shift Template Management
@@ -32,7 +39,7 @@ router.get('/shifts/templates', async (req, res) => {
 });
 
 // Create shift template
-router.post('/shifts/templates', requirePermission('SHIFT_MANAGE'), async (req, res) => {
+router.post('/shifts/templates', requireHRPermission('SHIFT_MANAGE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId, ...data } = req.body;
@@ -54,15 +61,15 @@ router.get('/shifts/templates/:id', async (req, res) => {
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    // TODO: Implement getTemplate method in service
-    res.json({ success: true, message: 'Get single template not yet implemented' });
+    const template = await shiftService.getTemplate(tenantId, id);
+    res.json({ success: true, data: template });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
 // Update shift template
-router.put('/shifts/templates/:id', requirePermission('SHIFT_MANAGE'), async (req, res) => {
+router.put('/shifts/templates/:id', requireHRPermission('SHIFT_MANAGE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -75,13 +82,13 @@ router.put('/shifts/templates/:id', requirePermission('SHIFT_MANAGE'), async (re
 });
 
 // Soft-delete shift template
-router.delete('/shifts/templates/:id', requirePermission('SHIFT_MANAGE'), async (req, res) => {
+router.delete('/shifts/templates/:id', requireHRPermission('SHIFT_MANAGE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    // TODO: Implement soft delete in service
-    res.json({ success: true, message: 'Template deleted' });
+    const template = await shiftService.deleteTemplate(tenantId, id);
+    res.json({ success: true, data: template, message: 'Template deleted' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -97,15 +104,15 @@ router.get('/shifts/assignments', async (req, res) => {
     const tenantId = req.tenant.id;
     const { employeeId, status, page = 1, limit = 50 } = req.query;
 
-    // TODO: Implement filtering in service
-    res.json({ success: true, data: [], pagination: { page, limit, total: 0 } });
+    const result = await shiftService.getAssignments(tenantId, { employeeId, status }, parseInt(page), parseInt(limit));
+    res.json({ success: true, data: result.data, pagination: result.pagination });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
 // Assign shift to employee
-router.post('/shifts/assignments', requirePermission('SHIFT_ASSIGN'), async (req, res) => {
+router.post('/shifts/assignments', requireHRPermission('SHIFT_ASSIGN'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { employeeId, shiftTemplateId, startDate, endDate } = req.body;
@@ -119,7 +126,8 @@ router.post('/shifts/assignments', requirePermission('SHIFT_ASSIGN'), async (req
       employeeId,
       shiftTemplateId,
       startDate,
-      endDate || null
+      endDate || null,
+      { ...req.body, approvedBy: req.user.id }
     );
     res.json({ success: true, data: assignment, message: 'Shift assigned' });
   } catch (error) {
@@ -130,8 +138,10 @@ router.post('/shifts/assignments', requirePermission('SHIFT_ASSIGN'), async (req
 // Get single assignment
 router.get('/shifts/assignments/:id', async (req, res) => {
   try {
-    // TODO: Implement get single assignment
-    res.json({ success: true, message: 'Get single assignment not yet implemented' });
+    const tenantId = req.tenant.id;
+    const { id } = req.params;
+    const assignment = await shiftService.getAssignment(tenantId, id);
+    res.json({ success: true, data: assignment });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -151,7 +161,7 @@ router.put('/shifts/assignments/:id', async (req, res) => {
 });
 
 // End shift assignment
-router.delete('/shifts/assignments/:id', requirePermission('SHIFT_ASSIGN'), async (req, res) => {
+router.delete('/shifts/assignments/:id', requireHRPermission('SHIFT_ASSIGN'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -249,7 +259,7 @@ router.get('/shifts/swaps', async (req, res) => {
 });
 
 // Approve shift swap
-router.post('/shifts/swaps/:id/approve', requirePermission('SHIFT_APPROVE'), async (req, res) => {
+router.post('/shifts/swaps/:id/approve', requireHRPermission('SHIFT_APPROVE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -278,7 +288,7 @@ router.post('/shifts/swaps/:id/reject', async (req, res) => {
 });
 
 // Execute swap
-router.post('/shifts/swaps/:id/execute', requirePermission('SHIFT_APPROVE'), async (req, res) => {
+router.post('/shifts/swaps/:id/execute', requireHRPermission('SHIFT_APPROVE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;

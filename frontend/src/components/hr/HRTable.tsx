@@ -2,7 +2,6 @@ import React from 'react'
 import { ChevronDown, Search, Plus, Edit, Trash2, MoreVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import {
   Table,
   TableBody,
@@ -26,6 +25,13 @@ export interface HRColumn {
   width?: string
 }
 
+export interface HRRowAction {
+  label: string
+  onClick: (row: any) => void
+  visible?: (row: any) => boolean
+  variant?: 'default' | 'outline' | 'secondary' | 'destructive' | 'ghost'
+}
+
 interface HRTableProps {
   columns: HRColumn[]
   data: any[]
@@ -36,7 +42,7 @@ interface HRTableProps {
   onView?: (id: string, row: any) => void
   searchPlaceholder?: string
   title?: string
-  actions?: boolean
+  actions?: boolean | HRRowAction[]
 }
 
 export const HRTable: React.FC<HRTableProps> = ({
@@ -54,6 +60,8 @@ export const HRTable: React.FC<HRTableProps> = ({
   const [search, setSearch] = React.useState('')
   const [sortKey, setSortKey] = React.useState<string | null>(null)
   const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc')
+  const rowActions = Array.isArray(actions) ? actions : []
+  const showActions = actions !== false && Boolean(onView || onEdit || onDelete || rowActions.length)
 
   const filtered = data.filter((row) =>
     columns.some((col) => {
@@ -128,19 +136,19 @@ export const HRTable: React.FC<HRTableProps> = ({
                   )}
                 </TableHead>
               ))}
-              {actions && <TableHead className="w-12 text-right">Actions</TableHead>}
+              {showActions && <TableHead className="w-12 text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={columns.length + (actions ? 1 : 0)} className="text-center py-8">
+                <TableCell colSpan={columns.length + (showActions ? 1 : 0)} className="text-center py-8">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : sorted.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length + (actions ? 1 : 0)} className="text-center py-8 text-gray-500">
+                <TableCell colSpan={columns.length + (showActions ? 1 : 0)} className="text-center py-8 text-gray-500">
                   No records found
                 </TableCell>
               </TableRow>
@@ -152,7 +160,7 @@ export const HRTable: React.FC<HRTableProps> = ({
                       {col.render ? col.render(row[col.key], row) : row[col.key]}
                     </TableCell>
                   ))}
-                  {actions && (
+                  {showActions && (
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -161,6 +169,17 @@ export const HRTable: React.FC<HRTableProps> = ({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          {rowActions
+                            .filter((action) => !action.visible || action.visible(row))
+                            .map((action) => (
+                              <DropdownMenuItem
+                                key={action.label}
+                                onClick={() => action.onClick(row)}
+                                className={action.variant === 'destructive' ? 'text-red-600' : undefined}
+                              >
+                                {action.label}
+                              </DropdownMenuItem>
+                            ))}
                           {onView && (
                             <DropdownMenuItem onClick={() => onView(row.id, row)}>
                               View

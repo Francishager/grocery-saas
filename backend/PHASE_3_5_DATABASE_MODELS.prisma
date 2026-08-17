@@ -1,0 +1,696 @@
+// =====================================================
+// PHASE 3: FINANCIAL MANAGEMENT
+// =====================================================
+
+model GeneralLedgerAccount {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code            String    // "1000", "2000", "3000"
+  name            String    // "Cash", "Accounts Payable"
+  type            String    // Asset, Liability, Equity, Revenue, Expense
+  category        String?   // Bank, Cash, Receivable, Payable, etc.
+  subCategory     String?
+  description     String?
+  parentAccountId String?   // For hierarchical accounts
+  normalBalance   String    @default("Debit") // Debit or Credit
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  journalLines JournalEntryLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+  @@map("general_ledger_accounts")
+}
+
+model JournalEntry {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  entryNo       String    // JE001, JE002, etc.
+  description   String?
+  referenceNo   String?   // Invoice no, check no, etc.
+  postDate      DateTime  @default(now())
+  totalDebit    Float     @default(0)
+  totalCredit   Float     @default(0)
+  status        String    @default("draft") // draft, posted, reversed
+  reversedJournalId String? // If reversed, link to reversing entry
+  reversalDate  DateTime?
+  reversalReason String?
+  approvedBy    String?   // UserId
+  approvedAt    DateTime?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  lines JournalEntryLine[]
+  reconciliation AccountReconciliation[]
+  payrollPayment PayrollPayment[]
+
+  @@unique([tenantId, entryNo])
+  @@index([tenantId, postDate])
+  @@index([status])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  id              String    @id @default(cuid())
+  tenantId        String
+  journalEntryId  String
+  journalEntry    JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         GeneralLedgerAccount @relation(fields: [accountId], references: [id])
+  debitAmount     Float     @default(0)
+  creditAmount    Float     @default(0)
+  description     String?
+  lineNo          Int       // Order of lines in entry
+  createdAt       DateTime  @default(now())
+
+  @@unique([journalEntryId, lineNo])
+  @@index([accountId])
+  @@map("journal_entry_lines")
+}
+
+model AccountReconciliation {
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId          String?
+  branch            Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  accountId         String
+  statementDate     DateTime
+  statementBalance  Float
+  bookBalance       Float
+  difference        Float     // statementBalance - bookBalance
+  reconciliationDate DateTime @default(now())
+  status            String    @default("pending") // pending, reconciled, variance
+  varianceAccountId String?   // GL account for variance
+  approvedBy        String?
+  approvedAt        DateTime?
+  notes             String?
+  journalEntryId    String?
+  journalEntry      JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+
+  @@index([tenantId, accountId])
+  @@map("account_reconciliations")
+}
+
+model FinancialStatement {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type          String    // income_statement, balance_sheet, cash_flow
+  periodStart   DateTime
+  periodEnd     DateTime
+  generatedDate DateTime  @default(now())
+  totalRevenue  Float     @default(0)
+  totalExpense  Float     @default(0)
+  netProfit     Float     @default(0)
+  totalAssets   Float     @default(0)
+  totalLiabilities Float  @default(0)
+  totalEquity   Float     @default(0)
+  data          Json?     // Detailed statement data
+  createdAt     DateTime  @default(now())
+
+  @@index([tenantId, type])
+  @@map("financial_statements")
+}
+
+model BudgetAllocation {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentId    String?
+  costCenterId    String?
+  year            Int
+  quarter         Int?      // 1-4, null for annual
+  accountId       String
+  budgetAmount    Float
+  spentAmount     Float     @default(0)
+  variance        Float     @default(0) // budgetAmount - spentAmount
+  approvedBy      String?
+  approvedAt      DateTime?
+  status          String    @default("pending") // pending, approved, active
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, year])
+  @@map("budget_allocations")
+}
+
+model CostCenter {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code        String    // "CC001", "CC002"
+  name        String    // "IT Department", "Marketing"
+  description String?
+  department  String?
+  responsible String?   // UserId of manager
+  budget      Float     @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("cost_centers")
+}
+
+model InvoiceTemplate {
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String    // "Standard", "Service", "Professional"
+  isDefault    Boolean   @default(false)
+  logoUrl      String?
+  headerText   String?
+  footerText   String?
+  termsConditions String?
+  bankDetails  String?
+  taxId        String?
+  customFields Json?     // Custom fields on invoice
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@map("invoice_templates")
+}
+
+model PaymentTerm {
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String    // "Net 30", "2/10 Net 30"
+  description  String?
+  days         Int       @default(0)
+  discountPercent Float   @default(0)
+  discountDays Int       @default(0)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@map("payment_terms")
+}
+
+model AssetDepreciation {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assetName       String
+  assetCode       String
+  purchaseDate    DateTime
+  cost            Float
+  salvageValue    Float     @default(0)
+  usefulLife      Int       // years
+  depreciationMethod String @default("straight_line") // straight_line, declining_balance
+  accumulatedDepreciation Float @default(0)
+  bookValue       Float
+  status          String    @default("active")
+  disposalDate    DateTime?
+  disposalValue   Float?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, assetCode])
+  @@index([tenantId])
+  @@map("asset_depreciation")
+}
+
+model TaxConfiguration {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  taxType         String    // VAT, GST, Sales Tax, Income Tax
+  taxRate         Float     // percentage
+  effectiveFrom   DateTime
+  effectiveUntil  DateTime?
+  fileFrequency   String?   // monthly, quarterly, annually
+  authority       String?   // Tax authority name
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, taxType])
+  @@map("tax_configurations")
+}
+
+// =====================================================
+// PHASE 4: PAYROLL MANAGEMENT
+// =====================================================
+
+model SalaryComponent {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code        String    // BASE, HRA, DA, BONUS
+  name        String
+  type        String    @default("earning") // earning, deduction, loan
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([tenantId, code])
+  @@map("salary_components")
+}
+
+model SalaryStructure {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  effectiveFrom   DateTime
+  effectiveUntil  DateTime?
+  baseSalary      Float
+  totalEarnings   Float     @default(0)
+  totalDeductions Float     @default(0)
+  netSalary       Float     @default(0)
+  components      Json     // {componentId: amount, ...}
+  approvedBy      String?
+  approvedAt      DateTime?
+  status          String    @default("pending") // pending, approved, active
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, employeeId])
+  @@map("salary_structures")
+}
+
+model Deduction {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type            String    // tax, pension, health_insurance, loan
+  description     String
+  rate            Float     // percentage or fixed amount
+  isPercentage    Boolean   @default(true)
+  maxAmount       Float?
+  effectiveFrom   DateTime
+  effectiveUntil  DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, type])
+  @@map("deductions")
+}
+
+model PayrollCycle {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  year            Int
+  period          Int       // 1-12 for monthly, 1-26 for bi-weekly
+  frequency       String    @default("monthly") // weekly, bi-weekly, monthly
+  cycleStartDate  DateTime
+  cycleEndDate    DateTime
+  paymentDate     DateTime
+  status          String    @default("pending") // pending, processing, completed
+  isLocked        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, year, period])
+  @@index([tenantId, status])
+  @@map("payroll_cycles")
+}
+
+model EmployeePayroll {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  payrollCycleId  String
+  payrollCycle    PayrollCycle @relation(fields: [payrollCycleId], references: [id])
+  baseSalary      Float
+  earnings        Json      // {componentId: amount, ...}
+  deductions      Json      // {type: amount, ...}
+  totalEarnings   Float     @default(0)
+  totalDeductions Float     @default(0)
+  netSalary       Float     @default(0)
+  status          String    @default("draft") // draft, approved, processed
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([employeeId, payrollCycleId])
+  @@index([tenantId, status])
+  @@map("employee_payroll")
+}
+
+model SalarySlip {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  payrollId       String
+  month           Int
+  year            Int
+  baseSalary      Float
+  earnings        Json
+  deductions      Json
+  totalEarnings   Float
+  totalDeductions Float
+  netSalary       Float
+  pdfUrl          String?
+  emailedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@unique([tenantId, employeeId, month, year])
+  @@index([tenantId, emailedAt])
+  @@map("salary_slips")
+}
+
+model PaymentMode {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mode            String    // bank_transfer, cash, cheque, mobile_money
+  bankName        String?
+  accountNumber   String?
+  accountHolder   String?
+  swiftCode       String?
+  routingNumber   String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@map("payment_modes")
+}
+
+model TaxBracket {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  year            Int
+  country         String?
+  incomeFrom      Float
+  incomeTo        Float
+  rate            Float     // tax rate %
+  effectiveFrom   DateTime
+  effectiveUntil  DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([tenantId, year])
+  @@map("tax_brackets")
+}
+
+model BonusAllocation {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  year            Int
+  bonusType       String    // annual, performance, festival, special
+  amount          Float
+  percentage      Float?    // % of salary if applicable
+  allocatedDate   DateTime
+  paymentDate     DateTime?
+  status          String    @default("allocated") // allocated, approved, paid
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, employeeId, year])
+  @@map("bonus_allocations")
+}
+
+// =====================================================
+// PHASE 5: PERFORMANCE MANAGEMENT
+// =====================================================
+
+model PerformanceIndicator {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code          String    // KPI001, KPI002
+  name          String    // "Sales Revenue", "Quality Score"
+  description   String?
+  unit          String    // amount, percentage, count, hours
+  target        Float
+  weight        Float     @default(1.0) // importance weight
+  frequency     String    @default("monthly") // weekly, monthly, quarterly, annual
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  targets KPITarget[]
+  actuals KPIActual[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("performance_indicators")
+}
+
+model KPITarget {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  performanceIndicatorId String
+  performanceIndicator  PerformanceIndicator @relation(fields: [performanceIndicatorId], references: [id])
+  period                String    // "2024-Q1", "2024-01"
+  targetValue           Float
+  actualValue           Float     @default(0)
+  achievement           Float     @default(0) // percentage
+  status                String    @default("active")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([employeeId, performanceIndicatorId, period])
+  @@index([tenantId, period])
+  @@map("kpi_targets")
+}
+
+model KPIActual {
+  id                    String    @id @default(cuid())
+  tenantId              String
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  performanceIndicatorId String
+  performanceIndicator  PerformanceIndicator @relation(fields: [performanceIndicatorId], references: [id])
+  period                String
+  value                 Float
+  recordedDate          DateTime  @default(now())
+  recordedBy            String    // UserId
+  notes                 String?
+  createdAt             DateTime  @default(now())
+
+  @@index([tenantId, employeeId, period])
+  @@map("kpi_actuals")
+}
+
+model PerformanceReview {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  cycle           String    // "2024-Annual", "2024-H1"
+  period          String    // Start and end date
+  reviewer        String    // UserId (direct manager)
+  selfReview      Boolean   @default(false)
+  status          String    @default("draft") // draft, in_progress, completed
+  overallRating   Float?    // 1-5
+  notes           String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  nextReviewDate  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  ratings ReviewRating[]
+  feedback ReviewFeedback[]
+  appraisal PerformanceAppraisal?
+
+  @@unique([employeeId, cycle])
+  @@index([tenantId, status])
+  @@map("performance_reviews")
+}
+
+model ReviewCriterion {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String    // "Communication", "Leadership", "Technical Skills"
+  description   String?
+  weight        Float     @default(1.0)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  ratings ReviewRating[]
+
+  @@unique([tenantId, name])
+  @@map("review_criteria")
+}
+
+model ReviewRating {
+  id            String    @id @default(cuid())
+  reviewId      String
+  review        PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  criterionId   String
+  criterion     ReviewCriterion @relation(fields: [criterionId], references: [id])
+  rating        Float     // 1-5, or percentage
+  comment       String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([reviewId, criterionId])
+  @@map("review_ratings")
+}
+
+model PerformanceAppraisal {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewId        String    @unique
+  review          PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  overallScore    Float
+  recommendation  String    // Promotion, Retain, Improvement needed
+  developmentAreas Json?    // Areas for improvement
+  strengths       Json?    // Key strengths
+  appraisalDate   DateTime  @default(now())
+  approvedBy      String?
+  approvedAt      DateTime?
+  status          String    @default("draft")
+  createdAt       DateTime  @default(now())
+
+  developmentPlan DevelopmentPlan?
+
+  @@index([tenantId, employeeId])
+  @@map("performance_appraisals")
+}
+
+model GoalSetting {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  period          String    // "2024-Q1", "2024-Annual"
+  title           String    // SMART goal title
+  description     String?
+  specific        String?   // Specific outcome
+  measurable      String?   // How to measure
+  achievable      String?   // Realistic approach
+  relevant        String?   // Relevant to role
+  timebound       String?   // Timeline
+  targetDate      DateTime
+  priority        String    @default("medium") // high, medium, low
+  status          String    @default("active") // active, completed, abandoned
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  progress GoalProgress[]
+
+  @@index([tenantId, employeeId, status])
+  @@map("goal_settings")
+}
+
+model GoalProgress {
+  id              String    @id @default(cuid())
+  goalId          String
+  goal            GoalSetting @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  completionPercent Float   @default(0)
+  notes           String?
+  updateDate      DateTime  @default(now())
+
+  @@index([goalId])
+  @@map("goal_progress")
+}
+
+model ReviewFeedback {
+  id              String    @id @default(cuid())
+  reviewId        String
+  review          PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  feedbackFrom    String    // UserId (reviewer name/dept)
+  feedbackType    String    // upward, downward, peer, self
+  feedback        String
+  submittedAt     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  @@index([reviewId])
+  @@map("review_feedback")
+}
+
+model DevelopmentPlan {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  appraisalId     String    @unique
+  appraisal       PerformanceAppraisal @relation(fields: [appraisalId], references: [id], onDelete: Cascade)
+  trainings       Json?     // [{ course: "", startDate: "", completionDate: "" }]
+  mentoring       String?   // Mentor assignment
+  projects        Json?     // Stretch projects
+  certifications  Json?     // Required certifications
+  timeline        String?   // Implementation timeline
+  status          String    @default("pending") // pending, active, completed
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId, employeeId])
+  @@map("development_plans")
+}
+
+// Update Employee model to include new relations (add to existing model)
+// Add these to Employee model in main schema:
+// salaryStructure SalaryStructure[]
+// kpiTargets KPITarget[]
+// kpiActuals KPIActual[]
+// bonusAllocations BonusAllocation[]
+// performanceReviews PerformanceReview[]
+// goalSettings GoalSetting[]
+// developmentPlans DevelopmentPlan[]
+
+// Update Branch model to include accounting relations
+// Add these to Branch model:
+// generalLedgerAccounts GeneralLedgerAccount[]
+// journalEntries JournalEntry[]
+// accountReconciliations AccountReconciliation[]
+
+// Update Tenant model to include new relations
+// Add these to Tenant model:
+// generalLedgerAccounts GeneralLedgerAccount[]
+// journalEntries JournalEntry[]
+// accountReconciliations AccountReconciliation[]
+// financialStatements FinancialStatement[]
+// budgetAllocations BudgetAllocation[]
+// costCenters CostCenter[]
+// invoiceTemplates InvoiceTemplate[]
+// paymentTerms PaymentTerm[]
+// assetDepreciations AssetDepreciation[]
+// taxConfigurations TaxConfiguration[]
+// salaryComponents SalaryComponent[]
+// salaryStructures SalaryStructure[]
+// deductions Deduction[]
+// payrollCycles PayrollCycle[]
+// employeePayroll EmployeePayroll[]
+// salarySlips SalarySlip[]
+// paymentModes PaymentMode[]
+// taxBrackets TaxBracket[]
+// bonusAllocations BonusAllocation[]
+// performanceIndicators PerformanceIndicator[]
+// kpiTargets KPITarget[]
+// kpiActuals KPIActual[]
+// performanceReviews PerformanceReview[]
+// reviewCriteria ReviewCriterion[]
+// performanceAppraisals PerformanceAppraisal[]
+// goalSettings GoalSetting[]
+// developmentPlans DevelopmentPlan[]

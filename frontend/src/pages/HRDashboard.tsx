@@ -208,10 +208,10 @@ export default function HRDashboard() {
             Create Payroll
           </a>
           <a
-            href="/hr/config"
+            href="/tenant/roles"
             className="px-4 py-3 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition text-center font-medium"
           >
-            HR Settings
+            Roles & Permissions
           </a>
         </div>
       </div>

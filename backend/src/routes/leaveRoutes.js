@@ -4,15 +4,22 @@
  */
 
 import express from 'express';
-import { requireAuth, requirePermission, requireTenant } from '../middleware/auth.js';
+import { requireAuth, requireTenant } from '../middleware/authMiddleware.js';
 import leaveTypeService from '../services/leaveTypeService.js';
 import leaveRequestService from '../services/leaveRequestService.js';
+import hrPermissionService from '../services/hrPermissionService.js';
 
 const router = express.Router();
 
 // Middleware
 router.use(requireAuth);
 router.use(requireTenant);
+
+const requireHRPermission = (permissionCode) => async (req, res, next) => {
+  const tenantId = req.tenant?.id || req.user?.tenantId || req.user?.tenant_id;
+  if (await hrPermissionService.hasPermission(tenantId, req.user.id, permissionCode)) return next();
+  return res.status(403).json({ success: false, message: 'Permission denied', required: permissionCode });
+};
 
 /**
  * Leave Type Management (Admin)
@@ -31,7 +38,7 @@ router.get('/leave-types', async (req, res) => {
 });
 
 // Create leave type
-router.post('/leave-types', requirePermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
+router.post('/leave-types', requireHRPermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { name, code, daysAllowedPerYear, ...data } = req.body;
@@ -66,7 +73,7 @@ router.get('/leave-types/:id', async (req, res) => {
 });
 
 // Update leave type
-router.put('/leave-types/:id', requirePermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
+router.put('/leave-types/:id', requireHRPermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -79,7 +86,7 @@ router.put('/leave-types/:id', requirePermission('LEAVE_TYPE_MANAGE'), async (re
 });
 
 // Deactivate leave type
-router.delete('/leave-types/:id', requirePermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
+router.delete('/leave-types/:id', requireHRPermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -123,11 +130,11 @@ router.get('/leave-requests', async (req, res) => {
 router.post('/leave-requests', async (req, res) => {
   try {
     const tenantId = req.tenant.id;
-    const employeeId = req.user.id; // Or from body if admin creating for employee
+    const employeeId = req.body.employeeId;
     const { leaveTypeId, startDate, endDate, reason, contactDuringLeave, replacementEmployeeId } = req.body;
 
-    if (!leaveTypeId || !startDate || !endDate) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    if (!employeeId || !leaveTypeId || !startDate || !endDate) {
+      return res.status(400).json({ success: false, message: 'Employee, leave type, start date, and end date are required' });
     }
 
     const request = await leaveRequestService.createRequest(tenantId, employeeId, {
@@ -144,14 +151,26 @@ router.post('/leave-requests', async (req, res) => {
   }
 });
 
+// Get pending approvals for current user
+router.get('/leave-requests/pending-approvals', async (req, res) => {
+  try {
+    const tenantId = req.tenant.id;
+
+    const pending = await leaveRequestService.getPendingApprovals(tenantId, req.user.id);
+    res.json({ success: true, data: pending });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // Get single leave request
 router.get('/leave-requests/:id', async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    // TODO: Implement get single request
-    res.json({ success: true, message: 'Get single request not yet implemented' });
+    const request = await leaveRequestService.getRequest(tenantId, id);
+    res.json({ success: true, data: request });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -163,8 +182,8 @@ router.put('/leave-requests/:id', async (req, res) => {
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    // TODO: Implement update method
-    res.json({ success: true, message: 'Update not yet implemented' });
+    const request = await leaveRequestService.updateRequest(tenantId, id, req.body);
+    res.json({ success: true, data: request, message: 'Leave request updated' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -202,21 +221,8 @@ router.delete('/leave-requests/:id', async (req, res) => {
  * Leave Approval Workflow
  */
 
-// Get pending approvals for current user
-router.get('/leave-requests/pending-approvals', async (req, res) => {
-  try {
-    const tenantId = req.tenant.id;
-    const approverId = req.user.id;
-
-    const pending = await leaveRequestService.getPendingApprovals(tenantId, approverId);
-    res.json({ success: true, data: pending });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-});
-
 // Manager Level 1 approval
-router.post('/leave-requests/:id/approve-l1', requirePermission('LEAVE_APPROVE_L1'), async (req, res) => {
+router.post('/leave-requests/:id/approve-l1', requireHRPermission('LEAVE_APPROVE_L1'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -231,7 +237,7 @@ router.post('/leave-requests/:id/approve-l1', requirePermission('LEAVE_APPROVE_L
 });
 
 // HR Level 2 approval
-router.post('/leave-requests/:id/approve-l2', requirePermission('LEAVE_APPROVE_L2'), async (req, res) => {
+router.post('/leave-requests/:id/approve-l2', requireHRPermission('LEAVE_APPROVE_L2'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -315,7 +321,7 @@ router.get('/leave-availability/:employeeId/:leaveTypeId/:days', async (req, res
  */
 
 // Allocate leave for new year
-router.post('/leave-types/allocate/:year', requirePermission('LEAVE_ALLOCATE'), async (req, res) => {
+router.post('/leave-types/allocate/:year', requireHRPermission('LEAVE_ALLOCATE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { year } = req.params;
@@ -328,7 +334,7 @@ router.post('/leave-types/allocate/:year', requirePermission('LEAVE_ALLOCATE'), 
 });
 
 // Carryover leaves from one year to next
-router.post('/leave-types/carryover/:fromYear/:toYear', requirePermission('LEAVE_ALLOCATE'), async (req, res) => {
+router.post('/leave-types/carryover/:fromYear/:toYear', requireHRPermission('LEAVE_ALLOCATE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { fromYear, toYear } = req.params;

@@ -129,7 +129,7 @@ export default function ShiftManagementPage() {
       })
 
       if (res.ok) {
-        toast({ title: 'Success', description: editingId ? 'Template updated' : 'Template created' })
+        toast({ title: 'Success', description: editingId ? 'Shift updated' : 'Shift created' })
         setOpenDialog(false)
         setFormData({ name: '', code: '', startTime: '09:00', endTime: '17:00', breakDuration: 60 })
         setEditingId(null)
@@ -141,12 +141,28 @@ export default function ShiftManagementPage() {
   }
 
   const handleDeleteTemplate = async (id: string) => {
-    if (!confirm('Delete this shift template?')) return
+    if (!confirm('Delete this shift?')) return
     try {
       const res = await apiFetch(`/api/hr/shifts/templates/${id}`, { method: 'DELETE' })
       if (res.ok) {
-        toast({ title: 'Success', description: 'Template deleted' })
+        toast({ title: 'Success', description: 'Shift deleted' })
         fetchTemplates()
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: (error as Error).message, variant: 'destructive' })
+    }
+  }
+
+  const handleEndAssignment = async (id: string) => {
+    if (!confirm('End this shift assignment?')) return
+    try {
+      const res = await apiFetch(`/api/hr/shifts/assignments/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        toast({ title: 'Success', description: 'Assignment ended' })
+        fetchAssignments()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ title: 'Error', description: data.message || 'Failed to end assignment', variant: 'destructive' })
       }
     } catch (error) {
       toast({ title: 'Error', description: (error as Error).message, variant: 'destructive' })
@@ -175,7 +191,7 @@ export default function ShiftManagementPage() {
                   setOpenDialog(true)
                 }}
               >
-                + New Shift Template
+                + New Shift
               </Button>
             )}
           </div>
@@ -189,7 +205,7 @@ export default function ShiftManagementPage() {
                 tab === 'templates' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'
               }`}
             >
-              Shift Templates
+              Shifts
             </button>
             <button
               onClick={() => setTab('assignments')}
@@ -201,7 +217,7 @@ export default function ShiftManagementPage() {
             </button>
           </div>
 
-          {/* Templates Tab */}
+          {/* Shifts Tab */}
           {tab === 'templates' && (
             <HRTable
               columns={templateColumns}
@@ -240,9 +256,9 @@ export default function ShiftManagementPage() {
               loading={loading}
               actions={[
                 {
-                  label: 'View',
-                  onClick: (row) => toast({ title: 'Info', description: 'Detailed view coming soon' }),
-                  variant: 'outline',
+                  label: 'End',
+                  onClick: (row) => handleEndAssignment(row.id),
+                  variant: 'destructive',
                 },
               ]}
             />
@@ -250,11 +266,11 @@ export default function ShiftManagementPage() {
         </CardContent>
       </Card>
 
-      {/* Template Dialog */}
+      {/* Shift Dialog */}
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingId ? 'Edit Shift Template' : 'New Shift Template'}</DialogTitle>
+            <DialogTitle>{editingId ? 'Edit Shift' : 'New Shift'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>

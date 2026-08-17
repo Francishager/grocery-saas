@@ -4,15 +4,22 @@
  */
 
 import express from 'express';
-import { requireAuth, requirePermission, requireTenant } from '../middleware/auth.js';
+import { requireAuth, requireTenant } from '../middleware/authMiddleware.js';
 import attendanceService from '../services/attendanceService.js';
 import attendanceConfigService from '../services/attendanceConfigService.js';
+import hrPermissionService from '../services/hrPermissionService.js';
 
 const router = express.Router();
 
 // Middleware
 router.use(requireAuth);
 router.use(requireTenant);
+
+const requireHRPermission = (permissionCode) => async (req, res, next) => {
+  const tenantId = req.tenant?.id || req.user?.tenantId || req.user?.tenant_id;
+  if (await hrPermissionService.hasPermission(tenantId, req.user.id, permissionCode)) return next();
+  return res.status(403).json({ success: false, message: 'Permission denied', required: permissionCode });
+};
 
 /**
  * Check-in Operations
@@ -25,7 +32,7 @@ router.post('/attendance/checkin', async (req, res) => {
     const tenantId = req.tenant.id;
     const method = 'MANUAL';
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, method, location);
+    const record = await attendanceService.checkIn(tenantId, employeeId, method, location, req.user.id);
     res.json({ success: true, data: record, message: 'Check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -41,7 +48,7 @@ router.post('/attendance/qr-checkin', async (req, res) => {
     // Validate QR data (decode employee ID from QR)
     if (!qrData) throw new Error('Invalid QR code');
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, 'QR_CODE', location);
+    const record = await attendanceService.checkIn(tenantId, employeeId, 'QR_CODE', location, req.user.id);
     res.json({ success: true, data: record, message: 'QR check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -56,7 +63,7 @@ router.post('/attendance/biometric-checkin', async (req, res) => {
 
     if (!biometricData) throw new Error('Biometric data required');
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, 'BIOMETRIC', location);
+    const record = await attendanceService.checkIn(tenantId, employeeId, 'BIOMETRIC', location, req.user.id);
     res.json({ success: true, data: record, message: 'Biometric check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -69,7 +76,7 @@ router.post('/attendance/checkout', async (req, res) => {
     const { employeeId, location } = req.body;
     const tenantId = req.tenant.id;
 
-    const record = await attendanceService.checkOut(tenantId, employeeId, location);
+    const record = await attendanceService.checkOut(tenantId, employeeId, location, req.user.id);
     res.json({ success: true, data: record, message: 'Check-out recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -113,27 +120,25 @@ router.get('/attendance/:id', async (req, res) => {
 });
 
 // Update attendance record (admin only)
-router.put('/attendance/:id', requirePermission('ATTENDANCE_EDIT'), async (req, res) => {
+router.put('/attendance/:id', requireHRPermission('ATTENDANCE_EDIT'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
-    const { status, notes } = req.body;
 
-    // Note: Current implementation doesn't have update method
-    // Would need to add to attendanceService
-    res.status(501).json({ message: 'Update endpoint not yet implemented' });
+    const record = await attendanceService.updateRecord(tenantId, id, req.body, req.user.id);
+    res.json({ success: true, data: record, message: 'Attendance updated' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
 // Soft-delete attendance record
-router.delete('/attendance/:id', requirePermission('ATTENDANCE_EDIT'), async (req, res) => {
+router.delete('/attendance/:id', requireHRPermission('ATTENDANCE_EDIT'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    const record = await attendanceService.deleteRecord(tenantId, id);
+    const record = await attendanceService.deleteRecord(tenantId, id, req.user.id);
     res.json({ success: true, data: record, message: 'Record deleted' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -141,7 +146,7 @@ router.delete('/attendance/:id', requirePermission('ATTENDANCE_EDIT'), async (re
 });
 
 // Approve attendance record
-router.post('/attendance/:id/approve', requirePermission('ATTENDANCE_APPROVE'), async (req, res) => {
+router.post('/attendance/:id/approve', requireHRPermission('ATTENDANCE_APPROVE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -159,7 +164,7 @@ router.post('/attendance/:id/approve', requirePermission('ATTENDANCE_APPROVE'), 
  */
 
 // Batch import attendance
-router.post('/attendance/batch-import', requirePermission('ATTENDANCE_IMPORT'), async (req, res) => {
+router.post('/attendance/batch-import', requireHRPermission('ATTENDANCE_IMPORT'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { records } = req.body;
@@ -245,8 +250,9 @@ router.get('/attendance/stats/:branchId', async (req, res) => {
 // Get audit history for record
 router.get('/attendance/audit/:recordId', async (req, res) => {
   try {
-    // TODO: Implement audit trail retrieval
-    res.json({ success: true, data: [], message: 'Audit trail for record' });
+    const tenantId = req.tenant.id;
+    const data = await attendanceService.getAudit(tenantId, req.params.recordId);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -270,7 +276,7 @@ router.get('/config/attendance', async (req, res) => {
 });
 
 // Update attendance configuration
-router.put('/config/attendance', requirePermission('ATTENDANCE_CONFIG'), async (req, res) => {
+router.put('/config/attendance', requireHRPermission('ATTENDANCE_CONFIG'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId, ...updates } = req.body;
@@ -283,7 +289,7 @@ router.put('/config/attendance', requirePermission('ATTENDANCE_CONFIG'), async (
 });
 
 // Enable biometric
-router.post('/config/attendance/enable-biometric', requirePermission('ATTENDANCE_CONFIG'), async (req, res) => {
+router.post('/config/attendance/enable-biometric', requireHRPermission('ATTENDANCE_CONFIG'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId } = req.body;
@@ -296,7 +302,7 @@ router.post('/config/attendance/enable-biometric', requirePermission('ATTENDANCE
 });
 
 // Enable QR code
-router.post('/config/attendance/enable-qr', requirePermission('ATTENDANCE_CONFIG'), async (req, res) => {
+router.post('/config/attendance/enable-qr', requireHRPermission('ATTENDANCE_CONFIG'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId } = req.body;

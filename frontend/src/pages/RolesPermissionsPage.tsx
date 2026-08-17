@@ -20,6 +20,30 @@ const PERM_LABELS: Record<string, string> = {
   canCreateReceivable:'Can create credit sales', canViewReceivable:'Can view receivables', canEditReceivable:'Can edit receivables', canDeleteReceivable:'Can delete receivables',
   canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
   canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaff:'Can edit staff', canDeleteStaff:'Can delete staff',
+  canViewHR:'Can view HR management',
+  canCreateHREmployee:'Can create HR employees',
+  canEditHREmployee:'Can edit HR employees',
+  canDeleteHREmployee:'Can delete HR employees',
+  canManageHRStructure:'Can manage HR departments, positions, units and teams',
+  canViewHRContracts:'Can view HR contracts',
+  canManageHRContracts:'Can manage HR contracts',
+  canViewHRDocuments:'Can view HR documents',
+  canManageHRDocuments:'Can manage HR documents',
+  canViewHRSalaries:'Can view HR salaries',
+  canManageHRSalaries:'Can manage HR salary records',
+  canViewHRAttendance:'Can view HR attendance',
+  canManageHRAttendance:'Can manage HR attendance',
+  canApproveHRAttendance:'Can approve HR attendance',
+  canViewHRShifts:'Can view HR shifts',
+  canManageHRShifts:'Can manage HR shifts',
+  canAssignHRShifts:'Can assign HR shifts',
+  canApproveHRShifts:'Can approve HR shift changes',
+  canViewHRLeave:'Can view HR leave',
+  canRequestHRLeave:'Can request HR leave',
+  canManageHRLeaveTypes:'Can manage HR leave types',
+  canApproveHRLeave:'Can approve HR leave',
+  canViewHRPayroll:'Can view HR payroll',
+  canManageHRPayroll:'Can manage HR payroll',
   canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
   canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance reports', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
   canViewSettings:'Can view settings', canEditSettings:'Can edit settings', canGiveDiscount:'Can give discounts',
@@ -45,6 +69,15 @@ const ACCOUNTING_ACCESS_KEYS = [
 ]
 
 const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaff', 'canDeleteStaff']
+const HR_PERMISSION_KEYS = [
+  'canViewHR', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee',
+  'canManageHRStructure', 'canViewHRContracts', 'canManageHRContracts',
+  'canViewHRDocuments', 'canManageHRDocuments', 'canViewHRSalaries', 'canManageHRSalaries',
+  'canViewHRAttendance', 'canManageHRAttendance', 'canApproveHRAttendance',
+  'canViewHRShifts', 'canManageHRShifts', 'canAssignHRShifts', 'canApproveHRShifts',
+  'canViewHRLeave', 'canRequestHRLeave', 'canManageHRLeaveTypes', 'canApproveHRLeave',
+  'canViewHRPayroll', 'canManageHRPayroll',
+]
 const EXPENSE_PERMISSION_KEYS = ['canCreateExpense', 'canViewExpense', 'canEditExpense', 'canDeleteExpense']
 
 const REPORT_PERMISSION_KEYS = [
@@ -66,6 +99,7 @@ const PERM_GROUPS = [
   { label: 'Receivables', prefix: 'Receivable' },
   { label: 'Suppliers', prefix: 'Supplier' },
   { label: 'Staff', matcher: (key: string) => STAFF_PERMISSION_KEYS.includes(key) },
+  { label: 'HR Management', matcher: (key: string) => HR_PERMISSION_KEYS.includes(key) },
   { label: 'Branches', prefix: 'Branch' },
   { label: 'Reports', matcher: (key: string) => REPORT_PERMISSION_KEYS.includes(key) },
   { label: 'Settings', prefix: 'Settings' },

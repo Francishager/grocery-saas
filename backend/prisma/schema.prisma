@@ -176,7 +176,6 @@ model Tenant {
   salaryHistories     SalaryHistory[]     @relation("TenantSalaryHistory")
   employmentHistories EmploymentHistory[] @relation("TenantEmploymentHistory")
   hrModuleFeatures    HRModuleFeature[]   @relation("TenantHRFeatures")
-  hrPermissions       HRPermission[]      @relation("TenantHRPermissions")
 
   stockTransfers   StockTransfer[]
   notifications    Notification[]
@@ -517,6 +516,31 @@ model UserPermission {
   canViewStaff                 Boolean  @default(true)
   canEditStaff                 Boolean  @default(false)
   canDeleteStaff               Boolean  @default(false)
+  // HR Management
+  canViewHR                    Boolean  @default(false)
+  canCreateHREmployee          Boolean  @default(false)
+  canEditHREmployee            Boolean  @default(false)
+  canDeleteHREmployee          Boolean  @default(false)
+  canManageHRStructure         Boolean  @default(false)
+  canViewHRContracts           Boolean  @default(false)
+  canManageHRContracts         Boolean  @default(false)
+  canViewHRDocuments           Boolean  @default(false)
+  canManageHRDocuments         Boolean  @default(false)
+  canViewHRSalaries            Boolean  @default(false)
+  canManageHRSalaries          Boolean  @default(false)
+  canViewHRAttendance          Boolean  @default(false)
+  canManageHRAttendance        Boolean  @default(false)
+  canApproveHRAttendance       Boolean  @default(false)
+  canViewHRShifts              Boolean  @default(false)
+  canManageHRShifts            Boolean  @default(false)
+  canAssignHRShifts            Boolean  @default(false)
+  canApproveHRShifts           Boolean  @default(false)
+  canViewHRLeave               Boolean  @default(false)
+  canRequestHRLeave            Boolean  @default(false)
+  canManageHRLeaveTypes        Boolean  @default(false)
+  canApproveHRLeave            Boolean  @default(false)
+  canViewHRPayroll             Boolean  @default(false)
+  canManageHRPayroll           Boolean  @default(false)
   // Branches
   canCreateBranch              Boolean  @default(false)
   canViewBranch                Boolean  @default(true)
@@ -1634,6 +1658,8 @@ model Employee {
   firstName     String
   middleName    String? // Phase 1: New
   lastName      String
+  employeeNumber String?
+  profilePhoto   String?
   email         String?
   phone         String?
   gender        String? // male, female, other (Phase 1: New)
@@ -1663,6 +1689,9 @@ model Employee {
   emergencyContactName         String?
   emergencyContactPhone        String?
   emergencyContactRelationship String?
+  nextOfKinName                 String?
+  nextOfKinPhone                String?
+  nextOfKinRelationship         String?
 
   // =====================
   // BANK ACCOUNT (Phase 1: New)
@@ -1700,6 +1729,13 @@ model Employee {
   jobTitle             String?
   basicSalary          Float     @default(0) // Base monthly salary
   payFrequency         String    @default("monthly") // weekly, biweekly, monthly
+  employmentType       String    @default("permanent") // permanent, contract, temporary, casual, part-time, intern, consultant
+  workLocation         String?
+  costCentre           String?
+  probationStartDate   DateTime?
+  probationEndDate     DateTime?
+  contractStartDate    DateTime?
+  contractEndDate      DateTime?
   hireDate             DateTime  @default(now())
   terminationDate      DateTime?
   status               String    @default("active") // active, terminated, on_leave, suspended, on_probation
@@ -1731,6 +1767,7 @@ model Employee {
 
   @@index([tenantId])
   @@index([branchId])
+  @@index([tenantId, employeeNumber])
   @@index([departmentId])
   @@index([positionId])
   @@index([supervisorId])
@@ -3643,24 +3680,6 @@ model HRModuleFeature {
 }
 
 // =====================================================
-// HR PERMISSIONS (Granular RBAC)
-// =====================================================
-
-model HRPermission {
-  id             String   @id @default(cuid())
-  tenantId       String
-  tenant         Tenant   @relation("TenantHRPermissions", fields: [tenantId], references: [id], onDelete: Cascade)
-  roleId         String // Reference to a role (User.role or custom role)
-  permissionCode String // e.g., "hr.dashboard.view", "employee.create", "payroll.approve"
-  description    String?
-  createdAt      DateTime @default(now())
-
-  @@unique([tenantId, roleId, permissionCode])
-  @@index([tenantId, roleId])
-  @@map("hr_permissions")
-}
-
-// =====================================================
 // PHASE 2: LEAVE TYPE CONFIGURATION
 // =====================================================
 
@@ -3890,4 +3909,3 @@ model ShiftSwap {
 // =====================================================
 // PHASE 2: LEAVE MANAGEMENT (LeaveType, LeaveBalance, LeaveHistory added)
 // =====================================================
-

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
@@ -8,54 +8,72 @@ import { Badge } from '@/components/ui/badge'
 interface CheckInState {
   checkedIn: boolean
   checkInTime?: string
-  duration?: string
+}
+
+interface EmployeeOption {
+  id: string
+  firstName: string
+  lastName: string
+  employeeNumber?: string
 }
 
 export default function AttendanceCheckPage() {
   const { toast } = useToast()
   const [state, setState] = useState<CheckInState>({ checkedIn: false })
   const [loading, setLoading] = useState(false)
-  const [location, setLocation] = useState<string>('')
+  const [location, setLocation] = useState('')
   const [geoLocation, setGeoLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [employees, setEmployees] = useState<EmployeeOption[]>([])
+  const [employeeId, setEmployeeId] = useState('')
 
   useEffect(() => {
-    // Get current location
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((position) => {
-        setGeoLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        })
+        setGeoLocation({ lat: position.coords.latitude, lng: position.coords.longitude })
       })
     }
-  }, [])
+
+    const loadEmployees = async () => {
+      try {
+        const res = await apiFetch('/api/hr/employees?take=500')
+        if (!res.ok) throw new Error('Failed to load employees')
+        const data = await res.json()
+        const rows = Array.isArray(data.data) ? data.data : []
+        setEmployees(rows)
+        if (rows.length > 0) setEmployeeId(rows[0].id)
+      } catch (error) {
+        toast({ title: 'Error', description: (error as Error).message, variant: 'destructive' })
+      }
+    }
+
+    loadEmployees()
+  }, [toast])
+
+  const selectedEmployeeName = employees
+    .filter((employee) => employee.id === employeeId)
+    .map((employee) => [employee.employeeNumber, employee.firstName, employee.lastName].filter(Boolean).join(' - '))[0]
+
+  const payload = () => {
+    if (!employeeId) throw new Error('Select an employee first')
+    const data: any = { employeeId }
+    if (location) data.location = location
+    if (geoLocation) data.location = [location, `${geoLocation.lat.toFixed(6)},${geoLocation.lng.toFixed(6)}`].filter(Boolean).join(' | ')
+    return data
+  }
 
   const handleCheckIn = async () => {
     try {
       setLoading(true)
-      const payload: any = {
-        employeeId: localStorage.getItem('userId'),
-        method: 'MANUAL',
-      }
-
-      if (location) payload.location = location
-      if (geoLocation) {
-        payload.latitude = geoLocation.lat
-        payload.longitude = geoLocation.lng
-      }
-
       const res = await apiFetch('/api/hr/attendance/checkin', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload()),
       })
-
-      if (res.ok) {
-        const data = await res.json()
-        setState({ checkedIn: true, checkInTime: new Date().toLocaleTimeString() })
-        toast({ title: 'Success', description: 'Checked in successfully' })
-      } else {
-        toast({ title: 'Error', description: 'Failed to check in', variant: 'destructive' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message || 'Failed to check in')
       }
+      setState({ checkedIn: true, checkInTime: new Date().toLocaleTimeString() })
+      toast({ title: 'Checked in', description: selectedEmployeeName || 'Attendance recorded' })
     } catch (error) {
       toast({ title: 'Error', description: (error as Error).message, variant: 'destructive' })
     } finally {
@@ -66,28 +84,16 @@ export default function AttendanceCheckPage() {
   const handleCheckOut = async () => {
     try {
       setLoading(true)
-      const payload: any = {
-        employeeId: localStorage.getItem('userId'),
-      }
-
-      if (location) payload.location = location
-      if (geoLocation) {
-        payload.latitude = geoLocation.lat
-        payload.longitude = geoLocation.lng
-      }
-
       const res = await apiFetch('/api/hr/attendance/checkout', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload()),
       })
-
-      if (res.ok) {
-        const data = await res.json()
-        setState({ checkedIn: false })
-        toast({ title: 'Success', description: 'Checked out successfully' })
-      } else {
-        toast({ title: 'Error', description: 'Failed to check out', variant: 'destructive' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message || 'Failed to check out')
       }
+      setState({ checkedIn: false })
+      toast({ title: 'Checked out', description: selectedEmployeeName || 'Attendance updated' })
     } catch (error) {
       toast({ title: 'Error', description: (error as Error).message, variant: 'destructive' })
     } finally {
@@ -96,89 +102,57 @@ export default function AttendanceCheckPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-4 md:p-6">
       <Card>
         <CardHeader>
           <CardTitle>Attendance Check-In/Out</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Status Display */}
-          <div className="p-6 bg-gray-50 rounded-lg text-center">
+          <div className="rounded-lg bg-muted/40 p-6 text-center">
             <div className="mb-3">
               <Badge variant={state.checkedIn ? 'default' : 'secondary'}>
-                {state.checkedIn ? 'Checked In' : 'Checked Out'}
+                {state.checkedIn ? 'Checked In' : 'Ready'}
               </Badge>
             </div>
-            {state.checkInTime && (
-              <div className="text-2xl font-bold text-blue-600 mb-2">
-                {state.checkInTime}
-              </div>
-            )}
+            <div className="text-sm text-muted-foreground">{selectedEmployeeName || 'Select an employee'}</div>
+            {state.checkInTime && <div className="mt-2 text-2xl font-semibold text-primary">{state.checkInTime}</div>}
           </div>
 
-          {/* Location Section */}
-          <div className="space-y-3">
-            <label className="text-sm font-medium">Location (Optional)</label>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Employee</label>
+            <select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} className="w-full rounded border p-2">
+              <option value="">Select employee</option>
+              {employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {[employee.employeeNumber, employee.firstName, employee.lastName].filter(Boolean).join(' - ')}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Location</label>
             <input
               type="text"
               value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="e.g., Main Office, Branch 2"
-              className="w-full border rounded p-2"
+              onChange={(event) => setLocation(event.target.value)}
+              placeholder="Office, branch, site, or station"
+              className="w-full rounded border p-2"
             />
             {geoLocation && (
-              <div className="text-xs text-gray-500">
-                GPS: {geoLocation.lat.toFixed(4)}, {geoLocation.lng.toFixed(4)}
+              <div className="text-xs text-muted-foreground">
+                GPS captured: {geoLocation.lat.toFixed(4)}, {geoLocation.lng.toFixed(4)}
               </div>
             )}
           </div>
 
-          {/* Action Buttons */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Button
-              onClick={handleCheckIn}
-              disabled={state.checkedIn || loading}
-              className="h-12 text-lg"
-              variant={state.checkedIn ? 'secondary' : 'default'}
-            >
+          <div className="grid gap-3 md:grid-cols-2">
+            <Button onClick={handleCheckIn} disabled={state.checkedIn || loading || !employeeId} className="h-12">
               {loading ? 'Processing...' : 'Check In'}
             </Button>
-            <Button
-              onClick={handleCheckOut}
-              disabled={!state.checkedIn || loading}
-              className="h-12 text-lg"
-              variant={!state.checkedIn ? 'secondary' : 'destructive'}
-            >
+            <Button onClick={handleCheckOut} disabled={!state.checkedIn || loading || !employeeId} variant="destructive" className="h-12">
               {loading ? 'Processing...' : 'Check Out'}
             </Button>
-          </div>
-
-          {/* Method Variants */}
-          <div className="pt-6 border-t space-y-3">
-            <h3 className="font-medium">Quick Check-In Methods</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Button
-                variant="outline"
-                className="h-10"
-                onClick={() => toast({ title: 'Info', description: 'QR code scanning not yet implemented' })}
-              >
-                📱 Scan QR Code
-              </Button>
-              <Button
-                variant="outline"
-                className="h-10"
-                onClick={() => toast({ title: 'Info', description: 'Biometric scanning not yet implemented' })}
-              >
-                👆 Biometric
-              </Button>
-              <Button
-                variant="outline"
-                className="h-10"
-                onClick={() => toast({ title: 'Info', description: 'Mobile app integration coming soon' })}
-              >
-                📲 Mobile App
-              </Button>
-            </div>
           </div>
         </CardContent>
       </Card>

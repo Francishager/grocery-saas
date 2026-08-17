@@ -1,326 +1,306 @@
-/**
- * Attendance Service - Manages attendance records and tracking
- * Supports multiple check-in methods: manual, QR code, biometric
- */
+import prisma from '../db.js';
 
-const db = require('../../config/db');
+function dayRange(value = new Date()) {
+  const start = new Date(value);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+function employeeName(employee) {
+  return [employee?.firstName, employee?.lastName].filter(Boolean).join(' ').trim();
+}
+
+function mapRecord(record) {
+  return {
+    ...record,
+    date: record.attendanceDate,
+    employeeName: employeeName(record.employee),
+    isApproved: Boolean(record.approvedAt),
+  };
+}
 
 class AttendanceService {
-  /**
-   * Record check-in for employee
-   */
-  async checkIn(tenantId, employeeId, method, location = null) {
-    try {
-      const today = new Date().toDateString();
-      const checkInTime = new Date();
-
-      // Check if already checked in today
-      const existing = await db.attendance_records.findFirst({
-        where: {
-          tenantId,
-          employeeId,
-          attendanceDate: {
-            gte: new Date(today),
-            lt: new Date(new Date(today).getTime() + 86400000),
-          },
-          isActive: true,
-        },
-      });
-
-      if (existing && existing.checkInTime && !existing.checkOutTime) {
-        throw new Error('Employee already checked in today');
-      }
-
-      const record = await db.attendance_records.create({
-        data: {
-          tenantId,
-          employeeId,
-          attendanceDate: new Date(today),
-          checkInTime,
-          method,
-          location,
-          status: 'present',
-          isActive: true,
-        },
-      });
-
-      // Audit trail
-      await this.createAudit(tenantId, record.id, 'SYSTEM', 'created', null, record);
-
-      return record;
-    } catch (error) {
-      throw new Error(`Check-in failed: ${error.message}`);
-    }
+  async requireEmployee(tenantId, employeeId) {
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, tenantId },
+      select: { id: true, firstName: true, lastName: true, branchId: true },
+    });
+    if (!employee) throw new Error('Employee not found');
+    return employee;
   }
 
-  /**
-   * Record check-out for employee
-   */
-  async checkOut(tenantId, employeeId, location = null) {
-    try {
-      const today = new Date().toDateString();
-      const checkOutTime = new Date();
+  async checkIn(tenantId, employeeId, method = 'MANUAL', location = null, changedBy = 'SYSTEM') {
+    await this.requireEmployee(tenantId, employeeId);
+    const { start, end } = dayRange();
+    const checkInTime = new Date();
 
-      const record = await db.attendance_records.findFirst({
-        where: {
-          tenantId,
-          employeeId,
-          attendanceDate: {
-            gte: new Date(today),
-            lt: new Date(new Date(today).getTime() + 86400000),
+    const existing = await prisma.attendanceRecord.findFirst({
+      where: {
+        tenantId,
+        employeeId,
+        attendanceDate: { gte: start, lt: end },
+        isActive: true,
+      },
+    });
+
+    if (existing?.checkInTime && !existing?.checkOutTime) throw new Error('Employee already checked in today');
+    if (existing?.checkInTime && existing?.checkOutTime) throw new Error('Employee attendance is already completed today');
+
+    const record = existing
+      ? await prisma.attendanceRecord.update({
+          where: { id: existing.id },
+          data: { checkInTime, method, location, status: 'present' },
+          include: { employee: { select: { firstName: true, lastName: true } } },
+        })
+      : await prisma.attendanceRecord.create({
+          data: {
+            tenantId,
+            employeeId,
+            attendanceDate: start,
+            checkInTime,
+            method,
+            location,
+            status: 'present',
+            isActive: true,
           },
-          isActive: true,
-        },
-      });
+          include: { employee: { select: { firstName: true, lastName: true } } },
+        });
 
-      if (!record) {
-        throw new Error('No check-in found for today');
-      }
-
-      if (record.checkOutTime) {
-        throw new Error('Employee already checked out');
-      }
-
-      // Calculate duration
-      const duration = (checkOutTime - record.checkInTime) / (1000 * 60 * 60); // hours
-
-      const config = await db.attendance_configurations.findFirst({
-        where: { tenantId, branchId: null },
-      });
-
-      const workingHours = config?.workingHoursPerDay || 8;
-      const lateMinutes = record.checkInTime > new Date(`${today} 09:00:00`) 
-        ? Math.floor((record.checkInTime - new Date(`${today} 09:00:00`)) / 60000) 
-        : 0;
-      const overtimeMinutes = duration > workingHours 
-        ? Math.floor((duration - workingHours) * 60) 
-        : 0;
-
-      const updated = await db.attendance_records.update({
-        where: { id: record.id },
-        data: {
-          checkOutTime,
-          duration,
-          lateMinutes,
-          overtimeMinutes,
-          location,
-        },
-      });
-
-      // Audit trail
-      await this.createAudit(tenantId, record.id, 'SYSTEM', 'edited', record, updated);
-
-      return updated;
-    } catch (error) {
-      throw new Error(`Check-out failed: ${error.message}`);
-    }
+    await this.createAudit(tenantId, record.id, changedBy, existing ? 'edited' : 'created', existing, record);
+    return mapRecord(record);
   }
 
-  /**
-   * Get attendance records with filtering and pagination
-   */
+  async checkOut(tenantId, employeeId, location = null, changedBy = 'SYSTEM') {
+    await this.requireEmployee(tenantId, employeeId);
+    const { start, end } = dayRange();
+    const checkOutTime = new Date();
+
+    const record = await prisma.attendanceRecord.findFirst({
+      where: {
+        tenantId,
+        employeeId,
+        attendanceDate: { gte: start, lt: end },
+        isActive: true,
+      },
+    });
+
+    if (!record?.checkInTime) throw new Error('No check-in found for today');
+    if (record.checkOutTime) throw new Error('Employee already checked out');
+
+    const duration = Math.max(0, (checkOutTime.getTime() - record.checkInTime.getTime()) / (1000 * 60 * 60));
+    const config = await prisma.attendanceConfiguration.findFirst({ where: { tenantId, branchId: null, isActive: true } });
+    const workingHours = Number(config?.workingHoursPerDay || 8);
+    const scheduledStart = new Date(start);
+    scheduledStart.setHours(9, Number(config?.lateTolerance || 0), 0, 0);
+    const lateMinutes = record.checkInTime > scheduledStart ? Math.floor((record.checkInTime.getTime() - scheduledStart.getTime()) / 60000) : 0;
+    const overtimeMinutes = duration > workingHours ? Math.floor((duration - workingHours) * 60) : 0;
+
+    const updated = await prisma.attendanceRecord.update({
+      where: { id: record.id },
+      data: {
+        checkOutTime,
+        duration,
+        lateMinutes,
+        overtimeMinutes,
+        location: location || record.location,
+      },
+      include: { employee: { select: { firstName: true, lastName: true } } },
+    });
+
+    await this.createAudit(tenantId, record.id, changedBy, 'edited', record, updated);
+    return mapRecord(updated);
+  }
+
   async getRecords(tenantId, filters = {}, page = 1, limit = 50) {
-    try {
-      const where = { tenantId, isActive: true };
+    const take = Math.min(Math.max(Number(limit) || 50, 1), 500);
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const where = { tenantId, isActive: true };
 
-      if (filters.employeeId) where.employeeId = filters.employeeId;
-      if (filters.status) where.status = filters.status;
-      if (filters.fromDate || filters.toDate) {
-        where.attendanceDate = {};
-        if (filters.fromDate) where.attendanceDate.gte = new Date(filters.fromDate);
-        if (filters.toDate) where.attendanceDate.lte = new Date(filters.toDate);
+    if (filters.recordId) where.id = filters.recordId;
+    if (filters.employeeId) where.employeeId = filters.employeeId;
+    if (filters.status) where.status = filters.status;
+    if (filters.fromDate || filters.toDate) {
+      where.attendanceDate = {};
+      if (filters.fromDate) where.attendanceDate.gte = new Date(filters.fromDate);
+      if (filters.toDate) {
+        const to = new Date(filters.toDate);
+        to.setHours(23, 59, 59, 999);
+        where.attendanceDate.lte = to;
       }
-
-      const skip = (page - 1) * limit;
-
-      const [records, total] = await Promise.all([
-        db.attendance_records.findMany({
-          where,
-          skip,
-          take: limit,
-          orderBy: { attendanceDate: 'desc' },
-        }),
-        db.attendance_records.count({ where }),
-      ]);
-
-      return {
-        records,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
-      };
-    } catch (error) {
-      throw new Error(`Failed to get records: ${error.message}`);
     }
+
+    if (filters.branchId) {
+      const employees = await prisma.employee.findMany({
+        where: { tenantId, branchId: filters.branchId },
+        select: { id: true },
+      });
+      where.employeeId = { in: employees.map((employee) => employee.id) };
+    }
+
+    const [records, total] = await Promise.all([
+      prisma.attendanceRecord.findMany({
+        where,
+        skip: (currentPage - 1) * take,
+        take,
+        include: { employee: { select: { firstName: true, lastName: true } } },
+        orderBy: { attendanceDate: 'desc' },
+      }),
+      prisma.attendanceRecord.count({ where }),
+    ]);
+
+    return {
+      records: records.map(mapRecord),
+      pagination: {
+        page: currentPage,
+        limit: take,
+        total,
+        totalPages: Math.ceil(total / take),
+      },
+    };
   }
 
-  /**
-   * Get monthly attendance summary for employee
-   */
-  async getSummary(tenantId, employeeId, year, month) {
-    try {
-      const periodStart = new Date(year, month - 1, 1);
-      const periodEnd = new Date(year, month, 0);
+  async updateRecord(tenantId, recordId, updates, changedBy) {
+    const record = await prisma.attendanceRecord.findFirst({ where: { id: recordId, tenantId, isActive: true } });
+    if (!record) throw new Error('Attendance record not found');
 
-      // Check existing summary
-      let summary = await db.attendance_summaries.findFirst({
-        where: {
-          tenantId,
-          employeeId,
-          periodStart,
-        },
-      });
+    const checkInTime = updates.checkInTime !== undefined ? (updates.checkInTime ? new Date(updates.checkInTime) : null) : record.checkInTime;
+    const checkOutTime = updates.checkOutTime !== undefined ? (updates.checkOutTime ? new Date(updates.checkOutTime) : null) : record.checkOutTime;
+    const duration = checkInTime && checkOutTime ? Math.max(0, (checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60)) : record.duration;
 
-      if (summary) return summary;
+    const updated = await prisma.attendanceRecord.update({
+      where: { id: recordId },
+      data: {
+        ...(updates.status !== undefined && { status: updates.status }),
+        ...(updates.notes !== undefined && { notes: updates.notes }),
+        ...(updates.location !== undefined && { location: updates.location }),
+        ...(updates.checkInTime !== undefined && { checkInTime }),
+        ...(updates.checkOutTime !== undefined && { checkOutTime }),
+        duration,
+      },
+      include: { employee: { select: { firstName: true, lastName: true } } },
+    });
 
-      // Calculate from records
-      const records = await db.attendance_records.findMany({
-        where: {
-          tenantId,
-          employeeId,
-          attendanceDate: {
-            gte: periodStart,
-            lte: periodEnd,
-          },
-          isActive: true,
-        },
-      });
-
-      const presentDays = records.filter((r) => r.status === 'present').length;
-      const absentDays = records.filter((r) => r.status === 'absent').length;
-      const leaveDays = records.filter((r) => r.status === 'on_leave' || r.status === 'leave').length;
-      const overtimeHours = records.reduce((sum, r) => sum + (r.overtimeMinutes || 0), 0) / 60;
-
-      // Calculate working days (Mon-Fri)
-      let workingDays = 0;
-      for (let d = new Date(periodStart); d <= periodEnd; d.setDate(d.getDate() + 1)) {
-        if (d.getDay() !== 0 && d.getDay() !== 6) workingDays++;
-      }
-
-      summary = await db.attendance_summaries.create({
-        data: {
-          tenantId,
-          employeeId,
-          periodStart,
-          periodEnd,
-          presentDays,
-          absentDays,
-          leaveDays,
-          overtimeHours,
-          workingDaysInPeriod: workingDays,
-        },
-      });
-
-      return summary;
-    } catch (error) {
-      throw new Error(`Failed to get summary: ${error.message}`);
-    }
+    await this.createAudit(tenantId, recordId, changedBy, 'edited', record, updated, updates.reason);
+    return mapRecord(updated);
   }
 
-  /**
-   * Approve pending attendance record
-   */
   async approveAttendance(tenantId, recordId, approvedBy) {
-    try {
-      const record = await db.attendance_records.findUniqueOrThrow({
-        where: { id: recordId },
-      });
+    const record = await prisma.attendanceRecord.findFirst({ where: { id: recordId, tenantId, isActive: true } });
+    if (!record) throw new Error('Attendance record not found');
 
-      if (record.tenantId !== tenantId) {
-        throw new Error('Unauthorized');
-      }
+    const updated = await prisma.attendanceRecord.update({
+      where: { id: recordId },
+      data: { approvedBy, approvedAt: new Date() },
+      include: { employee: { select: { firstName: true, lastName: true } } },
+    });
 
-      const updated = await db.attendance_records.update({
-        where: { id: recordId },
-        data: {
-          approvedBy,
-          approvedAt: new Date(),
-        },
-      });
-
-      await this.createAudit(tenantId, recordId, approvedBy, 'approved', record, updated);
-
-      return updated;
-    } catch (error) {
-      throw new Error(`Failed to approve: ${error.message}`);
-    }
+    await this.createAudit(tenantId, recordId, approvedBy, 'approved', record, updated);
+    return mapRecord(updated);
   }
 
-  /**
-   * Soft delete attendance record
-   */
-  async deleteRecord(tenantId, recordId) {
-    try {
-      const updated = await db.attendance_records.update({
-        where: { id: recordId },
-        data: { isActive: false },
-      });
+  async deleteRecord(tenantId, recordId, changedBy = 'SYSTEM') {
+    const record = await prisma.attendanceRecord.findFirst({ where: { id: recordId, tenantId, isActive: true } });
+    if (!record) throw new Error('Attendance record not found');
 
-      await this.createAudit(tenantId, recordId, 'SYSTEM', 'deleted', null, updated);
+    const updated = await prisma.attendanceRecord.update({
+      where: { id: recordId },
+      data: { isActive: false },
+      include: { employee: { select: { firstName: true, lastName: true } } },
+    });
 
-      return updated;
-    } catch (error) {
-      throw new Error(`Failed to delete: ${error.message}`);
-    }
+    await this.createAudit(tenantId, recordId, changedBy, 'deleted', record, updated);
+    return mapRecord(updated);
   }
 
-  /**
-   * Create audit trail entry
-   */
-  async createAudit(tenantId, recordId, changedBy, changeType, oldValues, newValues) {
-    try {
-      await db.attendance_audits.create({
-        data: {
-          tenantId,
-          recordId,
-          changedBy,
-          changeType,
-          oldValues,
-          newValues,
-        },
-      });
-    } catch (error) {
-      console.error('Audit trail creation failed:', error);
-    }
+  async getAudit(tenantId, recordId) {
+    return prisma.attendanceAudit.findMany({
+      where: { tenantId, recordId },
+      orderBy: { timestamp: 'desc' },
+    });
   }
 
-  /**
-   * Get attendance stats for branch
-   */
+  async createAudit(tenantId, recordId, changedBy, changeType, oldValues, newValues, reason = null) {
+    await prisma.attendanceAudit.create({
+      data: {
+        tenantId,
+        recordId,
+        changedBy: changedBy || 'SYSTEM',
+        changeType,
+        oldValues: oldValues || undefined,
+        newValues: newValues || undefined,
+        reason,
+      },
+    }).catch((error) => {
+      console.error('Attendance audit creation failed:', error);
+    });
+  }
+
+  async getSummary(tenantId, employeeId, year, month) {
+    await this.requireEmployee(tenantId, employeeId);
+    const periodStart = new Date(year, month - 1, 1);
+    const periodEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+    let summary = await prisma.attendanceSummary.findFirst({ where: { tenantId, employeeId, periodStart } });
+    if (summary) return summary;
+
+    const records = await prisma.attendanceRecord.findMany({
+      where: {
+        tenantId,
+        employeeId,
+        attendanceDate: { gte: periodStart, lte: periodEnd },
+        isActive: true,
+      },
+    });
+
+    const presentDays = records.filter((record) => record.status === 'present').length;
+    const absentDays = records.filter((record) => record.status === 'absent').length;
+    const leaveDays = records.filter((record) => ['on_leave', 'leave'].includes(record.status)).length;
+    const overtimeHours = records.reduce((sum, record) => sum + (record.overtimeMinutes || 0), 0) / 60;
+    let workingDays = 0;
+    for (let d = new Date(periodStart); d <= periodEnd; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() !== 0 && d.getDay() !== 6) workingDays++;
+    }
+
+    summary = await prisma.attendanceSummary.create({
+      data: {
+        tenantId,
+        employeeId,
+        periodStart,
+        periodEnd,
+        presentDays,
+        absentDays,
+        leaveDays,
+        overtimeHours,
+        workingDaysInPeriod: workingDays,
+      },
+    });
+
+    return summary;
+  }
+
   async getAttendanceStats(tenantId, branchId, periodStart, periodEnd) {
-    try {
-      const records = await db.attendance_records.findMany({
-        where: {
-          tenantId,
-          attendanceDate: {
-            gte: periodStart,
-            lte: periodEnd,
-          },
-          isActive: true,
-        },
-      });
+    const filters = {
+      fromDate: periodStart,
+      toDate: periodEnd,
+      ...(branchId && { branchId }),
+    };
+    const { records } = await this.getRecords(tenantId, filters, 1, 10000);
+    const present = records.filter((record) => record.status === 'present').length;
+    const absent = records.filter((record) => record.status === 'absent').length;
+    const onLeave = records.filter((record) => ['on_leave', 'leave'].includes(record.status)).length;
+    const averageHours = records.reduce((sum, record) => sum + (record.duration || 0), 0) / (records.length || 1);
 
-      const present = records.filter((r) => r.status === 'present').length;
-      const absent = records.filter((r) => r.status === 'absent').length;
-      const onLeave = records.filter((r) => r.status === 'on_leave').length;
-      const averageHours =
-        records.reduce((sum, r) => sum + (r.duration || 0), 0) / (records.length || 1);
-
-      return {
-        totalRecords: records.length,
-        present,
-        absent,
-        onLeave,
-        averageHours: Math.round(averageHours * 100) / 100,
-        attendanceRate: `${Math.round((present / (records.length || 1)) * 100)}%`,
-      };
-    } catch (error) {
-      throw new Error(`Failed to get stats: ${error.message}`);
-    }
+    return {
+      totalRecords: records.length,
+      present,
+      absent,
+      onLeave,
+      averageHours: Math.round(averageHours * 100) / 100,
+      attendanceRate: `${Math.round((present / (records.length || 1)) * 100)}%`,
+    };
   }
 }
 
-module.exports = new AttendanceService();
+export default new AttendanceService();

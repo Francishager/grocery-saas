@@ -54,7 +54,6 @@ import contractRoutes from "./routes/contractRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import salaryHistoryRoutes from "./routes/salaryHistoryRoutes.js";
 import employmentHistoryRoutes from "./routes/employmentHistoryRoutes.js";
-import hrSettingsRoutes from "./routes/hrSettingsRoutes.js";
 
 // Phase 2 HR Attendance, Shift, Leave Routes
 import attendanceRoutes from "./routes/attendanceRoutes.js";
@@ -204,7 +203,6 @@ app.use("/api/expenses", expensesRouter);
 app.use("/api/rentals", rentalsRouter);
 app.use("/api/returns", returnsRouter);
 app.use("/api/accounting", accountingRouter);
-app.use("/api/hr", hrRouter);
 
 // Phase 1 HR Core API routes
 app.use("/api/hr/positions", positionRoutes);
@@ -216,12 +214,15 @@ app.use("/api/hr/contracts", contractRoutes);
 app.use("/api/hr/documents", documentRoutes);
 app.use("/api/hr/salary-history", salaryHistoryRoutes);
 app.use("/api/hr/employment-history", employmentHistoryRoutes);
-app.use("/api/hr/settings", hrSettingsRoutes);
 
 // Phase 2 HR Attendance, Shift, Leave API routes
 app.use("/api/hr", attendanceRoutes);
 app.use("/api/hr", shiftRoutes);
 app.use("/api/hr", leaveRoutes);
+
+// HR dashboard and backwards-compatible HR routes. Keep this after the specific
+// module routers so legacy endpoints do not shadow the real HR APIs.
+app.use("/api/hr", hrRouter);
 
 app.use("/api/transfers", transfersRouter);
 app.use("/api/notifications", notificationsRouter);

@@ -14,19 +14,55 @@ import { Badge } from '@/components/ui/badge'
 
 interface Employee {
   id: string
+  employeeNumber?: string
   firstName: string
+  middleName?: string
   lastName: string
   email?: string
   phone?: string
   idNumber?: string
+  nationalId?: string
   dateOfBirth?: string
   hireDate: string
   position?: string
-  department?: string
-  employmentStatus: string
-  isActive: boolean
+  department?: string | { name?: string }
+  department_text?: string
+  status: string
+  employmentType?: string
+  basicSalary?: number
   tenantId: string
 }
+
+const today = () => new Date().toISOString().split('T')[0]
+
+const toDateInput = (value?: string) => {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value.split('T')[0] : date.toISOString().split('T')[0]
+}
+
+const formatStatus = (value?: string) =>
+  (value || 'active')
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+
+const initialFormData = () => ({
+  employeeNumber: '',
+  firstName: '',
+  middleName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  nationalId: '',
+  dateOfBirth: '',
+  hireDate: today(),
+  position: '',
+  department: '',
+  employmentType: 'permanent',
+  basicSalary: '',
+  status: 'active',
+})
 
 export default function EmployeeManagementPage() {
   const { toast } = useToast()
@@ -34,28 +70,24 @@ export default function EmployeeManagementPage() {
   const [loading, setLoading] = useState(true)
   const [openDialog, setOpenDialog] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [formData, setFormData] = useState<Record<string, any>>({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    idNumber: '',
-    dateOfBirth: '',
-    hireDate: new Date().toISOString().split('T')[0],
-    position: '',
-    department: '',
-    employmentStatus: 'active',
-  })
+  const [formData, setFormData] = useState<Record<string, any>>(initialFormData())
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
 
   const columns: HRColumn[] = [
     {
+      key: 'employeeNumber',
+      label: 'Staff No.',
+      sortable: true,
+      width: '12%',
+      render: (value) => value || '-',
+    },
+    {
       key: 'firstName',
       label: 'Full Name',
       sortable: true,
-      width: '25%',
-      render: (value, row) => `${row.firstName} ${row.lastName}`,
+      width: '22%',
+      render: (value, row) => [row.firstName, row.middleName, row.lastName].filter(Boolean).join(' '),
     },
     {
       key: 'email',
@@ -76,12 +108,12 @@ export default function EmployeeManagementPage() {
       render: (value) => value || '-',
     },
     {
-      key: 'employmentStatus',
+      key: 'status',
       label: 'Status',
       width: '15%',
       render: (value) => (
         <Badge variant={value === 'active' ? 'default' : value === 'terminated' ? 'destructive' : 'secondary'}>
-          {value}
+          {formatStatus(value)}
         </Badge>
       ),
     },
@@ -89,7 +121,7 @@ export default function EmployeeManagementPage() {
       key: 'hireDate',
       label: 'Hire Date',
       width: '10%',
-      render: (value) => new Date(value).toLocaleDateString(),
+      render: (value) => value ? new Date(value).toLocaleDateString() : '-',
     },
   ]
 
@@ -116,35 +148,32 @@ export default function EmployeeManagementPage() {
 
   const handleAdd = () => {
     setEditingId(null)
-    setFormData({
-      firstName: '',
-      lastName: '',
-      email: '',
-      phone: '',
-      idNumber: '',
-      dateOfBirth: '',
-      hireDate: new Date().toISOString().split('T')[0],
-      position: '',
-      department: '',
-      employmentStatus: 'active',
-    })
+    setFormData(initialFormData())
     setFormError('')
     setOpenDialog(true)
   }
 
   const handleEdit = (id: string, row: Employee) => {
+    const departmentName = typeof row.department === 'string'
+      ? row.department
+      : row.department?.name || row.department_text || ''
+
     setEditingId(id)
     setFormData({
+      employeeNumber: row.employeeNumber || '',
       firstName: row.firstName,
+      middleName: row.middleName || '',
       lastName: row.lastName,
       email: row.email || '',
       phone: row.phone || '',
-      idNumber: row.idNumber || '',
-      dateOfBirth: row.dateOfBirth || '',
-      hireDate: row.hireDate,
+      nationalId: row.nationalId || row.idNumber || '',
+      dateOfBirth: toDateInput(row.dateOfBirth),
+      hireDate: toDateInput(row.hireDate),
       position: row.position || '',
-      department: row.department || '',
-      employmentStatus: row.employmentStatus,
+      department: departmentName,
+      employmentType: row.employmentType || 'permanent',
+      basicSalary: row.basicSalary || '',
+      status: row.status || 'active',
     })
     setFormError('')
     setOpenDialog(true)
@@ -174,10 +203,14 @@ export default function EmployeeManagementPage() {
     try {
       const method = editingId ? 'PUT' : 'POST'
       const url = editingId ? `/api/hr/employees/${editingId}` : '/api/hr/employees'
+      const payload = {
+        ...formData,
+        basicSalary: formData.basicSalary === '' ? undefined : Number(formData.basicSalary),
+      }
 
       const res = await apiFetch(url, {
         method,
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       })
 
       if (res.ok) {
@@ -197,10 +230,21 @@ export default function EmployeeManagementPage() {
 
   const formFields: HRFormField[] = [
     {
+      name: 'employeeNumber',
+      label: 'Staff Number',
+      type: 'text',
+      placeholder: 'Auto-generated if left blank',
+    },
+    {
       name: 'firstName',
       label: 'First Name',
       type: 'text',
       required: true,
+    },
+    {
+      name: 'middleName',
+      label: 'Middle Name',
+      type: 'text',
     },
     {
       name: 'lastName',
@@ -212,7 +256,6 @@ export default function EmployeeManagementPage() {
       name: 'email',
       label: 'Email',
       type: 'email',
-      required: true,
     },
     {
       name: 'phone',
@@ -220,8 +263,8 @@ export default function EmployeeManagementPage() {
       type: 'text',
     },
     {
-      name: 'idNumber',
-      label: 'ID Number',
+      name: 'nationalId',
+      label: 'National ID',
       type: 'text',
     },
     {
@@ -246,15 +289,37 @@ export default function EmployeeManagementPage() {
       type: 'text',
     },
     {
-      name: 'employmentStatus',
-      label: 'Employment Status',
+      name: 'employmentType',
+      label: 'Employment Type',
+      type: 'select',
+      options: [
+        { label: 'Permanent', value: 'permanent' },
+        { label: 'Contract', value: 'contract' },
+        { label: 'Temporary', value: 'temporary' },
+        { label: 'Intern', value: 'intern' },
+        { label: 'Casual', value: 'casual' },
+      ],
+    },
+    {
+      name: 'basicSalary',
+      label: 'Basic Salary',
+      type: 'number',
+    },
+    {
+      name: 'status',
+      label: 'Status',
       type: 'select',
       required: true,
       options: [
         { label: 'Active', value: 'active' },
+        { label: 'On Probation', value: 'on_probation' },
         { label: 'On Leave', value: 'on_leave' },
-        { label: 'Terminated', value: 'terminated' },
         { label: 'Suspended', value: 'suspended' },
+        { label: 'Notice Period', value: 'notice_period' },
+        { label: 'Resigned', value: 'resigned' },
+        { label: 'Terminated', value: 'terminated' },
+        { label: 'Retired', value: 'retired' },
+        { label: 'Inactive', value: 'inactive' },
       ],
     },
   ]

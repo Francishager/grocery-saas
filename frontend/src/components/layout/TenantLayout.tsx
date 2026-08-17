@@ -64,7 +64,7 @@ const navItems = [
   { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: 'canViewServiceBusiness', isService: true },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport', isAccounting: true },
-  { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewStaff', isHR: true },
+  { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewHR', isHR: true },
   { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication', permission: 'canViewCommunication' },
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
@@ -264,19 +264,18 @@ const accountingSubItems = [
 ]
 
 const hrSubItems = [
-  { to: '/tenant/hr', label: 'Dashboard', icon: LayoutDashboard, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/departments', label: 'Departments', icon: Building2, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/positions', label: 'Positions', icon: Badge, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/units-teams', label: 'Teams', icon: Users, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/contracts', label: 'Contracts', icon: FileText, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/documents', label: 'Documents', icon: ClipboardList, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canViewStaff' },
-  { to: '/tenant/hr/settings', label: 'HR Settings', icon: Settings, feature: 'hr', permission: 'canViewStaff' },
+  { to: '/tenant/hr', label: 'Dashboard', icon: LayoutDashboard, feature: 'hr', permission: 'canViewHR' },
+  { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: 'canViewHR' },
+  { to: '/tenant/hr/departments', label: 'Departments', icon: Building2, feature: 'hr', permission: 'canViewHR' },
+  { to: '/tenant/hr/positions', label: 'Positions', icon: Badge, feature: 'hr', permission: 'canViewHR' },
+  { to: '/tenant/hr/units-teams', label: 'Teams', icon: Users, feature: 'hr', permission: 'canViewHR' },
+  { to: '/tenant/hr/contracts', label: 'Contracts', icon: FileText, feature: 'hr', permission: ['canViewHRContracts', 'canManageHRContracts'] },
+  { to: '/tenant/hr/documents', label: 'Documents', icon: ClipboardList, feature: 'hr', permission: ['canViewHRDocuments', 'canManageHRDocuments'] },
+  { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: 'canViewHRAttendance' },
+  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: 'canManageHRAttendance' },
+  { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewHRShifts' },
+  { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: ['canViewHRLeave', 'canRequestHRLeave'] },
+  { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canApproveHRLeave' },
 ]
 
 const settingsSubItems = [

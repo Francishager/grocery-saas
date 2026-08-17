@@ -44,7 +44,6 @@ import EmployeeManagementPage from '@/pages/hr/EmployeeManagementPage'
 import ContractManagementPage from '@/pages/hr/ContractManagementPage'
 import DocumentManagementPage from '@/pages/hr/DocumentManagementPage'
 import UnitTeamManagementPage from '@/pages/hr/UnitTeamManagementPage'
-import HRSettingsPage from '@/pages/hr/HRSettingsPage'
 // Phase 2 HR Pages
 import AttendanceListPage from '@/pages/hr/AttendanceListPage'
 import AttendanceCheckPage from '@/pages/hr/AttendanceCheckPage'
@@ -70,6 +69,7 @@ import BusinessesPage from '@/pages/SaaSAdmin/BusinessesPage'
 import ProvisionPage from '@/pages/SaaSAdmin/ProvisionPage'
 import PlansPage from '@/pages/SaaSAdmin/PlansPage'
 import FeaturesPage from '@/pages/SaaSAdmin/FeaturesPage'
+import HRModuleSettingsPage from '@/pages/SaaSAdmin/HRModuleSettingsPage'
 import OwnersPage from '@/pages/SaaSAdmin/OwnersPage'
 import SubscriptionsPage from '@/pages/SaaSAdmin/SubscriptionsPage'
 import InvitationsList from '@/pages/SaaSAdmin/InvitationsList'
@@ -137,6 +137,7 @@ function App() {
           <Route path="provision" element={<ProvisionPage />} />
           <Route path="plans" element={<PlansPage />} />
           <Route path="features" element={<FeaturesPage />} />
+          <Route path="hr-settings" element={<HRModuleSettingsPage />} />
           <Route path="invitations" element={<InvitationsList />} />
           <Route path="owners" element={<OwnersPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
@@ -174,22 +175,22 @@ function App() {
           <Route path="accounting/transactions" element={<FeatureGuard feature="accounting"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="inventory"><DataImporterPage /></FeatureGuard>} />
-          <Route path="hr" element={<FeatureGuard feature="hr"><HRDashboardPage /></FeatureGuard>} />
+          <Route path="hr" element={<FeatureGuard feature="hr" permission="canViewHR"><HRDashboardPage /></FeatureGuard>} />
           {/* Phase 1 HR Core Routes */}
-          <Route path="hr/departments" element={<FeatureGuard feature="hr"><DepartmentManagementPage /></FeatureGuard>} />
-          <Route path="hr/positions" element={<FeatureGuard feature="hr"><PositionManagementPage /></FeatureGuard>} />
-          <Route path="hr/employees" element={<FeatureGuard feature="hr"><EmployeeManagementPage /></FeatureGuard>} />
-          <Route path="hr/contracts" element={<FeatureGuard feature="hr"><ContractManagementPage /></FeatureGuard>} />
-          <Route path="hr/documents" element={<FeatureGuard feature="hr"><DocumentManagementPage /></FeatureGuard>} />
-          <Route path="hr/units-teams" element={<FeatureGuard feature="hr"><UnitTeamManagementPage /></FeatureGuard>} />
-          <Route path="hr/settings" element={<FeatureGuard feature="hr"><HRSettingsPage /></FeatureGuard>} />
-          <Route path="hr/legacy" element={<FeatureGuard feature="hr"><HRPage /></FeatureGuard>} />
+          <Route path="hr/departments" element={<FeatureGuard feature="hr" permission="canViewHR"><DepartmentManagementPage /></FeatureGuard>} />
+          <Route path="hr/positions" element={<FeatureGuard feature="hr" permission="canViewHR"><PositionManagementPage /></FeatureGuard>} />
+          <Route path="hr/employees" element={<FeatureGuard feature="hr" permission="canViewHR"><EmployeeManagementPage /></FeatureGuard>} />
+          <Route path="hr/contracts" element={<FeatureGuard feature="hr" permission={['canViewHRContracts', 'canManageHRContracts']}><ContractManagementPage /></FeatureGuard>} />
+          <Route path="hr/documents" element={<FeatureGuard feature="hr" permission={['canViewHRDocuments', 'canManageHRDocuments']}><DocumentManagementPage /></FeatureGuard>} />
+          <Route path="hr/units-teams" element={<FeatureGuard feature="hr" permission="canViewHR"><UnitTeamManagementPage /></FeatureGuard>} />
+          <Route path="hr/settings" element={<Navigate to="/tenant/roles" replace />} />
+          <Route path="hr/legacy" element={<FeatureGuard feature="hr" permission="canViewHR"><HRPage /></FeatureGuard>} />
           {/* Phase 2 HR Attendance, Shift, Leave Routes */}
-          <Route path="hr/attendance" element={<FeatureGuard feature="hr"><AttendanceListPage /></FeatureGuard>} />
-          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr"><AttendanceCheckPage /></FeatureGuard>} />
-          <Route path="hr/shifts" element={<FeatureGuard feature="hr"><ShiftManagementPage /></FeatureGuard>} />
-          <Route path="hr/leaves" element={<FeatureGuard feature="hr"><LeaveRequestPage /></FeatureGuard>} />
-          <Route path="hr/leaves/approval" element={<FeatureGuard feature="hr"><LeaveApprovalPage /></FeatureGuard>} />
+          <Route path="hr/attendance" element={<FeatureGuard feature="hr" permission="canViewHRAttendance"><AttendanceListPage /></FeatureGuard>} />
+          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr" permission="canManageHRAttendance"><AttendanceCheckPage /></FeatureGuard>} />
+          <Route path="hr/shifts" element={<FeatureGuard feature="hr" permission="canViewHRShifts"><ShiftManagementPage /></FeatureGuard>} />
+          <Route path="hr/leaves" element={<FeatureGuard feature="hr" permission={['canViewHRLeave', 'canRequestHRLeave']}><LeaveRequestPage /></FeatureGuard>} />
+          <Route path="hr/leaves/approval" element={<FeatureGuard feature="hr" permission="canApproveHRLeave"><LeaveApprovalPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />

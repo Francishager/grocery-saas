@@ -19,6 +19,13 @@ interface LeaveType {
   daysAllowedPerYear: number
 }
 
+interface EmployeeOption {
+  id: string
+  firstName: string
+  lastName: string
+  employeeNumber?: string
+}
+
 interface LeaveRequest {
   id: string
   employeeId: string
@@ -47,9 +54,11 @@ export default function LeaveRequestPage() {
   const [requests, setRequests] = useState<LeaveRequest[]>([])
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([])
   const [balances, setBalances] = useState<LeaveBalance[]>([])
+  const [employees, setEmployees] = useState<EmployeeOption[]>([])
   const [loading, setLoading] = useState(true)
   const [openDialog, setOpenDialog] = useState(false)
   const [formData, setFormData] = useState({
+    employeeId: '',
     leaveTypeId: '',
     startDate: '',
     endDate: '',
@@ -122,13 +131,32 @@ export default function LeaveRequestPage() {
     }
   }
 
-  const fetchBalances = async () => {
+  const fetchEmployees = async () => {
     try {
-      const userId = localStorage.getItem('userId')
-      const res = await apiFetch(`/api/hr/leave-balance/${userId}`)
+      const res = await apiFetch('/api/hr/employees?take=500')
       if (res.ok) {
         const data = await res.json()
-        setBalances(data.data || [])
+        const rows = Array.isArray(data.data) ? data.data : []
+        setEmployees(rows)
+        if (rows.length > 0 && !formData.employeeId) {
+          setFormData((current) => ({ ...current, employeeId: rows[0].id }))
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch employees:', error)
+    }
+  }
+
+  const fetchBalances = async (selectedEmployeeId = formData.employeeId) => {
+    try {
+      if (!selectedEmployeeId) {
+        setBalances([])
+        return
+      }
+      const res = await apiFetch(`/api/hr/leave-balance/${selectedEmployeeId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setBalances(Array.isArray(data.data?.balances) ? data.data.balances : [])
       }
     } catch (error) {
       console.error('Failed to fetch balances:', error)
@@ -136,7 +164,7 @@ export default function LeaveRequestPage() {
   }
 
   const handleCreateRequest = async () => {
-    if (!formData.leaveTypeId || !formData.startDate || !formData.endDate) {
+    if (!formData.employeeId || !formData.leaveTypeId || !formData.startDate || !formData.endDate) {
       toast({ title: 'Error', description: 'Please fill all required fields', variant: 'destructive' })
       return
     }
@@ -150,8 +178,9 @@ export default function LeaveRequestPage() {
       if (res.ok) {
         toast({ title: 'Success', description: 'Leave request created' })
         setOpenDialog(false)
-        setFormData({ leaveTypeId: '', startDate: '', endDate: '', reason: '' })
+        setFormData((current) => ({ employeeId: current.employeeId, leaveTypeId: '', startDate: '', endDate: '', reason: '' }))
         fetchRequests()
+        fetchBalances()
       } else {
         const error = await res.json()
         toast({ title: 'Error', description: error.message || 'Failed to create request', variant: 'destructive' })
@@ -196,8 +225,12 @@ export default function LeaveRequestPage() {
   useEffect(() => {
     fetchRequests()
     fetchLeaveTypes()
-    fetchBalances()
+    fetchEmployees()
   }, [])
+
+  useEffect(() => {
+    fetchBalances(formData.employeeId)
+  }, [formData.employeeId])
 
   return (
     <div className="space-y-4">
@@ -272,6 +305,22 @@ export default function LeaveRequestPage() {
             <DialogTitle>Create Leave Request</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Employee *</label>
+              <select
+                value={formData.employeeId}
+                onChange={(e) => setFormData({ ...formData, employeeId: e.target.value })}
+                className="w-full border rounded p-2 mt-1"
+              >
+                <option value="">Select employee</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {[employee.employeeNumber, employee.firstName, employee.lastName].filter(Boolean).join(' - ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="text-sm font-medium">Leave Type *</label>
               <select

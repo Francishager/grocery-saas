@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
-    const employee = await employeeService.createEmployee(tenantId, req.body);
+    const employee = await employeeService.createEmployee(tenantId, { ...req.body, createdBy: userId });
     res.status(201).json({ success: true, data: employee });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -46,11 +46,11 @@ router.get('/', async (req, res) => {
       unitId,
       teamId,
       positionId,
-      status: status || 'active',
+      status: status || null,
       search,
     });
 
-    const count = await employeeService.getEmployeeCount(tenantId);
+    const count = await employeeService.getEmployeeCount(tenantId, status && status !== 'all' ? { status } : {});
     res.json({ success: true, data: employees, pagination: { skip: parseInt(skip) || 0, take: parseInt(take) || 50, total: count } });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -81,7 +81,7 @@ router.put('/:id', async (req, res) => {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
-    const employee = await employeeService.updateEmployee(tenantId, req.params.id, req.body);
+    const employee = await employeeService.updateEmployee(tenantId, req.params.id, { ...req.body, updatedBy: userId });
     res.json({ success: true, data: employee });
   } catch (error) {
     res.status(400).json({ error: error.message });

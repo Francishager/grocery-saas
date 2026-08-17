@@ -1,255 +1,165 @@
-/**
- * Leave Type Service - Manages leave types and configurations
- */
-
-const db = require('../../config/db');
+import prisma from '../db.js';
 
 class LeaveTypeService {
-  /**
-   * Create leave type
-   */
   async createLeaveType(tenantId, data) {
-    try {
-      const leaveType = await db.leave_types.create({
-        data: {
-          tenantId,
-          name: data.name,
-          code: data.code,
-          description: data.description,
-          daysAllowedPerYear: data.daysAllowedPerYear,
-          carryoverAllowed: data.carryoverAllowed || false,
-          maxCarryover: data.maxCarryover,
-          requiresMedical: data.requiresMedical || false,
-          requiresApproval: data.requiresApproval !== false,
-          approvalLevels: data.approvalLevels || 1,
-          color: data.color,
-          isActive: true,
-        },
-      });
-
-      return leaveType;
-    } catch (error) {
-      throw new Error(`Failed to create leave type: ${error.message}`);
+    if (!data.name || !data.code || data.daysAllowedPerYear === undefined) {
+      throw new Error('Leave type name, code, and days allowed are required');
     }
+
+    return prisma.leaveType.create({
+      data: {
+        tenantId,
+        name: data.name,
+        code: data.code,
+        description: data.description || null,
+        daysAllowedPerYear: Number(data.daysAllowedPerYear),
+        carryoverAllowed: Boolean(data.carryoverAllowed),
+        maxCarryover: data.maxCarryover !== undefined && data.maxCarryover !== null ? Number(data.maxCarryover) : null,
+        requiresMedical: Boolean(data.requiresMedical),
+        requiresApproval: data.requiresApproval !== false,
+        approvalLevels: Number(data.approvalLevels || 1),
+        color: data.color || null,
+        isActive: true,
+      },
+    });
   }
 
-  /**
-   * Update leave type
-   */
   async updateLeaveType(tenantId, typeId, updates) {
-    try {
-      const leaveType = await db.leave_types.findUniqueOrThrow({
-        where: { id: typeId },
-      });
-
-      if (leaveType.tenantId !== tenantId) {
-        throw new Error('Unauthorized');
-      }
-
-      return db.leave_types.update({
-        where: { id: typeId },
-        data: updates,
-      });
-    } catch (error) {
-      throw new Error(`Failed to update leave type: ${error.message}`);
-    }
+    await this.getLeaveType(tenantId, typeId);
+    return prisma.leaveType.update({
+      where: { id: typeId },
+      data: {
+        ...(updates.name !== undefined && { name: updates.name }),
+        ...(updates.code !== undefined && { code: updates.code }),
+        ...(updates.description !== undefined && { description: updates.description }),
+        ...(updates.daysAllowedPerYear !== undefined && { daysAllowedPerYear: Number(updates.daysAllowedPerYear) }),
+        ...(updates.carryoverAllowed !== undefined && { carryoverAllowed: Boolean(updates.carryoverAllowed) }),
+        ...(updates.maxCarryover !== undefined && { maxCarryover: updates.maxCarryover === null ? null : Number(updates.maxCarryover) }),
+        ...(updates.requiresMedical !== undefined && { requiresMedical: Boolean(updates.requiresMedical) }),
+        ...(updates.requiresApproval !== undefined && { requiresApproval: Boolean(updates.requiresApproval) }),
+        ...(updates.approvalLevels !== undefined && { approvalLevels: Number(updates.approvalLevels) }),
+        ...(updates.color !== undefined && { color: updates.color }),
+        ...(updates.isActive !== undefined && { isActive: Boolean(updates.isActive) }),
+      },
+    });
   }
 
-  /**
-   * Get all leave types for tenant
-   */
   async getLeaveTypes(tenantId) {
-    try {
-      return db.leave_types.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-        },
-        orderBy: { name: 'asc' },
-      });
-    } catch (error) {
-      throw new Error(`Failed to get leave types: ${error.message}`);
-    }
+    return prisma.leaveType.findMany({
+      where: { tenantId, isActive: true },
+      orderBy: { name: 'asc' },
+    });
   }
 
-  /**
-   * Get single leave type
-   */
   async getLeaveType(tenantId, typeId) {
-    try {
-      const leaveType = await db.leave_types.findUniqueOrThrow({
-        where: { id: typeId },
-      });
-
-      if (leaveType.tenantId !== tenantId) {
-        throw new Error('Unauthorized');
-      }
-
-      return leaveType;
-    } catch (error) {
-      throw new Error(`Failed to get leave type: ${error.message}`);
-    }
+    const leaveType = await prisma.leaveType.findFirst({ where: { id: typeId, tenantId } });
+    if (!leaveType) throw new Error('Leave type not found');
+    return leaveType;
   }
 
-  /**
-   * Deactivate leave type
-   */
   async deactivateLeaveType(tenantId, typeId) {
-    try {
-      return this.updateLeaveType(tenantId, typeId, { isActive: false });
-    } catch (error) {
-      throw new Error(`Failed to deactivate leave type: ${error.message}`);
-    }
+    return this.updateLeaveType(tenantId, typeId, { isActive: false });
   }
 
-  /**
-   * Get leave balance for employee
-   */
   async getLeaveBalance(tenantId, employeeId, leaveTypeId, year) {
-    try {
-      let balance = await db.leave_balances.findFirst({
-        where: {
+    const employee = await prisma.employee.findFirst({ where: { id: employeeId, tenantId }, select: { id: true } });
+    if (!employee) throw new Error('Employee not found');
+
+    let balance = await prisma.leaveBalance.findFirst({ where: { tenantId, employeeId, leaveTypeId, year } });
+    if (!balance) {
+      const leaveType = await this.getLeaveType(tenantId, leaveTypeId);
+      balance = await prisma.leaveBalance.create({
+        data: {
           tenantId,
           employeeId,
           leaveTypeId,
+          leaveTypeName: leaveType.name,
           year,
+          allocatedDays: leaveType.daysAllowedPerYear,
+          remainingDays: leaveType.daysAllowedPerYear,
         },
       });
-
-      if (!balance) {
-        // Create default balance
-        const leaveType = await this.getLeaveType(tenantId, leaveTypeId);
-        balance = await db.leave_balances.create({
-          data: {
-            tenantId,
-            employeeId,
-            leaveTypeId,
-            leaveTypeName: leaveType.name,
-            year,
-            allocatedDays: leaveType.daysAllowedPerYear,
-            remainingDays: leaveType.daysAllowedPerYear,
-          },
-        });
-      }
-
-      return balance;
-    } catch (error) {
-      throw new Error(`Failed to get leave balance: ${error.message}`);
     }
+
+    return balance;
   }
 
-  /**
-   * Allocate leave for new year
-   */
   async allocateLeaveForYear(tenantId, year) {
-    try {
-      const leaveTypes = await this.getLeaveTypes(tenantId);
-      const employees = await db.employees.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-        },
-      });
+    const [leaveTypes, employees] = await Promise.all([
+      this.getLeaveTypes(tenantId),
+      prisma.employee.findMany({ where: { tenantId, status: { notIn: ['terminated', 'inactive'] } }, select: { id: true } }),
+    ]);
 
-      let allocated = 0;
-
-      for (const leaveType of leaveTypes) {
-        for (const employee of employees) {
-          // Check if balance already exists
-          const exists = await db.leave_balances.findFirst({
-            where: {
+    let allocated = 0;
+    for (const leaveType of leaveTypes) {
+      for (const employee of employees) {
+        const exists = await prisma.leaveBalance.findFirst({
+          where: { tenantId, employeeId: employee.id, leaveTypeId: leaveType.id, year },
+        });
+        if (!exists) {
+          await prisma.leaveBalance.create({
+            data: {
               tenantId,
               employeeId: employee.id,
               leaveTypeId: leaveType.id,
+              leaveTypeName: leaveType.name,
               year,
+              allocatedDays: leaveType.daysAllowedPerYear,
+              remainingDays: leaveType.daysAllowedPerYear,
             },
           });
-
-          if (!exists) {
-            await db.leave_balances.create({
-              data: {
-                tenantId,
-                employeeId: employee.id,
-                leaveTypeId: leaveType.id,
-                leaveTypeName: leaveType.name,
-                year,
-                allocatedDays: leaveType.daysAllowedPerYear,
-                remainingDays: leaveType.daysAllowedPerYear,
-              },
-            });
-            allocated++;
-          }
+          allocated++;
         }
       }
-
-      return { allocated, total: leaveTypes.length * employees.length };
-    } catch (error) {
-      throw new Error(`Failed to allocate leave: ${error.message}`);
     }
+
+    return { allocated, total: leaveTypes.length * employees.length };
   }
 
-  /**
-   * Carryover unused leave to next year
-   */
   async carryoverLeaves(tenantId, fromYear, toYear) {
-    try {
-      const balances = await db.leave_balances.findMany({
-        where: {
-          tenantId,
-          year: fromYear,
-          leaveType: {
-            carryoverAllowed: true,
-          },
-        },
+    const leaveTypes = await prisma.leaveType.findMany({
+      where: { tenantId, carryoverAllowed: true, isActive: true },
+    });
+    const byId = new Map(leaveTypes.map((type) => [type.id, type]));
+    const balances = await prisma.leaveBalance.findMany({
+      where: { tenantId, year: fromYear, leaveTypeId: { in: leaveTypes.map((type) => type.id) } },
+    });
+
+    let carried = 0;
+    for (const balance of balances) {
+      const leaveType = byId.get(balance.leaveTypeId);
+      const carryoverAmount = Math.min(balance.remainingDays, leaveType?.maxCarryover ?? balance.remainingDays);
+      const existing = await prisma.leaveBalance.findFirst({
+        where: { tenantId, employeeId: balance.employeeId, leaveTypeId: balance.leaveTypeId, year: toYear },
       });
 
-      let carried = 0;
-
-      for (const balance of balances) {
-        const carryoverAmount = Math.min(balance.remainingDays, balance.leaveType?.maxCarryover || balance.remainingDays);
-
-        // Check if new year balance exists
-        let newYearBalance = await db.leave_balances.findFirst({
-          where: {
+      if (!existing) {
+        await prisma.leaveBalance.create({
+          data: {
             tenantId,
             employeeId: balance.employeeId,
             leaveTypeId: balance.leaveTypeId,
+            leaveTypeName: balance.leaveTypeName,
             year: toYear,
+            allocatedDays: leaveType?.daysAllowedPerYear || balance.allocatedDays,
+            carryoverDays: carryoverAmount,
+            remainingDays: (leaveType?.daysAllowedPerYear || balance.allocatedDays) + carryoverAmount,
           },
         });
-
-        if (!newYearBalance) {
-          const leaveType = await this.getLeaveType(tenantId, balance.leaveTypeId);
-          newYearBalance = await db.leave_balances.create({
-            data: {
-              tenantId,
-              employeeId: balance.employeeId,
-              leaveTypeId: balance.leaveTypeId,
-              leaveTypeName: leaveType.name,
-              year: toYear,
-              allocatedDays: leaveType.daysAllowedPerYear,
-              carryoverDays: carryoverAmount,
-              remainingDays: leaveType.daysAllowedPerYear + carryoverAmount,
-            },
-          });
-        } else {
-          newYearBalance = await db.leave_balances.update({
-            where: { id: newYearBalance.id },
-            data: {
-              carryoverDays: carryoverAmount,
-              remainingDays: newYearBalance.allocatedDays + carryoverAmount,
-            },
-          });
-        }
-
-        carried++;
+      } else {
+        await prisma.leaveBalance.update({
+          where: { id: existing.id },
+          data: {
+            carryoverDays: carryoverAmount,
+            remainingDays: existing.allocatedDays + carryoverAmount - existing.usedDays,
+          },
+        });
       }
-
-      return { carried };
-    } catch (error) {
-      throw new Error(`Failed to carryover leaves: ${error.message}`);
+      carried++;
     }
+
+    return { carried };
   }
 }
 
-module.exports = new LeaveTypeService();
+export default new LeaveTypeService();

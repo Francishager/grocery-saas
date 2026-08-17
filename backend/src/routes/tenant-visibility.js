@@ -1,8 +1,103 @@
 import express from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import hrFeatureService from "../services/hrFeatureService.js";
 
 const router = express.Router();
+
+const HR_FEATURE_CATALOG = [
+  { name: "attendance_tracking", label: "Attendance Tracking", description: "Attendance records, check-in/out and approvals" },
+  { name: "shift_management", label: "Shift Management", description: "Shift setup, assignments and swaps" },
+  { name: "leave_management", label: "Leave Management", description: "Leave types, requests, balances and approvals" },
+  { name: "payroll_processing", label: "Payroll Processing", description: "Payroll visibility and processing controls" },
+  { name: "performance_management", label: "Performance Management", description: "Performance reviews and appraisals" },
+  { name: "training_management", label: "Training Management", description: "Training plans and employee development" },
+];
+
+router.get("/hr-features/catalog", authenticateToken, requirePlatformAdmin, async (_req, res) => {
+  res.json({ features: HR_FEATURE_CATALOG });
+});
+
+router.get("/hr-features/tenants", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { search } = req.query;
+    const tenants = await prisma.tenant.findMany({
+      where: search ? {
+        OR: [
+          { name: { contains: String(search), mode: "insensitive" } },
+          { slug: { contains: String(search), mode: "insensitive" } },
+        ],
+      } : {},
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        status: true,
+        plan: { select: { id: true, name: true } },
+        hrModuleFeatures: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+
+    res.json({ tenants, features: HR_FEATURE_CATALOG });
+  } catch (err) {
+    console.error("List HR feature tenants error:", err);
+    res.status(500).json({ error: "Failed to load HR feature tenants" });
+  }
+});
+
+router.get("/hr-features/:tenantId", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.params.tenantId },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        status: true,
+        hrModuleFeatures: true,
+      },
+    });
+
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json({ tenant, features: HR_FEATURE_CATALOG });
+  } catch (err) {
+    console.error("Get tenant HR features error:", err);
+    res.status(500).json({ error: "Failed to load tenant HR features" });
+  }
+});
+
+router.put("/hr-features/:tenantId/:featureName", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId, featureName } = req.params;
+    const { isEnabled, config } = req.body;
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+
+    const feature = Boolean(isEnabled)
+      ? await hrFeatureService.enableFeature(tenantId, { featureName, config }, req.user.id)
+      : await prisma.hRModuleFeature.upsert({
+          where: { tenantId_featureName: { tenantId, featureName } },
+          create: {
+            tenantId,
+            featureName,
+            isEnabled: false,
+            config: { ...(config || {}), updatedBy: req.user.id },
+          },
+          update: {
+            isEnabled: false,
+            config: { ...(config || {}), updatedBy: req.user.id },
+          },
+        });
+
+    res.json({ feature });
+  } catch (err) {
+    console.error("Update tenant HR feature error:", err);
+    res.status(500).json({ error: "Failed to update HR feature" });
+  }
+});
 
 /**
  * GET /api/platform/tenants/activity/:tenantId
@@ -57,7 +152,7 @@ router.get("/tenants/activity/:tenantId", authenticateToken, requirePlatformAdmi
     return res.json({
       tenant: {
         id: tenant.id,
-        name: tenant.businessName,
+        name: tenant.name,
         slug: tenant.slug,
         plan: tenant.plan?.name,
         status: tenant.status,
@@ -153,7 +248,7 @@ router.get("/tenants/metrics", authenticateToken, requirePlatformAdmin, async (r
       topTenants.map(async (item) => {
         const tenant = await prisma.tenant.findUnique({
           where: { id: item.tenantId },
-          select: { id: true, businessName: true, slug: true },
+          select: { id: true, name: true, slug: true },
         });
         return {
           ...tenant,
@@ -263,7 +358,7 @@ router.get("/tenants/comparison", authenticateToken, requirePlatformAdmin, async
 
         return {
           tenantId: tenant.id,
-          tenantName: tenant.businessName,
+          tenantName: tenant.name,
           slug: tenant.slug,
           plan: tenant.plan?.name,
           status: tenant.status,

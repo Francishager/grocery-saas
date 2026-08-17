@@ -12,6 +12,7 @@ const navItems = [
   { to: '/saas/businesses', label: 'Businesses', icon: Building2 },
   { to: '/saas/plans', label: 'Plans & Pricing', icon: CreditCard },
   { to: '/saas/features', label: 'Features', icon: Settings },
+  { to: '/saas/hr-settings', label: 'HR Module', icon: Users },
   { to: '/saas/subscriptions', label: 'Subscriptions', icon: Wallet },
   { to: '/saas/owners', label: 'Owners', icon: Users },
   { to: '/saas/invitations', label: 'Invitations', icon: Mail },

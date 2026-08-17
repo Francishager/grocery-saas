@@ -1,104 +1,138 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import prisma from '../db.js';
 
-/**
- * EmployeeService - Manages employee lifecycle (most complex service)
- * Handles: creation, profiles, transfers, promotions, hierarchy, supervisor relationships
- */
+function optionalDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function defined(data) {
+  return Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+}
 
 class EmployeeService {
-  /**
-   * Create a new employee
-   * @param {string} tenantId - Tenant ID
-   * @param {object} data - Employee data
-   * @returns {Promise<object>} Created employee
-   */
+  async nextEmployeeNumber(tenantId) {
+    const count = await prisma.employee.count({ where: { tenantId } });
+    return `EMP-${String(count + 1).padStart(4, '0')}`;
+  }
+
+  async validateTenantEmployee(tenantId, employeeId, label = 'Employee') {
+    const employee = await prisma.employee.findFirst({ where: { id: employeeId, tenantId } });
+    if (!employee) throw new Error(`${label} not found`);
+    return employee;
+  }
+
   async createEmployee(tenantId, data) {
-    const {
+    const firstName = String(data.firstName || '').trim();
+    const lastName = String(data.lastName || '').trim();
+    if (!firstName || !lastName) throw new Error('First name and last name are required');
+
+    if (data.supervisorId) {
+      await this.validateSupervisorHierarchy(tenantId, data.supervisorId, null);
+    }
+
+    const basicSalary = Number(data.basicSalary ?? data.salary ?? 0) || 0;
+    const hireDate = optionalDate(data.hireDate || data.dateOfJoining) || new Date();
+    const employeeNumber = String(data.employeeNumber || data.employeeId || '').trim() || await this.nextEmployeeNumber(tenantId);
+    const status = data.status || data.employmentStatus || 'active';
+
+    const createData = {
+      tenantId,
+      branchId: data.branchId || null,
       firstName,
+      middleName: data.middleName || null,
       lastName,
-      email,
-      phone,
-      dateOfBirth,
-      employeeId,
-      gender,
-      maritalStatus,
+      employeeNumber,
+      profilePhoto: data.profilePhoto || null,
+      email: data.email || null,
+      phone: data.phone || null,
+      gender: data.gender || null,
+      dateOfBirth: optionalDate(data.dateOfBirth),
+      nationality: data.nationality || null,
+      maritalStatus: data.maritalStatus || null,
+      bloodType: data.bloodType || null,
+      nationalId: data.nationalId || data.idNumber || null,
+      nationalIdType: data.nationalIdType || null,
+      taxId: data.taxId || null,
+      address: data.address || null,
+      city: data.city || null,
+      state: data.state || null,
+      postalCode: data.postalCode || data.zipCode || null,
+      emergencyContactName: data.emergencyContactName || data.emergencyContact || null,
+      emergencyContactPhone: data.emergencyContactPhone || data.emergencyPhone || null,
+      emergencyContactRelationship: data.emergencyContactRelationship || null,
+      nextOfKinName: data.nextOfKinName || null,
+      nextOfKinPhone: data.nextOfKinPhone || null,
+      nextOfKinRelationship: data.nextOfKinRelationship || null,
+      bankName: data.bankName || null,
+      bankAccountNumber: data.bankAccountNumber || null,
+      bankAccountType: data.bankAccountType || null,
+      bankSortCode: data.bankSortCode || null,
+      bankSwiftCode: data.bankSwiftCode || null,
+      departmentId: data.departmentId || null,
+      positionId: data.positionId || null,
+      supervisorId: data.supervisorId || null,
+      teamId: data.teamId || null,
+      unitId: data.unitId || null,
+      position: data.position || null,
+      department_text: data.department || data.department_text || null,
+      jobTitle: data.jobTitle || data.position || null,
       basicSalary,
-      departmentId,
-      unitId,
-      teamId,
-      positionId,
-      supervisorId,
-      dateOfJoining = new Date(),
-      employmentStatus = 'active',
-      employmentType = 'full-time',
-      branch,
-      address,
-      city,
-      state,
-      country,
-      zipCode,
-      emergencyContact,
-      emergencyPhone,
-      notes,
-    } = data;
-
-    if (!firstName || !lastName || !email || !employeeId) {
-      throw new Error('First name, last name, email, and employee ID are required');
-    }
-
-    // Check circular supervisor relationship
-    if (supervisorId) {
-      await this.validateSupervisorHierarchy(tenantId, supervisorId, null);
-    }
+      payFrequency: data.payFrequency || 'monthly',
+      employmentType: data.employmentType || 'permanent',
+      workLocation: data.workLocation || null,
+      costCentre: data.costCentre || null,
+      probationStartDate: optionalDate(data.probationStartDate),
+      probationEndDate: optionalDate(data.probationEndDate),
+      contractStartDate: optionalDate(data.contractStartDate),
+      contractEndDate: optionalDate(data.contractEndDate),
+      hireDate,
+      terminationDate: optionalDate(data.terminationDate),
+      status,
+    };
 
     try {
-      return await prisma.employee.create({
-        data: {
-          tenantId,
-          firstName,
-          lastName,
-          email,
-          phone,
-          dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-          employeeId,
-          gender,
-          maritalStatus,
-          basicSalary,
-          departmentId,
-          unitId,
-          teamId,
-          positionId,
-          supervisorId,
-          dateOfJoining: new Date(dateOfJoining),
-          employmentStatus,
-          employmentType,
-          branch,
-          address,
-          city,
-          state,
-          country,
-          zipCode,
-          emergencyContact,
-          emergencyPhone,
-          notes,
-          isActive: true,
-        },
+      return await prisma.$transaction(async (tx) => {
+        const employee = await tx.employee.create({ data: createData });
+
+        await tx.employmentHistory.create({
+          data: {
+            tenantId,
+            employeeId: employee.id,
+            employmentStatus: employee.status,
+            position: employee.position || employee.jobTitle,
+            department: employee.department_text,
+            branch: employee.branchId,
+            salary: employee.basicSalary,
+            reason: 'new_employment',
+            effectiveDate: employee.hireDate,
+            recordedBy: data.createdBy || 'system',
+          },
+        });
+
+        if (employee.basicSalary > 0) {
+          await tx.salaryHistory.create({
+            data: {
+              tenantId,
+              employeeId: employee.id,
+              basicSalary: employee.basicSalary,
+              grossSalary: employee.basicSalary,
+              effectiveDate: employee.hireDate,
+              reason: 'new_employment',
+              approvedBy: data.createdBy || null,
+              approvedAt: data.createdBy ? new Date() : null,
+            },
+          });
+        }
+
+        return employee;
       });
     } catch (error) {
-      if (error.code === 'P2002') {
-        throw new Error(`Employee with ID '${employeeId}' already exists`);
-      }
+      if (error.code === 'P2002') throw new Error(`Employee number '${employeeNumber}' already exists`);
       throw error;
     }
   }
 
-  /**
-   * Get employees with filters
-   * @param {string} tenantId - Tenant ID
-   * @param {object} options - Filter options
-   * @returns {Promise<array>} Employees list
-   */
   async getEmployees(tenantId, options = {}) {
     const {
       skip = 0,
@@ -107,13 +141,13 @@ class EmployeeService {
       unitId = null,
       teamId = null,
       positionId = null,
-      status = 'active',
+      status = null,
       search = null,
     } = options;
 
     const where = {
       tenantId,
-      ...(status === 'active' ? { isActive: true } : { isActive: false }),
+      ...(status && status !== 'all' ? { status } : {}),
       ...(departmentId && { departmentId }),
       ...(unitId && { unitId }),
       ...(teamId && { teamId }),
@@ -121,9 +155,12 @@ class EmployeeService {
       ...(search && {
         OR: [
           { firstName: { contains: search, mode: 'insensitive' } },
+          { middleName: { contains: search, mode: 'insensitive' } },
           { lastName: { contains: search, mode: 'insensitive' } },
           { email: { contains: search, mode: 'insensitive' } },
-          { employeeId: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+          { employeeNumber: { contains: search, mode: 'insensitive' } },
+          { nationalId: { contains: search, mode: 'insensitive' } },
         ],
       }),
     };
@@ -133,6 +170,7 @@ class EmployeeService {
       skip,
       take,
       include: {
+        branch: { select: { id: true, name: true } },
         department: true,
         unit: true,
         team: true,
@@ -143,229 +181,234 @@ class EmployeeService {
     });
   }
 
-  /**
-   * Get employee by ID
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @returns {Promise<object>} Employee data
-   */
   async getEmployeeById(tenantId, employeeId) {
     const employee = await prisma.employee.findFirst({
-      where: {
-        id: employeeId,
-        tenantId,
-      },
+      where: { id: employeeId, tenantId },
       include: {
+        branch: { select: { id: true, name: true } },
         department: true,
         unit: true,
         team: true,
         positionRole: true,
         supervisor: true,
         subordinates: { select: { id: true, firstName: true, lastName: true, email: true } },
-        contracts: true,
-        documents: true,
-        salaryHistory: { orderBy: { effectiveDate: 'desc' }, take: 5 },
-        employmentHistory: { orderBy: { effectiveDate: 'desc' }, take: 10 },
+        employeeContracts: true,
+        employeeDocuments: true,
+        salaryHistories: { orderBy: { effectiveDate: 'desc' }, take: 5 },
+        employmentHistories: { orderBy: { effectiveDate: 'desc' }, take: 10 },
       },
     });
 
-    if (!employee) {
-      throw new Error('Employee not found');
-    }
-
+    if (!employee) throw new Error('Employee not found');
     return employee;
   }
 
-  /**
-   * Update employee
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @param {object} data - Update data
-   * @returns {Promise<object>} Updated employee
-   */
   async updateEmployee(tenantId, employeeId, data) {
-    await this.getEmployeeById(tenantId, employeeId);
-
-    const {
-      firstName,
-      lastName,
-      phone,
-      gender,
-      maritalStatus,
-      address,
-      city,
-      state,
-      country,
-      zipCode,
-      emergencyContact,
-      emergencyPhone,
-      notes,
-    } = data;
-
-    const updateData = {};
-    if (firstName !== undefined) updateData.firstName = firstName;
-    if (lastName !== undefined) updateData.lastName = lastName;
-    if (phone !== undefined) updateData.phone = phone;
-    if (gender !== undefined) updateData.gender = gender;
-    if (maritalStatus !== undefined) updateData.maritalStatus = maritalStatus;
-    if (address !== undefined) updateData.address = address;
-    if (city !== undefined) updateData.city = city;
-    if (state !== undefined) updateData.state = state;
-    if (country !== undefined) updateData.country = country;
-    if (zipCode !== undefined) updateData.zipCode = zipCode;
-    if (emergencyContact !== undefined) updateData.emergencyContact = emergencyContact;
-    if (emergencyPhone !== undefined) updateData.emergencyPhone = emergencyPhone;
-    if (notes !== undefined) updateData.notes = notes;
-
-    return await prisma.employee.update({
-      where: { id: employeeId },
-      data: updateData,
-    });
-  }
-
-  /**
-   * Soft delete employee
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @returns {Promise<object>} Deleted employee
-   */
-  async softDeleteEmployee(tenantId, employeeId) {
-    await this.getEmployeeById(tenantId, employeeId);
-
-    return await prisma.employee.update({
-      where: { id: employeeId },
-      data: { isActive: false },
-    });
-  }
-
-  /**
-   * Transfer employee to different department/unit/team
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @param {object} data - Transfer data
-   * @param {string} transferredBy - User making transfer
-   * @returns {Promise<object>} Updated employee
-   */
-  async transferEmployee(tenantId, employeeId, data, transferredBy) {
     const employee = await this.getEmployeeById(tenantId, employeeId);
-    const { departmentId, unitId, teamId, reason } = data;
-
-    // Record employment history
-    await prisma.employmentHistory.create({
-      data: {
-        tenantId,
-        employeeId,
-        previousStatus: `${employee.departmentId}/${employee.unitId}/${employee.teamId}`,
-        newStatus: `${departmentId}/${unitId}/${teamId}`,
-        reason: reason || 'Transfer',
-        effectiveDate: new Date(),
-        recordedDate: new Date(),
-        recordedBy: transferredBy,
-      },
-    });
-
-    return await prisma.employee.update({
-      where: { id: employeeId },
-      data: {
-        ...(departmentId && { departmentId }),
-        ...(unitId && { unitId }),
-        ...(teamId && { teamId }),
-      },
-    });
-  }
-
-  /**
-   * Promote employee
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @param {object} data - Promotion data
-   * @param {string} promotedBy - User making promotion
-   * @returns {Promise<object>} Updated employee
-   */
-  async promoteEmployee(tenantId, employeeId, data, promotedBy) {
-    const employee = await this.getEmployeeById(tenantId, employeeId);
-    const { newPositionId, newSalary, reason, effectiveDate = new Date() } = data;
-
-    if (!newPositionId) {
-      throw new Error('New position is required for promotion');
+    if (data.supervisorId && data.supervisorId !== employee.supervisorId) {
+      if (data.supervisorId === employeeId) throw new Error('Employee cannot be their own supervisor');
+      await this.validateSupervisorHierarchy(tenantId, data.supervisorId, employeeId);
     }
 
-    // Record employment history
-    await prisma.employmentHistory.create({
-      data: {
-        tenantId,
-        employeeId,
-        previousStatus: `Position: ${employee.positionId}`,
-        newStatus: `Position: ${newPositionId}`,
-        reason: reason || 'Promotion',
-        effectiveDate: new Date(effectiveDate),
-        recordedDate: new Date(),
-        recordedBy: promotedBy,
-      },
+    const updateData = defined({
+      branchId: data.branchId,
+      firstName: data.firstName,
+      middleName: data.middleName,
+      lastName: data.lastName,
+      employeeNumber: data.employeeNumber,
+      profilePhoto: data.profilePhoto,
+      email: data.email,
+      phone: data.phone,
+      gender: data.gender,
+      dateOfBirth: data.dateOfBirth !== undefined ? optionalDate(data.dateOfBirth) : undefined,
+      nationality: data.nationality,
+      maritalStatus: data.maritalStatus,
+      bloodType: data.bloodType,
+      nationalId: data.nationalId ?? data.idNumber,
+      nationalIdType: data.nationalIdType,
+      taxId: data.taxId,
+      address: data.address,
+      city: data.city,
+      state: data.state,
+      postalCode: data.postalCode ?? data.zipCode,
+      emergencyContactName: data.emergencyContactName ?? data.emergencyContact,
+      emergencyContactPhone: data.emergencyContactPhone ?? data.emergencyPhone,
+      emergencyContactRelationship: data.emergencyContactRelationship,
+      nextOfKinName: data.nextOfKinName,
+      nextOfKinPhone: data.nextOfKinPhone,
+      nextOfKinRelationship: data.nextOfKinRelationship,
+      departmentId: data.departmentId,
+      unitId: data.unitId,
+      teamId: data.teamId,
+      positionId: data.positionId,
+      supervisorId: data.supervisorId,
+      position: data.position,
+      department_text: data.department ?? data.department_text,
+      jobTitle: data.jobTitle ?? data.position,
+      basicSalary: data.basicSalary !== undefined || data.salary !== undefined ? Number(data.basicSalary ?? data.salary ?? 0) : undefined,
+      payFrequency: data.payFrequency,
+      employmentType: data.employmentType,
+      workLocation: data.workLocation,
+      costCentre: data.costCentre,
+      probationStartDate: data.probationStartDate !== undefined ? optionalDate(data.probationStartDate) : undefined,
+      probationEndDate: data.probationEndDate !== undefined ? optionalDate(data.probationEndDate) : undefined,
+      contractStartDate: data.contractStartDate !== undefined ? optionalDate(data.contractStartDate) : undefined,
+      contractEndDate: data.contractEndDate !== undefined ? optionalDate(data.contractEndDate) : undefined,
+      hireDate: data.hireDate !== undefined || data.dateOfJoining !== undefined ? optionalDate(data.hireDate || data.dateOfJoining) : undefined,
+      terminationDate: data.terminationDate !== undefined ? optionalDate(data.terminationDate) : undefined,
+      status: data.status ?? data.employmentStatus,
     });
 
-    // Record salary change if provided
-    if (newSalary) {
-      await prisma.salaryHistory.create({
+    const salaryChanged = updateData.basicSalary !== undefined && Number(updateData.basicSalary) !== Number(employee.basicSalary || 0);
+    const employmentChanged = ['status', 'position', 'department_text', 'branchId', 'departmentId', 'positionId'].some((field) => updateData[field] !== undefined && updateData[field] !== employee[field]);
+
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id: employeeId },
+        data: updateData,
+      });
+
+      if (salaryChanged) {
+        await tx.salaryHistory.create({
+          data: {
+            tenantId,
+            employeeId,
+            basicSalary: updated.basicSalary,
+            grossSalary: updated.basicSalary,
+            effectiveDate: new Date(),
+            reason: data.salaryChangeReason || 'adjustment',
+            approvedBy: data.updatedBy || null,
+            approvedAt: data.updatedBy ? new Date() : null,
+          },
+        });
+      }
+
+      if (employmentChanged) {
+        await tx.employmentHistory.create({
+          data: {
+            tenantId,
+            employeeId,
+            employmentStatus: updated.status,
+            position: updated.position || updated.jobTitle,
+            department: updated.department_text,
+            branch: updated.branchId,
+            salary: updated.basicSalary,
+            reason: data.reason || 'profile_update',
+            effectiveDate: new Date(),
+            recordedBy: data.updatedBy || 'system',
+          },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  async softDeleteEmployee(tenantId, employeeId) {
+    await this.getEmployeeById(tenantId, employeeId);
+    return prisma.employee.update({
+      where: { id: employeeId },
+      data: {
+        status: 'inactive',
+        terminationDate: new Date(),
+      },
+    });
+  }
+
+  async transferEmployee(tenantId, employeeId, data, transferredBy) {
+    const employee = await this.getEmployeeById(tenantId, employeeId);
+
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id: employeeId },
+        data: defined({
+          branchId: data.branchId,
+          departmentId: data.departmentId,
+          unitId: data.unitId,
+          teamId: data.teamId,
+        }),
+      });
+
+      await tx.employmentHistory.create({
         data: {
           tenantId,
           employeeId,
-          basicSalary: newSalary,
-          effectiveDate: new Date(effectiveDate),
-          reason: 'Promotion salary increase',
-          approvedBy: promotedBy,
-          approvedAt: new Date(),
+          employmentStatus: updated.status,
+          position: updated.position || updated.jobTitle,
+          department: updated.department_text,
+          branch: updated.branchId,
+          salary: updated.basicSalary,
+          reason: data.reason || 'transfer',
+          effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : new Date(),
+          recordedBy: transferredBy || 'system',
+          notes: `Previous branch/department/unit/team: ${employee.branchId || '-'}/${employee.departmentId || '-'}/${employee.unitId || '-'}/${employee.teamId || '-'}`,
         },
       });
-    }
 
-    return await prisma.employee.update({
-      where: { id: employeeId },
-      data: {
-        positionId: newPositionId,
-        ...(newSalary && { basicSalary: newSalary }),
-      },
+      return updated;
     });
   }
 
-  /**
-   * Assign/Change supervisor
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @param {string} newSupervisorId - New supervisor ID
-   * @returns {Promise<object>} Updated employee
-   */
-  async assignSupervisor(tenantId, employeeId, newSupervisorId) {
+  async promoteEmployee(tenantId, employeeId, data, promotedBy) {
     const employee = await this.getEmployeeById(tenantId, employeeId);
+    if (!data.newPositionId) throw new Error('New position is required for promotion');
+    const effectiveDate = data.effectiveDate ? new Date(data.effectiveDate) : new Date();
 
-    // Prevent self-assignment
-    if (employeeId === newSupervisorId) {
-      throw new Error('Employee cannot be their own supervisor');
-    }
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id: employeeId },
+        data: {
+          positionId: data.newPositionId,
+          ...(data.newSalary !== undefined ? { basicSalary: Number(data.newSalary) || 0 } : {}),
+        },
+      });
 
-    // Validate hierarchy to prevent circular relationships
-    await this.validateSupervisorHierarchy(tenantId, newSupervisorId, employeeId);
+      await tx.employmentHistory.create({
+        data: {
+          tenantId,
+          employeeId,
+          employmentStatus: updated.status,
+          position: updated.position || updated.jobTitle,
+          department: updated.department_text,
+          branch: updated.branchId,
+          salary: updated.basicSalary,
+          reason: data.reason || 'promotion',
+          effectiveDate,
+          recordedBy: promotedBy || 'system',
+          notes: `Previous position: ${employee.positionId || employee.position || '-'}`,
+        },
+      });
 
-    return await prisma.employee.update({
-      where: { id: employeeId },
-      data: { supervisorId: newSupervisorId },
+      if (data.newSalary !== undefined) {
+        await tx.salaryHistory.create({
+          data: {
+            tenantId,
+            employeeId,
+            basicSalary: updated.basicSalary,
+            grossSalary: updated.basicSalary,
+            effectiveDate,
+            reason: 'promotion',
+            approvedBy: promotedBy || null,
+            approvedAt: new Date(),
+          },
+        });
+      }
+
+      return updated;
     });
   }
 
-  /**
-   * Get employee's subordinates
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @returns {Promise<array>} Subordinates
-   */
+  async assignSupervisor(tenantId, employeeId, newSupervisorId) {
+    await this.getEmployeeById(tenantId, employeeId);
+    if (employeeId === newSupervisorId) throw new Error('Employee cannot be their own supervisor');
+    await this.validateSupervisorHierarchy(tenantId, newSupervisorId, employeeId);
+    return prisma.employee.update({ where: { id: employeeId }, data: { supervisorId: newSupervisorId || null } });
+  }
+
   async getSubordinates(tenantId, employeeId) {
     await this.getEmployeeById(tenantId, employeeId);
-
     return prisma.employee.findMany({
-      where: {
-        tenantId,
-        supervisorId: employeeId,
-      },
+      where: { tenantId, supervisorId: employeeId },
       select: {
         id: true,
         firstName: true,
@@ -377,123 +420,94 @@ class EmployeeService {
     });
   }
 
-  /**
-   * Validate supervisor hierarchy (prevent circular relationships)
-   * @param {string} tenantId - Tenant ID
-   * @param {string} supervisorId - Proposed supervisor
-   * @param {string} employeeId - Employee being assigned
-   * @throws {Error} If circular relationship detected
-   */
   async validateSupervisorHierarchy(tenantId, supervisorId, employeeId) {
+    if (!supervisorId) return;
     let current = supervisorId;
     const visited = new Set();
 
     while (current) {
-      if (visited.has(current)) {
-        throw new Error('Circular supervisor relationship detected');
-      }
-
+      if (visited.has(current)) throw new Error('Circular supervisor relationship detected');
       visited.add(current);
-
-      if (current === employeeId) {
-        throw new Error('Circular supervisor relationship would be created');
-      }
-
+      if (current === employeeId) throw new Error('Circular supervisor relationship would be created');
       const supervisor = await prisma.employee.findFirst({
         where: { id: current, tenantId },
         select: { supervisorId: true },
       });
-
-      current = supervisor?.supervisorId || null;
+      if (!supervisor) throw new Error('Supervisor not found');
+      current = supervisor.supervisorId || null;
     }
   }
 
-  /**
-   * Get full reporting structure for employee
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @returns {Promise<object>} Hierarchy tree
-   */
   async getReportingStructure(tenantId, employeeId) {
     const employee = await this.getEmployeeById(tenantId, employeeId);
     const subordinates = await this.getSubordinates(tenantId, employeeId);
-
     return {
       employee: {
         id: employee.id,
-        name: `${employee.firstName} ${employee.lastName}`,
-        position: employee.positionRole?.name,
-        supervisor: employee.supervisor
-          ? `${employee.supervisor.firstName} ${employee.supervisor.lastName}`
-          : null,
+        employeeNumber: employee.employeeNumber,
+        name: [employee.firstName, employee.lastName].filter(Boolean).join(' '),
+        position: employee.positionRole?.name || employee.position || employee.jobTitle,
+        supervisor: employee.supervisor ? [employee.supervisor.firstName, employee.supervisor.lastName].filter(Boolean).join(' ') : null,
       },
-      subordinates: subordinates.map(s => ({
-        id: s.id,
-        name: `${s.firstName} ${s.lastName}`,
-        position: s.positionRole?.name,
+      subordinates: subordinates.map((subordinate) => ({
+        id: subordinate.id,
+        name: [subordinate.firstName, subordinate.lastName].filter(Boolean).join(' '),
+        position: subordinate.positionRole?.name,
       })),
     };
   }
 
-  /**
-   * Get complete employee profile
-   * @param {string} tenantId - Tenant ID
-   * @param {string} employeeId - Employee ID
-   * @returns {Promise<object>} Complete profile
-   */
   async getFullEmployeeProfile(tenantId, employeeId) {
     const employee = await this.getEmployeeById(tenantId, employeeId);
     const subordinates = await this.getSubordinates(tenantId, employeeId);
-
     return {
       personal: {
         id: employee.id,
+        employeeNumber: employee.employeeNumber,
         firstName: employee.firstName,
+        middleName: employee.middleName,
         lastName: employee.lastName,
         email: employee.email,
         phone: employee.phone,
         dateOfBirth: employee.dateOfBirth,
         gender: employee.gender,
-        maritalStatus: employee.maritalStatus,
+        nationality: employee.nationality,
+        nationalId: employee.nationalId,
         address: employee.address,
-        city: employee.city,
-        state: employee.state,
-        country: employee.country,
-        zipCode: employee.zipCode,
+        emergencyContactName: employee.emergencyContactName,
+        emergencyContactPhone: employee.emergencyContactPhone,
+        nextOfKinName: employee.nextOfKinName,
+        nextOfKinPhone: employee.nextOfKinPhone,
       },
       employment: {
-        employeeId: employee.employeeId,
-        dateOfJoining: employee.dateOfJoining,
-        employmentStatus: employee.employmentStatus,
+        hireDate: employee.hireDate,
+        status: employee.status,
         employmentType: employee.employmentType,
-        department: employee.department?.name,
+        branch: employee.branch?.name,
+        department: employee.department?.name || employee.department_text,
         unit: employee.unit?.name,
         team: employee.team?.name,
-        position: employee.positionRole?.name,
+        position: employee.positionRole?.name || employee.position || employee.jobTitle,
+        workLocation: employee.workLocation,
+        costCentre: employee.costCentre,
       },
       supervision: {
-        supervisor: employee.supervisor
-          ? `${employee.supervisor.firstName} ${employee.supervisor.lastName}`
-          : null,
+        supervisor: employee.supervisor ? [employee.supervisor.firstName, employee.supervisor.lastName].filter(Boolean).join(' ') : null,
         subordinates: subordinates.length,
       },
       compensation: {
         basicSalary: employee.basicSalary,
-        recentSalaryHistory: employee.salaryHistory,
+        recentSalaryHistory: employee.salaryHistories,
       },
-      contracts: employee.contracts,
-      documents: employee.documents,
+      contracts: employee.employeeContracts,
+      documents: employee.employeeDocuments,
+      history: employee.employmentHistories,
     };
   }
 
-  /**
-   * Get employee count
-   * @param {string} tenantId - Tenant ID
-   * @returns {Promise<number>} Total count
-   */
-  async getEmployeeCount(tenantId) {
+  async getEmployeeCount(tenantId, options = {}) {
     return prisma.employee.count({
-      where: { tenantId, isActive: true },
+      where: { tenantId, ...(options.status ? { status: options.status } : {}) },
     });
   }
 }
