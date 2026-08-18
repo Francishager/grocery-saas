@@ -16,13 +16,13 @@ import UserGuideMenu from '@/components/UserGuideMenu'
 const inventorySubItems = [
   { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
   { to: '/tenant/inventory/services', label: 'Services', icon: Wrench, permission: 'canViewService', feature: 'inventory.services' },
-  { to: '/tenant/inventory/rentals', label: 'Rental Items', icon: Clock, permission: 'canViewRental', feature: 'inventory.rentals' },
+  { to: '/tenant/inventory/rentals', label: 'Rental Items', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/inventory/lubricants', label: 'Lubricants & Dry Stock', icon: Droplet, permission: 'canViewProduct', feature: 'fuel_station.lubricants' },
   { to: '/tenant/inventory/convenience', label: 'Convenience Shop', icon: ShoppingBag, permission: 'canViewProduct', feature: 'fuel_station.convenience' },
 ]
 
 const fuelStationSubItems = [
-  { to: '/tenant/fuel-station/tanks', label: 'Tanks & Pumps', icon: Gauge, permission: 'canViewFuelStation', feature: 'fuel_station.tanks' },
+  { to: '/tenant/fuel-station/tanks', label: 'Tanks & Pumps', icon: Gauge, permission: 'canViewFuelStation', feature: 'fuel_station.pumps' },
   { to: '/tenant/fuel-station/deliveries', label: 'Fuel Deliveries', icon: Truck, permission: 'canViewFuelStation', feature: 'fuel_station.deliveries' },
   { to: '/tenant/fuel-station/meter_readings', label: 'Meter Readings', icon: TrendingUpIcon, permission: 'canViewFuelStation', feature: 'fuel_station.meter_readings' },
   { to: '/tenant/fuel-station/dipstick', label: 'Dipstick Readings', icon: Droplet, permission: 'canViewFuelStation', feature: 'fuel_station.dipstick' },
@@ -256,7 +256,6 @@ const reportCategories: ReportCategoryDef[] = [
 
 const accountingSubItems = [
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting'] },
-  { to: '/tenant/accounting/expenses', label: 'Expenses', icon: DollarSign, feature: 'expenses', permission: ['canViewExpense', 'canCreateExpense'] },
   { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: 'accounting', permission: ['canViewAccounting', 'canViewFinancialReport'] },
   { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewFinancialReport'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
@@ -366,21 +365,9 @@ export function TenantLayout() {
   const visibleHRSubItems = hrSubItems.filter(subItemVisible)
   const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
   const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
-  const visibleFuelStationSubItems = fuelStationSubItems.filter((item) => {
-    const parentEnabled = canAccessFeature('fuel_station')
-    const subEnabled = item.feature ? canAccessFeature(item.feature) : false
-    if (!parentEnabled && !subEnabled) return false
-    if (item.permission && !hasPermission(item.permission)) return false
-    return true
-  })
+  const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
-  const visibleServiceSubItems = serviceSubItems.filter((item) => {
-    const parentEnabled = canAccessFeature('service')
-    const subEnabled = item.feature ? canAccessFeature(item.feature) : false
-    if (!parentEnabled && !subEnabled) return false
-    if (item.permission && !hasPermission(item.permission)) return false
-    return true
-  })
+  const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
   const visibleReportCategories = reportCategories.filter((cat) => {
     if (cat.feature && !canAccessFeature(cat.feature)) return false

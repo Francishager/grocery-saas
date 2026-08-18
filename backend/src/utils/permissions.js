@@ -21,10 +21,10 @@ const PERMISSION_TO_FEATURES = {
   canViewPayable: ['accounting', 'payables'],
   canEditPayable: ['accounting', 'payables'],
   canDeletePayable: ['accounting', 'payables'],
-  canCreateExpense: ['expenses', 'accounting'],
-  canViewExpense: ['expenses', 'accounting'],
-  canEditExpense: ['expenses', 'accounting'],
-  canDeleteExpense: ['expenses', 'accounting'],
+  canCreateExpense: ['expenses'],
+  canViewExpense: ['expenses'],
+  canEditExpense: ['expenses'],
+  canDeleteExpense: ['expenses'],
   canCreateCustomer: ['customers', 'crm'],
   canViewCustomer: ['customers', 'crm'],
   canEditCustomer: ['customers', 'crm'],
@@ -207,17 +207,35 @@ function hasFeatureAccessForTenant(tenantFeatures, featureNames = []) {
   const features = tenantFeatures instanceof Set ? tenantFeatures : new Set(tenantFeatures || []);
   const names = featureNames.filter(Boolean);
 
-  return names.some((featureName) => {
-    if (!featureName) return true;
-    if (features.has(featureName)) return true;
+  const aliasesFor = (featureName) => {
+    const value = String(featureName);
+    const aliases = new Set([
+      value,
+      value.replace(/_/g, '-'),
+      value.replace(/-/g, '_'),
+    ]);
 
-    const parts = String(featureName).split('.');
-    for (let index = parts.length - 1; index > 0; index -= 1) {
-      const parentFeature = parts.slice(0, index).join('.');
-      if (features.has(parentFeature)) return true;
+    const equivalentFeatures = {
+      'fuel_station.tanks': ['fuel_station.pumps'],
+      'fuel_station.pumps': ['fuel_station.tanks'],
+      'service.car_wash': ['fuel_station.car_wash'],
+      'fuel_station.car_wash': ['service.car_wash'],
+      'service.garage': ['fuel_station.garage'],
+      'fuel_station.garage': ['service.garage'],
+    };
+
+    for (const equivalent of equivalentFeatures[value] || []) {
+      aliases.add(equivalent);
+      aliases.add(equivalent.replace(/_/g, '-'));
+      aliases.add(equivalent.replace(/-/g, '_'));
     }
 
-    return false;
+    return aliases;
+  };
+
+  return names.some((featureName) => {
+    if (!featureName) return true;
+    return [...aliasesFor(featureName)].some((alias) => features.has(alias));
   });
 }
 

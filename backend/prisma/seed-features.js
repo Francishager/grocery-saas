@@ -275,15 +275,6 @@ async function seedPlanFeatures() {
           'rentals',
           'communication', 'communication.sms', 'communication.email', 'communication.whatsapp', 'communication.notifications',
           'integrations',
-          'restaurant', 'restaurant.tables', 'restaurant.orders', 'restaurant.kitchen',
-          'restaurant.reservations', 'restaurant.recipes', 'restaurant.happy_hour',
-          'restaurant.combos', 'restaurant.delivery', 'restaurant.tips',
-          'restaurant.waiters', 'restaurant.reports',
-          'fuel_station', 'fuel_station.pumps', 'fuel_station.deliveries', 'fuel_station.meter_readings', 'fuel_station.shift_reports', 'fuel_station.lubricants', 'fuel_station.car_wash', 'fuel_station.reports',
-          'manufacturing', 'manufacturing.production_orders', 'manufacturing.bom', 'manufacturing.waste', 'manufacturing.costing', 'manufacturing.reports',
-          'agriculture', 'agriculture.fields', 'agriculture.livestock', 'agriculture.harvests', 'agriculture.expenses', 'agriculture.reports',
-          'service', 'service.appointments', 'service.work_orders', 'service.job_cards', 'service.technicians', 'service.contracts', 'service.reports',
-          'assets',
         ]
         break
       case 'enterprise':

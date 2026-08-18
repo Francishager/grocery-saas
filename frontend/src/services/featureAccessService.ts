@@ -84,6 +84,7 @@ class FeatureAccessService {
       const data = await response.json()
       this.features = this.normalizeFeatures(data.features || {})
       this.loadedTenantId = tenantId
+      localStorage.setItem('cachedFeatures', JSON.stringify(this.features))
 
       // Load usage limits
       await this.loadUsageLimits(tenantId)
@@ -91,6 +92,7 @@ class FeatureAccessService {
     } catch (error) {
       console.error('Failed to load features:', error)
       this.features = {}
+      localStorage.removeItem('cachedFeatures')
       this.loadedTenantId = null
       this.error = error instanceof Error ? error.message : 'Failed to load features'
     } finally {
@@ -142,11 +144,9 @@ class FeatureAccessService {
     }
   }
 
-  // Check if feature is enabled (primary API)
-  // Returns true if the feature is explicitly enabled.
-  // Returns false if the feature is explicitly disabled.
-  // If a child feature is requested and the parent module is enabled,
-  // that child is treated as accessible as part of the parent module.
+  // Check if feature is enabled (primary API).
+  // Tenant access is strict: a feature must be included by the plan or by an
+  // explicit tenant override. Parent modules do not unlock every child page.
   isFeatureEnabled(featureName: string): boolean {
     // Try the exact feature name first
     const entry = this.features[featureName]
@@ -159,19 +159,6 @@ class FeatureAccessService {
       if (e !== undefined) return e.enabled === true
     }
 
-    // Check parent modules (feature.module -> module enabled)
-    const parts = featureName.split('.')
-    for (let index = parts.length - 1; index > 0; index -= 1) {
-      const parentName = parts.slice(0, index).join('.')
-      const parentEntry = this.features[parentName]
-      if (parentEntry?.enabled) return true
-      // try alias of parent
-      const parentAliases = this.generateFeatureAliases(parentName)
-      if (parentAliases.some((a) => this.features[a]?.enabled)) return true
-    }
-
-    // Module-level features must be explicitly enabled; child features should not
-    // implicitly surface the parent module in the UI.
     return false
   }
 
@@ -184,19 +171,19 @@ class FeatureAccessService {
     aliases.add(featureName.replace(/_/g, '-'))
     aliases.add(featureName.replace(/-/g, '_'))
 
-    // module name fallbacks: service <-> fuel_station
-    const parts = featureName.split('.')
-    if (parts.length > 0) {
-      const module = parts[0]
-      const rest = parts.slice(1).join('.')
-      if (module === 'service') {
-        const alt = ['fuel_station', 'fuel-station']
-        alt.forEach((m) => aliases.add(rest ? `${m}.${rest}` : m))
-      }
-      if (module === 'fuel_station' || module === 'fuel-station') {
-        const alt = ['service']
-        alt.forEach((m) => aliases.add(rest ? `${m}.${rest}` : m))
-      }
+    const equivalentFeatures: Record<string, string[]> = {
+      'fuel_station.tanks': ['fuel_station.pumps'],
+      'fuel_station.pumps': ['fuel_station.tanks'],
+      'service.car_wash': ['fuel_station.car_wash'],
+      'fuel_station.car_wash': ['service.car_wash'],
+      'service.garage': ['fuel_station.garage'],
+      'fuel_station.garage': ['service.garage'],
+    }
+
+    for (const equivalent of equivalentFeatures[featureName] || []) {
+      aliases.add(equivalent)
+      aliases.add(equivalent.replace(/_/g, '-'))
+      aliases.add(equivalent.replace(/-/g, '_'))
     }
 
     return Array.from(aliases)
@@ -308,6 +295,7 @@ class FeatureAccessService {
   reset() {
     this.features = {}
     this.usageLimits = null
+    localStorage.removeItem('cachedFeatures')
     this.loading = false
     this.loadedTenantId = null
     this.error = null

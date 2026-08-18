@@ -97,6 +97,7 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
       include: {
         plan: true,
         features: {
+          where: { feature: { isActive: true } },
           include: {
             feature: true
           }
@@ -112,7 +113,7 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
       prisma.feature.findMany({ where: { isActive: true } }),
       tenant.planId
         ? prisma.planFeature.findMany({
-            where: { planId: tenant.planId, enabled: true },
+            where: { planId: tenant.planId, enabled: true, feature: { isActive: true } },
             include: { feature: true }
           })
         : Promise.resolve([])
@@ -753,9 +754,9 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
     const [allFeatures, planFeatures, tenantFeatureOverrides] = await Promise.all([
       prisma.feature.findMany({ where: { isActive: true }, orderBy: [{ category: 'asc' }, { name: 'asc' }] }),
       tenant.planId
-        ? prisma.planFeature.findMany({ where: { planId: tenant.planId, enabled: true }, include: { feature: true } })
+        ? prisma.planFeature.findMany({ where: { planId: tenant.planId, enabled: true, feature: { isActive: true } }, include: { feature: true } })
         : Promise.resolve([]),
-      prisma.tenantFeature.findMany({ where: { tenantId }, include: { feature: true } })
+      prisma.tenantFeature.findMany({ where: { tenantId, feature: { isActive: true } }, include: { feature: true } })
     ])
 
     const featureAccess = {}

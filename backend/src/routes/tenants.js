@@ -4,6 +4,7 @@ import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.j
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
 import { buildBillingPaymentRequest, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
+import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 
 const router = Router();
 
@@ -337,6 +338,7 @@ router.put("/:id/plan", authenticateToken, requirePlatformAdmin, async (req, res
       data,
       include: { plan: true },
     });
+    invalidateFeatureCache(req.params.id);
     res.json({ message: "Plan updated", tenant });
   } catch (err) {
     if (err?.code === "P2025") return res.status(404).json({ error: "Tenant not found" });

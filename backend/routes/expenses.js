@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions } from '../middleware/auth.js'
+import { requireAnyFeature, requireFeature } from '../middleware/featureCheck.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 
@@ -69,6 +70,18 @@ const paymentMethodAccountLabel = (paymentMethod) => {
 }
 
 const userSelect = { select: { id: true, fname: true, lname: true } }
+
+const requireAnyPermission = (permissions) => (req, res, next) => {
+  const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+  if (granted.includes('*') || permissions.some((permission) => granted.includes(permission))) {
+    return next()
+  }
+
+  return res.status(403).json({
+    message: 'Permission denied',
+    required: permissions,
+  })
+}
 
 const withUser = (record) => {
   if (!record) return record
@@ -151,7 +164,7 @@ async function canUsePaymentMethod(req, paymentMethod) {
 // === EXPENSES ===
 
 // Get all expenses for tenant
-router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, category, startDate, endDate } = req.query
@@ -198,7 +211,7 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
+router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -356,7 +369,7 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
 })
 
 // Update expense
-router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense'), requireTenant, async (req, res) => {
+router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -449,7 +462,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 })
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     await ensureDefaultCashAccounts(req.tenant.id)
 
@@ -522,7 +535,7 @@ router.get('/cash-accounts', authenticateToken, requirePermission('canViewExpens
 })
 
 // Create cash account
-router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
+router.post('/cash-accounts', authenticateToken, requireAnyPermission(['canCreateAccounting', 'canCreateExpense', 'canEditAccounting']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
 
@@ -603,7 +616,7 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateExp
 })
 
 // Update cash account
-router.put('/cash-accounts/:id', authenticateToken, requirePermission('canCreateExpense'), requireTenant, async (req, res) => {
+router.put('/cash-accounts/:id', authenticateToken, requireAnyPermission(['canEditAccounting', 'canCreateAccounting', 'canCreateExpense']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
     const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
@@ -694,7 +707,7 @@ router.put('/cash-accounts/:id', authenticateToken, requirePermission('canCreate
 // === CASH TRANSACTIONS ===
 
 // Get cash transactions
-router.get('/cash-transactions', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+router.get('/cash-transactions', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, accountId, type, startDate, endDate } = req.query
     const skip = (Number(page) - 1) * Number(limit)
@@ -743,7 +756,7 @@ router.get('/cash-transactions', authenticateToken, requirePermission('canViewEx
 // === CASH FLOW SUMMARY ===
 
 // Get cash flow overview
-router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { startDate, endDate } = req.query
@@ -837,7 +850,7 @@ const STAFF_TILL_CREDIT_TYPES = new Set(['sale', 'receipt', 'income', 'journal_i
 const STAFF_TILL_DEBIT_TYPES = new Set(['expense', 'payment', 'transfer', 'journal_out', 'transfer_out'])
 
 // Get staff till sheet data — aggregates all cash transactions per staff member
-router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewStaffTillSheet'), requireTenant, async (req, res) => {
+router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewStaffTillSheet'), requireFeature('accounting'), requireTenant, async (req, res) => {
   try {
     const { startDate, endDate, staffId, branchId } = req.query
 
@@ -963,7 +976,7 @@ router.get('/staff-till-sheets', authenticateToken, requirePermission('canViewSt
 })
 
 // Get expense categories
-router.get('/expense-categories', authenticateToken, requirePermission('canViewExpense'), requireTenant, async (req, res) => {
+router.get('/expense-categories', authenticateToken, requirePermission('canViewExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const categories = [
       // Operating Expenses

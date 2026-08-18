@@ -798,7 +798,7 @@ router.get("/me/features", authenticateToken, async (req, res) => {
 
       if (tenant?.planId) {
         const planFeatures = await prisma.planFeature.findMany({
-          where: { planId: tenant.planId, enabled: true },
+          where: { planId: tenant.planId, enabled: true, feature: { isActive: true } },
           include: { feature: true },
         });
         planFeatures.forEach((pf) => {
@@ -810,7 +810,7 @@ router.get("/me/features", authenticateToken, async (req, res) => {
 
       // 2. Tenant-level overrides (can enable/disable plan features or add extras)
       const tenantFeatures = await prisma.tenantFeature.findMany({
-        where: { tenantId },
+        where: { tenantId, feature: { isActive: true } },
         include: { feature: true },
       });
       tenantFeatures.forEach((tf) => {

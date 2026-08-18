@@ -6,17 +6,34 @@ const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 const featureCache = new Map(); // tenantId -> { features: Set, expiresAt: number }
 const CACHE_TTL = 60_000;
 
-export function hasFeatureAccess(features, featureName) {
-  if (!featureName) return false;
-  if (features.has(featureName)) return true;
+function featureAliases(featureName) {
+  const aliases = new Set([
+    String(featureName),
+    String(featureName).replace(/_/g, '-'),
+    String(featureName).replace(/-/g, '_'),
+  ]);
 
-  const parts = String(featureName).split('.');
-  for (let index = parts.length - 1; index > 0; index -= 1) {
-    const parentFeature = parts.slice(0, index).join('.');
-    if (features.has(parentFeature)) return true;
+  const equivalentFeatures = {
+    'fuel_station.tanks': ['fuel_station.pumps'],
+    'fuel_station.pumps': ['fuel_station.tanks'],
+    'service.car_wash': ['fuel_station.car_wash'],
+    'fuel_station.car_wash': ['service.car_wash'],
+    'service.garage': ['fuel_station.garage'],
+    'fuel_station.garage': ['service.garage'],
+  };
+
+  for (const equivalent of equivalentFeatures[String(featureName)] || []) {
+    aliases.add(equivalent);
+    aliases.add(equivalent.replace(/_/g, '-'));
+    aliases.add(equivalent.replace(/-/g, '_'));
   }
 
-  return false;
+  return aliases;
+}
+
+export function hasFeatureAccess(features, featureName) {
+  if (!featureName) return false;
+  return [...featureAliases(featureName)].some((name) => features.has(name));
 }
 
 /**
@@ -40,7 +57,7 @@ export async function getTenantFeatures(tenantId) {
 
   if (tenant?.planId) {
     const planFeatures = await prisma.planFeature.findMany({
-      where: { planId: tenant.planId, enabled: true },
+      where: { planId: tenant.planId, enabled: true, feature: { isActive: true } },
       include: { feature: true },
     });
     planFeatures.forEach((pf) => {
@@ -50,7 +67,7 @@ export async function getTenantFeatures(tenantId) {
 
   // 2. Tenant-level overrides (can enable/disable plan features or add extras)
   const tenantFeatures = await prisma.tenantFeature.findMany({
-    where: { tenantId },
+    where: { tenantId, feature: { isActive: true } },
     include: { feature: true },
   });
   tenantFeatures.forEach((tf) => {
@@ -58,7 +75,7 @@ export async function getTenantFeatures(tenantId) {
       if (tf.enabled) {
         effective.add(tf.feature.name);
       } else {
-        effective.delete(tf.feature.name);
+        featureAliases(tf.feature.name).forEach((name) => effective.delete(name));
       }
     }
   });
