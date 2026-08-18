@@ -37,6 +37,7 @@ import TransactionAccountsPage from '@/pages/accounting/TransactionAccountsPage'
 import StaffTillSheetPage from '@/pages/accounting/StaffTillSheetPage'
 import DataImporterPage from '@/pages/inventory/DataImporterPage'
 import HRPage from '@/pages/HRPage'
+import HRAccountingConfigPage from '@/pages/HRAccountingConfigPage'
 import HRDashboardPage from '@/pages/hr/HRDashboardPage'
 import DepartmentManagementPage from '@/pages/hr/DepartmentManagementPage'
 import PositionManagementPage from '@/pages/hr/PositionManagementPage'
@@ -183,6 +184,7 @@ function App() {
           <Route path="hr/contracts" element={<FeatureGuard feature="hr" permission={['canViewHRContracts', 'canManageHRContracts']}><ContractManagementPage /></FeatureGuard>} />
           <Route path="hr/documents" element={<FeatureGuard feature="hr" permission={['canViewHRDocuments', 'canManageHRDocuments']}><DocumentManagementPage /></FeatureGuard>} />
           <Route path="hr/units-teams" element={<FeatureGuard feature="hr" permission="canViewHR"><UnitTeamManagementPage /></FeatureGuard>} />
+          <Route path="hr/accounting" element={<FeatureGuard feature="hr" permission="canManageHRPayroll"><HRAccountingConfigPage /></FeatureGuard>} />
           <Route path="hr/settings" element={<Navigate to="/tenant/roles" replace />} />
           <Route path="hr/legacy" element={<FeatureGuard feature="hr" permission="canViewHR"><HRPage /></FeatureGuard>} />
           {/* Phase 2 HR Attendance, Shift, Leave Routes */}

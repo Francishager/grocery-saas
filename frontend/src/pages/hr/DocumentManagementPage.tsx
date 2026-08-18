@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { HRTable, HRColumn } from '@/components/hr/HRTable'
-import { FileText, AlertTriangle, Upload } from 'lucide-react'
+import { ExternalLink, FileText, AlertTriangle, Upload } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
@@ -22,11 +22,13 @@ interface Document {
   documentType: string
   fileName: string
   fileUrl?: string
+  employee?: { id: string; firstName?: string; lastName?: string; employeeNumber?: string }
   issueDate?: string
   expiryDate?: string
   uploadedBy?: string
   isExpired?: boolean
   daysUntilExpiry?: number
+  uploadedAt?: string
   createdAt: string
 }
 
@@ -72,7 +74,17 @@ export default function DocumentManagementPage() {
       key: 'fileName',
       label: 'File Name',
       width: '25%',
-      render: (value) => value || '-',
+      render: (value, row: Document) => row.fileUrl ? (
+        <button
+          type="button"
+          onClick={() => handleView(row.id, row)}
+          className="inline-flex max-w-full items-center gap-2 text-left text-primary hover:underline"
+          title={value || 'Open document'}
+        >
+          <span className="truncate">{value || 'Open document'}</span>
+          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+        </button>
+      ) : value || '-',
     },
     {
       key: 'expiryDate',
@@ -104,7 +116,10 @@ export default function DocumentManagementPage() {
       key: 'createdAt',
       label: 'Uploaded',
       width: '15%',
-      render: (value) => new Date(value).toLocaleDateString(),
+      render: (value, row: Document) => {
+        const dateValue = row.uploadedAt || value
+        return dateValue ? new Date(dateValue).toLocaleDateString() : '-'
+      },
     },
   ]
 
@@ -164,6 +179,14 @@ export default function DocumentManagementPage() {
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error deleting document' })
     }
+  }
+
+  const handleView = (_id: string, row: Document) => {
+    if (!row.fileUrl) {
+      toast({ variant: 'destructive', title: 'Document URL is missing' })
+      return
+    }
+    window.open(row.fileUrl, '_blank', 'noopener,noreferrer')
   }
 
   const handleSave = async () => {
@@ -261,6 +284,7 @@ export default function DocumentManagementPage() {
             data={documents}
             loading={loading}
             onAdd={handleAdd}
+            onView={handleView}
             onDelete={handleDelete}
             searchPlaceholder="Search documents..."
             actions={true}
@@ -269,32 +293,19 @@ export default function DocumentManagementPage() {
       </Card>
 
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Upload Document</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <HRFormBuilder
-              fields={formFields.slice(0, -2)}
+              fields={formFields}
               values={formData}
               onChange={setFormData}
               onSubmit={() => {}}
               loading={false}
-              submitLabel="Upload"
+              showSubmit={false}
             />
-
-            {formFields.slice(-2).map((field) => (
-              <div key={field.name} className="space-y-2">
-                <Label htmlFor={field.name}>{field.label}</Label>
-                <input
-                  id={field.name}
-                  type="date"
-                  value={formData[field.name] || ''}
-                  onChange={(e) => setFormData({ ...formData, [field.name]: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md"
-                />
-              </div>
-            ))}
 
             <div className="space-y-2">
               <Label htmlFor="file">Select File</Label>

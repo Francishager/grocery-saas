@@ -3,13 +3,16 @@
  * Handles HR accounting configuration and account mappings
  */
 
-const express = require("express");
-const router = express.Router();
-const hrConfigurationService = require("../services/hrConfigurationService");
-const { requireAuth, requireTenant } = require("../middleware/auth");
+import { Router } from "express";
+import hrConfigurationService from "../services/hrConfigurationService.js";
+import { authenticateToken, requirePermission, requireTenant } from "../../middleware/auth.js";
 
 // Check authentication and tenant
-router.use(requireAuth, requireTenant);
+const router = Router();
+const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
+const userIdFromRequest = (req) => req.user.id || req.user.userId;
+
+router.use(authenticateToken, requireTenant, requirePermission("canManageHRPayroll"));
 
 /**
  * GET /api/hr/config
@@ -17,7 +20,7 @@ router.use(requireAuth, requireTenant);
  */
 router.get("/", async (req, res) => {
   try {
-    const { tenantId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
 
     const config = await hrConfigurationService.getHRConfig(tenantId);
 
@@ -37,7 +40,7 @@ router.get("/", async (req, res) => {
  */
 router.get("/status", async (req, res) => {
   try {
-    const { tenantId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
 
     const status = await hrConfigurationService.checkHRConfiguration(tenantId);
 
@@ -54,7 +57,7 @@ router.get("/status", async (req, res) => {
  */
 router.get("/available-accounts", async (req, res) => {
   try {
-    const { tenantId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
 
     const accounts =
       await hrConfigurationService.getAvailableAccountsByType(tenantId);
@@ -76,7 +79,8 @@ router.get("/available-accounts", async (req, res) => {
  */
 router.post("/mapping", async (req, res) => {
   try {
-    const { tenantId, userId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
+    const userId = userIdFromRequest(req);
     const {
       salaryExpenseAccountId,
       salaryPayableAccountId,
@@ -118,14 +122,9 @@ router.post("/mapping", async (req, res) => {
  */
 router.post("/initialize-accounts", async (req, res) => {
   try {
-    const { tenantId, userId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
+    const userId = userIdFromRequest(req);
     const { branchId } = req.body;
-
-    if (!branchId) {
-      return res.status(400).json({
-        error: "branchId is required",
-      });
-    }
 
     const result = await hrConfigurationService.initializeDefaultHRAccounts({
       tenantId,
@@ -150,4 +149,4 @@ router.post("/initialize-accounts", async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

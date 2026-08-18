@@ -147,16 +147,17 @@ router.post("/:id/direct-repayment", async (req, res) => {
   try {
     const { tenantId, userId } = req.user;
     const { id } = req.params;
-    const { amount, date, notes } = req.body;
+    const { amount, paymentAccountId, date, notes } = req.body;
 
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "Invalid repayment amount" });
+    if (!amount || amount <= 0 || !paymentAccountId) {
+      return res.status(400).json({ error: "Missing required fields: amount, paymentAccountId" });
     }
 
     const result = await salaryAdvanceService.recordDirectRepayment({
       tenantId,
       salaryAdvanceId: id,
       amount,
+      paymentAccountId,
       date: date || new Date(),
       notes,
       userId,

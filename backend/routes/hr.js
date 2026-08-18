@@ -3,6 +3,7 @@ import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
+import { nextEmployeeNumber } from "../src/utils/employeeNumber.js";
 
 const router = Router();
 
@@ -31,6 +32,126 @@ function monthRange(offset = 0) {
 
 function money(value) {
   return Number(value || 0);
+}
+
+const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
+const HR_ACCOUNT_LABELS = {
+  salaryExpenseAccountId: "Staff Salaries & Wages expense account",
+  salaryPayableAccountId: "Salaries Payable liability account",
+  salaryAdvanceAccountId: "Employee Advances/Loans asset account",
+};
+
+function isDebitNormalAccount(account) {
+  return DEBIT_NORMAL_ACCOUNT_TYPES.has(String(account?.type || "").trim().toLowerCase());
+}
+
+function journalLineBalanceDelta(account, debit, credit) {
+  return isDebitNormalAccount(account) ? debit - credit : credit - debit;
+}
+
+function hrAccountingSetupError(missing = []) {
+  const required = missing.length ? missing.join(", ") : "Staff Salaries & Wages, Salaries Payable, and Employee Advances/Loans";
+  return `HR accounting accounts are not configured. Create the required Chart of Accounts first and map them in HR > HR Accounting before posting. Missing: ${required}.`;
+}
+
+async function getRequiredHRAccounts(tx, tenantId, requiredFields) {
+  const config = await tx.hRAccountingConfig.findUnique({ where: { tenantId } });
+  const missing = [];
+
+  for (const field of requiredFields) {
+    if (!config?.[field]) missing.push(HR_ACCOUNT_LABELS[field] || field);
+  }
+
+  if (!config || !config.isConfigured || missing.length) {
+    const error = new Error(hrAccountingSetupError(missing));
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const accountIds = requiredFields.map((field) => config[field]).filter(Boolean);
+  const accounts = await tx.account.findMany({
+    where: { tenantId, id: { in: accountIds }, isActive: true },
+  });
+  const accountsById = new Map(accounts.map((account) => [account.id, account]));
+  const inactiveOrMissing = requiredFields
+    .filter((field) => config[field] && !accountsById.has(config[field]))
+    .map((field) => HR_ACCOUNT_LABELS[field] || field);
+
+  if (inactiveOrMissing.length) {
+    const error = new Error(hrAccountingSetupError(inactiveOrMissing));
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return { config, accountsById };
+}
+
+async function nextJournalEntryNo(tx, tenantId) {
+  const today = new Date();
+  const dateStr = today.toISOString().split("T")[0].replace(/-/g, "");
+  const lastEntry = await tx.journalEntry.findFirst({
+    where: { tenantId, entryNo: { startsWith: `JE-${dateStr}-` } },
+    orderBy: { entryNo: "desc" },
+  });
+  const lastSequence = Number(String(lastEntry?.entryNo || "").split("-")[2] || 0);
+  return `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`;
+}
+
+async function createPostedJournal(tx, { tenantId, branchId, userId, description, reference, sourceType, sourceId, lines }) {
+  if (!lines.length) throw new Error("Journal lines are required");
+  const totalDebit = lines.reduce((sum, line) => sum + money(line.debit), 0);
+  const totalCredit = lines.reduce((sum, line) => sum + money(line.credit), 0);
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    const error = new Error("HR accounting journal is not balanced. Check salary, advance, and loan account mappings first.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const accounts = await tx.account.findMany({
+    where: { tenantId, id: { in: lines.map((line) => line.accountId) }, isActive: true },
+  });
+  const accountsById = new Map(accounts.map((account) => [account.id, account]));
+  const missingAccount = lines.find((line) => !accountsById.has(line.accountId));
+  if (missingAccount) {
+    const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure the accounts first in HR > HR Accounting.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const journalEntry = await tx.journalEntry.create({
+    data: {
+      entryNo: await nextJournalEntryNo(tx, tenantId),
+      tenantId,
+      branchId: branchId || null,
+      date: new Date(),
+      description,
+      reference,
+      status: "posted",
+      userId,
+      sourceType,
+      sourceId,
+      lines: {
+        create: lines.map((line) => ({
+          accountId: line.accountId,
+          debit: money(line.debit),
+          credit: money(line.credit),
+          description: line.description,
+        })),
+      },
+    },
+    include: { lines: true },
+  });
+
+  for (const line of lines) {
+    const account = accountsById.get(line.accountId);
+    const delta = journalLineBalanceDelta(account, money(line.debit), money(line.credit));
+    await tx.account.update({
+      where: { id: line.accountId },
+      data: { balance: { increment: delta } },
+    });
+  }
+
+  return journalEntry;
 }
 
 // HR management dashboard with real tenant/branch-scoped data
@@ -255,7 +376,7 @@ router.get("/", authenticateToken, requirePermission("canViewHR"), async (req, r
 // Create employee
 router.post("/", authenticateToken, requirePermission("canCreateHREmployee"), async (req, res) => {
   try {
-    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const { firstName, lastName, email, phone, position, department, salary, basicSalary, payFrequency, hireDate, branchId, address } = req.body;
     if (!firstName || !lastName) return res.status(400).json({ error: "firstName and lastName required" });
 
@@ -263,6 +384,7 @@ router.post("/", authenticateToken, requirePermission("canCreateHREmployee"), as
       data: {
         tenantId,
         branchId: branchId || null,
+        employeeNumber: await nextEmployeeNumber(prisma, tenantId, { firstName, lastName }),
         firstName,
         lastName,
         email,
@@ -330,7 +452,7 @@ router.get("/:id/attendance", authenticateToken, requirePermission("canViewHRAtt
 router.post("/:id/attendance", authenticateToken, requirePermission("canManageHRAttendance"), async (req, res) => {
   try {
     const { date, checkIn, checkOut, status, notes, method, location } = req.body;
-    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const att = await prisma.attendanceRecord.create({
       data: {
         tenantId,
@@ -354,7 +476,7 @@ router.post("/:id/attendance", authenticateToken, requirePermission("canManageHR
 // Leave requests
 router.get("/leave-requests", authenticateToken, requirePermission("canViewHRLeave"), async (req, res) => {
   try {
-    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const leaves = await prisma.leaveRequest.findMany({
       where: { tenantId },
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },
@@ -369,7 +491,7 @@ router.get("/leave-requests", authenticateToken, requirePermission("canViewHRLea
 router.post("/:id/leave", authenticateToken, requirePermission("canRequestHRLeave"), async (req, res) => {
   try {
     const { leaveType, leaveTypeId, startDate, endDate, days, reason } = req.body;
-    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const type = leaveTypeId
       ? await prisma.leaveType.findFirst({ where: { id: leaveTypeId, tenantId } })
       : await prisma.leaveType.findFirst({
@@ -490,22 +612,225 @@ router.post("/payroll/run", authenticateToken, requirePermission("canManageHRPay
   }
 });
 
+router.post("/payroll/:id/post", authenticateToken, requirePermission("canManageHRPayroll"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const userId = req.user.id;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const payroll = await tx.payroll.findFirst({
+        where: { id: req.params.id, tenantId },
+        include: { employee: { select: { id: true, firstName: true, lastName: true } } },
+      });
+      if (!payroll) {
+        const error = new Error("Payroll record not found");
+        error.statusCode = 404;
+        throw error;
+      }
+      if (payroll.journalEntryId || ["posted", "partially_paid", "paid"].includes(payroll.status)) {
+        const error = new Error("Payroll is already posted to accounting");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const requiredFields = ["salaryExpenseAccountId", "salaryPayableAccountId"];
+      if (money(payroll.salaryAdvanceRecovery) > 0) requiredFields.push("salaryAdvanceAccountId");
+      const { config } = await getRequiredHRAccounts(tx, tenantId, requiredFields);
+      const employeeName = [payroll.employee?.firstName, payroll.employee?.lastName].filter(Boolean).join(" ") || "Employee";
+      const lines = [
+        {
+          accountId: config.salaryExpenseAccountId,
+          debit: payroll.grossSalary,
+          credit: 0,
+          description: `Staff salary and wages - ${employeeName}`,
+        },
+        {
+          accountId: config.salaryPayableAccountId,
+          debit: 0,
+          credit: payroll.netSalary,
+          description: `Salary payable - ${employeeName}`,
+        },
+      ];
+
+      if (money(payroll.salaryAdvanceRecovery) > 0) {
+        lines.push({
+          accountId: config.salaryAdvanceAccountId,
+          debit: 0,
+          credit: payroll.salaryAdvanceRecovery,
+          description: `Employee advance/loan recovery - ${employeeName}`,
+        });
+      }
+
+      const journalEntry = await createPostedJournal(tx, {
+        tenantId,
+        branchId: payroll.branchId,
+        userId,
+        description: `Payroll posting - ${employeeName} - ${payroll.period}`,
+        reference: payroll.payrollNo,
+        sourceType: "HR_PAYROLL",
+        sourceId: payroll.id,
+        lines,
+      });
+
+      const updated = await tx.payroll.update({
+        where: { id: payroll.id },
+        data: {
+          status: "posted",
+          postedBy: userId,
+          postedAt: new Date(),
+          journalEntryId: journalEntry.id,
+        },
+      });
+
+      await tx.hRAuditLog.create({
+        data: {
+          tenantId,
+          recordType: "payroll",
+          recordId: payroll.id,
+          employeeId: payroll.employeeId,
+          action: "posted",
+          description: "Payroll posted to accounting",
+          amount: payroll.grossSalary,
+          userId,
+          branchId: payroll.branchId,
+          journalEntryId: journalEntry.id,
+        },
+      });
+
+      return { payroll: updated, journalEntry };
+    });
+
+    res.json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) console.error("Payroll post error:", err);
+    res.status(status).json({ error: err.message || "Failed to post payroll" });
+  }
+});
+
 router.put("/payroll/:id/pay", authenticateToken, requirePermission("canManageHRPayroll"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const current = await prisma.payroll.findFirst({
-      where: { id: req.params.id, tenantId },
-      select: { id: true, netSalary: true },
-    });
-    if (!current) return res.status(404).json({ error: "Payroll record not found" });
+    const userId = req.user.id;
+    const { paymentAccountId, amount, paymentMethod = "cash", referenceNo } = req.body;
+    if (!paymentAccountId) {
+      return res.status(400).json({
+        error: "Select the Cash/Bank/Mobile Money account used to pay salary. Create the account first if it does not exist.",
+      });
+    }
 
-    const rec = await prisma.payroll.update({
-      where: { id: req.params.id },
-      data: { status: "paid", paidAmount: current.netSalary, paymentDate: new Date() },
+    const result = await prisma.$transaction(async (tx) => {
+      const current = await tx.payroll.findFirst({
+        where: { id: req.params.id, tenantId },
+        include: { employee: { select: { id: true, firstName: true, lastName: true } } },
+      });
+      if (!current) {
+        const error = new Error("Payroll record not found");
+        error.statusCode = 404;
+        throw error;
+      }
+      if (!current.journalEntryId || !["posted", "partially_paid"].includes(current.status)) {
+        const error = new Error("Post this payroll to accounting before recording salary payment.");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const remaining = Math.max(0, money(current.netSalary) - money(current.paidAmount));
+      const paymentAmount = amount !== undefined ? money(amount) : remaining;
+      if (paymentAmount <= 0 || paymentAmount > remaining) {
+        const error = new Error(`Enter a valid salary payment amount up to ${remaining.toFixed(2)}.`);
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const { config } = await getRequiredHRAccounts(tx, tenantId, ["salaryPayableAccountId"]);
+      const paymentAccount = await tx.account.findFirst({
+        where: { id: paymentAccountId, tenantId, isActive: true },
+      });
+      if (!paymentAccount) {
+        const error = new Error("Selected salary payment account is missing or inactive. Create/select a Cash, Bank, Mobile Money, or Card account first.");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const payment = await tx.payrollPayment.create({
+        data: {
+          tenantId,
+          payrollId: current.id,
+          amount: paymentAmount,
+          paymentMethod,
+          paymentAccountId,
+          referenceNo: referenceNo || null,
+          status: "completed",
+          createdBy: userId,
+        },
+      });
+
+      const employeeName = [current.employee?.firstName, current.employee?.lastName].filter(Boolean).join(" ") || "Employee";
+      const journalEntry = await createPostedJournal(tx, {
+        tenantId,
+        branchId: current.branchId,
+        userId,
+        description: `Salary payment - ${employeeName} - ${current.period}`,
+        reference: referenceNo || payment.id,
+        sourceType: "HR_PAYROLL_PAYMENT",
+        sourceId: payment.id,
+        lines: [
+          {
+            accountId: config.salaryPayableAccountId,
+            debit: paymentAmount,
+            credit: 0,
+            description: `Salary payable paid - ${employeeName}`,
+          },
+          {
+            accountId: paymentAccountId,
+            debit: 0,
+            credit: paymentAmount,
+            description: `Salary payment from ${paymentAccount.name}`,
+          },
+        ],
+      });
+
+      const updatedPayment = await tx.payrollPayment.update({
+        where: { id: payment.id },
+        data: { journalEntryId: journalEntry.id },
+      });
+
+      const newPaidAmount = money(current.paidAmount) + paymentAmount;
+      const rec = await tx.payroll.update({
+        where: { id: current.id },
+        data: {
+          status: newPaidAmount >= money(current.netSalary) ? "paid" : "partially_paid",
+          paidAmount: newPaidAmount,
+          paymentAccountId: newPaidAmount >= money(current.netSalary) ? paymentAccountId : current.paymentAccountId,
+          paymentDate: new Date(),
+          paymentReference: referenceNo || current.paymentReference,
+        },
+      });
+
+      await tx.hRAuditLog.create({
+        data: {
+          tenantId,
+          recordType: "payroll",
+          recordId: current.id,
+          employeeId: current.employeeId,
+          action: "paid",
+          description: "Salary payment posted to accounting",
+          amount: paymentAmount,
+          userId,
+          branchId: current.branchId,
+          journalEntryId: journalEntry.id,
+        },
+      });
+
+      return { payroll: rec, payment: updatedPayment, journalEntry };
     });
-    res.json(rec);
+
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: "Failed to mark payroll as paid" });
+    const status = err.statusCode || 500;
+    if (status >= 500) console.error("Payroll pay error:", err);
+    res.status(status).json({ error: err.message || "Failed to mark payroll as paid" });
   }
 });
 

@@ -126,8 +126,9 @@ async function tryRefreshToken(): Promise<string | null> {
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = getAuthToken()
   const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) || {}) }
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (init?.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
+  if (init?.body && !isFormData && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
   const url = path.startsWith('http') ? path : `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
   return fetch(url, { ...init, headers }).then(async (res) => {
     if (res.status === 401) {

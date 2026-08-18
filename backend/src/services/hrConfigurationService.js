@@ -3,8 +3,7 @@
  * Handles HR accounting account mappings configuration
  */
 
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+import prisma from "../db.js";
 
 class HRConfigurationService {
   /**
@@ -227,7 +226,7 @@ class HRConfigurationService {
 
       if (!config.salaryExpenseAccountId) missing.push("Salary Expense");
       if (!config.salaryPayableAccountId) missing.push("Salary Payable");
-      if (!config.salaryAdvanceAccountId) missing.push("Salary Advance");
+      if (!config.salaryAdvanceAccountId) missing.push("Employee Advance/Loan");
 
       return {
         isConfigured: missing.length === 0,
@@ -315,6 +314,7 @@ class HRConfigurationService {
                 "Staff Salaries & Wages",
                 "Salaries Payable",
                 "Employee Salary Advances",
+                "Employee Advances/Loans",
               ],
             },
           },
@@ -332,7 +332,7 @@ class HRConfigurationService {
         const salaryExpense = await tx.account.create({
           data: {
             tenantId,
-            branchId,
+            branchId: branchId || null,
             code: "6100",
             name: "Staff Salaries & Wages",
             type: "expense",
@@ -346,7 +346,7 @@ class HRConfigurationService {
         const salaryPayable = await tx.account.create({
           data: {
             tenantId,
-            branchId,
+            branchId: branchId || null,
             code: "2100",
             name: "Salaries Payable",
             type: "liability",
@@ -360,13 +360,13 @@ class HRConfigurationService {
         const salaryAdvance = await tx.account.create({
           data: {
             tenantId,
-            branchId,
+            branchId: branchId || null,
             code: "1250",
-            name: "Employee Salary Advances",
+            name: "Employee Advances/Loans",
             type: "asset",
             subType: "current_asset",
             description:
-              "Advances given to employees that will be recovered through future payrolls.",
+              "Advances and employee loans that will be recovered through future payrolls.",
             isActive: true,
           },
         });
@@ -411,4 +411,4 @@ class HRConfigurationService {
   }
 }
 
-module.exports = new HRConfigurationService();
+export default new HRConfigurationService();

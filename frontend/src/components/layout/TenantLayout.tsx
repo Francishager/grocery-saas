@@ -276,6 +276,7 @@ const hrSubItems = [
   { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewHRShifts' },
   { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: ['canViewHRLeave', 'canRequestHRLeave'] },
   { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canApproveHRLeave' },
+  { to: '/tenant/hr/accounting', label: 'HR Accounting', icon: Calculator, feature: 'hr', permission: 'canManageHRPayroll' },
 ]
 
 const settingsSubItems = [

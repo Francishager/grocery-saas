@@ -7,6 +7,20 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
+const ACCOUNT_LABELS = {
+  salaryExpense: "Staff Salaries & Wages expense account",
+  salaryPayable: "Salaries Payable liability account",
+  salaryAdvance: "Employee Advances/Loans asset account",
+  payeTax: "PAYE Tax liability account",
+};
+
+function setupMessage(missingAccounts = []) {
+  const missing = missingAccounts.length
+    ? missingAccounts.map((key) => ACCOUNT_LABELS[key] || key).join(", ")
+    : "Staff Salaries & Wages, Salaries Payable, and Employee Advances/Loans";
+  return `HR accounting accounts are not configured. Create the required Chart of Accounts first and map them in HR > HR Accounting before posting. Missing: ${missing}.`;
+}
+
 class HRAccountingService {
   /**
    * Validate that required HR accounting accounts are configured
@@ -24,7 +38,7 @@ class HRAccountingService {
         return {
           isValid: false,
           missingAccounts: requiredAccounts,
-          error: "HR Accounting configuration not set up",
+          error: setupMessage(requiredAccounts),
         };
       }
 
@@ -110,11 +124,11 @@ class HRAccountingService {
         });
 
         if (!validation || !validation.isConfigured) {
-          throw new Error("HR Accounting configuration not set up");
+          throw new Error(setupMessage(["salaryAdvance"]));
         }
 
         if (!validation.salaryAdvanceAccountId) {
-          throw new Error("Salary Advance Account not configured");
+          throw new Error(setupMessage(["salaryAdvance"]));
         }
 
         // Verify accounts exist
@@ -131,7 +145,7 @@ class HRAccountingService {
         });
 
         if (accountCheck.length !== accountIds.length) {
-          throw new Error("One or more accounts not found or inactive");
+          throw new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
         }
 
         // Generate entry number
@@ -215,13 +229,15 @@ class HRAccountingService {
         });
 
         if (!config || !config.isConfigured) {
-          throw new Error("HR Accounting configuration not set up");
+          throw new Error(setupMessage(["salaryExpense", "salaryPayable"]));
         }
 
         if (!config.salaryExpenseAccountId || !config.salaryPayableAccountId) {
-          throw new Error(
-            "Salary Expense and Salary Payable accounts must be configured"
-          );
+          throw new Error(setupMessage(["salaryExpense", "salaryPayable"]));
+        }
+
+        if (salaryAdvanceRecovery > 0 && !config.salaryAdvanceAccountId) {
+          throw new Error(setupMessage(["salaryAdvance"]));
         }
 
         // Verify accounts exist
@@ -243,7 +259,7 @@ class HRAccountingService {
         });
 
         if (accounts.length !== accountIds.length) {
-          throw new Error("One or more accounts not found or inactive");
+          throw new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
         }
 
         // Generate entry number
@@ -339,11 +355,11 @@ class HRAccountingService {
         });
 
         if (!config || !config.isConfigured) {
-          throw new Error("HR Accounting configuration not set up");
+          throw new Error(setupMessage(["salaryPayable"]));
         }
 
         if (!config.salaryPayableAccountId) {
-          throw new Error("Salary Payable account not configured");
+          throw new Error(setupMessage(["salaryPayable"]));
         }
 
         // Verify payment account exists
@@ -404,6 +420,80 @@ class HRAccountingService {
         console.error("Error creating salary payment journal:", error);
         throw error;
       }
+    });
+
+    return session;
+  }
+
+  /**
+   * Create direct salary advance/loan repayment accounting entry
+   * Creates: DR Payment Account / CR Employee Advances/Loans
+   */
+  async createSalaryAdvanceRepaymentJournal(params) {
+    const {
+      tenantId,
+      branchId,
+      recoveryId,
+      amount,
+      paymentAccountId,
+      employeeName,
+      userId,
+      date,
+    } = params;
+
+    const session = await prisma.$transaction(async (tx) => {
+      const config = await tx.hRAccountingConfig.findUnique({ where: { tenantId } });
+      if (!config || !config.isConfigured || !config.salaryAdvanceAccountId) {
+        throw new Error(setupMessage(["salaryAdvance"]));
+      }
+
+      const accountIds = [config.salaryAdvanceAccountId, paymentAccountId];
+      const accounts = await tx.account.findMany({
+        where: { tenantId, id: { in: accountIds }, isActive: true },
+      });
+
+      if (accounts.length !== accountIds.length) {
+        throw new Error("One or more salary advance repayment accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
+      }
+
+      const lastEntry = await tx.journalEntry.findFirst({
+        where: { tenantId },
+        orderBy: { entryNo: "desc" },
+      });
+
+      const journalEntry = await tx.journalEntry.create({
+        data: {
+          entryNo: this.generateEntryNumber(lastEntry?.entryNo),
+          tenantId,
+          branchId,
+          date: new Date(date),
+          description: `Advance/Loan Repayment - ${employeeName}`,
+          reference: `ADV-REPAY-${recoveryId}`,
+          status: "posted",
+          userId,
+          sourceType: "SALARY_ADVANCE_REPAYMENT",
+          sourceId: recoveryId,
+          lines: {
+            create: [
+              {
+                accountId: paymentAccountId,
+                debit: amount,
+                credit: 0,
+                description: `Direct repayment from ${employeeName}`,
+              },
+              {
+                accountId: config.salaryAdvanceAccountId,
+                debit: 0,
+                credit: amount,
+                description: `Reduce employee advance/loan - ${employeeName}`,
+              },
+            ],
+          },
+        },
+        include: { lines: true },
+      });
+
+      return { success: true, journalEntry };
     });
 
     return session;

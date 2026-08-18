@@ -185,10 +185,31 @@ class SalaryAdvanceService {
       tenantId,
       salaryAdvanceId,
       amount,
+      paymentAccountId,
       date,
       notes,
       userId,
     } = params;
+
+    if (!paymentAccountId) {
+      return {
+        success: false,
+        error: "Select the Cash/Bank/Mobile Money account that received the advance/loan repayment. Create the account first if it does not exist.",
+      };
+    }
+
+    const accountValidation =
+      await hrAccountingService.validateHRAccountConfiguration(tenantId, [
+        "salaryAdvance",
+      ]);
+
+    if (!accountValidation.isValid) {
+      return {
+        success: false,
+        error: accountValidation.error,
+        missingAccounts: accountValidation.missingAccounts,
+      };
+    }
 
     const session = await prisma.$transaction(async (tx) => {
       try {
@@ -255,6 +276,21 @@ class SalaryAdvanceService {
           },
         });
 
+        const journalResult = await hrAccountingService.createSalaryAdvanceRepaymentJournal({
+          tenantId,
+          branchId: advance.employee.branchId,
+          recoveryId: recovery.id,
+          amount,
+          paymentAccountId,
+          employeeName: `${advance.employee.firstName} ${advance.employee.lastName}`,
+          userId,
+          date,
+        });
+
+        if (!journalResult.success) {
+          throw new Error(journalResult.error || "Failed to create advance/loan repayment journal");
+        }
+
         // Create audit log
         await hrAccountingService.createAuditLog({
           tenantId,
@@ -266,12 +302,14 @@ class SalaryAdvanceService {
           amount,
           userId,
           branchId: advance.employee.branchId,
+          journalEntryId: journalResult.journalEntry.id,
         });
 
         return {
           success: true,
           recovery,
           advance: updatedAdvance,
+          journalEntry: journalResult.journalEntry,
         };
       } catch (error) {
         console.error("Error recording direct repayment:", error);

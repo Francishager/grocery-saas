@@ -244,15 +244,15 @@ class PayrollService {
         }
 
         // Validate accounting configuration
+        const requiredAccounts = ["salaryExpense", "salaryPayable"];
+        if (payroll.salaryAdvanceRecovery > 0) requiredAccounts.push("salaryAdvance");
+
         const accountValidation =
-          await hrAccountingService.validateHRAccountConfiguration(tenantId, [
-            "salaryExpense",
-            "salaryPayable",
-          ]);
+          await hrAccountingService.validateHRAccountConfiguration(tenantId, requiredAccounts);
 
         if (!accountValidation.isValid) {
           throw new Error(
-            `Payroll Accounts Not Configured. ${accountValidation.missingAccounts.join(", ")} is required.`
+            accountValidation.error || `Payroll accounts not configured: ${accountValidation.missingAccounts.join(", ")}`
           );
         }
 

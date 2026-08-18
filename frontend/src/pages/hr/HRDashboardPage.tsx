@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Activity, Banknote, Briefcase, CalendarClock, Clock, FileText, TrendingUp, Users } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -31,16 +30,6 @@ const statLabels: Array<{ key: string; label: string; icon: any }> = [
   { key: 'newHires', label: 'New Hires', icon: Users },
 ]
 
-const quickLinks = [
-  { label: 'Employees', route: '/tenant/hr/employees', icon: Users },
-  { label: 'Departments', route: '/tenant/hr/departments', icon: Briefcase },
-  { label: 'Positions', route: '/tenant/hr/positions', icon: Briefcase },
-  { label: 'Attendance', route: '/tenant/hr/attendance', icon: Clock },
-  { label: 'Leave', route: '/tenant/hr/leaves', icon: FileText },
-  { label: 'Shifts', route: '/tenant/hr/shifts', icon: CalendarClock },
-  { label: 'Contracts', route: '/tenant/hr/contracts', icon: FileText },
-]
-
 function formatNumber(key: string, value: number) {
   if (['monthlyPayroll', 'salaryPayable', 'salaryPaidThisMonth', 'outstandingSalaryAdvances'].includes(key)) {
     return Number(value || 0).toLocaleString()
@@ -69,7 +58,6 @@ function MiniBarChart({ data, valueKey = 'value' }: { data: Array<Record<string,
 }
 
 export default function HRDashboardPage() {
-  const navigate = useNavigate()
   const { toast } = useToast()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -99,6 +87,37 @@ export default function HRDashboardPage() {
   const payrollTrend = useMemo(() => data?.charts?.payrollTrend || [], [data])
   const headcount = useMemo(() => data?.charts?.headcount || [], [data])
   const attendanceTrend = useMemo(() => data?.charts?.attendanceTrend || [], [data])
+  const moreInsights = useMemo(() => {
+    const totalEmployees = Number(stats.totalEmployees || 0)
+    const activeEmployees = Number(stats.activeEmployees || 0)
+    const presentToday = Number(stats.employeesPresentToday || 0)
+    const absentToday = Number(stats.employeesAbsentToday || 0)
+    const salaryPayable = Number(stats.salaryPayable || 0)
+    const advances = Number(stats.outstandingSalaryAdvances || 0) + Number(stats.outstandingEmployeeLoans || 0)
+
+    return [
+      {
+        label: 'Active Workforce',
+        value: totalEmployees ? `${((activeEmployees / totalEmployees) * 100).toFixed(1)}%` : '0%',
+        detail: `${activeEmployees.toLocaleString()} active of ${totalEmployees.toLocaleString()} total`,
+      },
+      {
+        label: 'Today Attendance',
+        value: presentToday.toLocaleString(),
+        detail: `${absentToday.toLocaleString()} absent or not checked in`,
+      },
+      {
+        label: 'Payroll Liability',
+        value: salaryPayable.toLocaleString(),
+        detail: 'Unpaid posted salary balance',
+      },
+      {
+        label: 'Advance & Loan Exposure',
+        value: advances.toLocaleString(),
+        detail: 'Outstanding recoverable staff balances',
+      },
+    ]
+  }, [stats])
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -189,14 +208,15 @@ export default function HRDashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>HR Work Areas</CardTitle>
+            <CardTitle>More Insights</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2">
-            {quickLinks.map(({ label, route, icon: Icon }) => (
-              <Button key={route} variant="outline" className="justify-start gap-2" onClick={() => navigate(route)}>
-                <Icon className="h-4 w-4" />
-                {label}
-              </Button>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            {moreInsights.map((insight) => (
+              <div key={insight.label} className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">{insight.label}</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums">{loading ? '-' : insight.value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{insight.detail}</p>
+              </div>
             ))}
           </CardContent>
         </Card>

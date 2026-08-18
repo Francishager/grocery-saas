@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { nextEmployeeNumber } from '../utils/employeeNumber.js';
 
 function optionalDate(value) {
   if (!value) return null;
@@ -12,8 +13,7 @@ function defined(data) {
 
 class EmployeeService {
   async nextEmployeeNumber(tenantId) {
-    const count = await prisma.employee.count({ where: { tenantId } });
-    return `EMP-${String(count + 1).padStart(4, '0')}`;
+    return nextEmployeeNumber(prisma, tenantId);
   }
 
   async validateTenantEmployee(tenantId, employeeId, label = 'Employee') {
@@ -33,7 +33,7 @@ class EmployeeService {
 
     const basicSalary = Number(data.basicSalary ?? data.salary ?? 0) || 0;
     const hireDate = optionalDate(data.hireDate || data.dateOfJoining) || new Date();
-    const employeeNumber = String(data.employeeNumber || data.employeeId || '').trim() || await this.nextEmployeeNumber(tenantId);
+    const employeeNumber = await nextEmployeeNumber(prisma, tenantId, { firstName, lastName });
     const status = data.status || data.employmentStatus || 'active';
 
     const createData = {
@@ -215,7 +215,6 @@ class EmployeeService {
       firstName: data.firstName,
       middleName: data.middleName,
       lastName: data.lastName,
-      employeeNumber: data.employeeNumber,
       profilePhoto: data.profilePhoto,
       email: data.email,
       phone: data.phone,

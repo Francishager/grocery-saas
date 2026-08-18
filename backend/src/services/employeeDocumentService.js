@@ -1,6 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
+function optionalDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /**
  * EmployeeDocumentService - Manages employee documents
  */
@@ -16,20 +22,16 @@ class EmployeeDocumentService {
     const {
       employeeId,
       documentType,
-      documentName,
       fileUrl,
       fileName,
-      fileSize,
-      mimeType,
+      issueDate,
       expiryDate,
-      issuedDate,
-      issuedBy,
       notes,
       uploadedBy,
     } = data;
 
-    if (!employeeId || !documentType || !fileName || !uploadedBy) {
-      throw new Error('Employee ID, document type, file name, and uploader are required');
+    if (!employeeId || !documentType || !fileUrl || !fileName || !uploadedBy) {
+      throw new Error('Employee ID, document type, file URL, file name, and uploader are required');
     }
 
     // Verify employee exists
@@ -47,17 +49,11 @@ class EmployeeDocumentService {
           tenantId,
           employeeId,
           documentType,
-          documentName,
           fileUrl,
           fileName,
-          fileSize,
-          mimeType,
-          status: 'active',
-          uploadedDate: new Date(),
           uploadedBy,
-          expiryDate: expiryDate ? new Date(expiryDate) : null,
-          issuedDate: issuedDate ? new Date(issuedDate) : null,
-          issuedBy,
+          issueDate: optionalDate(issueDate || data.issuedDate),
+          expiryDate: optionalDate(expiryDate),
           notes,
         },
       });
@@ -74,12 +70,11 @@ class EmployeeDocumentService {
    * @returns {Promise<array>} Documents list
    */
   async getEmployeeDocuments(tenantId, employeeId, options = {}) {
-    const { skip = 0, take = 50, documentType = null, status = 'active' } = options;
+    const { skip = 0, take = 50, documentType = null } = options;
 
     const where = {
       tenantId,
       employeeId,
-      ...(status && { status }),
       ...(documentType && { documentType }),
     };
 
@@ -87,7 +82,52 @@ class EmployeeDocumentService {
       where,
       skip,
       take,
-      orderBy: { uploadedDate: 'desc' },
+      orderBy: { uploadedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Get all documents for a tenant
+   * @param {string} tenantId - Tenant ID
+   * @param {object} options - Filter options
+   * @returns {Promise<array>} Documents list
+   */
+  async getDocuments(tenantId, options = {}) {
+    const { skip = 0, take = 100, employeeId = null, documentType = null, search = null } = options;
+
+    return prisma.employeeDocument.findMany({
+      where: {
+        tenantId,
+        ...(employeeId && { employeeId }),
+        ...(documentType && { documentType }),
+        ...(search && {
+          OR: [
+            { fileName: { contains: search, mode: 'insensitive' } },
+            { documentType: { contains: search, mode: 'insensitive' } },
+            { employee: { is: {
+              OR: [
+                { firstName: { contains: search, mode: 'insensitive' } },
+                { lastName: { contains: search, mode: 'insensitive' } },
+                { employeeNumber: { contains: search, mode: 'insensitive' } },
+              ],
+            } } },
+          ],
+        }),
+      },
+      skip,
+      take,
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeNumber: true,
+            firstName: true,
+            lastName: true,
+            profilePhoto: true,
+          },
+        },
+      },
+      orderBy: { uploadedAt: 'desc' },
     });
   }
 
@@ -125,19 +165,15 @@ class EmployeeDocumentService {
   async updateDocument(tenantId, documentId, data) {
     const document = await this.getDocumentById(tenantId, documentId);
 
-    if (document.status === 'archived') {
-      throw new Error('Cannot update archived document');
-    }
-
-    const { documentName, expiryDate, issuedDate, issuedBy, notes, status } = data;
+    const { documentType, fileName, fileUrl, issueDate, expiryDate, notes } = data;
 
     const updateData = {};
-    if (documentName !== undefined) updateData.documentName = documentName;
-    if (expiryDate !== undefined) updateData.expiryDate = expiryDate ? new Date(expiryDate) : null;
-    if (issuedDate !== undefined) updateData.issuedDate = issuedDate ? new Date(issuedDate) : null;
-    if (issuedBy !== undefined) updateData.issuedBy = issuedBy;
+    if (documentType !== undefined) updateData.documentType = documentType;
+    if (fileName !== undefined) updateData.fileName = fileName;
+    if (fileUrl !== undefined) updateData.fileUrl = fileUrl;
+    if (issueDate !== undefined || data.issuedDate !== undefined) updateData.issueDate = optionalDate(issueDate || data.issuedDate);
+    if (expiryDate !== undefined) updateData.expiryDate = optionalDate(expiryDate);
     if (notes !== undefined) updateData.notes = notes;
-    if (status !== undefined) updateData.status = status;
 
     return await prisma.employeeDocument.update({
       where: { id: documentId },
@@ -151,15 +187,11 @@ class EmployeeDocumentService {
    * @param {string} documentId - Document ID
    * @returns {Promise<object>} Archived document
    */
-  async archiveDocument(tenantId, documentId) {
-    const document = await this.getDocumentById(tenantId, documentId);
+  async deleteDocument(tenantId, documentId) {
+    await this.getDocumentById(tenantId, documentId);
 
-    return await prisma.employeeDocument.update({
+    return await prisma.employeeDocument.delete({
       where: { id: documentId },
-      data: {
-        status: 'archived',
-        archivedDate: new Date(),
-      },
     });
   }
 
@@ -176,7 +208,6 @@ class EmployeeDocumentService {
     return prisma.employeeDocument.findMany({
       where: {
         tenantId,
-        status: 'active',
         expiryDate: {
           gte: now,
           lte: expiryDate,
@@ -210,7 +241,6 @@ class EmployeeDocumentService {
       where: {
         tenantId,
         documentType,
-        status: 'active',
       },
       skip,
       take,
@@ -223,7 +253,7 @@ class EmployeeDocumentService {
           },
         },
       },
-      orderBy: { uploadedDate: 'desc' },
+      orderBy: { uploadedAt: 'desc' },
     });
   }
 

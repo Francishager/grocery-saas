@@ -24,6 +24,7 @@ interface HRFormBuilderProps {
   loading?: boolean
   submitLabel?: string
   error?: string
+  showSubmit?: boolean
 }
 
 export const HRFormBuilder: React.FC<HRFormBuilderProps> = ({
@@ -34,6 +35,7 @@ export const HRFormBuilder: React.FC<HRFormBuilderProps> = ({
   loading = false,
   submitLabel = 'Save',
   error,
+  showSubmit = true,
 }) => {
   const [errors, setErrors] = React.useState<Record<string, string>>({})
 
@@ -127,9 +129,11 @@ export const HRFormBuilder: React.FC<HRFormBuilderProps> = ({
         )
       })}
 
-      <Button onClick={handleSubmit} disabled={loading} className="w-full">
-        {loading ? 'Saving...' : submitLabel}
-      </Button>
+      {showSubmit && (
+        <Button onClick={handleSubmit} disabled={loading} className="w-full">
+          {loading ? 'Saving...' : submitLabel}
+        </Button>
+      )}
     </div>
   )
 }

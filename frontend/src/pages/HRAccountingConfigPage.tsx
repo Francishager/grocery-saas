@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { AlertCircle, CheckCircle2, Settings, Zap } from "lucide-react";
-import axios from "axios";
+import { apiFetch } from "@/lib/api";
+
+async function fetchJson(path: string, init?: RequestInit) {
+  const response = await apiFetch(path, init);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || data?.message || "Request failed");
+  return data;
+}
 
 export default function HRAccountingConfigPage() {
   const [config, setConfig] = useState(null);
@@ -27,22 +34,22 @@ export default function HRAccountingConfigPage() {
     try {
       setLoading(true);
       const [configRes, accountsRes] = await Promise.all([
-        axios.get("/api/hr/config"),
-        axios.get("/api/hr/config/available-accounts"),
+        fetchJson("/api/hr/config"),
+        fetchJson("/api/hr/config/available-accounts"),
       ]);
 
-      setConfig(configRes.data.config);
-      setAvailableAccounts(accountsRes.data);
+      setConfig(configRes.config);
+      setAvailableAccounts(accountsRes);
       setSelectedAccounts({
-        salaryExpenseAccountId: configRes.data.config.salaryExpenseAccountId || "",
-        salaryPayableAccountId: configRes.data.config.salaryPayableAccountId || "",
-        salaryAdvanceAccountId: configRes.data.config.salaryAdvanceAccountId || "",
-        payeTaxAccountId: configRes.data.config.payeTaxAccountId || "",
-        socialSecurityAccountId: configRes.data.config.socialSecurityAccountId || "",
+        salaryExpenseAccountId: configRes.config.salaryExpenseAccountId || "",
+        salaryPayableAccountId: configRes.config.salaryPayableAccountId || "",
+        salaryAdvanceAccountId: configRes.config.salaryAdvanceAccountId || "",
+        payeTaxAccountId: configRes.config.payeTaxAccountId || "",
+        socialSecurityAccountId: configRes.config.socialSecurityAccountId || "",
       });
       setError(null);
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to load configuration");
+      setError(err instanceof Error ? err.message : "Failed to load configuration");
     } finally {
       setLoading(false);
     }
@@ -58,16 +65,18 @@ export default function HRAccountingConfigPage() {
   const handleSaveMapping = async () => {
     try {
       setSaving(true);
-      const response = await axios.post("/api/hr/config/mapping", selectedAccounts);
+      const response = await fetchJson("/api/hr/config/mapping", {
+        method: "POST",
+        body: JSON.stringify(selectedAccounts),
+      });
 
-      setConfig(response.data.config);
+      setConfig(response.config);
       setSuccess("HR account mapping updated successfully!");
       setTimeout(() => setSuccess(null), 3000);
       setError(null);
     } catch (err) {
-      const errorMsg = err.response?.data?.error || "Failed to save mapping";
+      const errorMsg = err instanceof Error ? err.message : "Failed to save mapping";
       setError(errorMsg);
-      console.error("Validation errors:", err.response?.data?.validation);
     } finally {
       setSaving(false);
     }
@@ -76,11 +85,14 @@ export default function HRAccountingConfigPage() {
   const handleInitializeAccounts = async () => {
     try {
       setSaving(true);
-      const response = await axios.post("/api/hr/config/initialize-accounts", {
-        branchId: localStorage.getItem("selectedBranchId"), // From app state
+      const response = await fetchJson("/api/hr/config/initialize-accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          branchId: localStorage.getItem("selectedBranchId"),
+        }),
       });
 
-      setConfig(response.data.config);
+      setConfig(response.config);
       setShowInitialize(false);
       setSuccess(
         "Default HR accounts created! Please review and confirm the mappings."
@@ -88,8 +100,7 @@ export default function HRAccountingConfigPage() {
       await fetchConfiguration(); // Refresh after creation
     } catch (err) {
       setError(
-        err.response?.data?.error ||
-          "Failed to initialize accounts. They may already exist."
+        err instanceof Error ? err.message : "Failed to initialize accounts. They may already exist."
       );
     } finally {
       setSaving(false);
@@ -117,7 +128,7 @@ export default function HRAccountingConfigPage() {
           HR Accounting Configuration
         </h1>
         <p className="text-gray-600 mt-2">
-          Set up accounting accounts for HR transactions (salary advances, payroll,
+          Set up accounting accounts for HR transactions (salary advances, employee loans, payroll,
           payments)
         </p>
       </div>
@@ -140,7 +151,7 @@ export default function HRAccountingConfigPage() {
           <p className="text-gray-600 text-sm">
             {isConfigured
               ? "All required accounts are mapped. HR features are ready to use."
-              : "Configure accounting accounts before using salary advances or payroll."}
+              : "Configure accounting accounts before using salary advances, employee loans, or payroll."}
           </p>
         </div>
       </div>
@@ -226,12 +237,12 @@ export default function HRAccountingConfigPage() {
             )}
           </div>
 
-          {/* Salary Advance Account */}
+          {/* Salary Advance / Loan Account */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Salary Advance Account *
+              Employee Advance/Loan Account *
               <span className="text-gray-500 text-xs font-normal">
-                (Asset/Receivable) - Money advanced to employees
+                (Asset/Receivable) - Money advanced or loaned to employees
               </span>
             </label>
             <select
@@ -325,7 +336,7 @@ export default function HRAccountingConfigPage() {
           <div className="mt-4 p-4 bg-blue-50 border border-blue-300 rounded-md">
             <p className="text-blue-900 mb-3">
               This will create default HR accounts (Salaries & Wages, Salaries Payable,
-              Employee Salary Advances) and automatically map them.
+              Employee Advances/Loans) and automatically map them.
             </p>
             <div className="flex gap-2">
               <button
@@ -363,9 +374,9 @@ export default function HRAccountingConfigPage() {
             </p>
           </div>
           <div>
-            <p className="font-medium text-blue-900">Salary Advance</p>
+            <p className="font-medium text-blue-900">Advance/Loan</p>
             <p className="text-blue-700 text-xs mt-1">
-              Must be "Asset" type. Decreased when advances are recovered.
+              Must be "Asset" type. Decreased when advances or employee loans are recovered.
             </p>
           </div>
         </div>
