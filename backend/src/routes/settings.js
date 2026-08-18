@@ -118,7 +118,7 @@ router.get("/tax-config", authenticateToken, async (req, res) => {
   }
 });
 
-// Upload logo to Cloudinary
+// Upload logo image.
 router.post("/logo", authenticateToken, requirePermission("canEditSettings"), upload.single("logo"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
@@ -129,7 +129,7 @@ router.post("/logo", authenticateToken, requirePermission("canEditSettings"), up
       { folder: `jibusales/logos/${tenantId}`, public_id: `logo-${Date.now()}`, overwrite: true },
       async (error, cloudResult) => {
         if (error) {
-          console.error("Cloudinary upload error:", error);
+          console.error("Upload error:", error);
           return res.status(500).json({ error: "Failed to upload logo" });
         }
         const logoUrl = cloudResult.secure_url;

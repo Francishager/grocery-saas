@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -303,6 +304,7 @@ export default function LeaveRequestPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Create Leave Request</DialogTitle>
+            <DialogDescription>Submit a leave request for an employee and leave type.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>

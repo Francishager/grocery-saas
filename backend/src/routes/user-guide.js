@@ -80,7 +80,7 @@ router.post("/:id/image", authenticateToken, requirePlatformAdmin, upload.single
     const step = await prisma.userGuideStep.findUnique({ where: { id: req.params.id } });
     if (!step) return res.status(404).json({ error: "Guide step not found" });
 
-    // Delete old image from Cloudinary if exists
+    // Delete old uploaded image if it exists.
     if (step.imagePublicId) {
       try {
         await cloudinary.v2.uploader.destroy(step.imagePublicId);
@@ -93,7 +93,7 @@ router.post("/:id/image", authenticateToken, requirePlatformAdmin, upload.single
       { folder: `jibusales/guide-steps`, public_id: `guide-${req.params.id}-${Date.now()}`, overwrite: true },
       async (error, cloudResult) => {
         if (error) {
-          console.error("Cloudinary upload error:", error);
+          console.error("Upload error:", error);
           return res.status(500).json({ error: "Failed to upload image" });
         }
         const updated = await prisma.userGuideStep.update({
@@ -135,7 +135,7 @@ router.put("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
   }
 });
 
-// Delete a guide step (also removes image from Cloudinary)
+// Delete a guide step and its uploaded image.
 router.delete("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const step = await prisma.userGuideStep.findUnique({ where: { id: req.params.id } });
@@ -145,7 +145,7 @@ router.delete("/:id", authenticateToken, requirePlatformAdmin, async (req, res) 
       try {
         await cloudinary.v2.uploader.destroy(step.imagePublicId);
       } catch (e) {
-        console.warn("Failed to delete image from Cloudinary:", e.message);
+        console.warn("Failed to delete uploaded image:", e.message);
       }
     }
 

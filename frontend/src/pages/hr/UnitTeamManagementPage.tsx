@@ -7,6 +7,7 @@ import { HRTable, HRColumn } from '@/components/hr/HRTable'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -358,6 +359,9 @@ export default function UnitTeamManagementPage() {
             <DialogTitle>
               {editingId ? `Edit ${activeTab === 'units' ? 'Unit' : 'Team'}` : `Create ${activeTab === 'units' ? 'Unit' : 'Team'}`}
             </DialogTitle>
+            <DialogDescription>
+              {activeTab === 'units' ? 'Manage a department unit.' : 'Manage a team within a department.'}
+            </DialogDescription>
           </DialogHeader>
           <HRFormBuilder
             fields={formFields}

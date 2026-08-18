@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -189,6 +190,7 @@ export default function LeaveApprovalPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Review Leave Request</DialogTitle>
+            <DialogDescription>Review leave dates, notes, and approval action.</DialogDescription>
           </DialogHeader>
           {selectedRequest && (
             <div className="space-y-4">

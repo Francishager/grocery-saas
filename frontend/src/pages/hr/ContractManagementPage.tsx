@@ -6,6 +6,7 @@ import { HRTable, HRColumn } from '@/components/hr/HRTable'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -23,6 +24,7 @@ interface Contract {
   salary: number
   probationPeriod?: number
   createdAt: string
+  employee?: { id: string; firstName?: string; lastName?: string; employeeNumber?: string }
 }
 
 export default function ContractManagementPage() {
@@ -56,7 +58,10 @@ export default function ContractManagementPage() {
       key: 'employeeId',
       label: 'Employee',
       width: '20%',
-      render: (value) => {
+      render: (value, row) => {
+        if (row.employee) {
+          return [row.employee.firstName, row.employee.lastName].filter(Boolean).join(' ') || row.employee.employeeNumber || value
+        }
         const emp = employees.find((e) => e.id === value)
         return emp ? `${emp.firstName} ${emp.lastName}` : value
       },
@@ -282,6 +287,7 @@ export default function ContractManagementPage() {
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Contract' : 'Create Contract'}</DialogTitle>
+            <DialogDescription>Manage employee contract dates, salary, and status.</DialogDescription>
           </DialogHeader>
           <HRFormBuilder
             fields={formFields}

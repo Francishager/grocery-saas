@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -27,14 +28,40 @@ interface Employee {
   nationalId?: string
   dateOfBirth?: string
   hireDate: string
+  departmentId?: string
+  positionId?: string
   position?: string
+  positionRole?: { name?: string }
   department?: string | { name?: string }
   department_text?: string
+  branch?: { name?: string }
+  unit?: { name?: string }
+  team?: { name?: string }
+  supervisor?: { firstName?: string; lastName?: string }
+  gender?: string
+  nationality?: string
+  address?: string
+  emergencyContactName?: string
+  emergencyContactPhone?: string
+  nextOfKinName?: string
+  nextOfKinPhone?: string
+  workLocation?: string
+  costCentre?: string
   status: string
   employmentType?: string
   basicSalary?: number
   tenantId: string
   employeeDocuments?: Array<{ id: string; fileName: string; fileUrl?: string; documentType: string }>
+}
+
+interface Department {
+  id: string
+  name: string
+}
+
+interface Position {
+  id: string
+  name: string
 }
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -51,6 +78,37 @@ const formatStatus = (value?: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
 
+const formatOptionalLabel = (value?: string) => (value ? formatStatus(value) : '-')
+
+const normalizeList = (payload: any) => (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [])
+
+const employeeDepartmentName = (employee: any) =>
+  employee?.employment?.department ||
+  (typeof employee?.department === 'string' ? employee.department : employee?.department?.name) ||
+  employee?.department_text ||
+  ''
+
+const employeePositionName = (employee: any) =>
+  employee?.employment?.position ||
+  employee?.positionRole?.name ||
+  employee?.position ||
+  employee?.jobTitle ||
+  ''
+
+const fullName = (employee: any) =>
+  [employee?.firstName, employee?.middleName, employee?.lastName].filter(Boolean).join(' ').trim()
+
+const formatMoney = (value?: number | string) => {
+  const amount = Number(value || 0)
+  return amount ? `UGX ${amount.toLocaleString()}` : '-'
+}
+
+const formatDate = (value?: string) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString()
+}
+
 const initialFormData = () => ({
   firstName: '',
   middleName: '',
@@ -60,6 +118,8 @@ const initialFormData = () => ({
   nationalId: '',
   dateOfBirth: '',
   hireDate: today(),
+  positionId: '',
+  departmentId: '',
   position: '',
   department: '',
   employmentType: 'permanent',
@@ -71,6 +131,8 @@ const initialFormData = () => ({
 export default function EmployeeManagementPage() {
   const { toast } = useToast()
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
   const [openDialog, setOpenDialog] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -78,7 +140,7 @@ export default function EmployeeManagementPage() {
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null)
   const [profilePhotoPreview, setProfilePhotoPreview] = useState('')
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
+  const [selectedEmployee, setSelectedEmployee] = useState<any | null>(null)
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
 
@@ -138,7 +200,7 @@ export default function EmployeeManagementPage() {
       key: 'position',
       label: 'Position',
       width: '15%',
-      render: (value) => value || '-',
+      render: (_value, row) => employeePositionName(row) || '-',
     },
     {
       key: 'status',
@@ -161,12 +223,27 @@ export default function EmployeeManagementPage() {
   const fetchEmployees = async () => {
     try {
       setLoading(true)
-      const res = await apiFetch('/api/hr/employees')
-      if (res.ok) {
-        const data = await res.json()
-        setEmployees(Array.isArray(data.data) ? data.data : data)
+      const [employeeRes, departmentRes, positionRes] = await Promise.all([
+        apiFetch('/api/hr/employees?take=500'),
+        apiFetch('/api/hr/departments?take=500'),
+        apiFetch('/api/hr/positions?take=500'),
+      ])
+
+      if (employeeRes.ok) {
+        const data = await employeeRes.json()
+        setEmployees(normalizeList(data))
       } else {
         toast({ variant: 'destructive', title: 'Failed to load employees' })
+      }
+
+      if (departmentRes.ok) {
+        const data = await departmentRes.json()
+        setDepartments(normalizeList(data))
+      }
+
+      if (positionRes.ok) {
+        const data = await positionRes.json()
+        setPositions(normalizeList(data))
       }
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error loading employees' })
@@ -189,9 +266,8 @@ export default function EmployeeManagementPage() {
   }
 
   const handleEdit = (id: string, row: Employee) => {
-    const departmentName = typeof row.department === 'string'
-      ? row.department
-      : row.department?.name || row.department_text || ''
+    const departmentName = employeeDepartmentName(row)
+    const positionName = employeePositionName(row)
 
     setEditingId(id)
     setFormData({
@@ -203,7 +279,9 @@ export default function EmployeeManagementPage() {
       nationalId: row.nationalId || row.idNumber || '',
       dateOfBirth: toDateInput(row.dateOfBirth),
       hireDate: toDateInput(row.hireDate),
-      position: row.position || '',
+      positionId: row.positionId || '',
+      departmentId: row.departmentId || '',
+      position: positionName,
       department: departmentName,
       employmentType: row.employmentType || 'permanent',
       basicSalary: row.basicSalary || '',
@@ -263,8 +341,15 @@ export default function EmployeeManagementPage() {
     try {
       const method = editingId ? 'PUT' : 'POST'
       const url = editingId ? `/api/hr/employees/${editingId}` : '/api/hr/employees'
+      const selectedDepartment = departments.find((department) => department.id === formData.departmentId)
+      const selectedPosition = positions.find((position) => position.id === formData.positionId)
       const payload = {
         ...formData,
+        departmentId: formData.departmentId || undefined,
+        positionId: formData.positionId || undefined,
+        department: selectedDepartment?.name || formData.department || undefined,
+        position: selectedPosition?.name || formData.position || undefined,
+        jobTitle: selectedPosition?.name || formData.position || undefined,
         basicSalary: formData.basicSalary === '' ? undefined : Number(formData.basicSalary),
       }
       const body = profilePhotoFile
@@ -298,6 +383,16 @@ export default function EmployeeManagementPage() {
       setFormLoading(false)
     }
   }
+
+  const departmentOptions = departments.map((department) => ({
+    label: department.name,
+    value: department.id,
+  }))
+
+  const positionOptions = positions.map((position) => ({
+    label: position.name,
+    value: position.id,
+  }))
 
   const formFields: HRFormField[] = [
     {
@@ -344,14 +439,18 @@ export default function EmployeeManagementPage() {
       required: true,
     },
     {
-      name: 'position',
-      label: 'Position',
-      type: 'text',
+      name: 'departmentId',
+      label: 'Department',
+      type: 'select',
+      options: departmentOptions,
+      placeholder: departments.length ? 'Select Department' : 'Create a department first',
     },
     {
-      name: 'department',
-      label: 'Department',
-      type: 'text',
+      name: 'positionId',
+      label: 'Position',
+      type: 'select',
+      options: positionOptions,
+      placeholder: positions.length ? 'Select Position' : 'Create a position first',
     },
     {
       name: 'employmentType',
@@ -389,6 +488,106 @@ export default function EmployeeManagementPage() {
     },
   ]
 
+  const renderEmployeeProfile = () => {
+    if (!selectedEmployee) return null
+
+    const personal = selectedEmployee.personal || selectedEmployee
+    const employment = selectedEmployee.employment || {}
+    const compensation = selectedEmployee.compensation || selectedEmployee
+    const supervision = selectedEmployee.supervision || {}
+    const documents = selectedEmployee.documents || selectedEmployee.employeeDocuments || []
+    const displayName = fullName(personal) || fullName(selectedEmployee) || 'Employee'
+    const photo = personal.profilePhoto || selectedEmployee.profilePhoto
+    const department = employment.department || employeeDepartmentName(selectedEmployee)
+    const position = employment.position || employeePositionName(selectedEmployee)
+    const supervisor =
+      supervision.supervisor ||
+      (selectedEmployee.supervisor ? fullName(selectedEmployee.supervisor) : '')
+
+    const items = [
+      ['Staff No.', personal.employeeNumber || selectedEmployee.employeeNumber || '-'],
+      ['Email', personal.email || selectedEmployee.email || '-'],
+      ['Phone', personal.phone || selectedEmployee.phone || '-'],
+      ['National ID', personal.nationalId || selectedEmployee.nationalId || selectedEmployee.idNumber || '-'],
+      ['Date of Birth', formatDate(personal.dateOfBirth || selectedEmployee.dateOfBirth)],
+      ['Gender', formatOptionalLabel(personal.gender || selectedEmployee.gender)],
+      ['Nationality', personal.nationality || selectedEmployee.nationality || '-'],
+      ['Address', personal.address || selectedEmployee.address || '-'],
+      ['Emergency Contact', personal.emergencyContactName || selectedEmployee.emergencyContactName || '-'],
+      ['Emergency Phone', personal.emergencyContactPhone || selectedEmployee.emergencyContactPhone || '-'],
+      ['Next of Kin', personal.nextOfKinName || selectedEmployee.nextOfKinName || '-'],
+      ['Next of Kin Phone', personal.nextOfKinPhone || selectedEmployee.nextOfKinPhone || '-'],
+      ['Position', position || '-'],
+      ['Department', department || '-'],
+      ['Unit', employment.unit || selectedEmployee.unit?.name || '-'],
+      ['Team', employment.team || selectedEmployee.team?.name || '-'],
+      ['Branch', employment.branch || selectedEmployee.branch?.name || '-'],
+      ['Supervisor', supervisor || '-'],
+      ['Employment Type', formatOptionalLabel(employment.employmentType || selectedEmployee.employmentType)],
+      ['Status', formatOptionalLabel(employment.status || selectedEmployee.status)],
+      ['Hire Date', formatDate(employment.hireDate || selectedEmployee.hireDate)],
+      ['Work Location', employment.workLocation || selectedEmployee.workLocation || '-'],
+      ['Cost Centre', employment.costCentre || selectedEmployee.costCentre || '-'],
+      ['Basic Salary', formatMoney(compensation.basicSalary || selectedEmployee.basicSalary)],
+    ]
+
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-4">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted ring-1 ring-border">
+            {photo ? (
+              <img
+                src={photo}
+                alt={displayName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="text-sm font-semibold text-muted-foreground">
+                {[personal.firstName?.[0], personal.lastName?.[0]].filter(Boolean).join('').toUpperCase() || 'HR'}
+              </span>
+            )}
+          </div>
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-semibold">{displayName}</h3>
+            <p className="text-sm text-muted-foreground">{personal.employeeNumber || selectedEmployee.employeeNumber || 'No staff number'}</p>
+            <Badge variant={(employment.status || selectedEmployee.status) === 'active' ? 'default' : 'secondary'}>
+              {formatStatus(employment.status || selectedEmployee.status)}
+            </Badge>
+          </div>
+        </div>
+
+        <div className="grid gap-3 text-sm sm:grid-cols-2">
+          {items.map(([label, value]) => (
+            <div key={label}>
+              <p className="text-muted-foreground">{label}</p>
+              <p className="break-words font-medium">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        {documents.length ? (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Documents</p>
+            <div className="space-y-2">
+              {documents.map((document: any) => (
+                <a
+                  key={document.id}
+                  href={document.fileUrl || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-lg border p-3 text-sm hover:bg-muted"
+                >
+                  <span className="break-words font-medium">{document.fileName}</span>
+                  <span className="ml-2 text-muted-foreground">({formatStatus(document.documentType)})</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -418,6 +617,7 @@ export default function EmployeeManagementPage() {
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Employee' : 'Create Employee'}</DialogTitle>
+            <DialogDescription>Manage employee identity, contact, department, position, and payroll details.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Label htmlFor="profilePhoto">Passport Photo</Label>
@@ -436,7 +636,7 @@ export default function EmployeeManagementPage() {
                 onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
               />
             </div>
-            <p className="text-xs text-muted-foreground">Saved to Cloudinary and stored as the employee profile photo URL.</p>
+            <p className="text-xs text-muted-foreground">Used as the employee passport photo across HR records.</p>
           </div>
           <HRFormBuilder
             fields={formFields}
@@ -454,84 +654,9 @@ export default function EmployeeManagementPage() {
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Employee Profile</DialogTitle>
+            <DialogDescription>Review employee personal, employment, compensation, and document details.</DialogDescription>
           </DialogHeader>
-          {selectedEmployee && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-4">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted ring-1 ring-border">
-                  {selectedEmployee.profilePhoto ? (
-                    <img
-                      src={selectedEmployee.profilePhoto}
-                      alt={`${selectedEmployee.firstName} ${selectedEmployee.lastName}`}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-sm font-semibold text-muted-foreground">
-                      {[selectedEmployee.firstName?.[0], selectedEmployee.lastName?.[0]].filter(Boolean).join('').toUpperCase() || 'HR'}
-                    </span>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <h3 className="truncate text-lg font-semibold">
-                    {[selectedEmployee.firstName, selectedEmployee.middleName, selectedEmployee.lastName].filter(Boolean).join(' ')}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">{selectedEmployee.employeeNumber || 'No staff number'}</p>
-                  <Badge variant={selectedEmployee.status === 'active' ? 'default' : 'secondary'}>{formatStatus(selectedEmployee.status)}</Badge>
-                </div>
-              </div>
-
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="text-muted-foreground">Email</p>
-                  <p className="font-medium">{selectedEmployee.email || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Phone</p>
-                  <p className="font-medium">{selectedEmployee.phone || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Position</p>
-                  <p className="font-medium">{selectedEmployee.position || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Department</p>
-                  <p className="font-medium">
-                    {typeof selectedEmployee.department === 'string'
-                      ? selectedEmployee.department
-                      : selectedEmployee.department?.name || selectedEmployee.department_text || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Employment Type</p>
-                  <p className="font-medium">{formatStatus(selectedEmployee.employmentType)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Hire Date</p>
-                  <p className="font-medium">{selectedEmployee.hireDate ? new Date(selectedEmployee.hireDate).toLocaleDateString() : '-'}</p>
-                </div>
-              </div>
-
-              {selectedEmployee.employeeDocuments?.length ? (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold">Documents</p>
-                  <div className="space-y-2">
-                    {selectedEmployee.employeeDocuments.map((document) => (
-                      <a
-                        key={document.id}
-                        href={document.fileUrl || '#'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block rounded-lg border p-3 text-sm hover:bg-muted"
-                      >
-                        <span className="font-medium">{document.fileName}</span>
-                        <span className="ml-2 text-muted-foreground">({document.documentType})</span>
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          )}
+          {renderEmployeeProfile()}
         </DialogContent>
       </Dialog>
     </div>

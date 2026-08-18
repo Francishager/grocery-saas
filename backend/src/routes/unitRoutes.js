@@ -35,6 +35,32 @@ router.post('/', async (req, res) => {
 });
 
 /**
+ * GET /units - List units
+ */
+router.get('/', async (req, res) => {
+  try {
+    const tenantId = req.tenant?.id || req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const { skip, take, search, departmentId, isActive } = req.query;
+
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_UNIT_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    const units = await unitService.getUnits(tenantId, {
+      skip: parseInt(skip) || 0,
+      take: parseInt(take) || 100,
+      search,
+      departmentId,
+      isActive: isActive === 'all' ? null : isActive === 'false' ? false : true,
+    });
+
+    res.json({ success: true, data: units });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
  * GET /units/:departmentId - Get units in department
  */
 router.get('/:departmentId', async (req, res) => {

@@ -84,7 +84,7 @@ export default function AttendanceListPage() {
       key: 'isApproved',
       label: 'Approved',
       width: '8%',
-      render: (value) => value ? '✓' : '✕',
+      render: (value) => value ? 'Yes' : 'No',
     },
   ]
 
@@ -101,7 +101,8 @@ export default function AttendanceListPage() {
       const res = await apiFetch(`/api/hr/attendance?${params.toString()}`)
       if (res.ok) {
         const data = await res.json()
-        setRecords(data.records || [])
+        const nextRecords = data.records || data.data?.records || data.data || []
+        setRecords(Array.isArray(nextRecords) ? nextRecords : [])
       } else {
         toast({ title: 'Error', description: 'Failed to load attendance records', variant: 'destructive' })
       }

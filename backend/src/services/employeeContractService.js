@@ -97,6 +97,57 @@ class EmployeeContractService {
   }
 
   /**
+   * Get all contracts for a tenant.
+   * @param {string} tenantId - Tenant ID
+   * @param {object} options - Filter options
+   * @returns {Promise<array>} Contracts list
+   */
+  async getContracts(tenantId, options = {}) {
+    const { skip = 0, take = 100, employeeId = null, status = null, search = null } = options;
+
+    const where = {
+      tenantId,
+      ...(employeeId && { employeeId }),
+      ...(status && status !== 'all' && { status }),
+      ...(search && {
+        OR: [
+          { contractNo: { contains: search, mode: 'insensitive' } },
+          { contractType: { contains: search, mode: 'insensitive' } },
+          {
+            employee: {
+              is: {
+                OR: [
+                  { firstName: { contains: search, mode: 'insensitive' } },
+                  { lastName: { contains: search, mode: 'insensitive' } },
+                  { employeeNumber: { contains: search, mode: 'insensitive' } },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    };
+
+    return prisma.employeeContract.findMany({
+      where,
+      skip,
+      take,
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeNumber: true,
+            firstName: true,
+            lastName: true,
+            profilePhoto: true,
+          },
+        },
+      },
+      orderBy: { startDate: 'desc' },
+    });
+  }
+
+  /**
    * Get contract by ID
    * @param {string} tenantId - Tenant ID
    * @param {string} contractId - Contract ID

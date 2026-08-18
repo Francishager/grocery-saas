@@ -37,6 +37,33 @@ router.post('/', async (req, res) => {
 });
 
 /**
+ * GET /teams - List teams
+ */
+router.get('/', async (req, res) => {
+  try {
+    const tenantId = req.tenant?.id || req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const { skip, take, search, departmentId, unitId, isActive } = req.query;
+
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_TEAM_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    const teams = await teamService.getTeams(tenantId, {
+      skip: parseInt(skip) || 0,
+      take: parseInt(take) || 100,
+      search,
+      departmentId,
+      unitId,
+      isActive: isActive === 'all' ? null : isActive === 'false' ? false : true,
+    });
+
+    res.json({ success: true, data: teams });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
  * GET /teams/:departmentId - Get teams by department
  */
 router.get('/:departmentId', async (req, res) => {

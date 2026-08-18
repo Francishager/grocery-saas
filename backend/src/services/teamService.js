@@ -62,6 +62,42 @@ class TeamService {
   }
 
   /**
+   * Get all teams for a tenant.
+   * @param {string} tenantId - Tenant ID
+   * @param {object} options - Filter options
+   * @returns {Promise<array>} Teams list
+   */
+  async getTeams(tenantId, options = {}) {
+    const { skip = 0, take = 100, departmentId = null, unitId = null, isActive = true, search = null } = options;
+
+    const where = {
+      tenantId,
+      ...(departmentId && { departmentId }),
+      ...(unitId && { unitId }),
+      ...(isActive !== null && { isActive }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { code: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    return prisma.team.findMany({
+      where,
+      skip,
+      take,
+      include: {
+        department: true,
+        unit: true,
+        employees: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: [{ department: { name: 'asc' } }, { name: 'asc' }],
+    });
+  }
+
+  /**
    * Get teams in a department or unit
    * @param {string} tenantId - Tenant ID
    * @param {string} departmentId - Department ID

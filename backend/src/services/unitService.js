@@ -49,6 +49,41 @@ class UnitService {
   }
 
   /**
+   * Get all units for a tenant.
+   * @param {string} tenantId - Tenant ID
+   * @param {object} options - Filter options
+   * @returns {Promise<array>} Units list
+   */
+  async getUnits(tenantId, options = {}) {
+    const { skip = 0, take = 100, departmentId = null, isActive = true, search = null } = options;
+
+    const where = {
+      tenantId,
+      ...(departmentId && { departmentId }),
+      ...(isActive !== null && { isActive }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { code: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    return prisma.unit.findMany({
+      where,
+      skip,
+      take,
+      include: {
+        department: true,
+        employees: { select: { id: true, firstName: true, lastName: true } },
+        teams: true,
+      },
+      orderBy: [{ department: { name: 'asc' } }, { name: 'asc' }],
+    });
+  }
+
+  /**
    * Get units for a department
    * @param {string} tenantId - Tenant ID
    * @param {string} departmentId - Department ID

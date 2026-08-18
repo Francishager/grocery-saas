@@ -149,7 +149,7 @@ model EmployeeDocument {
   employee        Employee  @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
   documentType    String    // employment_contract, national_id, passport, academic_certificate, professional_certificate, cv, appointment_letter, promotion_letter, warning_letter, training_certificate, medical_document, other
   fileName        String
-  fileUrl         String    // URL to document (S3, Cloudinary, etc.)
+  fileUrl         String    // Uploaded document URL
   issueDate       DateTime?
   expiryDate      DateTime? // For certificates, IDs, etc
   expiryAlertDays Int?      // Alert X days before expiry

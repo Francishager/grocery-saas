@@ -31,6 +31,33 @@ router.post('/', async (req, res) => {
 });
 
 /**
+ * GET /contracts - List contracts
+ */
+router.get('/', async (req, res) => {
+  try {
+    const tenantId = req.tenant?.id || req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const { id: userId } = req.user;
+    const { skip, take, employeeId, status, search } = req.query;
+
+    if (!(await hrPermissionService.hasPermission(tenantId, userId, 'HR_CONTRACT_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    const contracts = await contractService.getContracts(tenantId, {
+      skip: parseInt(skip) || 0,
+      take: parseInt(take) || 100,
+      employeeId,
+      status,
+      search,
+    });
+
+    res.json({ success: true, data: contracts });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
  * GET /contracts/employee/:employeeId - Get employee contracts
  */
 router.get('/employee/:employeeId', async (req, res) => {

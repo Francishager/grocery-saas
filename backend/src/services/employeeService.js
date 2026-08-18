@@ -463,6 +463,7 @@ class EmployeeService {
       personal: {
         id: employee.id,
         employeeNumber: employee.employeeNumber,
+        profilePhoto: employee.profilePhoto,
         firstName: employee.firstName,
         middleName: employee.middleName,
         lastName: employee.lastName,

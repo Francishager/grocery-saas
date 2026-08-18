@@ -31,7 +31,7 @@ class EmployeeDocumentService {
     } = data;
 
     if (!employeeId || !documentType || !fileUrl || !fileName || !uploadedBy) {
-      throw new Error('Employee ID, document type, file URL, file name, and uploader are required');
+      throw new Error('Employee, document type, document file, file name, and uploader are required');
     }
 
     // Verify employee exists

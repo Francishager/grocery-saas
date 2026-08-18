@@ -8,7 +8,7 @@ function ensureCloudinaryConfigured() {
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
   if (!cloudName || !apiKey || !apiSecret) {
-    throw new Error('Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.');
+    throw new Error('File storage is not configured. Please contact support.');
   }
 
   if (!configured) {

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -31,6 +32,13 @@ interface Document {
   uploadedAt?: string
   createdAt: string
 }
+
+const formatLabel = (value?: string) =>
+  (value || '')
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 
 export default function DocumentManagementPage() {
   const { toast } = useToast()
@@ -66,7 +74,7 @@ export default function DocumentManagementPage() {
       render: (value) => (
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-gray-400" />
-          <span className="capitalize">{value}</span>
+          <span>{formatLabel(value)}</span>
         </div>
       ),
     },
@@ -183,7 +191,7 @@ export default function DocumentManagementPage() {
 
   const handleView = (_id: string, row: Document) => {
     if (!row.fileUrl) {
-      toast({ variant: 'destructive', title: 'Document URL is missing' })
+      toast({ variant: 'destructive', title: 'Document file is missing' })
       return
     }
     window.open(row.fileUrl, '_blank', 'noopener,noreferrer')
@@ -245,9 +253,18 @@ export default function DocumentManagementPage() {
       type: 'select',
       required: true,
       options: [
+        { label: 'CV', value: 'cv' },
         { label: 'Passport', value: 'passport' },
         { label: 'National ID', value: 'national_id' },
         { label: 'Driver License', value: 'driver_license' },
+        { label: 'Employment Contract', value: 'employment_contract' },
+        { label: 'Academic Certificate', value: 'academic_certificate' },
+        { label: 'Professional Certificate', value: 'professional_certificate' },
+        { label: 'Appointment Letter', value: 'appointment_letter' },
+        { label: 'Promotion Letter', value: 'promotion_letter' },
+        { label: 'Warning Letter', value: 'warning_letter' },
+        { label: 'Training Certificate', value: 'training_certificate' },
+        { label: 'Medical Document', value: 'medical_document' },
         { label: 'Work Permit', value: 'work_permit' },
         { label: 'Vaccination', value: 'vaccination' },
         { label: 'Medical Certificate', value: 'medical_certificate' },
@@ -295,7 +312,8 @@ export default function DocumentManagementPage() {
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Upload Document</DialogTitle>
+            <DialogTitle>Add Document</DialogTitle>
+            <DialogDescription>Attach employee records for viewing from HR profiles and document management.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <HRFormBuilder
@@ -308,7 +326,7 @@ export default function DocumentManagementPage() {
             />
 
             <div className="space-y-2">
-              <Label htmlFor="file">Select File</Label>
+              <Label htmlFor="file">Document File</Label>
               <Input
                 id="file"
                 type="file"
@@ -330,7 +348,7 @@ export default function DocumentManagementPage() {
               className="w-full gap-2"
             >
               <Upload className="h-4 w-4" />
-              {formLoading ? 'Uploading...' : 'Upload Document'}
+              {formLoading ? 'Saving...' : 'Save Document'}
             </Button>
           </div>
         </DialogContent>

@@ -31,8 +31,28 @@ class AttendanceService {
     return employee;
   }
 
+  async attachEmployees(tenantId, records) {
+    const list = Array.isArray(records) ? records : records ? [records] : [];
+    if (list.length === 0) return records;
+
+    const employeeIds = [...new Set(list.map((record) => record.employeeId).filter(Boolean))];
+    if (employeeIds.length === 0) return records;
+
+    const employees = await prisma.employee.findMany({
+      where: { tenantId, id: { in: employeeIds } },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    const employeesById = new Map(employees.map((employee) => [employee.id, employee]));
+    const withEmployees = list.map((record) => ({
+      ...record,
+      employee: record.employee || employeesById.get(record.employeeId) || null,
+    }));
+
+    return Array.isArray(records) ? withEmployees : withEmployees[0];
+  }
+
   async checkIn(tenantId, employeeId, method = 'MANUAL', location = null, changedBy = 'SYSTEM') {
-    await this.requireEmployee(tenantId, employeeId);
+    const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkInTime = new Date();
 
@@ -52,7 +72,6 @@ class AttendanceService {
       ? await prisma.attendanceRecord.update({
           where: { id: existing.id },
           data: { checkInTime, method, location, status: 'present' },
-          include: { employee: { select: { firstName: true, lastName: true } } },
         })
       : await prisma.attendanceRecord.create({
           data: {
@@ -65,15 +84,14 @@ class AttendanceService {
             status: 'present',
             isActive: true,
           },
-          include: { employee: { select: { firstName: true, lastName: true } } },
         });
 
     await this.createAudit(tenantId, record.id, changedBy, existing ? 'edited' : 'created', existing, record);
-    return mapRecord(record);
+    return mapRecord({ ...record, employee });
   }
 
   async checkOut(tenantId, employeeId, location = null, changedBy = 'SYSTEM') {
-    await this.requireEmployee(tenantId, employeeId);
+    const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkOutTime = new Date();
 
@@ -106,11 +124,10 @@ class AttendanceService {
         overtimeMinutes,
         location: location || record.location,
       },
-      include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
     await this.createAudit(tenantId, record.id, changedBy, 'edited', record, updated);
-    return mapRecord(updated);
+    return mapRecord({ ...updated, employee });
   }
 
   async getRecords(tenantId, filters = {}, page = 1, limit = 50) {
@@ -144,14 +161,14 @@ class AttendanceService {
         where,
         skip: (currentPage - 1) * take,
         take,
-        include: { employee: { select: { firstName: true, lastName: true } } },
         orderBy: { attendanceDate: 'desc' },
       }),
       prisma.attendanceRecord.count({ where }),
     ]);
+    const recordsWithEmployees = await this.attachEmployees(tenantId, records);
 
     return {
-      records: records.map(mapRecord),
+      records: recordsWithEmployees.map(mapRecord),
       pagination: {
         page: currentPage,
         limit: take,
@@ -179,11 +196,10 @@ class AttendanceService {
         ...(updates.checkOutTime !== undefined && { checkOutTime }),
         duration,
       },
-      include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
     await this.createAudit(tenantId, recordId, changedBy, 'edited', record, updated, updates.reason);
-    return mapRecord(updated);
+    return mapRecord(await this.attachEmployees(tenantId, updated));
   }
 
   async approveAttendance(tenantId, recordId, approvedBy) {
@@ -193,11 +209,10 @@ class AttendanceService {
     const updated = await prisma.attendanceRecord.update({
       where: { id: recordId },
       data: { approvedBy, approvedAt: new Date() },
-      include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
     await this.createAudit(tenantId, recordId, approvedBy, 'approved', record, updated);
-    return mapRecord(updated);
+    return mapRecord(await this.attachEmployees(tenantId, updated));
   }
 
   async deleteRecord(tenantId, recordId, changedBy = 'SYSTEM') {
@@ -207,11 +222,10 @@ class AttendanceService {
     const updated = await prisma.attendanceRecord.update({
       where: { id: recordId },
       data: { isActive: false },
-      include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
     await this.createAudit(tenantId, recordId, changedBy, 'deleted', record, updated);
-    return mapRecord(updated);
+    return mapRecord(await this.attachEmployees(tenantId, updated));
   }
 
   async getAudit(tenantId, recordId) {

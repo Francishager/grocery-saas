@@ -6,6 +6,7 @@ import { HRTable, HRColumn } from '@/components/hr/HRTable'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -19,13 +20,22 @@ interface Position {
   minSalary: number
   maxSalary: number
   description?: string
+  department?: string
   departmentId?: string
   isActive: boolean
 }
 
+interface Department {
+  id: string
+  name: string
+}
+
+const normalizeList = (payload: any) => (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [])
+
 export default function PositionManagementPage() {
   const { toast } = useToast()
   const [positions, setPositions] = useState<Position[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
   const [loading, setLoading] = useState(true)
   const [openDialog, setOpenDialog] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -33,6 +43,7 @@ export default function PositionManagementPage() {
     name: '',
     code: '',
     level: 'mid',
+    department: '',
     minSalary: '',
     maxSalary: '',
     description: '',
@@ -52,6 +63,12 @@ export default function PositionManagementPage() {
       label: 'Code',
       sortable: true,
       width: '15%',
+    },
+    {
+      key: 'department',
+      label: 'Department',
+      width: '18%',
+      render: (value) => value || '-',
     },
     {
       key: 'level',
@@ -90,12 +107,19 @@ export default function PositionManagementPage() {
   const fetchPositions = async () => {
     try {
       setLoading(true)
-      const res = await apiFetch('/api/hr/positions')
-      if (res.ok) {
-        const data = await res.json()
-        setPositions(Array.isArray(data.data) ? data.data : data)
+      const [positionRes, departmentRes] = await Promise.all([
+        apiFetch('/api/hr/positions?take=500'),
+        apiFetch('/api/hr/departments?take=500'),
+      ])
+      if (positionRes.ok) {
+        const data = await positionRes.json()
+        setPositions(normalizeList(data))
       } else {
         toast({ variant: 'destructive', title: 'Failed to load positions' })
+      }
+      if (departmentRes.ok) {
+        const data = await departmentRes.json()
+        setDepartments(normalizeList(data))
       }
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error loading positions' })
@@ -110,7 +134,7 @@ export default function PositionManagementPage() {
 
   const handleAdd = () => {
     setEditingId(null)
-    setFormData({ name: '', code: '', level: 'mid', minSalary: '', maxSalary: '', description: '' })
+    setFormData({ name: '', code: '', level: 'mid', department: '', minSalary: '', maxSalary: '', description: '' })
     setFormError('')
     setOpenDialog(true)
   }
@@ -121,6 +145,7 @@ export default function PositionManagementPage() {
       name: row.name,
       code: row.code,
       level: row.level,
+      department: row.department || '',
       minSalary: row.minSalary || '',
       maxSalary: row.maxSalary || '',
       description: row.description || '',
@@ -178,6 +203,11 @@ export default function PositionManagementPage() {
     }
   }
 
+  const departmentOptions = departments.map((department) => ({
+    label: department.name,
+    value: department.name,
+  }))
+
   const formFields: HRFormField[] = [
     {
       name: 'name',
@@ -192,6 +222,13 @@ export default function PositionManagementPage() {
       type: 'text',
       required: true,
       placeholder: 'e.g., SE-01',
+    },
+    {
+      name: 'department',
+      label: 'Department',
+      type: 'select',
+      options: departmentOptions,
+      placeholder: departments.length ? 'Select Department' : 'Create a department first',
     },
     {
       name: 'level',
@@ -255,6 +292,7 @@ export default function PositionManagementPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Position' : 'Create Position'}</DialogTitle>
+            <DialogDescription>Manage a job position created for the selected department.</DialogDescription>
           </DialogHeader>
           <HRFormBuilder
             fields={formFields}

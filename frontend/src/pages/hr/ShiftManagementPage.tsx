@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -271,6 +272,7 @@ export default function ShiftManagementPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Shift' : 'New Shift'}</DialogTitle>
+            <DialogDescription>Manage shift timing and break duration.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>

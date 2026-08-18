@@ -8,6 +8,7 @@ import { HRTable, HRColumn } from '@/components/hr/HRTable'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -209,6 +210,7 @@ export default function DepartmentManagementPage() {
             <DialogTitle>
               {editingId ? 'Edit Department' : 'Create Department'}
             </DialogTitle>
+            <DialogDescription>Manage a department that can be selected across HR records.</DialogDescription>
           </DialogHeader>
           <HRFormBuilder
             fields={formFields}
