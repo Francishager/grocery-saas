@@ -22,6 +22,41 @@ function saleCogs(sale) {
   return (sale?.items || []).reduce((sum, item) => sum + saleLineCogs(item), 0);
 }
 
+const saleItemCostSelect = {
+  quantity: true,
+  cost: true,
+  conversionFactor: true,
+  product: { select: { cost: true } },
+};
+
+const aggregateTotal = (aggregate, field = "total") => Number(aggregate?._sum?.[field] || 0);
+const aggregateCount = (aggregate) => Number(aggregate?._count || 0);
+
+function mergeGroupedTotals(groups) {
+  const map = new Map();
+  groups.flat().forEach((group) => {
+    const key = group.productId || "unknown";
+    const current = map.get(key) || { productId: group.productId, quantity: 0, revenue: 0, salesCount: 0 };
+    current.quantity += Number(group._sum?.quantity || 0);
+    current.revenue += Number(group._sum?.total || 0);
+    current.salesCount += Number(group._count || 0);
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
+}
+
+function mergePaymentMethods(groups) {
+  const map = new Map();
+  groups.flat().forEach((group) => {
+    const key = group.paymentMethod || "cash";
+    const current = map.get(key) || { method: key, total: 0, count: 0 };
+    current.total += Number(group._sum?.total || 0);
+    current.count += Number(group._count || 0);
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
 // Dashboard KPIs
 router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
   try {
@@ -30,10 +65,28 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    const [salesThisMonth, salesLastMonth, purchasesThisMonth, expensesThisMonth, products, lowStockProducts, expiringProducts, customers, receivables, salesWithItemsThisMonth] = await Promise.all([
+    const [
+      salesThisMonth,
+      saleRecordsThisMonth,
+      salesLastMonth,
+      saleRecordsLastMonth,
+      purchasesThisMonth,
+      supplierPurchasesThisMonth,
+      expensesThisMonth,
+      products,
+      lowStockProducts,
+      expiringProducts,
+      customers,
+      receivables,
+      salesWithItemsThisMonth,
+      saleRecordsWithItemsThisMonth,
+    ] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true, tax: true, discount: true }, _count: true }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true, tax: true, discount: true }, _count: true }),
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
       prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
+      prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: startOfMonth } }), _sum: { amount: true } }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
@@ -42,25 +95,29 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.customer.aggregate({ where: scopedWhere(scope, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
-        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
+        select: { items: { select: saleItemCostSelect } },
+      }),
+      prisma.saleRecord.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        select: { items: { select: saleItemCostSelect } },
       }),
     ]);
 
-    const revenueThisMonth = salesThisMonth._sum.total || 0;
-    const revenueLastMonth = salesLastMonth._sum.total || 0;
+    const revenueThisMonth = aggregateTotal(salesThisMonth) + aggregateTotal(saleRecordsThisMonth);
+    const revenueLastMonth = aggregateTotal(salesLastMonth) + aggregateTotal(saleRecordsLastMonth);
     const revenueChange = revenueLastMonth ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1) : 0;
-    const totalExpenses = expensesThisMonth._sum.amount || 0;
-    const totalPurchases = purchasesThisMonth._sum.total || 0;
-    const cogs = salesWithItemsThisMonth.reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const totalExpenses = aggregateTotal(expensesThisMonth, "amount");
+    const totalPurchases = aggregateTotal(purchasesThisMonth) + aggregateTotal(supplierPurchasesThisMonth);
+    const cogs = [...salesWithItemsThisMonth, ...saleRecordsWithItemsThisMonth].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const grossProfit = revenueThisMonth - cogs;
     const netProfit = grossProfit - totalExpenses;
 
     res.json({
       revenue: revenueThisMonth,
       revenueChange: Number(revenueChange),
-      salesCount: salesThisMonth._count,
-      taxCollected: salesThisMonth._sum.tax || 0,
-      totalDiscount: salesThisMonth._sum.discount || 0,
+      salesCount: aggregateCount(salesThisMonth) + aggregateCount(saleRecordsThisMonth),
+      taxCollected: aggregateTotal(salesThisMonth, "tax") + aggregateTotal(saleRecordsThisMonth, "tax"),
+      totalDiscount: aggregateTotal(salesThisMonth, "discount") + aggregateTotal(saleRecordsThisMonth, "discount"),
       purchases: totalPurchases,
       expenses: totalExpenses,
       cogs,
@@ -94,12 +151,13 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
       const label = start.toLocaleString("default", { month: "short" });
       labels.push(label);
 
-      const [saleAgg, expAgg] = await Promise.all([
+      const [saleAgg, saleRecordAgg, expAgg] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
+        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: start, lt: end } }), _sum: { amount: true } }),
       ]);
-      revenue.push(saleAgg._sum.total || 0);
-      expenses.push(expAgg._sum.amount || 0);
+      revenue.push(aggregateTotal(saleAgg) + aggregateTotal(saleRecordAgg));
+      expenses.push(aggregateTotal(expAgg, "amount"));
     }
 
     res.json({ labels, revenue, expenses });
@@ -122,17 +180,22 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       labels.push(start.toLocaleString("default", { month: "short" }));
 
-      const [saleAgg, expAgg, salesWithItems] = await Promise.all([
+      const [saleAgg, saleRecordAgg, expAgg, salesWithItems, saleRecordsWithItems] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
+        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: start, lt: end } }), _sum: { amount: true } }),
         prisma.sale.findMany({
           where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
-          select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
+          select: { items: { select: saleItemCostSelect } },
+        }),
+        prisma.saleRecord.findMany({
+          where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
+          select: { items: { select: saleItemCostSelect } },
         }),
       ]);
-      const rev = saleAgg._sum.total || 0;
-      const cogs = salesWithItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
-      const exp = expAgg._sum.amount || 0;
+      const rev = aggregateTotal(saleAgg) + aggregateTotal(saleRecordAgg);
+      const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
+      const exp = aggregateTotal(expAgg, "amount");
       grossProfit.push(rev - cogs);
       netProfit.push(rev - cogs - exp);
     }
@@ -152,20 +215,21 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    const [sales, expenses, salesWithItems] = await Promise.all([
+    const [sales, saleRecords, expenses] = await Promise.all([
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
-        select: { total: true, createdAt: true, items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
+        select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.saleRecord.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
+        select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
         orderBy: { createdAt: "asc" },
       }),
       prisma.expense.findMany({
         where: scopedWhere(scope, { date: { gte: startOfMonth, lt: endOfMonth } }),
         select: { amount: true, date: true },
         orderBy: { date: "asc" },
-      }),
-      prisma.sale.findMany({
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
-        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
 
@@ -177,7 +241,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     }
 
     // Aggregate sales by day
-    sales.forEach((sale) => {
+    [...sales, ...saleRecords].forEach((sale) => {
       const day = new Date(sale.createdAt).getDate();
       if (dayMap[day]) {
         dayMap[day].revenue += sale.total || 0;
@@ -230,15 +294,22 @@ router.get("/top-products", authenticateToken, requirePermission("canViewDashboa
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const topItems = await prisma.saleItem.groupBy({
-      by: ["productId"],
-      where: { sale: { createdAt: { gte: startOfMonth }, ...scopedWhere(scope, {}) } },
-      _sum: { quantity: true, total: true },
-      _count: true,
-      orderBy: { _sum: { total: "desc" } },
-      take: 5,
-    });
+    const [saleItems, saleRecordItems] = await Promise.all([
+      prisma.saleItem.groupBy({
+        by: ["productId"],
+        where: { sale: { createdAt: { gte: startOfMonth }, ...scopedWhere(scope, {}) } },
+        _sum: { quantity: true, total: true },
+        _count: true,
+      }),
+      prisma.saleRecordItem.groupBy({
+        by: ["productId"],
+        where: { sale: { createdAt: { gte: startOfMonth }, ...scopedWhere(scope, {}) } },
+        _sum: { quantity: true, total: true },
+        _count: true,
+      }),
+    ]);
 
+    const topItems = mergeGroupedTotals([saleItems, saleRecordItems]).slice(0, 5);
     const productIds = topItems.map((t) => t.productId).filter(Boolean);
     const products = await prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true } });
     const byId = new Map(products.map((p) => [p.id, p.name]));
@@ -246,9 +317,9 @@ router.get("/top-products", authenticateToken, requirePermission("canViewDashboa
     res.json(topItems.map((t) => ({
       productId: t.productId,
       name: byId.get(t.productId) || "Unknown",
-      quantity: t._sum.quantity || 0,
-      revenue: t._sum.total || 0,
-      salesCount: t._count,
+      quantity: t.quantity,
+      revenue: t.revenue,
+      salesCount: t.salesCount,
     })));
   } catch (err) {
     handleBranchError(res, err);
@@ -262,18 +333,22 @@ router.get("/payment-methods", authenticateToken, requirePermission("canViewDash
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const methods = await prisma.sale.groupBy({
-      by: ["paymentMethod"],
-      where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
-      _sum: { total: true },
-      _count: true,
-    });
+    const [saleMethods, saleRecordMethods] = await Promise.all([
+      prisma.sale.groupBy({
+        by: ["paymentMethod"],
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        _sum: { total: true },
+        _count: true,
+      }),
+      prisma.saleRecord.groupBy({
+        by: ["paymentMethod"],
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        _sum: { total: true },
+        _count: true,
+      }),
+    ]);
 
-    res.json(methods.map((m) => ({
-      method: m.paymentMethod || "cash",
-      total: m._sum.total || 0,
-      count: m._count,
-    })));
+    res.json(mergePaymentMethods([saleMethods, saleRecordMethods]));
   } catch (err) {
     handleBranchError(res, err);
   }

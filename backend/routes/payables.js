@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
@@ -14,6 +14,73 @@ const prisma = new PrismaClient()
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
+  cash: { name: 'Cash Box', type: 'cash' },
+  mobile_money: { name: 'Mobile Money', type: 'mobile_money' },
+  bank_transfer: { name: 'Bank Account', type: 'bank' },
+  bank: { name: 'Bank Account', type: 'bank' },
+  cheque: { name: 'Bank Account', type: 'bank' },
+  card: { name: 'Card Payments', type: 'card' }
+}
+
+const accountForPaymentMethod = (paymentMethod) =>
+  CASH_ACCOUNTS_BY_PAYMENT_METHOD[paymentMethod] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
+
+async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = prisma) {
+  const account = accountForPaymentMethod(paymentMethod)
+
+  return client.cashAccount.upsert({
+    where: {
+      tenantId_name: {
+        tenantId,
+        name: account.name
+      }
+    },
+    update: { type: account.type, isActive: true },
+    create: {
+      tenantId,
+      name: account.name,
+      type: account.type,
+      currency: 'UGX'
+    }
+  })
+}
+
+const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
+  const type = String(cashAccount?.type || '').toLowerCase()
+  if (paymentMethod === 'cash') return type === 'cash' || type === 'safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque' || paymentMethod === 'bank') return type === 'bank'
+  if (paymentMethod === 'mobile_money') return type === 'mobile_money'
+  if (paymentMethod === 'card') return type === 'card'
+  return false
+}
+
+async function resolvePaymentCashAccount(client, scope, req, paymentMethod, cashAccountId = null) {
+  if (cashAccountId) {
+    const account = await client.cashAccount.findFirst({
+      where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true }
+    })
+    if (!account) {
+      throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
+    }
+    if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
+      throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} payments`), { statusCode: 400 })
+    }
+    return account
+  }
+
+  if (req.userCashAccountId) {
+    const account = await client.cashAccount.findFirst({
+      where: { id: req.userCashAccountId, tenantId: scope.tenantId, isActive: true }
+    })
+    if (account && cashAccountMatchesPaymentMethod(account, paymentMethod)) {
+      return account
+    }
+  }
+
+  return cashAccountForPaymentMethod(scope.tenantId, paymentMethod, client)
 }
 
 const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
@@ -341,7 +408,7 @@ router.get('/purchases', authenticateToken, requirePermission('canViewPayable'),
 })
 
 // Create new supplier purchase
-router.post('/purchases', authenticateToken, requirePermission('canCreatePayable'), requireTenant, async (req, res) => {
+router.post('/purchases', authenticateToken, requirePermission('canCreatePayable'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -352,10 +419,13 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
       supplierId, 
       items, 
       refNo,
-      total,
       amountPaid = 0,
-      paymentStatus = 'unpaid',
-      notes 
+      paymentMethod,
+      cashAccountId,
+      mobileProvider,
+      phoneNumber,
+      transactionId,
+      notes
     } = req.body
 
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
@@ -389,88 +459,140 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
       }
     })
 
-    const computedTotal = total !== undefined ? toMoney(total) : purchaseItems.reduce((sum, item) => sum + item.total, 0)
+    const computedTotal = purchaseItems.reduce((sum, item) => sum + item.total, 0)
     const paid = Math.min(toMoney(amountPaid), computedTotal)
     const balance = Math.max(0, computedTotal - paid)
     const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+
+    if (paid > 0 && !checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
 
     // Generate reference number if not provided
     const purchaseRefNo = refNo || `PUR-${Date.now()}`
 
-    // Update supplier balance
-    if (balance > 0) {
-      const newBalance = supplier.balance + balance
-      await prisma.supplier.update({
-        where: { id: supplierId },
-        data: { balance: newBalance }
-      })
-    }
-
-    const purchase = await prisma.supplierPurchase.create({
-      data: {
-        refNo: purchaseRefNo,
-        tenantId: scope.tenantId,
-        branchId: scope.branchId,
-        supplierId,
-        userId: req.user.id,
-        total: computedTotal,
-        amountPaid: paid,
-        balance,
-        paymentStatus: finalPaymentStatus,
-        notes,
-        dueDate: balance > 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined // 30 days
-      },
-      include: {
-        supplier: true,
-        branch: true,
-        User: userSelect
-      }
-    })
-
-    // Create purchase items
-    await prisma.supplierPurchaseItem.createMany({
-      data: purchaseItems.map(item => ({
-        purchaseId: purchase.id,
-        productId: item.productId,
-        quantity: item.quantity,
-        cost: item.cost,
-        total: item.total
-      }))
-    })
-
-    // Update product quantities and costs (skip service items)
-    for (const item of purchaseItems) {
-      const product = productsById.get(item.productId)
-      if (product && product.itemType === 'service') continue
-      await prisma.product.update({
-        where: { id: item.productId },
-        data: {
-          quantity: {
-            increment: item.quantity
-          },
-          cost: item.cost
-        }
-      })
-      if (Number(item.oldCost || 0) !== Number(item.cost || 0)) {
-        await prisma.productPriceHistory.create({
-          data: {
-            productId: item.productId,
-            tenantId: scope.tenantId,
-            branchId: scope.branchId,
-            oldCost: item.oldCost,
-            newCost: item.cost,
-            source: 'supplier_purchase',
-            reference: purchase.refNo,
-            reason: 'Supplier purchase cost update',
-            changedByUserId: req.user?.id || null
-          }
+    const purchase = await prisma.$transaction(async (tx) => {
+      if (balance > 0) {
+        await tx.supplier.update({
+          where: { id: supplierId },
+          data: { balance: { increment: balance } }
         })
       }
-    }
+
+      const createdPurchase = await tx.supplierPurchase.create({
+        data: {
+          refNo: purchaseRefNo,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          supplierId,
+          userId: req.user.id,
+          total: computedTotal,
+          amountPaid: paid,
+          balance,
+          paymentStatus: finalPaymentStatus,
+          notes,
+          dueDate: balance > 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined
+        },
+        include: {
+          supplier: true,
+          branch: true,
+          User: userSelect
+        }
+      })
+
+      await tx.supplierPurchaseItem.createMany({
+        data: purchaseItems.map(item => ({
+          purchaseId: createdPurchase.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          cost: item.cost,
+          total: item.total
+        }))
+      })
+
+      for (const item of purchaseItems) {
+        const product = productsById.get(item.productId)
+        if (product && product.itemType === 'service') continue
+        await tx.product.update({
+          where: { id: item.productId },
+          data: {
+            quantity: {
+              increment: item.quantity
+            },
+            cost: item.cost
+          }
+        })
+        if (Number(item.oldCost || 0) !== Number(item.cost || 0)) {
+          await tx.productPriceHistory.create({
+            data: {
+              productId: item.productId,
+              tenantId: scope.tenantId,
+              branchId: scope.branchId,
+              oldCost: item.oldCost,
+              newCost: item.cost,
+              source: 'supplier_purchase',
+              reference: createdPurchase.refNo,
+              reason: 'Supplier purchase cost update',
+              changedByUserId: req.user?.id || null
+            }
+          })
+        }
+      }
+
+      if (paid > 0) {
+        const payment = await tx.supplierPayment.create({
+          data: {
+            tenantId: scope.tenantId,
+            branchId: scope.branchId,
+            supplierId,
+            purchaseId: createdPurchase.id,
+            amount: paid,
+            paymentMethod: resolvedPaymentMethod,
+            mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+            phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+            transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
+            reference: purchaseRefNo,
+            notes: notes ? `Paid at purchase: ${notes}` : 'Paid at purchase'
+          }
+        })
+
+        const paymentAccount = await resolvePaymentCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
+        if (Number(paymentAccount.balance || 0) < paid) {
+          throw Object.assign(new Error(`Insufficient funds in ${paymentAccount.name}. Available: ${Number(paymentAccount.balance || 0).toFixed(2)}, Required: ${paid.toFixed(2)}`), { statusCode: 400 })
+        }
+
+        const updatedAccount = await tx.cashAccount.update({
+          where: { id: paymentAccount.id },
+          data: { balance: { decrement: paid } }
+        })
+
+        await tx.cashTransaction.create({
+          data: {
+            tenantId: scope.tenantId,
+            accountId: paymentAccount.id,
+            type: 'payment',
+            amount: paid,
+            balanceAfter: updatedAccount.balance,
+            reference: purchaseRefNo || payment.id,
+            description: `Supplier purchase payment: ${supplier.name}`,
+            userId: req.user.id
+          }
+        })
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, paymentAccount.id)
+      }
+
+      return createdPurchase
+    })
 
     res.status(201).json(withUser(purchase))
   } catch (error) {
     console.error('Create purchase error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
     handleBranchError(res, error, 'Failed to create purchase')
   }
 })
@@ -531,20 +653,12 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { supplierId, purchaseId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId } = req.body
+    const { supplierId, purchaseId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
     const paidAmount = toMoney(amount)
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
 
     const resolvedPaymentMethod = paymentMethod || 'mobile_money'
-
-    // Cash is not allowed for spending — only for receiving customer payments
-    if (resolvedPaymentMethod === 'cash') {
-      return res.status(400).json({
-        error: 'Cash payment method is not available for spending. Please use mobile money, bank transfer, or card.',
-        code: 'INVALID_PAYMENT_METHOD'
-      })
-    }
 
     // Gate payment method by permission
     if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
@@ -574,85 +688,78 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
       return res.status(400).json({ error: 'Payment exceeds supplier balance' })
     }
 
-    // Validate cash account balance if user has one assigned
-    let cashAccountUsed = null
-    if (req.userCashAccountId) {
-      cashAccountUsed = await prisma.cashAccount.findUnique({
-        where: { id: req.userCashAccountId }
+    const cashAccountUsed = await resolvePaymentCashAccount(prisma, scope, req, resolvedPaymentMethod, cashAccountId)
+    if (Number(cashAccountUsed.balance || 0) < paidAmount) {
+      return res.status(400).json({
+        error: `Insufficient funds in ${cashAccountUsed.name}. Available: ${Number(cashAccountUsed.balance || 0).toFixed(2)} ${cashAccountUsed.currency}, Required: ${paidAmount.toFixed(2)}`,
+        code: 'INSUFFICIENT_FUNDS'
       })
-      if (cashAccountUsed && cashAccountUsed.balance < paidAmount) {
-        return res.status(400).json({
-          error: `Insufficient funds in ${cashAccountUsed.name}. Available: ${cashAccountUsed.balance.toFixed(2)} ${cashAccountUsed.currency}, Required: ${paidAmount.toFixed(2)}`,
-          code: 'INSUFFICIENT_FUNDS'
-        })
-      }
     }
 
-    // Create payment
-    const payment = await prisma.supplierPayment.create({
-      data: {
-        tenantId: scope.tenantId,
-        branchId: scope.branchId,
-        supplierId,
-        purchaseId,
-        amount: paidAmount,
-        paymentMethod: resolvedPaymentMethod,
-        mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
-        phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
-        transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
-        reference,
-        notes
-      }
-    })
+    const payment = await prisma.$transaction(async (tx) => {
+      const createdPayment = await tx.supplierPayment.create({
+        data: {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          supplierId,
+          purchaseId,
+          amount: paidAmount,
+          paymentMethod: resolvedPaymentMethod,
+          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
+          reference,
+          notes
+        }
+      })
 
-    // Deduct from cash account and record transaction
-    if (cashAccountUsed) {
-      const updatedAccount = await prisma.cashAccount.update({
+      const updatedAccount = await tx.cashAccount.update({
         where: { id: cashAccountUsed.id },
         data: { balance: { decrement: paidAmount } }
       })
 
-      await prisma.cashTransaction.create({
+      await tx.cashTransaction.create({
         data: {
-          tenantId: req.tenant.id,
+          tenantId: scope.tenantId,
           accountId: cashAccountUsed.id,
           type: 'payment',
           amount: paidAmount,
           balanceAfter: updatedAccount.balance,
-          reference: reference || payment.id,
+          reference: reference || createdPayment.id,
           description: `Supplier payment: ${supplier.name}`,
           userId: req.user.id
         }
       })
 
-      await syncLinkedTransactionAccountBalance(prisma, scope.tenantId, cashAccountUsed.id)
-    }
+      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, cashAccountUsed.id)
 
-    // Update supplier balance
-    const newBalance = Math.max(0, supplier.balance - paidAmount)
-    await prisma.supplier.update({
-      where: { id: supplierId },
-      data: { balance: newBalance }
-    })
-
-    // Update purchase payment status if fully paid
-    if (purchase) {
-      const newAmountPaid = Math.min(purchase.total, purchase.amountPaid + paidAmount)
-      const newPurchaseBalance = Math.max(0, purchase.balance - paidAmount)
-
-      await prisma.supplierPurchase.update({
-        where: { id: purchaseId },
-        data: {
-          amountPaid: newAmountPaid,
-          balance: newPurchaseBalance,
-          paymentStatus: newPurchaseBalance <= 0 ? 'paid' : 'partial'
-        }
+      const newBalance = Math.max(0, supplier.balance - paidAmount)
+      await tx.supplier.update({
+        where: { id: supplierId },
+        data: { balance: newBalance }
       })
-    }
+
+      if (purchase) {
+        const newAmountPaid = Math.min(purchase.total, purchase.amountPaid + paidAmount)
+        const newPurchaseBalance = Math.max(0, purchase.balance - paidAmount)
+
+        await tx.supplierPurchase.update({
+          where: { id: purchaseId },
+          data: {
+            amountPaid: newAmountPaid,
+            balance: newPurchaseBalance,
+            paymentStatus: newPurchaseBalance <= 0 ? 'paid' : 'partial'
+          }
+        })
+      }
+
+      return createdPayment
+    })
 
     res.status(201).json(payment)
   } catch (error) {
     console.error('Record supplier payment error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
     handleBranchError(res, error, 'Failed to record payment')
   }
 })
@@ -665,8 +772,8 @@ router.get('/payables/summary', authenticateToken, requirePermission('canViewPay
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const supplierWhere = scopedWhere(scope)
     const purchaseWhere = scopedWhere(scope, {
-      paymentStatus: 'unpaid',
-      balance: { gt: 0 }
+      balance: { gt: 0 },
+      paymentStatus: { not: 'paid' }
     })
 
     const [totalPayables, overdueCount, agingPurchases] = await Promise.all([
@@ -679,7 +786,7 @@ router.get('/payables/summary', authenticateToken, requirePermission('canViewPay
       // Overdue purchases count
       prisma.supplierPurchase.count({
         where: scopedWhere(scope, {
-          paymentStatus: 'unpaid',
+          balance: { gt: 0 },
           dueDate: { lt: new Date() }
         })
       }),

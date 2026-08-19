@@ -411,13 +411,18 @@ router.get("/reports/trial-balance", authenticateToken, requirePermission("canVi
       where: { tenantId, isActive: true },
       orderBy: { code: "asc" },
     });
-    const trialBalance = accounts.map((a) => ({
-      code: a.code,
-      name: a.name,
-      type: a.type,
-      debit: a.balance > 0 ? a.balance : 0,
-      credit: a.balance < 0 ? Math.abs(a.balance) : 0,
-    }));
+    const trialBalance = accounts.map((a) => {
+      const balance = Number(a.balance || 0);
+      const debitNormal = isDebitNormalAccount(a);
+      return {
+        code: a.code,
+        name: a.name,
+        type: a.type,
+        balance,
+        debit: debitNormal ? Math.max(balance, 0) : Math.max(-balance, 0),
+        credit: debitNormal ? Math.max(-balance, 0) : Math.max(balance, 0),
+      };
+    });
     const totalDebit = trialBalance.reduce((s, r) => s + r.debit, 0);
     const totalCredit = trialBalance.reduce((s, r) => s + r.credit, 0);
     res.json({ accounts: trialBalance, totalDebit, totalCredit });

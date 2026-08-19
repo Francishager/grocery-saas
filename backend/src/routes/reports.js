@@ -3467,22 +3467,31 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     const prevExpWhere = scopedWhere(s, { date: { gte: prevStart, lt: prevEnd } });
 
     const [
-      curSalesAgg, prevSalesAgg, curExpAgg, prevExpAgg,
-      curSalesItems, prevSalesItems, curSalesFull, prevSalesFull,
-      curPurchasesAgg, prevPurchasesAgg,
+      curSalesAgg, curSaleRecordsAgg, prevSalesAgg, prevSaleRecordsAgg, curExpAgg, prevExpAgg,
+      curSalesItems, curSaleRecordItems, prevSalesItems, prevSaleRecordItems,
+      curSalesFull, curSaleRecordsFull, prevSalesFull, prevSaleRecordsFull,
+      curPurchasesAgg, curSupplierPurchasesAgg, prevPurchasesAgg, prevSupplierPurchasesAgg,
       products, lowStockProducts, expiringProducts,
       customers, curReceivables, curCashAccounts,
     ] = await Promise.all([
       prisma.sale.aggregate({ where: curWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
+      prisma.saleRecord.aggregate({ where: curWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
       prisma.sale.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
+      prisma.saleRecord.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
       prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
       prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
       prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      prisma.saleRecord.findMany({ where: curWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
       prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
-      prisma.sale.findMany({ where: curWhere, include: { items: { include: { product: { select: { name: true, category: { select: { name: true } } } } }, branch: { select: { name: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" }, take: 50 } }),
-      prisma.sale.findMany({ where: prevWhere, include: { items: { include: { product: { select: { name: true } } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 50 } }),
+      prisma.saleRecord.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      prisma.sale.findMany({ where: curWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleRecord.findMany({ where: curWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ where: prevWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleRecord.findMany({ where: prevWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.purchase.aggregate({ where: curWhere, _sum: { total: true } }),
+      prisma.supplierPurchase.aggregate({ where: curWhere, _sum: { total: true } }),
       prisma.purchase.aggregate({ where: prevWhere, _sum: { total: true } }),
+      prisma.supplierPurchase.aggregate({ where: prevWhere, _sum: { total: true } }),
       prisma.product.count({ where: scopedWhere(s, { isActive: { not: false } }) }),
       prisma.product.count({ where: scopedWhere(s, { isActive: { not: false }, quantity: { lte: 10 } }) }),
       prisma.product.count({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null, lte: new Date(Date.now() + 60 * 86400000) } }) }),
@@ -3491,21 +3500,26 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
     ]);
 
+    const curSalesAllItems = [...curSalesItems, ...curSaleRecordItems];
+    const prevSalesAllItems = [...prevSalesItems, ...prevSaleRecordItems];
+    const curSalesAllFull = [...curSalesFull, ...curSaleRecordsFull];
+    const prevSalesAllFull = [...prevSalesFull, ...prevSaleRecordsFull];
+
     // Calculate COGS
-    const curCogs = curSalesItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
-    const prevCogs = prevSalesItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const curCogs = curSalesAllItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const prevCogs = prevSalesAllItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
 
     // Core metrics
-    const curRevenue = curSalesAgg._sum.total || 0;
-    const prevRevenue = prevSalesAgg._sum.total || 0;
+    const curRevenue = (curSalesAgg._sum.total || 0) + (curSaleRecordsAgg._sum.total || 0);
+    const prevRevenue = (prevSalesAgg._sum.total || 0) + (prevSaleRecordsAgg._sum.total || 0);
     const curExpenses = curExpAgg._sum.amount || 0;
     const prevExpenses = prevExpAgg._sum.amount || 0;
     const curGrossProfit = curRevenue - curCogs;
     const prevGrossProfit = prevRevenue - prevCogs;
     const curNetProfit = curGrossProfit - curExpenses;
     const prevNetProfit = prevGrossProfit - prevExpenses;
-    const curSalesCount = curSalesAgg._count || 0;
-    const prevSalesCount = prevSalesAgg._count || 0;
+    const curSalesCount = (curSalesAgg._count || 0) + (curSaleRecordsAgg._count || 0);
+    const prevSalesCount = (prevSalesAgg._count || 0) + (prevSaleRecordsAgg._count || 0);
     const curAvgSale = curSalesCount > 0 ? curRevenue / curSalesCount : 0;
     const prevAvgSale = prevSalesCount > 0 ? prevRevenue / prevSalesCount : 0;
 
@@ -3522,12 +3536,12 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       { metric: 'Net Profit', current: curNetProfit, previous: prevNetProfit, change: pct(curNetProfit, prevNetProfit), format: 'currency' },
       { metric: 'Sales Count', current: curSalesCount, previous: prevSalesCount, change: pct(curSalesCount, prevSalesCount), format: 'number' },
       { metric: 'Avg Sale Value', current: curAvgSale, previous: prevAvgSale, change: pct(curAvgSale, prevAvgSale), format: 'currency' },
-      { metric: 'Purchases', current: curPurchasesAgg._sum.total || 0, previous: prevPurchasesAgg._sum.total || 0, change: pct(curPurchasesAgg._sum.total || 0, prevPurchasesAgg._sum.total || 0), format: 'currency' },
+      { metric: 'Purchases', current: (curPurchasesAgg._sum.total || 0) + (curSupplierPurchasesAgg._sum.total || 0), previous: (prevPurchasesAgg._sum.total || 0) + (prevSupplierPurchasesAgg._sum.total || 0), change: pct((curPurchasesAgg._sum.total || 0) + (curSupplierPurchasesAgg._sum.total || 0), (prevPurchasesAgg._sum.total || 0) + (prevSupplierPurchasesAgg._sum.total || 0)), format: 'currency' },
     ];
 
     // Product-level driver analysis (what drove the revenue change)
     const curProductMap = {};
-    curSalesItems.forEach(sale => {
+    curSalesAllItems.forEach(sale => {
       sale.items.forEach(item => {
         const name = item.product?.name || 'Unknown';
         const cat = item.product?.category?.name || 'Uncategorized';
@@ -3538,7 +3552,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       });
     });
     const prevProductMap = {};
-    prevSalesItems.forEach(sale => {
+    prevSalesAllItems.forEach(sale => {
       sale.items.forEach(item => {
         const name = item.product?.name || 'Unknown';
         const cat = item.product?.category?.name || 'Uncategorized';
@@ -3604,13 +3618,13 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     // Branch analysis
     const curBranchMap = {};
     const prevBranchMap = {};
-    curSalesFull.forEach(sale => {
+    curSalesAllFull.forEach(sale => {
       const name = sale.branch?.name || 'Main';
       if (!curBranchMap[name]) curBranchMap[name] = { revenue: 0, count: 0 };
       curBranchMap[name].revenue += sale.total;
       curBranchMap[name].count += 1;
     });
-    prevSalesFull.forEach(sale => {
+    prevSalesAllFull.forEach(sale => {
       const name = sale.branch?.name || 'Main';
       if (!prevBranchMap[name]) prevBranchMap[name] = { revenue: 0, count: 0 };
       prevBranchMap[name].revenue += sale.total;
@@ -3626,7 +3640,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
 
     // Payment method analysis
     const curPayMap = {};
-    curSalesFull.forEach(sale => {
+    curSalesAllFull.forEach(sale => {
       const m = sale.paymentMethod || 'cash';
       if (!curPayMap[m]) curPayMap[m] = { total: 0, count: 0 };
       curPayMap[m].total += sale.total;
@@ -3706,8 +3720,8 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     }
 
     // Discount insight
-    const curDiscount = curSalesAgg._sum.discount || 0;
-    const prevDiscount = prevSalesAgg._sum.discount || 0;
+    const curDiscount = (curSalesAgg._sum.discount || 0) + (curSaleRecordsAgg._sum.discount || 0);
+    const prevDiscount = (prevSalesAgg._sum.discount || 0) + (prevSaleRecordsAgg._sum.discount || 0);
     const curDiscRate = curRevenue > 0 ? (curDiscount / curRevenue * 100) : 0;
     const prevDiscRate = prevRevenue > 0 ? (prevDiscount / prevRevenue * 100) : 0;
     if (Math.abs(curDiscRate - prevDiscRate) > 2) {
@@ -3739,7 +3753,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       receivablesCount: curReceivables._count,
       cashOnHand: curCashAccounts._sum.balance || 0,
       curDiscount,
-      curTax: curSalesAgg._sum.tax || 0,
+      curTax: (curSalesAgg._sum.tax || 0) + (curSaleRecordsAgg._sum.tax || 0),
       grossMargin: curRevenue > 0 ? (curGrossProfit / curRevenue * 100) : 0,
       netMargin: curRevenue > 0 ? (curNetProfit / curRevenue * 100) : 0,
     };
