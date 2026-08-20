@@ -71,8 +71,13 @@ const CATEGORIES: ReportCategory[] = [
         summaryKeys: [
           { key: 'totalSales', label: 'Total Sales', format: 'number' },
           { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
-          { key: 'totalDiscount', label: 'Discount', format: 'currency' },
-          { key: 'totalTax', label: 'Tax', format: 'currency' },
+          { key: 'cashSales', label: 'Cash Sales', format: 'currency' },
+          { key: 'creditSales', label: 'Credit Sales', format: 'currency' },
+          { key: 'mobileMoneySales', label: 'Mobile Money', format: 'currency' },
+          { key: 'bankSales', label: 'Bank', format: 'currency' },
+          { key: 'cardSales', label: 'Card', format: 'currency' },
+          { key: 'totalCogs', label: 'Cost of Goods Sold', format: 'currency' },
+          { key: 'grossProfit', label: 'Gross Profit', format: 'currency' },
         ]
       },
       { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'enriched',
@@ -1790,7 +1795,7 @@ export default function ReportsPage() {
   const canExport = hasPermission('canExportReport')
 
   // Statement columns definition with proper formatting
-  const statementColumns = [
+  const statementColumns: NonNullable<ReportItem['columns']> = [
     { key: 'date', label: 'Date', format: 'date' },
     { key: 'type', label: 'Transaction Type', format: 'text' },
     { key: 'description', label: 'Description', format: 'text' },

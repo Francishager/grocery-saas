@@ -34,6 +34,7 @@ const reportPermMap = {
   fuel: "canViewFuelStationReport",
   manufacturing: "canViewManufacturingReport",
   agriculture: "canViewAgricultureReport",
+  "daily-business": "canViewFinancialReport",
   "service-business": "canViewServiceBusinessReport",
   restaurant: "canViewRestaurantReport",
 };
@@ -135,6 +136,36 @@ function saleStatus(sale) {
   return sale.status || sale.paymentStatus || "Completed";
 }
 
+function normalizedPaymentMethod(value) {
+  const method = String(value || "cash").trim().toLowerCase();
+  if (["mobile_money", "mobile money", "momo", "mtn", "airtel"].includes(method)) return "mobile_money";
+  if (["bank_transfer", "bank transfer", "bank", "cheque", "check"].includes(method)) return "bank";
+  if (method === "card") return "card";
+  if (method === "credit" || method === "on_credit") return "credit";
+  return "cash";
+}
+
+function userLabel(user) {
+  return [user?.fname, user?.lname].filter(Boolean).join(" ") || user?.email || "Unknown";
+}
+
+function saleCogsForItems(items = []) {
+  return items.reduce((sum, item) => sum + saleLineCogs(item), 0);
+}
+
+function addPaymentBreakdown(target, method, amount) {
+  const key = normalizedPaymentMethod(method);
+  target[key] = (target[key] || 0) + Number(amount || 0);
+}
+
+function dayRange(from, to) {
+  const start = from ? new Date(from) : new Date();
+  if (!from) start.setHours(0, 0, 0, 0);
+  const end = to ? toEndOfDay(to) : new Date(start);
+  if (!to) end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
 function enrichBalanceRows(rows, { title, entityType, entityKey, balanceLabel = "Balance" }) {
   const transactions = rows.map((row) => {
     const balance = Number(row.balance || 0);
@@ -234,6 +265,196 @@ router.get("/profit", authenticateToken, async (req, res) => {
   } catch (err) { console.error("Profit report error:", err); handleBranchError(res, err); }
 });
 
+// ==================== DAILY BUSINESS CONTROL REPORT ====================
+// This is the operational daily report. Sales, customer payments, expenses,
+// and inventory costs remain separate event types so the report cannot turn
+// a debt collection or a cash transfer into revenue.
+router.get("/daily-business", authenticateToken, async (req, res) => {
+  try {
+    const scope = await getScope(req);
+    const { start, end } = dayRange(req.query.from, req.query.to);
+    const userId = req.query.userId || req.query.staffId || null;
+    const customerId = req.query.customerId || null;
+    const requestedMethod = req.query.paymentMethod && normalizedPaymentMethod(req.query.paymentMethod);
+    const take = Math.min(Math.max(Number.parseInt(req.query.limit || "500", 10) || 500, 1), 1000);
+    const dateWhere = { gte: start, lte: end };
+    const baseWhere = scopedWhere(scope, { createdAt: dateWhere, ...(userId ? { userId } : {}) });
+    const customerWhere = scopedWhere(scope, { createdAt: dateWhere });
+    if (customerId) customerWhere.customerId = customerId;
+
+    const [sales, creditSales, payments, expenses, products, creditProducts, branches, cashAccounts] = await Promise.all([
+      prisma.sale.findMany({
+        where: { ...baseWhere, status: "completed", ...(customerId ? { id: { in: [] } } : {}) },
+        include: { items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } }, user: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } } },
+        orderBy: { createdAt: "asc" },
+        take,
+      }),
+      prisma.saleRecord.findMany({
+        where: { ...scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...(userId ? { userId } : {}), ...(customerId ? { customerId } : {}) }) },
+        include: { customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } }, User: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } } },
+        orderBy: { createdAt: "asc" },
+        take,
+      }),
+      prisma.customerPayment.findMany({
+        where: customerWhere,
+        include: { customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } } },
+        orderBy: { createdAt: "asc" },
+        take,
+      }),
+      prisma.expense.findMany({
+        where: scopedWhere(scope, { date: dateWhere, ...(userId ? { userId } : {}) }),
+        include: { User: { select: { id: true, fname: true, lname: true, email: true } }, cashAccount: { select: { id: true, name: true, type: true } }, branch: { select: { id: true, name: true } } },
+        orderBy: { date: "asc" },
+        take,
+      }),
+      prisma.saleItem.findMany({
+        where: { sale: { ...baseWhere, status: "completed" } },
+        include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } }, sale: { select: { createdAt: true, receiptNo: true, total: true } } },
+        take: take * 10,
+      }),
+      prisma.saleRecordItem.findMany({
+        where: { sale: { ...scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...(userId ? { userId } : {}), ...(customerId ? { customerId } : {}) }) } },
+        include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } }, sale: { select: { createdAt: true, receiptNo: true, total: true } } },
+        take: take * 10,
+      }),
+      prisma.branch.findMany({ where: { tenantId: scope.tenantId, isActive: true, ...(scope.canAccessAllBranches ? {} : { id: scope.branchId }) }, select: { id: true, name: true } }),
+      prisma.cashAccount.findMany({ where: { tenantId: scope.tenantId, isActive: true, type: { in: ["cash", "safe"] }, ...(!scope.canAccessAllBranches && req.user?.cashAccountId ? { id: req.user.cashAccountId } : {}) }, select: { id: true, name: true, type: true, balance: true } }),
+    ]);
+
+    const transactionRows = [];
+    const salesBreakdown = { cash: 0, credit: 0, mobile_money: 0, bank: 0, card: 0 };
+    const staffMap = new Map();
+    const customerMap = new Map();
+    const productMap = new Map();
+    let totalSales = 0;
+    let cogs = 0;
+
+    const addStaff = (user, values = {}) => {
+      const id = user?.id || "unknown";
+      const row = staffMap.get(id) || { id, name: userLabel(user), sales: 0, cashSales: 0, creditSales: 0, collections: 0, cashHeld: 0 };
+      Object.entries(values).forEach(([key, value]) => { row[key] = Number(row[key] || 0) + Number(value || 0); });
+      staffMap.set(id, row);
+      return row;
+    };
+
+    const addCustomer = (customer) => {
+      const id = customer?.id || "walk-in";
+      const row = customerMap.get(id) || { id, name: customer?.name || "Walk-in", phone: customer?.phone || null, cashSales: 0, creditSales: 0, payments: 0, currentBalance: Number(customer?.balance || 0), transactions: [] };
+      customerMap.set(id, row);
+      return row;
+    };
+
+    for (const sale of sales) {
+      const method = normalizedPaymentMethod(sale.paymentMethod);
+      if (requestedMethod && method !== requestedMethod) continue;
+      totalSales += Number(sale.total || 0);
+      const amount = method === "credit" ? 0 : Number(sale.total || 0);
+      salesBreakdown[method] += amount;
+      cogs += saleCogsForItems(sale.items);
+      addStaff(sale.user, { sales: sale.total, [`${method === "mobile_money" ? "mobile_money" : method}Sales`]: amount });
+      const customer = addCustomer(sale.customerName ? { name: sale.customerName } : null);
+      customer[method === "credit" ? "creditSales" : "cashSales"] += amount;
+      customer.transactions.push({ id: sale.id, type: "SALE", reference: sale.receiptNo, date: sale.createdAt, amount: sale.total, paymentMethod: method, staff: userLabel(sale.user) });
+      transactionRows.push({ id: sale.id, kind: method === "credit" ? "credit-sale" : "sale", date: sale.createdAt, reference: sale.receiptNo, customer: sale.customerName || "Walk-in", customerId: null, staff: userLabel(sale.user), staffId: sale.user?.id, branch: sale.branch?.name || "", amount: sale.total, paymentMethod: method, items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item) })) });
+    }
+
+    for (const sale of creditSales) {
+      const paid = Number(sale.amountPaid || 0);
+      const credit = Math.max(0, Number(sale.total || 0) - paid);
+      const method = normalizedPaymentMethod(sale.paymentMethod);
+      if (requestedMethod && method !== requestedMethod) continue;
+      totalSales += Number(sale.total || 0);
+      salesBreakdown.credit += credit;
+      if (paid > 0 && method !== "credit") addPaymentBreakdown(salesBreakdown, method, paid);
+      cogs += saleCogsForItems(sale.items);
+      addStaff(sale.User, { sales: sale.total, creditSales: credit, ...(paid > 0 && method !== "credit" ? { [`${method}Sales`]: paid } : {}) });
+      const customer = addCustomer(sale.customer);
+      customer.creditSales += credit;
+      if (paid > 0 && method !== "credit") customer.cashSales += paid;
+      customer.currentBalance = Number(sale.customer?.balance || customer.currentBalance || 0);
+      customer.transactions.push({ id: sale.id, type: "SALE", reference: sale.receiptNo, date: sale.createdAt, amount: sale.total, creditAmount: credit, paymentMethod: method, staff: userLabel(sale.User) });
+      transactionRows.push({ id: sale.id, kind: "credit-sale", date: sale.createdAt, reference: sale.receiptNo, customer: sale.customer?.name || "Unknown customer", customerId: sale.customerId, staff: userLabel(sale.User), staffId: sale.User?.id, branch: sale.branch?.name || "", amount: sale.total, creditAmount: credit, paymentMethod: method, status: sale.paymentStatus, items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item) })) });
+    }
+
+    const saleReferences = new Set([...sales, ...creditSales].map((sale) => sale.receiptNo));
+    let debtCollections = 0;
+    for (const payment of payments) {
+      // Payments attached to a sale are the amount paid at sale time. Only
+      // unlinked payments are collections against an existing receivable.
+      if (payment.saleId) continue;
+      const method = normalizedPaymentMethod(payment.paymentMethod);
+      if (requestedMethod && method !== requestedMethod) continue;
+      debtCollections += Number(payment.amount || 0);
+      const customer = addCustomer(payment.customer);
+      customer.payments += Number(payment.amount || 0);
+      customer.transactions.push({ id: payment.id, type: "PAYMENT", reference: payment.reference || payment.id, date: payment.createdAt, amount: payment.amount, paymentMethod: method });
+      transactionRows.push({ id: payment.id, kind: "collection", date: payment.createdAt, reference: payment.reference || payment.id, customer: payment.customer?.name || "Unknown customer", customerId: payment.customerId, amount: payment.amount, paymentMethod: method, staff: "Recorded payment", transactionId: payment.transactionId });
+    }
+
+    let cashExpenses = 0;
+    let otherCashIn = 0;
+    let otherCashOut = 0;
+    for (const expense of expenses) {
+      const method = normalizedPaymentMethod(expense.paymentMethod);
+      if (method === "cash") cashExpenses += Number(expense.amount || 0);
+      transactionRows.push({ id: expense.id, kind: "expense", date: expense.date, reference: expense.reference || expense.id, category: expense.category, description: expense.description, paymentMethod: method, account: expense.cashAccount?.name || "", staff: userLabel(expense.User), staffId: expense.User?.id, amount: expense.amount });
+    }
+
+    const allowedCashAccountId = !scope.canAccessAllBranches ? req.user?.cashAccountId : null;
+    const cashTransactions = await prisma.cashTransaction.findMany({
+      where: { tenantId: scope.tenantId, createdAt: dateWhere, account: { type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) }, ...(userId ? { userId } : {}) },
+      include: { account: { select: { id: true, name: true, type: true } }, User: { select: { id: true, fname: true, lname: true, email: true } } },
+      orderBy: { createdAt: "asc" },
+      take,
+    });
+    const knownReferences = new Set([...saleReferences, ...expenses.map((expense) => expense.reference || expense.id)]);
+    for (const movement of cashTransactions) {
+      if (knownReferences.has(movement.reference)) continue;
+      const type = String(movement.type || "").toLowerCase();
+      if (["income", "receipt", "deposit"].includes(type)) otherCashIn += Number(movement.amount || 0);
+      if (["expense", "payment", "withdrawal"].includes(type)) otherCashOut += Number(movement.amount || 0);
+      transactionRows.push({ id: movement.id, kind: type.includes("transfer") ? "transfer" : "cash-movement", date: movement.createdAt, reference: movement.reference || movement.id, description: movement.description, account: movement.account?.name, staff: userLabel(movement.User), staffId: movement.User?.id, amount: movement.amount, direction: ["income", "receipt", "deposit"].includes(type) ? "in" : "out" });
+    }
+
+    for (const item of [...products, ...creditProducts]) {
+      const row = productMap.get(item.product.id) || { id: item.product.id, name: item.product.name, sku: item.product.sku, quantitySold: 0, salesValue: 0, cogs: 0, currentStock: item.product.quantity };
+      row.quantitySold += Number(item.quantity || 0);
+      row.salesValue += Number(item.total || 0);
+      row.cogs += saleLineCogs(item);
+      productMap.set(item.product.id, row);
+    }
+
+    const cashSales = salesBreakdown.cash;
+    const cashCollections = payments.filter((payment) => !payment.saleId && normalizedPaymentMethod(payment.paymentMethod) === "cash").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const openingRows = await prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, createdAt: { lt: start }, account: { type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) } }, orderBy: { createdAt: "desc" }, distinct: ["accountId"], select: { accountId: true, balanceAfter: true } });
+    const openingCash = openingRows.reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
+    const expectedCash = openingCash + cashSales + cashCollections + otherCashIn - cashExpenses - otherCashOut;
+    const expensesTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+    const revenue = totalSales;
+    const grossProfit = revenue - cogs;
+
+    res.json({
+      header: { date: start.toISOString().slice(0, 10), branch: scope.branch?.name || "All authorized branches", status: "Open" },
+      filters: { from: start.toISOString(), to: end.toISOString(), branchId: scope.branchId || "all", userId, customerId, paymentMethod: req.query.paymentMethod || "all" },
+      summary: { totalSales, cashSales, creditSales: salesBreakdown.credit, mobileMoneySales: salesBreakdown.mobile_money, bankSales: salesBreakdown.bank, cardSales: salesBreakdown.card, debtCollections, cashReceived: cashSales + cashCollections + otherCashIn, expenses: expensesTotal },
+      cashMovement: { openingCash, cashSales, debtCollections, cashCollections, otherCashIn, cashExpenses, otherCashOut, cashTransfersIn: 0, cashTransfersOut: 0, expectedCash },
+      profitability: { revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
+      customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),
+      staffActivity: [...staffMap.values()].sort((a, b) => b.sales - a.sales),
+      productActivity: [...productMap.values()].sort((a, b) => b.salesValue - a.salesValue),
+      expenses: expenses.map((expense) => ({ id: expense.id, date: expense.date, reference: expense.reference || expense.id, category: expense.category, description: expense.description, paymentMethod: normalizedPaymentMethod(expense.paymentMethod), account: expense.cashAccount?.name || "", staff: userLabel(expense.User), amount: expense.amount })),
+      transactions: transactionRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+      staffTills: cashAccounts.map((account) => ({ id: account.id, name: account.name, type: account.type, balance: account.balance })),
+      branches,
+      pagination: { returned: transactionRows.length, limit: take },
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Daily business report error:", err);
+    handleBranchError(res, err);
+  }
+});
+
 // ==================== SALES REPORTS ====================
 router.get("/sales/summary", authenticateToken, async (req, res) => {
   try {
@@ -257,12 +478,12 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ 
         where: scopedWhere(s, df(req)), 
-        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, createdAt: true, status: true },
+        include: { items: { include: { product: { select: { cost: true } } } } },
         orderBy: { createdAt: 'asc' }
       }),
       prisma.saleRecord.findMany({ 
         where: scopedWhere(s, df(req)), 
-        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, createdAt: true, paymentStatus: true, status: true },
+        include: { items: { include: { product: { select: { cost: true } } } } },
         orderBy: { createdAt: 'asc' }
       }),
     ]);
@@ -274,6 +495,25 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
       status: saleStatus(sale)
     })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const enriched = transformSalesData(allSales);
+    const summary = allSales.reduce((result, sale) => {
+      const total = Number(sale.total || 0);
+      const method = normalizedPaymentMethod(sale.paymentMethod);
+      const paid = sale.amountPaid === undefined || sale.amountPaid === null ? total : Math.min(total, Number(sale.amountPaid || 0));
+      const credit = sale.paymentStatus || sale.customerId ? Math.max(0, total - paid) : 0;
+      const cogs = saleCogs(sale);
+
+      result.totalSales += 1;
+      result.totalRevenue += total;
+      result.totalCogs += cogs;
+      result.cashSales += sale.paymentStatus ? (method === 'cash' ? paid : 0) : (method === 'cash' ? total : 0);
+      result.creditSales += credit;
+      result.mobileMoneySales += sale.paymentStatus ? (method === 'mobile_money' ? paid : 0) : (method === 'mobile_money' ? total : 0);
+      result.bankSales += sale.paymentStatus ? (method === 'bank' ? paid : 0) : (method === 'bank' ? total : 0);
+      result.cardSales += sale.paymentStatus ? (method === 'card' ? paid : 0) : (method === 'card' ? total : 0);
+      return result;
+    }, { totalSales: 0, totalRevenue: 0, totalCogs: 0, cashSales: 0, creditSales: 0, mobileMoneySales: 0, bankSales: 0, cardSales: 0 });
+    summary.grossProfit = summary.totalRevenue - summary.totalCogs;
+    enriched.summary = { ...(enriched.summary || {}), ...summary };
     res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
