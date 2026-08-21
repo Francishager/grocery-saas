@@ -377,7 +377,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         select: { id: true, name: true },
       }),
       prisma.cashAccount.findMany({
-        where: { tenantId: scope.tenantId, isActive: true, type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) },
+        where: { tenantId: scope.tenantId, isActive: true, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) },
         select: {
           id: true,
           name: true,
@@ -396,10 +396,10 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         take: take * 2,
       }),
       prisma.cashTransaction.findMany({
-        where: { tenantId: scope.tenantId, createdAt: { lt: start }, account: { type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) } },
+        where: { tenantId: scope.tenantId, createdAt: { lt: start }, account: { ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) } },
         orderBy: { createdAt: "desc" },
         distinct: ["accountId"],
-        select: { accountId: true, balanceAfter: true },
+        select: { accountId: true, balanceAfter: true, account: { select: { type: true } } },
       }),
       prisma.customer.findMany({
         where: scopedWhere(scope, customerId ? { id: customerId } : {}),
@@ -520,6 +520,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         amount: sale.total,
         cashAmount,
         creditAmount,
+        debit: cashAmount,
+        credit: 0,
         paymentMethod: method,
         status: sale.status,
         items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item), profit: saleItemProfit(item) })),
@@ -557,6 +559,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         amount: sale.total,
         cashAmount: paid > 0 && method !== "credit" ? paid : 0,
         creditAmount,
+        debit: paid > 0 && method !== "credit" ? paid : 0,
+        credit: 0,
         paymentMethod: method,
         status: sale.paymentStatus,
         items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item), profit: saleItemProfit(item) })),
@@ -587,6 +591,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         customerId: payment.customerId,
         customerBalance: Number(payment.customer?.balance || 0),
         amount: payment.amount,
+        debit: payment.amount,
+        credit: 0,
         paymentMethod: method,
         staff: paymentStaff ? userLabel(paymentStaff) : "Recorded payment",
         staffId: paymentStaff?.id || null,
@@ -617,6 +623,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         staff: userLabel(expense.User),
         staffId: expense.User?.id,
         amount: expense.amount,
+        debit: 0,
+        credit: method === "cash" ? expense.amount : 0,
       });
     }
 
@@ -626,30 +634,61 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ...payments.flatMap((payment) => [payment.id, payment.reference, payment.transactionId, payment.sale?.receiptNo].filter(Boolean)),
       ...filteredExpenses.flatMap((expense) => [expense.id, expense.reference].filter(Boolean)),
     ]);
+    const physicalCashOutReferences = new Set();
+    cashTransactions.forEach((movement) => {
+      if (!movement.reference || knownReferences.has(movement.reference)) return;
+      const accountType = String(movement.account?.type || "").toLowerCase();
+      const direction = cashMovementDirection(movement.type);
+      if (accountType === "cash" && (direction === "out" || direction === "transfer-out")) {
+        physicalCashOutReferences.add(movement.reference);
+      }
+    });
     const accountMovementMap = new Map();
     let otherCashIn = 0;
     let otherCashOut = 0;
+    let otherPhysicalCashIn = 0;
+    let otherPhysicalCashOut = 0;
     let cashTransfersIn = 0;
     let cashTransfersOut = 0;
+    let cashToSafe = 0;
+    let cashToBank = 0;
+    let cashToMobileMoney = 0;
     for (const movement of cashTransactions) {
-      if (knownReferences.has(movement.reference)) continue;
       const direction = cashMovementDirection(movement.type);
       const accountType = String(movement.account?.type || "").toLowerCase();
-      const isPhysicalCash = ["cash", "safe"].includes(accountType);
-      if (isPhysicalCash) {
-        if (direction === "transfer-in") cashTransfersIn += Number(movement.amount || 0);
-        else if (direction === "transfer-out") cashTransfersOut += Number(movement.amount || 0);
-        else if (direction === "in") otherCashIn += Number(movement.amount || 0);
-        else otherCashOut += Number(movement.amount || 0);
+      const amount = Number(movement.amount || 0);
+      const isDebit = direction === "in" || direction === "transfer-in";
+      const accountStats = accountMovementMap.get(movement.accountId) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, debit: 0, credit: 0, lastBalance: null };
+      if (direction === "transfer-in") accountStats.transferIn += amount;
+      else if (direction === "transfer-out") accountStats.transferOut += amount;
+      else if (direction === "in") accountStats.cashIn += amount;
+      else accountStats.cashOut += amount;
+      if (isDebit) accountStats.debit += amount;
+      else accountStats.credit += amount;
+      accountStats.lastBalance = Number(movement.balanceAfter || 0);
+      accountMovementMap.set(movement.accountId, accountStats);
 
-        const accountStats = accountMovementMap.get(movement.accountId) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, lastBalance: null };
-        if (direction === "transfer-in") accountStats.transferIn += Number(movement.amount || 0);
-        else if (direction === "transfer-out") accountStats.transferOut += Number(movement.amount || 0);
-        else if (direction === "in") accountStats.cashIn += Number(movement.amount || 0);
-        else accountStats.cashOut += Number(movement.amount || 0);
-        accountStats.lastBalance = Number(movement.balanceAfter || 0);
-        accountMovementMap.set(movement.accountId, accountStats);
+      if (!knownReferences.has(movement.reference)) {
+        if (accountType === "cash") {
+          if (direction === "transfer-in") cashTransfersIn += amount;
+          else if (direction === "transfer-out") cashTransfersOut += amount;
+          else if (direction === "in") {
+            otherCashIn += amount;
+            otherPhysicalCashIn += amount;
+          } else {
+            otherCashOut += amount;
+            otherPhysicalCashOut += amount;
+          }
+        } else if (accountType === "safe" && isDebit && !physicalCashOutReferences.has(movement.reference)) {
+          cashToSafe += amount;
+        } else if (accountType === "bank" && isDebit && !physicalCashOutReferences.has(movement.reference)) {
+          cashToBank += amount;
+        } else if (accountType === "mobile_money" && isDebit && !physicalCashOutReferences.has(movement.reference)) {
+          cashToMobileMoney += amount;
+        }
       }
+
+      if (knownReferences.has(movement.reference)) continue;
       transactionRows.push({
         id: movement.id,
         kind: direction.includes("transfer") ? "transfer" : "cash-movement",
@@ -660,6 +699,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         staff: userLabel(movement.User),
         staffId: movement.User?.id,
         amount: movement.amount,
+        debit: isDebit ? movement.amount : 0,
+        credit: isDebit ? 0 : movement.amount,
         direction,
         paymentMethod: normalizedPaymentMethod(movement.account?.type || "cash"),
       });
@@ -670,15 +711,18 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       .filter((payment) => !payment.saleId && paymentMethodMatches(payment.paymentMethod, requestedMethod) && normalizedPaymentMethod(payment.paymentMethod) === "cash")
       .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     const openingByAccount = new Map(openingRows.map((row) => [row.accountId, Number(row.balanceAfter || 0)]));
-    const openingCash = openingRows.reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
+    const openingCashAtHand = openingRows.filter((row) => String(row.account?.type || "").toLowerCase() === "cash").reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
+    const openingCash = openingCashAtHand;
     const cashReceived = cashSales + cashCollections + otherCashIn + cashTransfersIn;
     const cashPaidOut = cashExpenses + otherCashOut + cashTransfersOut;
     const expectedCash = openingCash + cashReceived - cashPaidOut;
+    const cashAtHand = openingCashAtHand + cashSales + cashCollections + otherPhysicalCashIn + cashTransfersIn - cashExpenses - otherPhysicalCashOut - cashTransfersOut - cashToSafe - cashToBank - cashToMobileMoney;
+    const netCashMovement = cashReceived - cashPaidOut - cashToSafe - cashToBank - cashToMobileMoney;
     const expensesTotal = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const revenue = totalSales;
     const grossProfit = revenue - cogs;
     const staffTills = cashAccounts.map((account) => {
-      const stats = accountMovementMap.get(account.id) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, lastBalance: null };
+      const stats = accountMovementMap.get(account.id) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, debit: 0, credit: 0, lastBalance: null };
       const netMovement = stats.cashIn + stats.transferIn - stats.cashOut - stats.transferOut;
       const closingBalance = stats.lastBalance !== null ? stats.lastBalance : Number(account.balance || 0);
       const openingBalance = openingByAccount.has(account.id) ? openingByAccount.get(account.id) : closingBalance - netMovement;
@@ -694,6 +738,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         cashOut: stats.cashOut,
         cashTransfersIn: stats.transferIn,
         cashTransfersOut: stats.transferOut,
+        debit: stats.debit,
+        credit: stats.credit,
         expectedClosing: closingBalance,
         balance: closingBalance,
       };
@@ -720,6 +766,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         cardSales: salesBreakdown.card,
         debtCollections,
         cashReceived,
+        cashAtHand,
+        netCashMovement,
         expenses: expensesTotal,
         grossProfit,
         netProfit: grossProfit - expensesTotal,
@@ -733,16 +781,23 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         cashCollections,
         otherCashIn,
         cashReceived,
+        cashAtHand,
         cashExpenses,
         otherCashOut,
+        otherPhysicalCashIn,
+        otherPhysicalCashOut,
         cashTransfersIn,
         cashTransfersOut,
+        cashToSafe,
+        cashToBank,
+        cashToMobileMoney,
         cashPaidOut,
         expectedCash,
+        netCashMovement,
         physicalCashCounted: 0,
         difference: 0,
         cashHandedOver: cashTransfersOut,
-        cashRetained: expectedCash - cashTransfersOut,
+        cashRetained: cashAtHand,
       },
       profitability: { revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
       customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),

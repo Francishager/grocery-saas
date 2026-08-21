@@ -1843,8 +1843,8 @@ export default function ReportsPage() {
     { key: 'item', label: 'Item', format: 'text' },
     { key: 'details', label: 'Details', format: 'text' },
     { key: 'amount', label: 'Amount', format: 'currency' },
-    { key: 'cashAmount', label: 'Cash', format: 'currency' },
-    { key: 'creditAmount', label: 'Credit', format: 'currency' },
+    { key: 'cashAmount', label: 'Debit / Cash In', format: 'currency' },
+    { key: 'creditAmount', label: 'Credit / Cash Out', format: 'currency' },
     { key: 'balance', label: 'Balance', format: 'currency' },
   ]
 
@@ -1855,12 +1855,12 @@ export default function ReportsPage() {
     const cash = data?.cashMovement || {}
     const profitability = data?.profitability || {}
     ;[
-      ['Cash at Hand', cash.expectedCash, 'Expected physical cash'],
+      ['Cash at Hand', cash.cashAtHand, 'Physical cash after credit, expenses, safe and bank movements'],
       ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
       ['Credit Sales', summary.creditSales, 'Customer balances created'],
       ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
       ['Expenses', summary.expenses, 'Money spent today'],
-      ['Net Cash Movement', Number(cash.cashReceived || 0) - Number(cash.cashPaidOut || 0), 'Cash in minus cash out'],
+      ['Net Cash Movement', cash.netCashMovement, 'Cash in minus expenses, safe and bank movements'],
       ['Gross Profit', profitability.grossProfit, 'Sales minus COGS'],
       ['Net Profit', profitability.netProfit, 'Gross profit minus expenses'],
     ].forEach(([item, amount, details]) => pushAmount('Day Balancing Totals', String(item), amount, String(details)))
@@ -1870,7 +1870,8 @@ export default function ReportsPage() {
     ;(data?.customerActivity || []).forEach((row: any) => rows.push({ section: 'Customer Activity', item: row.name, details: row.phone || '', amount: Number(row.cashSales || 0) + Number(row.creditSales || 0), cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.currentBalance || 0 }))
     ;(data?.staffActivity || []).forEach((row: any) => rows.push({ section: 'Staff Activity', item: row.name, details: `Collections ${formatCurrency(row.collections || 0)}`, amount: row.sales || 0, cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.cashHeld || 0 }))
     ;(data?.productActivity || []).forEach((row: any) => rows.push({ section: 'Product Activity', item: row.name, details: `Qty ${row.quantitySold || 0}, Stock ${row.currentStock ?? ''}`, amount: row.salesValue || 0, cashAmount: row.cogs || 0, creditAmount: row.grossProfit || 0, balance: null }))
-    ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: row.reference || row.id, details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.cashAmount || 0, creditAmount: row.creditAmount || 0, balance: row.customerBalance || 0 }))
+    ;(data?.staffTills || []).forEach((row: any) => rows.push({ section: 'Cash Accounts', item: row.name, details: `${String(row.type || '').replace(/_/g, ' ')} - ${row.staff || 'Unassigned'}`, amount: row.expectedClosing ?? row.balance ?? 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.openingCash || 0 }))
+    ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: row.reference || row.id, details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || row.cashAmount || 0, creditAmount: row.credit || row.creditAmount || 0, balance: row.customerBalance || 0 }))
     return rows
   }
 
