@@ -4,6 +4,7 @@
  */
 
 import prisma from "../db.js";
+import { ensureTransactionAccounts } from "../utils/accountingSync.js";
 
 class HRConfigurationService {
   /**
@@ -270,6 +271,8 @@ class HRConfigurationService {
    */
   async getAvailableAccountsByType(tenantId) {
     try {
+      await ensureTransactionAccounts(prisma, tenantId);
+
       const expenseAccounts = await this.getAvailableAccountsForMapping(
         tenantId,
         "expense"

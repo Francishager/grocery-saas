@@ -29,16 +29,20 @@ interface Employee {
   nationalId?: string
   dateOfBirth?: string
   hireDate: string
+  branchId?: string
+  unitId?: string
+  teamId?: string
+  supervisorId?: string
   departmentId?: string
   positionId?: string
   position?: string
   positionRole?: { name?: string }
   department?: string | { name?: string }
   department_text?: string
-  branch?: { name?: string }
-  unit?: { name?: string }
-  team?: { name?: string }
-  supervisor?: { firstName?: string; lastName?: string }
+  branch?: { id?: string; name?: string }
+  unit?: { id?: string; name?: string }
+  team?: { id?: string; name?: string; unitId?: string }
+  supervisor?: { id?: string; firstName?: string; lastName?: string; employeeNumber?: string }
   gender?: string
   nationality?: string
   address?: string
@@ -65,6 +69,25 @@ interface Position {
   name: string
 }
 
+interface Branch {
+  id: string
+  name: string
+}
+
+interface Unit {
+  id: string
+  name: string
+  departmentId?: string
+}
+
+interface Team {
+  id: string
+  name: string
+  unitId?: string
+  departmentId?: string
+}
+
+const NONE_VALUE = '__none__'
 const today = () => new Date().toISOString().split('T')[0]
 
 const toDateInput = (value?: string) => {
@@ -81,7 +104,14 @@ const formatStatus = (value?: string) =>
 
 const formatOptionalLabel = (value?: string) => (value ? formatStatus(value) : '-')
 
-const normalizeList = (payload: any) => (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [])
+const normalizeList = (payload: any) => (
+  Array.isArray(payload?.data) ? payload.data :
+  Array.isArray(payload?.branches) ? payload.branches :
+  Array.isArray(payload?.units) ? payload.units :
+  Array.isArray(payload?.teams) ? payload.teams :
+  Array.isArray(payload) ? payload :
+  []
+)
 
 const employeeDepartmentName = (employee: any) =>
   employee?.employment?.department ||
@@ -117,8 +147,19 @@ const initialFormData = () => ({
   email: '',
   phone: '',
   nationalId: '',
+  gender: '',
+  nationality: '',
+  address: '',
+  emergencyContactName: '',
+  emergencyContactPhone: '',
+  nextOfKinName: '',
+  nextOfKinPhone: '',
   dateOfBirth: '',
   hireDate: today(),
+  branchId: '',
+  unitId: '',
+  teamId: '',
+  supervisorId: '',
   positionId: '',
   departmentId: '',
   position: '',
@@ -134,6 +175,9 @@ export default function EmployeeManagementPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [positions, setPositions] = useState<Position[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [units, setUnits] = useState<Unit[]>([])
+  const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
   const [openDialog, setOpenDialog] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -224,15 +268,20 @@ export default function EmployeeManagementPage() {
   const fetchEmployees = async () => {
     try {
       setLoading(true)
-      const [employeeRes, departmentRes, positionRes] = await Promise.all([
+      let employeeList: Employee[] = []
+      const [employeeRes, departmentRes, positionRes, branchRes, unitRes, teamRes] = await Promise.all([
         apiFetch('/api/hr/employees?take=500'),
         apiFetch('/api/hr/departments?take=500'),
         apiFetch('/api/hr/positions?take=500'),
+        apiFetch('/api/branches?status=active'),
+        apiFetch('/api/hr/units?take=500'),
+        apiFetch('/api/hr/teams?take=500'),
       ])
 
       if (employeeRes.ok) {
         const data = await employeeRes.json()
-        setEmployees(normalizeList(data))
+        employeeList = normalizeList(data)
+        setEmployees(employeeList)
       } else {
         toast({ variant: 'destructive', title: 'Failed to load employees' })
       }
@@ -245,6 +294,29 @@ export default function EmployeeManagementPage() {
       if (positionRes.ok) {
         const data = await positionRes.json()
         setPositions(normalizeList(data))
+      }
+
+      if (branchRes.ok) {
+        const data = await branchRes.json()
+        setBranches(normalizeList(data))
+      } else {
+        const branchMap = new Map<string, Branch>()
+        employeeList.forEach((employee) => {
+          if (employee.branch?.id && employee.branch?.name) {
+            branchMap.set(employee.branch.id, { id: employee.branch.id, name: employee.branch.name })
+          }
+        })
+        setBranches([...branchMap.values()])
+      }
+
+      if (unitRes.ok) {
+        const data = await unitRes.json()
+        setUnits(normalizeList(data))
+      }
+
+      if (teamRes.ok) {
+        const data = await teamRes.json()
+        setTeams(normalizeList(data))
       }
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error loading employees' })
@@ -278,8 +350,19 @@ export default function EmployeeManagementPage() {
       email: row.email || '',
       phone: row.phone || '',
       nationalId: row.nationalId || row.idNumber || '',
+      gender: row.gender || '',
+      nationality: row.nationality || '',
+      address: row.address || '',
+      emergencyContactName: row.emergencyContactName || '',
+      emergencyContactPhone: row.emergencyContactPhone || '',
+      nextOfKinName: row.nextOfKinName || '',
+      nextOfKinPhone: row.nextOfKinPhone || '',
       dateOfBirth: toDateInput(row.dateOfBirth),
       hireDate: toDateInput(row.hireDate),
+      branchId: row.branchId || row.branch?.id || '',
+      unitId: row.unitId || row.unit?.id || '',
+      teamId: row.teamId || row.team?.id || '',
+      supervisorId: row.supervisorId || row.supervisor?.id || '',
       positionId: row.positionId || '',
       departmentId: row.departmentId || '',
       position: positionName,
@@ -344,10 +427,22 @@ export default function EmployeeManagementPage() {
       const url = editingId ? `/api/hr/employees/${editingId}` : '/api/hr/employees'
       const selectedDepartment = departments.find((department) => department.id === formData.departmentId)
       const selectedPosition = positions.find((position) => position.id === formData.positionId)
+      const selectedTeam = teams.find((team) => team.id === formData.teamId)
+      const selectedTeamMatchesUnit =
+        selectedTeam &&
+        (!formData.unitId || formData.unitId === NONE_VALUE || !selectedTeam.unitId || selectedTeam.unitId === formData.unitId)
+      const relationValue = (value: any) => {
+        const normalized = String(value || '').trim()
+        return normalized && normalized !== NONE_VALUE ? normalized : null
+      }
       const payload = {
         ...formData,
-        departmentId: formData.departmentId || undefined,
-        positionId: formData.positionId || undefined,
+        departmentId: relationValue(formData.departmentId),
+        positionId: relationValue(formData.positionId),
+        branchId: relationValue(formData.branchId),
+        unitId: relationValue(formData.unitId),
+        teamId: selectedTeamMatchesUnit ? relationValue(formData.teamId) : null,
+        supervisorId: relationValue(formData.supervisorId),
         department: selectedDepartment?.name || formData.department || undefined,
         position: selectedPosition?.name || formData.position || undefined,
         jobTitle: selectedPosition?.name || formData.position || undefined,
@@ -395,6 +490,33 @@ export default function EmployeeManagementPage() {
     value: position.id,
   }))
 
+  const branchOptions = [
+    { label: 'No branch', value: NONE_VALUE },
+    ...branches.map((branch) => ({ label: branch.name, value: branch.id })),
+  ]
+
+  const unitOptions = [
+    { label: 'No unit', value: NONE_VALUE },
+    ...units.map((unit) => ({ label: unit.name, value: unit.id })),
+  ]
+
+  const teamOptions = [
+    { label: 'No team', value: NONE_VALUE },
+    ...teams
+      .filter((team) => !formData.unitId || formData.unitId === NONE_VALUE || !team.unitId || team.unitId === formData.unitId)
+      .map((team) => ({ label: team.name, value: team.id })),
+  ]
+
+  const supervisorOptions = [
+    { label: 'No supervisor', value: NONE_VALUE },
+    ...employees
+      .filter((employee) => employee.id !== editingId)
+      .map((employee) => ({
+        label: [employee.employeeNumber, fullName(employee)].filter(Boolean).join(' - '),
+        value: employee.id,
+      })),
+  ]
+
   const formFields: HRFormField[] = [
     {
       name: 'firstName',
@@ -429,6 +551,47 @@ export default function EmployeeManagementPage() {
       type: 'text',
     },
     {
+      name: 'gender',
+      label: 'Gender',
+      type: 'select',
+      options: [
+        { label: 'Male', value: 'male' },
+        { label: 'Female', value: 'female' },
+        { label: 'Other', value: 'other' },
+        { label: 'Prefer not to say', value: 'prefer_not_to_say' },
+      ],
+    },
+    {
+      name: 'nationality',
+      label: 'Nationality',
+      type: 'text',
+    },
+    {
+      name: 'address',
+      label: 'Address',
+      type: 'textarea',
+    },
+    {
+      name: 'emergencyContactName',
+      label: 'Emergency Contact',
+      type: 'text',
+    },
+    {
+      name: 'emergencyContactPhone',
+      label: 'Emergency Phone',
+      type: 'text',
+    },
+    {
+      name: 'nextOfKinName',
+      label: 'Next of Kin',
+      type: 'text',
+    },
+    {
+      name: 'nextOfKinPhone',
+      label: 'Next of Kin Phone',
+      type: 'text',
+    },
+    {
       name: 'dateOfBirth',
       label: 'Date of Birth',
       type: 'date',
@@ -452,6 +615,34 @@ export default function EmployeeManagementPage() {
       type: 'select',
       options: positionOptions,
       placeholder: positions.length ? 'Select Position' : 'Create a position first',
+    },
+    {
+      name: 'branchId',
+      label: 'Branch',
+      type: 'select',
+      options: branchOptions,
+      placeholder: branches.length ? 'Select Branch' : 'No branches available',
+    },
+    {
+      name: 'unitId',
+      label: 'Unit',
+      type: 'select',
+      options: unitOptions,
+      placeholder: units.length ? 'Select Unit' : 'No units available',
+    },
+    {
+      name: 'teamId',
+      label: 'Team',
+      type: 'select',
+      options: teamOptions,
+      placeholder: teams.length ? 'Select Team' : 'No teams available',
+    },
+    {
+      name: 'supervisorId',
+      label: 'Supervisor',
+      type: 'select',
+      options: supervisorOptions,
+      placeholder: employees.length ? 'Select Supervisor' : 'No supervisors available',
     },
     {
       name: 'employmentType',

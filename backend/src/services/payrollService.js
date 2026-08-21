@@ -455,17 +455,13 @@ class PayrollService {
           );
         }
 
-        // Verify payment account
-        const account = await tx.account.findFirst({
-          where: { id: paymentAccountId, tenantId, isActive: true },
-        });
-
-        if (!account) {
-          throw new Error("Payment account not found or inactive");
-        }
-        if (String(account.type || "").toLowerCase() !== "asset") {
-          throw new Error("Salary payments must be made from an Asset account such as Cash, Bank, Mobile Money, or Card.");
-        }
+        await hrAccountingService.requirePaymentAccountForMethod(
+          tx,
+          tenantId,
+          paymentAccountId,
+          paymentMethod,
+          "salary payment"
+        );
 
         // Create payment record
         const payment = await tx.payrollPayment.create({
@@ -489,6 +485,7 @@ class PayrollService {
           paymentId: payment.id,
           amount,
           paymentAccountId,
+          paymentMethod,
           employeeName: `${payroll.employee.firstName} ${payroll.employee.lastName}`,
           userId,
           date: new Date(),

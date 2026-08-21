@@ -4,8 +4,10 @@
  */
 
 import prisma from "../db.js";
+import { linkedCashAccountId, syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 
 const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
+const BALANCE_EPSILON = 0.01;
 
 const ACCOUNT_LABELS = {
   salaryExpense: "Staff Salaries & Wages expense account",
@@ -20,6 +22,14 @@ function money(value) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
+function normalizeValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function formatAmount(value) {
+  return money(value).toFixed(2);
+}
+
 function setupMessage(missingAccounts = []) {
   const missing = missingAccounts.length
     ? missingAccounts.map((key) => ACCOUNT_LABELS[key] || key).join(", ")
@@ -28,11 +38,37 @@ function setupMessage(missingAccounts = []) {
 }
 
 function isDebitNormalAccount(account) {
-  return DEBIT_NORMAL_ACCOUNT_TYPES.has(String(account?.type || "").trim().toLowerCase());
+  return DEBIT_NORMAL_ACCOUNT_TYPES.has(normalizeValue(account?.type));
 }
 
 function journalLineBalanceDelta(account, debit, credit) {
   return isDebitNormalAccount(account) ? debit - credit : credit - debit;
+}
+
+function paymentMethodAccountTypes(paymentMethod) {
+  const method = normalizeValue(paymentMethod || "cash");
+  if (method === "cash") return ["cash", "safe"];
+  if (method === "safe") return ["safe", "cash"];
+  if (method === "bank" || method === "bank_transfer" || method === "cheque") return ["bank"];
+  if (method === "mobile_money") return ["mobile_money"];
+  if (method === "card") return ["card"];
+  return [method];
+}
+
+function paymentMethodAccountLabel(paymentMethod) {
+  const method = normalizeValue(paymentMethod || "cash");
+  if (method === "cash") return "cash or safe";
+  if (method === "safe") return "safe or cash";
+  if (method === "bank" || method === "bank_transfer" || method === "cheque") return "bank";
+  if (method === "mobile_money") return "mobile money";
+  if (method === "card") return "card";
+  return method.replace(/_/g, " ");
+}
+
+function transactionAccountType(account) {
+  const subType = normalizeValue(account?.subType);
+  if (subType.startsWith("transaction_")) return subType.replace("transaction_", "");
+  return linkedCashAccountId(account) ? "cash" : null;
 }
 
 class HRAccountingService {
@@ -85,6 +121,50 @@ class HRAccountingService {
       invalidAccounts: ids.filter((id) => !foundIds.has(id)),
       accounts,
     };
+  }
+
+  async requirePaymentAccountForMethod(tx, tenantId, paymentAccountId, paymentMethod = "cash", context = "payment") {
+    const db = this.client(tx);
+    const method = normalizeValue(paymentMethod || "cash");
+    const account = await db.account.findFirst({
+      where: { id: paymentAccountId, tenantId, isActive: true },
+    });
+
+    if (!account) {
+      const error = new Error(`Select an existing ${paymentMethodAccountLabel(method)} transaction account for ${context}. Create it first in Transaction Accounts if it does not exist.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (normalizeValue(account.type) !== "asset") {
+      const error = new Error(`${context} must use an active Asset transaction account such as Cash, Safe, Bank, Mobile Money, or Card.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const cashAccountId = linkedCashAccountId(account);
+    let resolvedType = transactionAccountType(account);
+    if (cashAccountId) {
+      const cashAccount = await db.cashAccount.findFirst({
+        where: { id: cashAccountId, tenantId, isActive: true },
+        select: { id: true, type: true },
+      });
+
+      if (!cashAccount) {
+        const error = new Error(`The linked transaction account for ${account.name} is missing or inactive. Create/select the ${paymentMethodAccountLabel(method)} account again in Transaction Accounts.`);
+        error.statusCode = 400;
+        throw error;
+      }
+      resolvedType = normalizeValue(cashAccount.type);
+    }
+
+    if (!resolvedType || !paymentMethodAccountTypes(method).includes(resolvedType)) {
+      const error = new Error(`Selected account must be a ${paymentMethodAccountLabel(method)} transaction account for ${context}.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return account;
   }
 
   async requireConfiguredAccounts(tx, tenantId, requiredAccounts) {
@@ -185,7 +265,7 @@ class HRAccountingService {
       }
 
       const accountIds = [...new Set(normalizedLines.map((line) => line.accountId))];
-      const accounts = await db.account.findMany({
+      let accounts = await db.account.findMany({
         where: { tenantId, id: { in: accountIds }, isActive: true },
       });
       const accountsById = new Map(accounts.map((account) => [account.id, account]));
@@ -193,6 +273,51 @@ class HRAccountingService {
         const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
         error.statusCode = 400;
         throw error;
+      }
+
+      const linkedCashAccountIds = [...new Set(accounts.map(linkedCashAccountId).filter(Boolean))];
+      for (const cashAccountId of linkedCashAccountIds) {
+        await syncLinkedTransactionAccountBalance(db, tenantId, cashAccountId).catch(() => null);
+      }
+
+      if (linkedCashAccountIds.length) {
+        accounts = await db.account.findMany({
+          where: { tenantId, id: { in: accountIds }, isActive: true },
+        });
+        accountsById.clear();
+        for (const account of accounts) accountsById.set(account.id, account);
+      }
+
+      const cashAccounts = linkedCashAccountIds.length
+        ? await db.cashAccount.findMany({ where: { tenantId, id: { in: linkedCashAccountIds }, isActive: true } })
+        : [];
+      const cashAccountsById = new Map(cashAccounts.map((account) => [account.id, account]));
+      const accountDeltas = new Map();
+
+      for (const line of normalizedLines) {
+        const account = accountsById.get(line.accountId);
+        const delta = journalLineBalanceDelta(account, line.debit, line.credit);
+        accountDeltas.set(line.accountId, (accountDeltas.get(line.accountId) || 0) + delta);
+      }
+
+      for (const [accountId, delta] of accountDeltas) {
+        const account = accountsById.get(accountId);
+        const cashAccountId = linkedCashAccountId(account);
+        if (!cashAccountId || Math.abs(delta) <= 0) continue;
+
+        const cashAccount = cashAccountsById.get(cashAccountId);
+        if (!cashAccount) {
+          const error = new Error(`Linked transaction account for ${account.name} was not found or is inactive.`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const projectedCashBalance = money(cashAccount.balance) + delta;
+        if (delta < 0 && projectedCashBalance < -BALANCE_EPSILON) {
+          const error = new Error(`Insufficient balance in ${cashAccount.name}. Available: ${formatAmount(cashAccount.balance)}, required: ${formatAmount(Math.abs(delta))}.`);
+          error.statusCode = 400;
+          throw error;
+        }
       }
 
       const journalEntry = await db.journalEntry.create({
@@ -214,10 +339,32 @@ class HRAccountingService {
 
       for (const line of normalizedLines) {
         const account = accountsById.get(line.accountId);
+        const delta = journalLineBalanceDelta(account, line.debit, line.credit);
         await db.account.update({
           where: { id: line.accountId },
-          data: { balance: { increment: journalLineBalanceDelta(account, line.debit, line.credit) } },
+          data: { balance: { increment: delta } },
         });
+
+        const cashAccountId = linkedCashAccountId(account);
+        if (cashAccountId && Math.abs(delta) > 0) {
+          const updatedCashAccount = await db.cashAccount.update({
+            where: { id: cashAccountId },
+            data: { balance: { increment: delta } },
+          });
+
+          await db.cashTransaction.create({
+            data: {
+              tenantId,
+              accountId: cashAccountId,
+              type: delta >= 0 ? "hr_journal_in" : "hr_journal_out",
+              amount: Math.abs(delta),
+              balanceAfter: updatedCashAccount.balance,
+              reference: reference || sourceId || journalEntry.entryNo,
+              description: description || line.description || "HR journal entry",
+              userId,
+            },
+          });
+        }
       }
 
       return { success: true, journalEntry };
@@ -225,14 +372,11 @@ class HRAccountingService {
   }
 
   async createSalaryAdvanceJournal(params) {
-    const { tx = null, tenantId, branchId, salaryAdvanceId, amount, paymentAccountId, employeeName, userId, date } = params;
+    const { tx = null, tenantId, branchId, salaryAdvanceId, amount, paymentAccountId, paymentMethod = "cash", employeeName, userId, date } = params;
 
     return this.withTransaction(tx, async (db) => {
       const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
-      const paymentAccount = await db.account.findFirst({ where: { id: paymentAccountId, tenantId, isActive: true } });
-      if (!paymentAccount || String(paymentAccount.type || "").toLowerCase() !== "asset") {
-        throw new Error("Salary advance must be paid from an active Asset account such as Cash, Bank, or Mobile Money.");
-      }
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary advance payment");
 
       return this.createJournal({
         tx: db,
@@ -301,14 +445,11 @@ class HRAccountingService {
   }
 
   async createSalaryPaymentJournal(params) {
-    const { tx = null, tenantId, branchId, paymentId, amount, paymentAccountId, employeeName, userId, date } = params;
+    const { tx = null, tenantId, branchId, paymentId, amount, paymentAccountId, paymentMethod = "cash", employeeName, userId, date } = params;
 
     return this.withTransaction(tx, async (db) => {
       const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryPayable"]);
-      const paymentAccount = await db.account.findFirst({ where: { id: paymentAccountId, tenantId, isActive: true } });
-      if (!paymentAccount || String(paymentAccount.type || "").toLowerCase() !== "asset") {
-        throw new Error("Salary payment must be made from an active Asset account such as Cash, Bank, or Mobile Money.");
-      }
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary payment");
 
       return this.createJournal({
         tx: db,
@@ -329,14 +470,11 @@ class HRAccountingService {
   }
 
   async createSalaryAdvanceRepaymentJournal(params) {
-    const { tx = null, tenantId, branchId, recoveryId, amount, paymentAccountId, employeeName, userId, date } = params;
+    const { tx = null, tenantId, branchId, recoveryId, amount, paymentAccountId, paymentMethod = "cash", employeeName, userId, date } = params;
 
     return this.withTransaction(tx, async (db) => {
       const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
-      const paymentAccount = await db.account.findFirst({ where: { id: paymentAccountId, tenantId, isActive: true } });
-      if (!paymentAccount || String(paymentAccount.type || "").toLowerCase() !== "asset") {
-        throw new Error("Advance/loan repayment must be received into an active Asset account such as Cash, Bank, or Mobile Money.");
-      }
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "advance repayment");
 
       return this.createJournal({
         tx: db,

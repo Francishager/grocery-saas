@@ -23,6 +23,7 @@ class SalaryAdvanceService {
       recoveryMethod = "payroll",
       recoveryPlan,
       recoveryAmount,
+      paymentMethod = "cash",
       userId,
     } = params;
     const advanceAmount = Number(amount || 0);
@@ -49,22 +50,18 @@ class SalaryAdvanceService {
       };
     }
 
-    // Check payment account is valid (not expense account)
-    const paymentAccount = await prisma.account.findFirst({
-      where: { id: paymentAccountId, tenantId, isActive: true },
-    });
-
-    if (!paymentAccount) {
+    try {
+      await hrAccountingService.requirePaymentAccountForMethod(
+        prisma,
+        tenantId,
+        paymentAccountId,
+        paymentMethod,
+        "salary advance payment"
+      );
+    } catch (error) {
       return {
         success: false,
-        error: "Payment account not found",
-      };
-    }
-
-    if (String(paymentAccount.type || "").toLowerCase() !== "asset") {
-      return {
-        success: false,
-        error: "Salary advance payment must use an active Asset account such as Cash, Bank, or Mobile Money.",
+        error: error.message,
       };
     }
 
@@ -123,6 +120,7 @@ class SalaryAdvanceService {
             salaryAdvanceId: advance.id,
             amount: advanceAmount,
             paymentAccountId,
+            paymentMethod,
             employeeName: `${employee.firstName} ${employee.lastName}`,
             userId,
             date,
@@ -197,6 +195,7 @@ class SalaryAdvanceService {
       paymentAccountId,
       date,
       notes,
+      paymentMethod = "cash",
       userId,
     } = params;
     const repaymentAmount = Number(amount || 0);
@@ -250,6 +249,14 @@ class SalaryAdvanceService {
           );
         }
 
+        await hrAccountingService.requirePaymentAccountForMethod(
+          tx,
+          tenantId,
+          paymentAccountId,
+          paymentMethod,
+          "advance repayment"
+        );
+
         // Create recovery record
         const recovery = await tx.salaryAdvanceRecovery.create({
           data: {
@@ -299,6 +306,7 @@ class SalaryAdvanceService {
           recoveryId: recovery.id,
           amount: repaymentAmount,
           paymentAccountId,
+          paymentMethod,
           employeeName: `${advance.employee.firstName} ${advance.employee.lastName}`,
           userId,
           date,

@@ -31,6 +31,7 @@ router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
       recoveryMethod,
       recoveryPlan,
       recoveryAmount,
+      paymentMethod = "cash",
     } = req.body;
 
     // Validation
@@ -50,6 +51,7 @@ router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
       recoveryMethod,
       recoveryPlan,
       recoveryAmount,
+      paymentMethod,
       userId,
     });
 
@@ -152,7 +154,7 @@ router.post("/:id/direct-repayment", requirePermission("canManageHRPayroll"), as
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);
     const { id } = req.params;
-    const { amount, paymentAccountId, date, notes } = req.body;
+    const { amount, paymentAccountId, paymentMethod = "cash", date, notes } = req.body;
 
     if (!amount || amount <= 0 || !paymentAccountId) {
       return res.status(400).json({ error: "Missing required fields: amount, paymentAccountId" });
@@ -163,6 +165,7 @@ router.post("/:id/direct-repayment", requirePermission("canManageHRPayroll"), as
       salaryAdvanceId: id,
       amount,
       paymentAccountId,
+      paymentMethod,
       date: date || new Date(),
       notes,
       userId,

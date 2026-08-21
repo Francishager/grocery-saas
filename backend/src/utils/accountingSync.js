@@ -1,4 +1,7 @@
 const LINKED_CASH_ACCOUNT_MARKER = 'cashAccount:'
+const AUTO_DEFAULT_CASH_ACCOUNT_NAMES = new Set(['Cash Box', 'Mobile Money', 'Bank Account', 'Card Payments'])
+
+export const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`
 
 export function linkedCashAccountId(account) {
   const description = String(account?.description || '').trim()
@@ -64,6 +67,84 @@ export async function syncLinkedTransactionAccountBalance(prismaClient, tenantId
     syncedAccountId: synced.id,
     syncedBalance: Number(synced.balance || 0),
   }
+}
+
+export async function ensureTransactionAccounts(prismaClient, tenantId) {
+  if (!prismaClient || !tenantId) return []
+
+  const cashAccounts = await prismaClient.cashAccount.findMany({
+    where: { tenantId, isActive: true },
+    include: {
+      _count: {
+        select: {
+          AssignedUsers: true,
+          CashTransaction: true,
+          Expense: true,
+        },
+      },
+    },
+    orderBy: { name: 'asc' },
+  })
+
+  const linkedAccounts = []
+
+  for (const cashAccount of cashAccounts) {
+    const marker = cashAccountMarker(cashAccount.id)
+    const description = `Linked transaction account ${marker}`
+    const subType = `transaction_${cashAccount.type}`
+    const existing = await prismaClient.account.findFirst({
+      where: { tenantId, description: { contains: marker } },
+      include: { _count: { select: { journalLines: true, children: true } } },
+    })
+    const isUnusedAutoDefault =
+      AUTO_DEFAULT_CASH_ACCOUNT_NAMES.has(cashAccount.name) &&
+      Number(cashAccount.balance || 0) === 0 &&
+      Number(cashAccount._count?.AssignedUsers || 0) === 0 &&
+      Number(cashAccount._count?.CashTransaction || 0) === 0 &&
+      Number(cashAccount._count?.Expense || 0) === 0
+
+    if (isUnusedAutoDefault) {
+      if (existing && Number(existing._count?.journalLines || 0) === 0 && Number(existing._count?.children || 0) === 0) {
+        await prismaClient.account.delete({ where: { id: existing.id } })
+      }
+      continue
+    }
+
+    if (existing) {
+      linkedAccounts.push(await prismaClient.account.update({
+        where: { id: existing.id },
+        data: {
+          name: cashAccount.name,
+          type: 'asset',
+          subType,
+          balance: cashAccount.balance,
+          isActive: cashAccount.isActive,
+          description,
+        },
+      }))
+      continue
+    }
+
+    let code = `TX-${cashAccount.id.slice(-8).toUpperCase()}`
+    let suffix = 1
+    while (await prismaClient.account.findFirst({ where: { tenantId, code } })) {
+      code = `TX-${cashAccount.id.slice(-6).toUpperCase()}-${suffix++}`
+    }
+
+    linkedAccounts.push(await prismaClient.account.create({
+      data: {
+        tenantId,
+        code,
+        name: cashAccount.name,
+        type: 'asset',
+        subType,
+        balance: cashAccount.balance,
+        description,
+      },
+    }))
+  }
+
+  return linkedAccounts
 }
 
 export function syncCashAccountBalanceForTransactionAccount({ cashAccount, linkedAccount }) {

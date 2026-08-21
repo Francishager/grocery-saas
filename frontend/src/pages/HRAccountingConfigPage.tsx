@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { NavLink, useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 import {
   AlertCircle,
   BadgeDollarSign,
-  Banknote,
   Calculator,
   CheckCircle2,
-  CreditCard,
   FileText,
   Loader2,
   ReceiptText,
@@ -16,7 +14,7 @@ import {
   Wallet,
 } from "lucide-react"
 import { apiFetch } from "@/lib/api"
-import { cn, formatCurrency } from "@/lib/utils"
+import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -29,7 +27,9 @@ type Account = {
   code?: string
   name: string
   type?: string
+  subType?: string
   balance?: number
+  description?: string | null
 }
 
 type Employee = {
@@ -68,13 +68,26 @@ type SalaryAdvance = {
   journalEntryId?: string | null
 }
 
-const tabs = [
-  { id: "overview", label: "Overview", icon: Calculator },
-  { id: "mappings", label: "Account Mappings", icon: Settings },
-  { id: "payroll", label: "Payroll Posting", icon: ReceiptText },
-  { id: "payments", label: "Salary Payments", icon: Banknote },
-  { id: "advances", label: "Advances / Loans", icon: CreditCard },
+const HR_ACCOUNTING_VIEWS = new Set(["overview", "mappings", "payroll", "payments", "advances"])
+
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "cash", label: "Cash" },
+  { value: "safe", label: "Safe" },
+  { value: "mobile_money", label: "Mobile Money" },
+  { value: "bank", label: "Bank" },
+  { value: "cheque", label: "Cheque" },
+  { value: "card", label: "Card" },
 ]
+
+const PAYMENT_METHOD_ACCOUNT_LABELS: Record<string, string> = {
+  cash: "cash or safe",
+  safe: "safe or cash",
+  mobile_money: "mobile money",
+  bank: "bank",
+  bank_transfer: "bank",
+  cheque: "bank",
+  card: "card",
+}
 
 const emptyMapping = {
   salaryExpenseAccountId: "",
@@ -90,6 +103,29 @@ const money = (value: number | string | null | undefined) => formatCurrency(Numb
 const asArray = (payload: any) => Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : []
 const employeeName = (employee?: Employee | null) =>
   [employee?.firstName, employee?.middleName, employee?.lastName].filter(Boolean).join(" ").trim() || "Employee"
+const normalizeValue = (value?: string | null) => String(value || "").trim().toLowerCase()
+
+const getTransactionAccountType = (account: Account) => {
+  const subType = normalizeValue(account.subType)
+  if (subType.startsWith("transaction_")) return subType.replace("transaction_", "")
+  if (String(account.description || "").includes("cashAccount:")) return "cash"
+  return null
+}
+
+const transactionAccountMatchesMethod = (account: Account, paymentMethod?: string | null) => {
+  const type = getTransactionAccountType(account)
+  const method = normalizeValue(paymentMethod || "cash")
+  if (!type) return false
+  if (method === "cash") return type === "cash" || type === "safe"
+  if (method === "safe") return type === "safe" || type === "cash"
+  if (method === "bank" || method === "bank_transfer" || method === "cheque") return type === "bank"
+  if (method === "mobile_money") return type === "mobile_money"
+  if (method === "card") return type === "card"
+  return type === method
+}
+
+const paymentAccountPlaceholder = (paymentMethod?: string | null) =>
+  `Select ${PAYMENT_METHOD_ACCOUNT_LABELS[normalizeValue(paymentMethod || "cash")] || "payment"} account`
 
 async function fetchJson(path: string, init?: RequestInit) {
   const response = await apiFetch(path, init)
@@ -165,7 +201,7 @@ export default function HRAccountingConfigPage() {
   const { tab } = useParams()
   const navigate = useNavigate()
   const { toast } = useToast()
-  const activeTab = tabs.some((item) => item.id === tab) ? String(tab) : "overview"
+  const activeTab = HR_ACCOUNTING_VIEWS.has(String(tab)) ? String(tab) : "overview"
 
   const [config, setConfig] = useState<any>(null)
   const [availableAccounts, setAvailableAccounts] = useState<{
@@ -211,6 +247,7 @@ export default function HRAccountingConfigPage() {
     employeeId: "",
     amount: "",
     paymentAccountId: "",
+    paymentMethod: "cash",
     date: today(),
     reason: "",
     recoveryMethod: "payroll",
@@ -221,6 +258,7 @@ export default function HRAccountingConfigPage() {
     advanceId: "",
     amount: "",
     paymentAccountId: "",
+    paymentMethod: "cash",
     date: today(),
     notes: "",
   })
@@ -239,6 +277,18 @@ export default function HRAccountingConfigPage() {
   )
   const outstandingAdvances = advances.filter((advance) =>
     ["outstanding", "partially_recovered"].includes(advance.status) && Number(advance.outstandingAmount || 0) > 0
+  )
+  const paymentAccountOptions = useMemo(
+    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, paymentForm.paymentMethod)),
+    [availableAccounts.assetAccounts, paymentForm.paymentMethod]
+  )
+  const advancePaymentAccountOptions = useMemo(
+    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, advanceForm.paymentMethod)),
+    [availableAccounts.assetAccounts, advanceForm.paymentMethod]
+  )
+  const repaymentPaymentAccountOptions = useMemo(
+    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, repaymentForm.paymentMethod)),
+    [availableAccounts.assetAccounts, repaymentForm.paymentMethod]
   )
 
   const loadConfiguration = async () => {
@@ -310,6 +360,24 @@ export default function HRAccountingConfigPage() {
     loadPayroll().catch((err) => setError(err instanceof Error ? err.message : "Failed to load payroll"))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payrollPeriod])
+
+  useEffect(() => {
+    if (paymentForm.paymentAccountId && !paymentAccountOptions.some((account) => account.id === paymentForm.paymentAccountId)) {
+      setPaymentForm((prev) => ({ ...prev, paymentAccountId: "" }))
+    }
+  }, [paymentAccountOptions, paymentForm.paymentAccountId])
+
+  useEffect(() => {
+    if (advanceForm.paymentAccountId && !advancePaymentAccountOptions.some((account) => account.id === advanceForm.paymentAccountId)) {
+      setAdvanceForm((prev) => ({ ...prev, paymentAccountId: "" }))
+    }
+  }, [advancePaymentAccountOptions, advanceForm.paymentAccountId])
+
+  useEffect(() => {
+    if (repaymentForm.paymentAccountId && !repaymentPaymentAccountOptions.some((account) => account.id === repaymentForm.paymentAccountId)) {
+      setRepaymentForm((prev) => ({ ...prev, paymentAccountId: "" }))
+    }
+  }, [repaymentPaymentAccountOptions, repaymentForm.paymentAccountId])
 
   const notifySuccess = (message: string) => {
     setSuccess(message)
@@ -464,6 +532,7 @@ export default function HRAccountingConfigPage() {
         employeeId: "",
         amount: "",
         paymentAccountId: "",
+        paymentMethod: "cash",
         date: today(),
         reason: "",
         recoveryMethod: "payroll",
@@ -492,11 +561,12 @@ export default function HRAccountingConfigPage() {
         body: JSON.stringify({
           amount: Number(repaymentForm.amount),
           paymentAccountId: repaymentForm.paymentAccountId,
+          paymentMethod: repaymentForm.paymentMethod,
           date: repaymentForm.date,
           notes: repaymentForm.notes || undefined,
         }),
       })
-      setRepaymentForm({ advanceId: "", amount: "", paymentAccountId: "", date: today(), notes: "" })
+      setRepaymentForm({ advanceId: "", amount: "", paymentAccountId: "", paymentMethod: "cash", date: today(), notes: "" })
       notifySuccess("Advance repayment recorded")
       await loadAdvances()
     } catch (err) {
@@ -538,25 +608,6 @@ export default function HRAccountingConfigPage() {
             Refresh
           </Button>
         </div>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto border-b pb-2">
-        {tabs.map((item) => {
-          const Icon = item.icon
-          return (
-            <NavLink
-              key={item.id}
-              to={`/tenant/hr/accounting/${item.id}`}
-              className={cn(
-                "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium transition",
-                activeTab === item.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {item.label}
-            </NavLink>
-          )
-        })}
       </div>
 
       {error && (
@@ -791,11 +842,10 @@ export default function HRAccountingConfigPage() {
                 </div>
                 <div>
                   <Label>Payment Method</Label>
-                  <select value={paymentForm.paymentMethod} onChange={(event) => setPaymentForm((prev) => ({ ...prev, paymentMethod: event.target.value }))} className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank</option>
-                    <option value="mobile_money">Mobile Money</option>
-                    <option value="card">Card</option>
+                  <select value={paymentForm.paymentMethod} onChange={(event) => setPaymentForm((prev) => ({ ...prev, paymentMethod: event.target.value, paymentAccountId: "" }))} className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
+                    {PAYMENT_METHOD_OPTIONS.map((method) => (
+                      <option key={method.value} value={method.value}>{method.label}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -804,8 +854,8 @@ export default function HRAccountingConfigPage() {
                 </div>
               </div>
               <div>
-                <Label>Cash / Bank / Mobile Money Account</Label>
-                <AccountSelect value={paymentForm.paymentAccountId} onChange={(value) => setPaymentForm((prev) => ({ ...prev, paymentAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder="Select payment account" />
+                <Label>{PAYMENT_METHOD_ACCOUNT_LABELS[paymentForm.paymentMethod] || "Payment"} Account</Label>
+                <AccountSelect value={paymentForm.paymentAccountId} onChange={(value) => setPaymentForm((prev) => ({ ...prev, paymentAccountId: value }))} accounts={paymentAccountOptions} placeholder={paymentAccountPlaceholder(paymentForm.paymentMethod)} />
               </div>
               {selectedPaymentPayroll && (
                 <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
@@ -845,8 +895,16 @@ export default function HRAccountingConfigPage() {
                   </div>
                 </div>
                 <div>
-                  <Label>Payment Account</Label>
-                  <AccountSelect value={advanceForm.paymentAccountId} onChange={(value) => setAdvanceForm((prev) => ({ ...prev, paymentAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder="Select cash, bank, or mobile money account" />
+                  <Label>Payment Method</Label>
+                  <select value={advanceForm.paymentMethod} onChange={(event) => setAdvanceForm((prev) => ({ ...prev, paymentMethod: event.target.value, paymentAccountId: "" }))} className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
+                    {PAYMENT_METHOD_OPTIONS.map((method) => (
+                      <option key={method.value} value={method.value}>{method.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label>{PAYMENT_METHOD_ACCOUNT_LABELS[advanceForm.paymentMethod] || "Payment"} Account</Label>
+                  <AccountSelect value={advanceForm.paymentAccountId} onChange={(value) => setAdvanceForm((prev) => ({ ...prev, paymentAccountId: value }))} accounts={advancePaymentAccountOptions} placeholder={paymentAccountPlaceholder(advanceForm.paymentMethod)} />
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
@@ -902,8 +960,16 @@ export default function HRAccountingConfigPage() {
                   </div>
                 </div>
                 <div>
-                  <Label>Receiving Account</Label>
-                  <AccountSelect value={repaymentForm.paymentAccountId} onChange={(value) => setRepaymentForm((prev) => ({ ...prev, paymentAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder="Select cash, bank, or mobile money account" />
+                  <Label>Payment Method</Label>
+                  <select value={repaymentForm.paymentMethod} onChange={(event) => setRepaymentForm((prev) => ({ ...prev, paymentMethod: event.target.value, paymentAccountId: "" }))} className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
+                    {PAYMENT_METHOD_OPTIONS.map((method) => (
+                      <option key={method.value} value={method.value}>{method.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label>{PAYMENT_METHOD_ACCOUNT_LABELS[repaymentForm.paymentMethod] || "Receiving"} Account</Label>
+                  <AccountSelect value={repaymentForm.paymentAccountId} onChange={(value) => setRepaymentForm((prev) => ({ ...prev, paymentAccountId: value }))} accounts={repaymentPaymentAccountOptions} placeholder={paymentAccountPlaceholder(repaymentForm.paymentMethod)} />
                 </div>
                 <div>
                   <Label>Notes</Label>
