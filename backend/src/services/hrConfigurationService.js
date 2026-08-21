@@ -305,71 +305,104 @@ class HRConfigurationService {
 
     const session = await prisma.$transaction(async (tx) => {
       try {
-        // Check if accounts already exist
-        const existing = await tx.account.findMany({
-          where: {
-            tenantId,
-            name: {
-              in: [
-                "Staff Salaries & Wages",
-                "Salaries Payable",
-                "Employee Salary Advances",
-                "Employee Advances/Loans",
-              ],
-            },
-          },
-        });
+        const ensureAccount = async ({ code, name, type, subType, description }) => {
+          const existing = await tx.account.findFirst({
+            where: { tenantId, name },
+          });
 
-        if (existing.length > 0) {
+          if (existing) {
+            if (existing.type !== type) {
+              return {
+                error: `${existing.name} exists but is ${existing.type}. HR accounting needs a ${type} account for ${name}.`,
+              };
+            }
+
+            return {
+              account: await tx.account.update({
+                where: { id: existing.id },
+                data: {
+                  name,
+                  subType,
+                  description,
+                  isActive: true,
+                },
+              }),
+            };
+          }
+
+          let availableCode = code;
+          let suffix = 1;
+          while (await tx.account.findFirst({ where: { tenantId, code: availableCode } })) {
+            availableCode = `${code}-${suffix++}`;
+          }
+
           return {
-            success: false,
-            error:
-              "HR accounts already exist. Cannot initialize default accounts.",
+            account: await tx.account.create({
+              data: {
+                tenantId,
+                branchId: branchId || null,
+                code: availableCode,
+                name,
+                type,
+                subType,
+                description,
+                isActive: true,
+              },
+            }),
           };
+        };
+
+        const salaryExpenseResult = await ensureAccount({
+          code: "6100",
+          name: "Staff Salaries & Wages",
+          type: "expense",
+          subType: "operating_expense",
+          description: "Salaries and wages paid to employees. Used when payroll is processed.",
+        });
+        const salaryPayableResult = await ensureAccount({
+          code: "2100",
+          name: "Salaries Payable",
+          type: "liability",
+          subType: "current_liability",
+          description: "Amount owed to employees for salaries processed but not yet paid.",
+        });
+        const salaryAdvanceResult = await ensureAccount({
+          code: "1250",
+          name: "Employee Advances/Loans",
+          type: "asset",
+          subType: "current_asset",
+          description: "Advances and employee loans that will be recovered through future payrolls.",
+        });
+        const payeTaxResult = await ensureAccount({
+          code: "2110",
+          name: "PAYE Tax Payable",
+          type: "liability",
+          subType: "current_liability",
+          description: "Payroll tax withheld from employees and payable to the authority.",
+        });
+        const socialSecurityResult = await ensureAccount({
+          code: "2120",
+          name: "Social Security Payable",
+          type: "liability",
+          subType: "current_liability",
+          description: "Employee social security deductions payable to the authority or scheme.",
+        });
+        const accountError =
+          salaryExpenseResult.error ||
+          salaryPayableResult.error ||
+          salaryAdvanceResult.error ||
+          payeTaxResult.error ||
+          socialSecurityResult.error;
+
+        if (accountError) {
+          return { success: false, error: accountError };
         }
 
-        // Create accounts
-        const salaryExpense = await tx.account.create({
-          data: {
-            tenantId,
-            branchId: branchId || null,
-            code: "6100",
-            name: "Staff Salaries & Wages",
-            type: "expense",
-            subType: "operating_expense",
-            description:
-              "Salaries and wages paid to employees. Used when payroll is processed.",
-            isActive: true,
-          },
-        });
-
-        const salaryPayable = await tx.account.create({
-          data: {
-            tenantId,
-            branchId: branchId || null,
-            code: "2100",
-            name: "Salaries Payable",
-            type: "liability",
-            subType: "current_liability",
-            description:
-              "Amount owed to employees for salaries processed but not yet paid.",
-            isActive: true,
-          },
-        });
-
-        const salaryAdvance = await tx.account.create({
-          data: {
-            tenantId,
-            branchId: branchId || null,
-            code: "1250",
-            name: "Employee Advances/Loans",
-            type: "asset",
-            subType: "current_asset",
-            description:
-              "Advances and employee loans that will be recovered through future payrolls.",
-            isActive: true,
-          },
-        });
+        const salaryExpense = salaryExpenseResult.account;
+        const salaryPayable = salaryPayableResult.account;
+        const salaryAdvance = salaryAdvanceResult.account;
+        const payeTax = payeTaxResult.account;
+        const socialSecurity = socialSecurityResult.account;
 
         // Update HR configuration
         const config = await tx.hRAccountingConfig.upsert({
@@ -379,6 +412,8 @@ class HRConfigurationService {
             salaryExpenseAccountId: salaryExpense.id,
             salaryPayableAccountId: salaryPayable.id,
             salaryAdvanceAccountId: salaryAdvance.id,
+            payeTaxAccountId: payeTax.id,
+            socialSecurityAccountId: socialSecurity.id,
             isConfigured: true,
             configuredBy: userId,
             configuredAt: new Date(),
@@ -387,6 +422,8 @@ class HRConfigurationService {
             salaryExpenseAccountId: salaryExpense.id,
             salaryPayableAccountId: salaryPayable.id,
             salaryAdvanceAccountId: salaryAdvance.id,
+            payeTaxAccountId: payeTax.id,
+            socialSecurityAccountId: socialSecurity.id,
             isConfigured: true,
             updatedBy: userId,
           },
@@ -398,6 +435,8 @@ class HRConfigurationService {
             salaryExpense,
             salaryPayable,
             salaryAdvance,
+            payeTax,
+            socialSecurity,
           },
           config,
         };

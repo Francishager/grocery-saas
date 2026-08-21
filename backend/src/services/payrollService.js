@@ -3,10 +3,8 @@
  * Handles payroll processing with accounting integration
  */
 
-const { PrismaClient } = require("@prisma/client");
-const hrAccountingService = require("./hrAccountingService");
-
-const prisma = new PrismaClient();
+import prisma from "../db.js";
+import hrAccountingService from "./hrAccountingService.js";
 
 class PayrollService {
   /**
@@ -58,8 +56,8 @@ class PayrollService {
     }
 
     // Get employee
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, tenantId },
       include: { salaryAdvances: true },
     });
 
@@ -130,6 +128,7 @@ class PayrollService {
 
         // Create audit log
         await hrAccountingService.createAuditLog({
+          tx,
           tenantId,
           recordType: "payroll",
           recordId: payroll.id,
@@ -246,9 +245,11 @@ class PayrollService {
         // Validate accounting configuration
         const requiredAccounts = ["salaryExpense", "salaryPayable"];
         if (payroll.salaryAdvanceRecovery > 0) requiredAccounts.push("salaryAdvance");
+        if (payroll.paye > 0) requiredAccounts.push("payeTax");
+        if (payroll.socialSecurityTax > 0) requiredAccounts.push("socialSecurity");
 
         const accountValidation =
-          await hrAccountingService.validateHRAccountConfiguration(tenantId, requiredAccounts);
+          await hrAccountingService.validateHRAccountConfiguration(tenantId, requiredAccounts, tx);
 
         if (!accountValidation.isValid) {
           throw new Error(
@@ -256,14 +257,45 @@ class PayrollService {
           );
         }
 
+        const existingJournal = await hrAccountingService.getExistingJournalEntry(
+          tenantId,
+          "PAYROLL",
+          payrollId,
+          tx
+        );
+        if (existingJournal) {
+          const updated = await tx.payroll.update({
+            where: { id: payrollId },
+            data: {
+              status: "posted",
+              postedBy: payroll.postedBy || userId,
+              postedAt: payroll.postedAt || new Date(),
+              journalEntryId: existingJournal.id,
+            },
+          });
+
+          return {
+            success: true,
+            payroll: updated,
+            journalEntry: existingJournal,
+          };
+        }
+
         // Process salary advance recoveries
         if (payroll.salaryAdvanceRecovery > 0) {
           const advances = await tx.salaryAdvance.findMany({
             where: {
+              tenantId,
               employeeId: payroll.employeeId,
               status: { in: ["outstanding", "partially_recovered"] },
             },
+            orderBy: { date: "asc" },
           });
+
+          const outstanding = advances.reduce((sum, advance) => sum + Number(advance.outstandingAmount || 0), 0);
+          if (payroll.salaryAdvanceRecovery > outstanding) {
+            throw new Error(`Cannot recover more than outstanding advance (${outstanding})`);
+          }
 
           let remainingRecovery = payroll.salaryAdvanceRecovery;
 
@@ -320,12 +352,18 @@ class PayrollService {
 
         // Create accounting journal entry
         const journalResult = await hrAccountingService.createPayrollJournal({
+          tx,
           tenantId,
           branchId: payroll.branchId,
           payrollId,
           grossSalary: payroll.grossSalary,
           salaryAdvanceRecovery: payroll.salaryAdvanceRecovery,
           netSalaryPayable: payroll.netSalary,
+          paye: payroll.paye,
+          socialSecurityTax: payroll.socialSecurityTax,
+          healthInsurance: payroll.healthInsurance,
+          otherDeductions: payroll.otherDeductions,
+          totalDeductions: payroll.totalDeductions,
           employeeName: `${payroll.employee.firstName} ${payroll.employee.lastName}`,
           userId,
           date: new Date(),
@@ -348,6 +386,7 @@ class PayrollService {
 
         // Create audit log
         await hrAccountingService.createAuditLog({
+          tx,
           tenantId,
           recordType: "payroll",
           recordId: payrollId,
@@ -410,19 +449,22 @@ class PayrollService {
 
         // Check payment amount doesn't exceed net salary
         const remaining = payroll.netSalary - payroll.paidAmount;
-        if (amount > remaining) {
+        if (amount <= 0 || amount > remaining) {
           throw new Error(
-            `Payment amount (${amount}) exceeds remaining salary (${remaining})`
+            `Enter a valid salary payment amount up to ${remaining}`
           );
         }
 
         // Verify payment account
-        const account = await tx.account.findUnique({
-          where: { id: paymentAccountId },
+        const account = await tx.account.findFirst({
+          where: { id: paymentAccountId, tenantId, isActive: true },
         });
 
-        if (!account || !account.isActive) {
+        if (!account) {
           throw new Error("Payment account not found or inactive");
+        }
+        if (String(account.type || "").toLowerCase() !== "asset") {
+          throw new Error("Salary payments must be made from an Asset account such as Cash, Bank, Mobile Money, or Card.");
         }
 
         // Create payment record
@@ -441,6 +483,7 @@ class PayrollService {
 
         // Create payment journal entry
         const journalResult = await hrAccountingService.createSalaryPaymentJournal({
+          tx,
           tenantId,
           branchId: payroll.branchId,
           paymentId: payment.id,
@@ -489,6 +532,7 @@ class PayrollService {
 
         // Create audit log
         await hrAccountingService.createAuditLog({
+          tx,
           tenantId,
           recordType: "payroll",
           recordId: payrollId,
@@ -640,4 +684,4 @@ class PayrollService {
   }
 }
 
-module.exports = new PayrollService();
+export default new PayrollService();

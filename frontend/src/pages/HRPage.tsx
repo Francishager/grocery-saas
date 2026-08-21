@@ -43,12 +43,22 @@ interface PayrollRecord {
   id: string
   period: string
   grossSalary: number
-  deductions: number
+  deductions?: number
+  totalDeductions?: number
   netSalary: number
   bonus: number
+  paidAmount?: number
   status: string
   paidAt?: string
   employee: { id: string; firstName: string; lastName: string; position?: string }
+}
+
+interface AccountOption {
+  id: string
+  code?: string
+  name: string
+  balance?: number
+  type?: string
 }
 
 export default function HRPage() {
@@ -60,6 +70,10 @@ export default function HRPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showPayrollModal, setShowPayrollModal] = useState(false)
+  const [paymentAccounts, setPaymentAccounts] = useState<AccountOption[]>([])
+  const [payrollToPay, setPayrollToPay] = useState<PayrollRecord | null>(null)
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAmount, setPaymentAmount] = useState('')
 
   // Form
   const [firstName, setFirstName] = useState('')
@@ -127,10 +141,21 @@ export default function HRPage() {
     }
   }
 
+  const fetchPaymentAccounts = async () => {
+    try {
+      if (!online) return
+      const res = await apiFetch('/api/hr/config/available-accounts')
+      if (!res.ok) return
+      const data = await res.json()
+      setPaymentAccounts((data.assetAccounts || []).filter((account: AccountOption) => account.type === 'asset'))
+    } catch {}
+  }
+
   useEffect(() => {
     fetchEmployees()
     fetchLeaves()
     fetchPayroll()
+    fetchPaymentAccounts()
   }, [])
 
   const employeeFormValid = firstName.trim() && lastName.trim() && phone.trim() && position.trim() && department.trim() && salary > 0 && payFrequency
@@ -221,12 +246,50 @@ export default function HRPage() {
     }
   }
 
-  const handlePayPayroll = async (id: string) => {
+  const handlePostPayroll = async (id: string) => {
     try {
-      const res = await apiFetch(`/api/hr/payroll/${id}/pay`, { method: 'PUT' })
+      const res = await apiFetch(`/api/hr/payroll/${id}/post`, { method: 'POST' })
       if (res.ok) {
-        toast({ title: 'Payment recorded' })
+        toast({ title: 'Payroll posted to accounting' })
         fetchPayroll()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: data.error || 'Failed to post payroll' })
+      }
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Failed to post payroll' })
+    }
+  }
+
+  const openPayPayroll = (record: PayrollRecord) => {
+    const remaining = Math.max(0, Number(record.netSalary || 0) - Number(record.paidAmount || 0))
+    setPayrollToPay(record)
+    setPaymentAmount(remaining ? String(remaining) : '')
+    setPaymentAccountId('')
+  }
+
+  const handlePayPayroll = async () => {
+    if (!payrollToPay || !paymentAccountId || Number(paymentAmount) <= 0) {
+      return toast({ variant: 'destructive', title: 'Select account and amount' })
+    }
+    try {
+      const res = await apiFetch(`/api/hr/payroll/${payrollToPay.id}/pay`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          paymentAccountId,
+          amount: Number(paymentAmount),
+          paymentMethod: 'account',
+        }),
+      })
+      if (res.ok) {
+        toast({ title: 'Salary payment posted' })
+        setPayrollToPay(null)
+        setPaymentAccountId('')
+        setPaymentAmount('')
+        fetchPayroll()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: data.error || 'Failed to record payment' })
       }
     } catch (err) {
       toast({ variant: 'destructive', title: 'Failed to record payment' })
@@ -238,7 +301,10 @@ export default function HRPage() {
     terminated: 'bg-red-100 text-red-800',
     on_leave: 'bg-yellow-100 text-yellow-800',
     pending: 'bg-yellow-100 text-yellow-800',
+    draft: 'bg-yellow-100 text-yellow-800',
     approved: 'bg-green-100 text-green-800',
+    posted: 'bg-blue-100 text-blue-800',
+    partially_paid: 'bg-purple-100 text-purple-800',
     rejected: 'bg-red-100 text-red-800',
     paid: 'bg-green-100 text-green-800',
   }
@@ -418,6 +484,38 @@ export default function HRPage() {
             </Dialog>
           </div>
 
+          <Dialog open={Boolean(payrollToPay)} onOpenChange={(open) => !open && setPayrollToPay(null)}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Record Salary Payment</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <Label>Payment Account</Label>
+                  <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select cash, bank, or mobile money account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {paymentAccounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {[account.code, account.name].filter(Boolean).join(' - ')}
+                          {account.balance !== undefined ? ` (${Number(account.balance).toFixed(2)})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Amount</Label>
+                  <Input type="number" min="0" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPayrollToPay(null)}>Cancel</Button>
+                <Button onClick={handlePayPayroll}>Post Payment</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <div className="space-y-2">
             {payroll.map((rec) => (
               <div key={rec.id} className="flex items-center justify-between rounded-lg border p-4">
@@ -428,10 +526,15 @@ export default function HRPage() {
                 <div className="flex items-center gap-4">
                   <div className="text-right">
                     <p className="font-medium">{rec.netSalary.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">Gross: {rec.grossSalary.toFixed(0)} - Ded: {rec.deductions.toFixed(0)} + Bonus: {rec.bonus.toFixed(0)}</p>
+                    <p className="text-xs text-muted-foreground">Gross: {rec.grossSalary.toFixed(0)} - Ded: {Number(rec.totalDeductions ?? rec.deductions ?? 0).toFixed(0)} + Bonus: {rec.bonus.toFixed(0)}</p>
                   </div>
                   <Badge className={statusColor[rec.status] || 'bg-gray-100'}>{rec.status}</Badge>
-                  {rec.status === 'pending' && <Button size="sm" onClick={() => handlePayPayroll(rec.id)}>Pay</Button>}
+                  {!['posted', 'partially_paid', 'paid'].includes(rec.status) && (
+                    <Button size="sm" variant="outline" onClick={() => handlePostPayroll(rec.id)}>Post</Button>
+                  )}
+                  {['posted', 'partially_paid'].includes(rec.status) && (
+                    <Button size="sm" onClick={() => openPayPayroll(rec)}>Pay</Button>
+                  )}
                 </div>
               </div>
             ))}

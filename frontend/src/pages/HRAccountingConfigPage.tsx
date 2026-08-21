@@ -336,7 +336,7 @@ export default function HRAccountingConfigPage() {
           <div className="mt-4 p-4 bg-blue-50 border border-blue-300 rounded-md">
             <p className="text-blue-900 mb-3">
               This will create default HR accounts (Salaries & Wages, Salaries Payable,
-              Employee Advances/Loans) and automatically map them.
+              Employee Advances/Loans, PAYE Tax Payable, and Social Security Payable) and automatically map them.
             </p>
             <div className="flex gap-2">
               <button

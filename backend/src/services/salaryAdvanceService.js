@@ -3,10 +3,8 @@
  * Handles salary advances with accounting integration
  */
 
-const { PrismaClient } = require("@prisma/client");
-const hrAccountingService = require("./hrAccountingService");
-
-const prisma = new PrismaClient();
+import prisma from "../db.js";
+import hrAccountingService from "./hrAccountingService.js";
 
 class SalaryAdvanceService {
   /**
@@ -27,6 +25,15 @@ class SalaryAdvanceService {
       recoveryAmount,
       userId,
     } = params;
+    const advanceAmount = Number(amount || 0);
+    const plannedRecoveryAmount = Number(recoveryAmount || 0);
+
+    if (!Number.isFinite(advanceAmount) || advanceAmount <= 0) {
+      return {
+        success: false,
+        error: "Enter a valid positive salary advance amount.",
+      };
+    }
 
     // Validate HR accounting configuration
     const accountValidation =
@@ -43,8 +50,8 @@ class SalaryAdvanceService {
     }
 
     // Check payment account is valid (not expense account)
-    const paymentAccount = await prisma.account.findUnique({
-      where: { id: paymentAccountId },
+    const paymentAccount = await prisma.account.findFirst({
+      where: { id: paymentAccountId, tenantId, isActive: true },
     });
 
     if (!paymentAccount) {
@@ -54,16 +61,16 @@ class SalaryAdvanceService {
       };
     }
 
-    if (paymentAccount.type === "expense") {
+    if (String(paymentAccount.type || "").toLowerCase() !== "asset") {
       return {
         success: false,
-        error: "Cannot use Expense account for salary advance payment",
+        error: "Salary advance payment must use an active Asset account such as Cash, Bank, or Mobile Money.",
       };
     }
 
     // Get employee
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, tenantId },
     });
 
     if (!employee) {
@@ -89,16 +96,16 @@ class SalaryAdvanceService {
             tenantId,
             employeeId,
             advanceNo,
-            amount,
+            amount: advanceAmount,
             paymentAccountId,
             date: new Date(date),
             reason,
             status: "outstanding",
-            outstandingAmount: amount,
+            outstandingAmount: advanceAmount,
             totalRecovered: 0,
             recoveryMethod,
             recoveryPlan,
-            recoveryAmount: recoveryAmount || 0,
+            recoveryAmount: plannedRecoveryAmount,
             approvedBy: userId,
             approvedAt: new Date(),
             paidBy: userId,
@@ -110,10 +117,11 @@ class SalaryAdvanceService {
         // Create accounting journal entry
         const journalResult = await hrAccountingService.createSalaryAdvanceJournal(
           {
+            tx,
             tenantId,
             branchId: employee.branchId,
             salaryAdvanceId: advance.id,
-            amount,
+            amount: advanceAmount,
             paymentAccountId,
             employeeName: `${employee.firstName} ${employee.lastName}`,
             userId,
@@ -138,20 +146,21 @@ class SalaryAdvanceService {
           where: { id: employeeId },
           data: {
             salaryAdvanceBalance: {
-              increment: amount,
+              increment: advanceAmount,
             },
           },
         });
 
         // Create audit log
         await hrAccountingService.createAuditLog({
+          tx,
           tenantId,
           recordType: "salary_advance",
           recordId: advance.id,
           employeeId,
           action: "created",
-          description: `Salary advance issued: ${amount}`,
-          amount,
+          description: `Salary advance issued: ${advanceAmount}`,
+          amount: advanceAmount,
           userId,
           branchId: employee.branchId,
           journalEntryId: journalResult.journalEntry.id,
@@ -190,11 +199,18 @@ class SalaryAdvanceService {
       notes,
       userId,
     } = params;
+    const repaymentAmount = Number(amount || 0);
 
     if (!paymentAccountId) {
       return {
         success: false,
         error: "Select the Cash/Bank/Mobile Money account that received the advance/loan repayment. Create the account first if it does not exist.",
+      };
+    }
+    if (!Number.isFinite(repaymentAmount) || repaymentAmount <= 0) {
+      return {
+        success: false,
+        error: "Enter a valid positive repayment amount.",
       };
     }
 
@@ -214,8 +230,8 @@ class SalaryAdvanceService {
     const session = await prisma.$transaction(async (tx) => {
       try {
         // Get salary advance
-        const advance = await tx.salaryAdvance.findUnique({
-          where: { id: salaryAdvanceId },
+        const advance = await tx.salaryAdvance.findFirst({
+          where: { id: salaryAdvanceId, tenantId },
           include: { employee: true },
         });
 
@@ -228,7 +244,7 @@ class SalaryAdvanceService {
         }
 
         // Check over-recovery
-        if (amount > advance.outstandingAmount) {
+        if (repaymentAmount > advance.outstandingAmount) {
           throw new Error(
             `Cannot recover more than outstanding amount (${advance.outstandingAmount})`
           );
@@ -241,13 +257,13 @@ class SalaryAdvanceService {
             salaryAdvanceId,
             recoveryType: "direct_repayment",
             recoveryDate: new Date(date),
-            amount,
+            amount: repaymentAmount,
             notes,
           },
         });
 
         // Calculate new balances
-        const newTotalRecovered = advance.totalRecovered + amount;
+        const newTotalRecovered = advance.totalRecovered + repaymentAmount;
         const newOutstandingAmount = advance.amount - newTotalRecovered;
         const newStatus =
           newOutstandingAmount <= 0
@@ -271,16 +287,17 @@ class SalaryAdvanceService {
           where: { id: advance.employeeId },
           data: {
             salaryAdvanceBalance: {
-              decrement: amount,
+              decrement: repaymentAmount,
             },
           },
         });
 
         const journalResult = await hrAccountingService.createSalaryAdvanceRepaymentJournal({
+          tx,
           tenantId,
           branchId: advance.employee.branchId,
           recoveryId: recovery.id,
-          amount,
+          amount: repaymentAmount,
           paymentAccountId,
           employeeName: `${advance.employee.firstName} ${advance.employee.lastName}`,
           userId,
@@ -293,13 +310,14 @@ class SalaryAdvanceService {
 
         // Create audit log
         await hrAccountingService.createAuditLog({
+          tx,
           tenantId,
           recordType: "salary_advance_direct_repayment",
           recordId: recovery.id,
           employeeId: advance.employeeId,
           action: "direct_repayment",
-          description: `Direct repayment of salary advance: ${amount}`,
-          amount,
+          description: `Direct repayment of salary advance: ${repaymentAmount}`,
+          amount: repaymentAmount,
           userId,
           branchId: advance.employee.branchId,
           journalEntryId: journalResult.journalEntry.id,
@@ -336,8 +354,8 @@ class SalaryAdvanceService {
 
     const session = await prisma.$transaction(async (tx) => {
       try {
-        const advance = await tx.salaryAdvance.findUnique({
-          where: { id: salaryAdvanceId },
+        const advance = await tx.salaryAdvance.findFirst({
+          where: { id: salaryAdvanceId, tenantId },
           include: { employee: true, journalEntry: true },
         });
 
@@ -357,6 +375,7 @@ class SalaryAdvanceService {
         if (advance.journalEntry) {
           const reversalResult =
             await hrAccountingService.reverseJournalEntry({
+              tx,
               tenantId,
               originalEntryId: advance.journalEntry.id,
               reason: `Cancellation: ${reason}`,
@@ -392,6 +411,7 @@ class SalaryAdvanceService {
 
         // Create audit log
         await hrAccountingService.createAuditLog({
+          tx,
           tenantId,
           recordType: "salary_advance",
           recordId: salaryAdvanceId,
@@ -562,4 +582,4 @@ class SalaryAdvanceService {
   }
 }
 
-module.exports = new SalaryAdvanceService();
+export default new SalaryAdvanceService();

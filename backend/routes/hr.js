@@ -39,6 +39,8 @@ const HR_ACCOUNT_LABELS = {
   salaryExpenseAccountId: "Staff Salaries & Wages expense account",
   salaryPayableAccountId: "Salaries Payable liability account",
   salaryAdvanceAccountId: "Employee Advances/Loans asset account",
+  payeTaxAccountId: "PAYE Tax liability account",
+  socialSecurityAccountId: "Social Security liability account",
 };
 
 function isDebitNormalAccount(account) {
@@ -97,10 +99,143 @@ async function nextJournalEntryNo(tx, tenantId) {
   return `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`;
 }
 
+function payrollPostingLines(payroll, config, employeeName) {
+  const grossSalary = money(payroll.grossSalary);
+  const salaryAdvanceRecovery = money(payroll.salaryAdvanceRecovery);
+  const paye = money(payroll.paye);
+  const socialSecurityTax = money(payroll.socialSecurityTax);
+  const healthInsurance = money(payroll.healthInsurance);
+  const otherDeductions = money(payroll.otherDeductions);
+  const recordedDeductions = money(payroll.totalDeductions);
+  const itemizedDeductions = salaryAdvanceRecovery + paye + socialSecurityTax + healthInsurance + otherDeductions;
+  const unclassifiedDeductions = Math.max(0, recordedDeductions - itemizedDeductions);
+  const salaryPayableAmount = grossSalary - salaryAdvanceRecovery - paye - socialSecurityTax;
+
+  if (salaryPayableAmount < -0.01) {
+    const error = new Error("Payroll deductions exceed gross salary. Review the payroll before posting to accounting.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return [
+    {
+      accountId: config.salaryExpenseAccountId,
+      debit: grossSalary,
+      credit: 0,
+      description: `Staff salary and wages - ${employeeName}`,
+    },
+    {
+      accountId: config.salaryPayableAccountId,
+      debit: 0,
+      credit: Math.max(0, salaryPayableAmount),
+      description:
+        healthInsurance + otherDeductions + unclassifiedDeductions > 0
+          ? `Salary payable and other payroll deductions - ${employeeName}`
+          : `Salary payable - ${employeeName}`,
+    },
+    paye > 0 && {
+      accountId: config.payeTaxAccountId,
+      debit: 0,
+      credit: paye,
+      description: `PAYE tax payable - ${employeeName}`,
+    },
+    socialSecurityTax > 0 && {
+      accountId: config.socialSecurityAccountId,
+      debit: 0,
+      credit: socialSecurityTax,
+      description: `Social security payable - ${employeeName}`,
+    },
+    salaryAdvanceRecovery > 0 && {
+      accountId: config.salaryAdvanceAccountId,
+      debit: 0,
+      credit: salaryAdvanceRecovery,
+      description: `Employee advance/loan recovery - ${employeeName}`,
+    },
+  ].filter(Boolean);
+}
+
+async function applySalaryAdvanceRecoveries(tx, { tenantId, payroll }) {
+  const recoveryTotal = money(payroll.salaryAdvanceRecovery);
+  if (recoveryTotal <= 0) return [];
+
+  const advances = await tx.salaryAdvance.findMany({
+    where: {
+      tenantId,
+      employeeId: payroll.employeeId,
+      status: { in: ["outstanding", "partially_recovered"] },
+      outstandingAmount: { gt: 0 },
+    },
+    orderBy: { date: "asc" },
+  });
+
+  const outstanding = advances.reduce((sum, advance) => sum + money(advance.outstandingAmount), 0);
+  if (recoveryTotal > outstanding + 0.01) {
+    const error = new Error(`Cannot recover ${recoveryTotal.toFixed(2)} from salary advances. Outstanding amount is ${outstanding.toFixed(2)}.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let remaining = recoveryTotal;
+  const recoveries = [];
+
+  for (const advance of advances) {
+    if (remaining <= 0.01) break;
+
+    const recoveryAmount = Math.min(remaining, money(advance.outstandingAmount));
+    const newTotalRecovered = money(advance.totalRecovered) + recoveryAmount;
+    const newOutstandingAmount = Math.max(0, money(advance.amount) - newTotalRecovered);
+
+    const recovery = await tx.salaryAdvanceRecovery.create({
+      data: {
+        tenantId,
+        salaryAdvanceId: advance.id,
+        payrollId: payroll.id,
+        recoveryType: "payroll",
+        recoveryDate: new Date(),
+        amount: recoveryAmount,
+        notes: `Recovered through payroll ${payroll.payrollNo}`,
+      },
+    });
+
+    await tx.salaryAdvance.update({
+      where: { id: advance.id },
+      data: {
+        totalRecovered: newTotalRecovered,
+        outstandingAmount: newOutstandingAmount,
+        status: newOutstandingAmount <= 0.01 ? "fully_recovered" : "partially_recovered",
+      },
+    });
+
+    recoveries.push(recovery);
+    remaining -= recoveryAmount;
+  }
+
+  await tx.employee.update({
+    where: { id: payroll.employeeId },
+    data: {
+      salaryAdvanceBalance: {
+        decrement: recoveryTotal,
+      },
+    },
+  });
+
+  return recoveries;
+}
+
 async function createPostedJournal(tx, { tenantId, branchId, userId, description, reference, sourceType, sourceId, lines }) {
-  if (!lines.length) throw new Error("Journal lines are required");
-  const totalDebit = lines.reduce((sum, line) => sum + money(line.debit), 0);
-  const totalCredit = lines.reduce((sum, line) => sum + money(line.credit), 0);
+  const activeLines = lines.filter((line) => money(line.debit) > 0 || money(line.credit) > 0);
+  if (!activeLines.length) throw new Error("Journal lines are required");
+
+  if (sourceType && sourceId) {
+    const existing = await tx.journalEntry.findFirst({
+      where: { tenantId, sourceType, sourceId },
+      include: { lines: true },
+    });
+    if (existing) return existing;
+  }
+
+  const totalDebit = activeLines.reduce((sum, line) => sum + money(line.debit), 0);
+  const totalCredit = activeLines.reduce((sum, line) => sum + money(line.credit), 0);
   if (Math.abs(totalDebit - totalCredit) > 0.01) {
     const error = new Error("HR accounting journal is not balanced. Check salary, advance, and loan account mappings first.");
     error.statusCode = 400;
@@ -108,10 +243,10 @@ async function createPostedJournal(tx, { tenantId, branchId, userId, description
   }
 
   const accounts = await tx.account.findMany({
-    where: { tenantId, id: { in: lines.map((line) => line.accountId) }, isActive: true },
+    where: { tenantId, id: { in: activeLines.map((line) => line.accountId) }, isActive: true },
   });
   const accountsById = new Map(accounts.map((account) => [account.id, account]));
-  const missingAccount = lines.find((line) => !accountsById.has(line.accountId));
+  const missingAccount = activeLines.find((line) => !accountsById.has(line.accountId));
   if (missingAccount) {
     const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure the accounts first in HR > HR Accounting.");
     error.statusCode = 400;
@@ -131,7 +266,7 @@ async function createPostedJournal(tx, { tenantId, branchId, userId, description
       sourceType,
       sourceId,
       lines: {
-        create: lines.map((line) => ({
+        create: activeLines.map((line) => ({
           accountId: line.accountId,
           debit: money(line.debit),
           credit: money(line.credit),
@@ -142,7 +277,7 @@ async function createPostedJournal(tx, { tenantId, branchId, userId, description
     include: { lines: true },
   });
 
-  for (const line of lines) {
+  for (const line of activeLines) {
     const account = accountsById.get(line.accountId);
     const delta = journalLineBalanceDelta(account, money(line.debit), money(line.credit));
     await tx.account.update({
@@ -570,11 +705,27 @@ router.get("/payroll", authenticateToken, requirePermission("canViewHRPayroll"),
 router.post("/payroll/run", authenticateToken, requirePermission("canManageHRPayroll"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { period, deductions = 0, bonus = 0 } = req.body;
+    const {
+      period,
+      deductions = 0,
+      bonus = 0,
+      paye = 0,
+      socialSecurityTax = 0,
+      healthInsurance = 0,
+      otherDeductions,
+      salaryAdvanceRecovery = 0,
+    } = req.body;
     if (!period) return res.status(400).json({ error: "period required (e.g. 2025-01)" });
 
     const employees = await prisma.employee.findMany({ where: { tenantId, status: "active" } });
     const records = [];
+    const otherDeductionAmount = otherDeductions === undefined ? money(deductions) : money(otherDeductions);
+    const totalDeductions =
+      money(paye) +
+      money(socialSecurityTax) +
+      money(healthInsurance) +
+      otherDeductionAmount +
+      money(salaryAdvanceRecovery);
 
     for (const emp of employees) {
       const existing = await prisma.payroll.findUnique({
@@ -583,7 +734,6 @@ router.post("/payroll/run", authenticateToken, requirePermission("canManageHRPay
       if (existing) continue;
 
       const gross = Number(emp.basicSalary || 0) + Number(bonus || 0);
-      const totalDeductions = Number(deductions || 0);
       const payrollNo = `PAYROLL-${period}-${emp.id.slice(-6).toUpperCase()}`;
       const net = Math.max(0, gross - totalDeductions);
       const rec = await prisma.payroll.create({
@@ -597,6 +747,11 @@ router.post("/payroll/run", authenticateToken, requirePermission("canManageHRPay
           grossSalary: gross,
           totalDeductions,
           bonus: Number(bonus || 0),
+          paye: money(paye),
+          socialSecurityTax: money(socialSecurityTax),
+          healthInsurance: money(healthInsurance),
+          otherDeductions: otherDeductionAmount,
+          salaryAdvanceRecovery: money(salaryAdvanceRecovery),
           netSalary: net,
           status: "draft",
           createdBy: req.user.id,
@@ -635,31 +790,29 @@ router.post("/payroll/:id/post", authenticateToken, requirePermission("canManage
 
       const requiredFields = ["salaryExpenseAccountId", "salaryPayableAccountId"];
       if (money(payroll.salaryAdvanceRecovery) > 0) requiredFields.push("salaryAdvanceAccountId");
+      if (money(payroll.paye) > 0) requiredFields.push("payeTaxAccountId");
+      if (money(payroll.socialSecurityTax) > 0) requiredFields.push("socialSecurityAccountId");
       const { config } = await getRequiredHRAccounts(tx, tenantId, requiredFields);
       const employeeName = [payroll.employee?.firstName, payroll.employee?.lastName].filter(Boolean).join(" ") || "Employee";
-      const lines = [
-        {
-          accountId: config.salaryExpenseAccountId,
-          debit: payroll.grossSalary,
-          credit: 0,
-          description: `Staff salary and wages - ${employeeName}`,
-        },
-        {
-          accountId: config.salaryPayableAccountId,
-          debit: 0,
-          credit: payroll.netSalary,
-          description: `Salary payable - ${employeeName}`,
-        },
-      ];
-
-      if (money(payroll.salaryAdvanceRecovery) > 0) {
-        lines.push({
-          accountId: config.salaryAdvanceAccountId,
-          debit: 0,
-          credit: payroll.salaryAdvanceRecovery,
-          description: `Employee advance/loan recovery - ${employeeName}`,
+      const existingJournal = await tx.journalEntry.findFirst({
+        where: { tenantId, sourceType: "HR_PAYROLL", sourceId: payroll.id },
+        include: { lines: true },
+      });
+      if (existingJournal) {
+        const relinked = await tx.payroll.update({
+          where: { id: payroll.id },
+          data: {
+            status: "posted",
+            postedBy: payroll.postedBy || userId,
+            postedAt: payroll.postedAt || new Date(),
+            journalEntryId: existingJournal.id,
+          },
         });
+        return { payroll: relinked, journalEntry: existingJournal };
       }
+
+      await applySalaryAdvanceRecoveries(tx, { tenantId, payroll });
+      const lines = payrollPostingLines(payroll, config, employeeName);
 
       const journalEntry = await createPostedJournal(tx, {
         tenantId,
@@ -694,6 +847,16 @@ router.post("/payroll/:id/post", authenticateToken, requirePermission("canManage
           userId,
           branchId: payroll.branchId,
           journalEntryId: journalEntry.id,
+          metadata: {
+            grossSalary: money(payroll.grossSalary),
+            netSalary: money(payroll.netSalary),
+            totalDeductions: money(payroll.totalDeductions),
+            paye: money(payroll.paye),
+            socialSecurityTax: money(payroll.socialSecurityTax),
+            healthInsurance: money(payroll.healthInsurance),
+            otherDeductions: money(payroll.otherDeductions),
+            salaryAdvanceRecovery: money(payroll.salaryAdvanceRecovery),
+          },
         },
       });
 
@@ -749,6 +912,11 @@ router.put("/payroll/:id/pay", authenticateToken, requirePermission("canManageHR
       });
       if (!paymentAccount) {
         const error = new Error("Selected salary payment account is missing or inactive. Create/select a Cash, Bank, Mobile Money, or Card account first.");
+        error.statusCode = 400;
+        throw error;
+      }
+      if (String(paymentAccount.type || "").toLowerCase() !== "asset") {
+        const error = new Error("Salary payments must be made from an Asset account such as Cash, Bank, Mobile Money, or Card.");
         error.statusCode = 400;
         throw error;
       }

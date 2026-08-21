@@ -1,18 +1,24 @@
 /**
  * HR Accounting Service
- * Handles accounting integration for HR transactions (advances, payroll, payments)
- * Ensures all HR financial transactions have corresponding journal entries
+ * Posts HR transactions into the general ledger and updates account balances.
  */
 
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+import prisma from "../db.js";
+
+const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
 
 const ACCOUNT_LABELS = {
   salaryExpense: "Staff Salaries & Wages expense account",
   salaryPayable: "Salaries Payable liability account",
   salaryAdvance: "Employee Advances/Loans asset account",
   payeTax: "PAYE Tax liability account",
+  socialSecurity: "Social Security liability account",
 };
+
+function money(value) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
 
 function setupMessage(missingAccounts = []) {
   const missing = missingAccounts.length
@@ -21,617 +27,409 @@ function setupMessage(missingAccounts = []) {
   return `HR accounting accounts are not configured. Create the required Chart of Accounts first and map them in HR > HR Accounting before posting. Missing: ${missing}.`;
 }
 
+function isDebitNormalAccount(account) {
+  return DEBIT_NORMAL_ACCOUNT_TYPES.has(String(account?.type || "").trim().toLowerCase());
+}
+
+function journalLineBalanceDelta(account, debit, credit) {
+  return isDebitNormalAccount(account) ? debit - credit : credit - debit;
+}
+
 class HRAccountingService {
-  /**
-   * Validate that required HR accounting accounts are configured
-   * @param {string} tenantId - Tenant ID
-   * @param {string[]} requiredAccounts - Array of account types needed (e.g., ['salaryExpense', 'salaryPayable'])
-   * @returns {Promise<{isValid: boolean, missingAccounts: string[]}>}
-   */
-  async validateHRAccountConfiguration(tenantId, requiredAccounts = []) {
-    try {
-      const config = await prisma.hRAccountingConfig.findUnique({
-        where: { tenantId },
-      });
+  client(tx) {
+    return tx || prisma;
+  }
 
-      if (!config || !config.isConfigured) {
-        return {
-          isValid: false,
-          missingAccounts: requiredAccounts,
-          error: setupMessage(requiredAccounts),
-        };
-      }
+  async withTransaction(tx, callback) {
+    if (tx) return callback(tx);
+    return prisma.$transaction(callback);
+  }
 
-      const missing = [];
+  async validateHRAccountConfiguration(tenantId, requiredAccounts = [], tx = null) {
+    const db = this.client(tx);
+    const config = await db.hRAccountingConfig.findUnique({ where: { tenantId } });
 
-      if (requiredAccounts.includes("salaryExpense") && !config.salaryExpenseAccountId) {
-        missing.push("salaryExpense");
-      }
-      if (requiredAccounts.includes("salaryPayable") && !config.salaryPayableAccountId) {
-        missing.push("salaryPayable");
-      }
-      if (requiredAccounts.includes("salaryAdvance") && !config.salaryAdvanceAccountId) {
-        missing.push("salaryAdvance");
-      }
-      if (requiredAccounts.includes("payeTax") && !config.payeTaxAccountId) {
-        missing.push("payeTax");
-      }
-
+    if (!config || !config.isConfigured) {
       return {
-        isValid: missing.length === 0,
-        missingAccounts: missing,
-        config,
+        isValid: false,
+        missingAccounts: requiredAccounts,
+        error: setupMessage(requiredAccounts),
       };
-    } catch (error) {
-      console.error("Error validating HR account configuration:", error);
+    }
+
+    const missing = [];
+    if (requiredAccounts.includes("salaryExpense") && !config.salaryExpenseAccountId) missing.push("salaryExpense");
+    if (requiredAccounts.includes("salaryPayable") && !config.salaryPayableAccountId) missing.push("salaryPayable");
+    if (requiredAccounts.includes("salaryAdvance") && !config.salaryAdvanceAccountId) missing.push("salaryAdvance");
+    if (requiredAccounts.includes("payeTax") && !config.payeTaxAccountId) missing.push("payeTax");
+    if (requiredAccounts.includes("socialSecurity") && !config.socialSecurityAccountId) missing.push("socialSecurity");
+
+    return {
+      isValid: missing.length === 0,
+      missingAccounts: missing,
+      error: missing.length ? setupMessage(missing) : null,
+      config,
+    };
+  }
+
+  async verifyAccountsExist(tenantId, accountIds, tx = null) {
+    const db = this.client(tx);
+    const ids = [...new Set(accountIds.filter(Boolean))];
+    const accounts = await db.account.findMany({
+      where: { tenantId, id: { in: ids }, isActive: true },
+    });
+    const foundIds = new Set(accounts.map((account) => account.id));
+
+    return {
+      valid: ids.every((id) => foundIds.has(id)),
+      invalidAccounts: ids.filter((id) => !foundIds.has(id)),
+      accounts,
+    };
+  }
+
+  async requireConfiguredAccounts(tx, tenantId, requiredAccounts) {
+    const validation = await this.validateHRAccountConfiguration(tenantId, requiredAccounts, tx);
+    if (!validation.isValid) {
+      const error = new Error(validation.error || setupMessage(validation.missingAccounts));
+      error.statusCode = 400;
       throw error;
     }
-  }
 
-  /**
-   * Verify that accounts exist and are valid
-   * @param {string} tenantId - Tenant ID
-   * @param {string[]} accountIds - Account IDs to verify
-   * @returns {Promise<{valid: boolean, invalidAccounts: string[]}>}
-   */
-  async verifyAccountsExist(tenantId, accountIds) {
-    try {
-      const accounts = await prisma.account.findMany({
-        where: {
-          tenantId,
-          id: { in: accountIds.filter(Boolean) },
-          isActive: true,
-        },
-      });
+    const accountIds = [
+      requiredAccounts.includes("salaryExpense") && validation.config.salaryExpenseAccountId,
+      requiredAccounts.includes("salaryPayable") && validation.config.salaryPayableAccountId,
+      requiredAccounts.includes("salaryAdvance") && validation.config.salaryAdvanceAccountId,
+      requiredAccounts.includes("payeTax") && validation.config.payeTaxAccountId,
+      requiredAccounts.includes("socialSecurity") && validation.config.socialSecurityAccountId,
+    ].filter(Boolean);
 
-      const foundIds = accounts.map((a) => a.id);
-      const invalidAccounts = accountIds.filter((id) => id && !foundIds.includes(id));
-
-      return {
-        valid: invalidAccounts.length === 0,
-        invalidAccounts,
-        accounts,
-      };
-    } catch (error) {
-      console.error("Error verifying accounts:", error);
+    const accountCheck = await this.verifyAccountsExist(tenantId, accountIds, tx);
+    if (!accountCheck.valid) {
+      const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
+      error.statusCode = 400;
       throw error;
     }
+
+    return { config: validation.config, accounts: accountCheck.accounts };
   }
 
-  /**
-   * Create salary advance accounting entry
-   * Creates: DR Employee Salary Advances / CR Cash/Bank Account
-   * @param {object} params - Parameters
-   * @returns {Promise<{success: boolean, journalEntry: object, error?: string}>}
-   */
-  async createSalaryAdvanceJournal(params) {
-    const {
-      tenantId,
-      branchId,
-      salaryAdvanceId,
-      amount,
-      paymentAccountId,
-      employeeName,
-      userId,
-      date,
-    } = params;
+  async nextJournalEntryNo(tx, tenantId) {
+    const today = new Date();
+    const dateStr = today.toISOString().split("T")[0].replace(/-/g, "");
+    const lastEntry = await tx.journalEntry.findFirst({
+      where: { tenantId, entryNo: { startsWith: `JE-${dateStr}-` } },
+      orderBy: { entryNo: "desc" },
+    });
+    const lastSequence = Number(String(lastEntry?.entryNo || "").split("-")[2] || 0);
+    return `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`;
+  }
 
-    const session = await prisma.$transaction(async (tx) => {
-      try {
-        // Validate accounts are configured
-        const validation = await tx.hRAccountingConfig.findUnique({
-          where: { tenantId },
-        });
+  normalizeLines(lines) {
+    if (!Array.isArray(lines) || !lines.length) {
+      throw new Error("Journal lines are required");
+    }
 
-        if (!validation || !validation.isConfigured) {
-          throw new Error(setupMessage(["salaryAdvance"]));
-        }
+    const normalized = lines
+      .map((line, index) => {
+        const debit = money(line.debit);
+        const credit = money(line.credit);
+        const lineNo = index + 1;
 
-        if (!validation.salaryAdvanceAccountId) {
-          throw new Error(setupMessage(["salaryAdvance"]));
-        }
-
-        // Verify accounts exist
-        const accountIds = [
-          validation.salaryAdvanceAccountId,
-          paymentAccountId,
-        ];
-        const accountCheck = await tx.account.findMany({
-          where: {
-            tenantId,
-            id: { in: accountIds },
-            isActive: true,
-          },
-        });
-
-        if (accountCheck.length !== accountIds.length) {
-          throw new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
-        }
-
-        // Generate entry number
-        const lastEntry = await tx.journalEntry.findFirst({
-          where: { tenantId },
-          orderBy: { entryNo: "desc" },
-        });
-
-        const entryNo = this.generateEntryNumber(lastEntry?.entryNo);
-
-        // Create journal entry
-        const journalEntry = await tx.journalEntry.create({
-          data: {
-            entryNo,
-            tenantId,
-            branchId,
-            date: new Date(date),
-            description: `Salary Advance - ${employeeName}`,
-            reference: `ADV-${salaryAdvanceId}`,
-            status: "posted",
-            userId,
-            sourceType: "SALARY_ADVANCE",
-            sourceId: salaryAdvanceId,
-            lines: {
-              create: [
-                {
-                  accountId: validation.salaryAdvanceAccountId,
-                  debit: amount,
-                  credit: 0,
-                  description: `Salary Advance to ${employeeName}`,
-                },
-                {
-                  accountId: paymentAccountId,
-                  debit: 0,
-                  credit: amount,
-                  description: `Payment for ${employeeName} salary advance`,
-                },
-              ],
-            },
-          },
-          include: { lines: true },
-        });
+        if (!line.accountId) throw new Error(`Select an account for HR journal line ${lineNo}`);
+        if (debit < 0 || credit < 0) throw new Error(`Negative amounts are not allowed on HR journal line ${lineNo}`);
+        if (debit > 0 && credit > 0) throw new Error(`HR journal line ${lineNo} cannot have both debit and credit`);
 
         return {
-          success: true,
-          journalEntry,
+          accountId: line.accountId,
+          debit,
+          credit,
+          description: line.description || null,
         };
-      } catch (error) {
-        console.error("Error creating salary advance journal:", error);
-        throw error;
-      }
-    });
+      })
+      .filter((line) => line.debit > 0 || line.credit > 0);
 
-    return session;
+    if (!normalized.length) throw new Error("Journal lines must contain at least one amount");
+    return normalized;
   }
 
-  /**
-   * Create payroll accounting entry
-   * Creates: DR Salary Expense / CR Salary Payable / CR Salary Advance (if recovery)
-   * @param {object} params - Parameters
-   * @returns {Promise<{success: boolean, journalEntry: object, error?: string}>}
-   */
-  async createPayrollJournal(params) {
+  async createJournal(params) {
     const {
+      tx = null,
       tenantId,
       branchId,
-      payrollId,
-      grossSalary,
-      salaryAdvanceRecovery,
-      netSalaryPayable,
-      employeeName,
+      date = new Date(),
+      description,
+      reference,
+      sourceType,
+      sourceId,
       userId,
-      date,
+      lines,
     } = params;
 
-    const session = await prisma.$transaction(async (tx) => {
-      try {
-        // Validate accounts
-        const config = await tx.hRAccountingConfig.findUnique({
-          where: { tenantId },
-        });
-
-        if (!config || !config.isConfigured) {
-          throw new Error(setupMessage(["salaryExpense", "salaryPayable"]));
-        }
-
-        if (!config.salaryExpenseAccountId || !config.salaryPayableAccountId) {
-          throw new Error(setupMessage(["salaryExpense", "salaryPayable"]));
-        }
-
-        if (salaryAdvanceRecovery > 0 && !config.salaryAdvanceAccountId) {
-          throw new Error(setupMessage(["salaryAdvance"]));
-        }
-
-        // Verify accounts exist
-        const accountIds = [
-          config.salaryExpenseAccountId,
-          config.salaryPayableAccountId,
-        ];
-
-        if (salaryAdvanceRecovery > 0 && config.salaryAdvanceAccountId) {
-          accountIds.push(config.salaryAdvanceAccountId);
-        }
-
-        const accounts = await tx.account.findMany({
-          where: {
-            tenantId,
-            id: { in: accountIds },
-            isActive: true,
-          },
-        });
-
-        if (accounts.length !== accountIds.length) {
-          throw new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
-        }
-
-        // Generate entry number
-        const lastEntry = await tx.journalEntry.findFirst({
-          where: { tenantId },
-          orderBy: { entryNo: "desc" },
-        });
-
-        const entryNo = this.generateEntryNumber(lastEntry?.entryNo);
-
-        // Create journal lines
-        const lines = [
-          {
-            accountId: config.salaryExpenseAccountId,
-            debit: grossSalary,
-            credit: 0,
-            description: `Salary Expense - ${employeeName}`,
-          },
-          {
-            accountId: config.salaryPayableAccountId,
-            debit: 0,
-            credit: netSalaryPayable,
-            description: `Salary Payable - ${employeeName}`,
-          },
-        ];
-
-        // Add advance recovery if applicable
-        if (salaryAdvanceRecovery > 0 && config.salaryAdvanceAccountId) {
-          lines.push({
-            accountId: config.salaryAdvanceAccountId,
-            debit: 0,
-            credit: salaryAdvanceRecovery,
-            description: `Salary Advance Recovery - ${employeeName}`,
-          });
-        }
-
-        // Create journal entry
-        const journalEntry = await tx.journalEntry.create({
-          data: {
-            entryNo,
-            tenantId,
-            branchId,
-            date: new Date(date),
-            description: `Payroll - ${employeeName}`,
-            reference: `PAYROLL-${payrollId}`,
-            status: "posted",
-            userId,
-            sourceType: "PAYROLL",
-            sourceId: payrollId,
-            lines: {
-              create: lines,
-            },
-          },
+    return this.withTransaction(tx, async (db) => {
+      if (sourceType && sourceId) {
+        const existing = await db.journalEntry.findFirst({
+          where: { tenantId, sourceType, sourceId },
           include: { lines: true },
         });
+        if (existing) return { success: true, journalEntry: existing, alreadyPosted: true };
+      }
 
-        return {
-          success: true,
-          journalEntry,
-        };
-      } catch (error) {
-        console.error("Error creating payroll journal:", error);
+      const normalizedLines = this.normalizeLines(lines);
+      const totalDebit = normalizedLines.reduce((sum, line) => sum + line.debit, 0);
+      const totalCredit = normalizedLines.reduce((sum, line) => sum + line.credit, 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.01) {
+        const error = new Error("HR accounting journal is not balanced. Review salary, deduction, advance, and payment account mappings.");
+        error.statusCode = 400;
         throw error;
       }
-    });
 
-    return session;
-  }
-
-  /**
-   * Create salary payment accounting entry
-   * Creates: DR Salary Payable / CR Payment Account
-   * @param {object} params - Parameters
-   * @returns {Promise<{success: boolean, journalEntry: object, error?: string}>}
-   */
-  async createSalaryPaymentJournal(params) {
-    const {
-      tenantId,
-      branchId,
-      paymentId,
-      amount,
-      paymentAccountId,
-      employeeName,
-      userId,
-      date,
-    } = params;
-
-    const session = await prisma.$transaction(async (tx) => {
-      try {
-        // Validate accounts
-        const config = await tx.hRAccountingConfig.findUnique({
-          where: { tenantId },
-        });
-
-        if (!config || !config.isConfigured) {
-          throw new Error(setupMessage(["salaryPayable"]));
-        }
-
-        if (!config.salaryPayableAccountId) {
-          throw new Error(setupMessage(["salaryPayable"]));
-        }
-
-        // Verify payment account exists
-        const paymentAccount = await tx.account.findUnique({
-          where: { id: paymentAccountId },
-        });
-
-        if (!paymentAccount || !paymentAccount.isActive) {
-          throw new Error("Payment account not found or inactive");
-        }
-
-        // Generate entry number
-        const lastEntry = await tx.journalEntry.findFirst({
-          where: { tenantId },
-          orderBy: { entryNo: "desc" },
-        });
-
-        const entryNo = this.generateEntryNumber(lastEntry?.entryNo);
-
-        // Create journal entry
-        const journalEntry = await tx.journalEntry.create({
-          data: {
-            entryNo,
-            tenantId,
-            branchId,
-            date: new Date(date),
-            description: `Salary Payment - ${employeeName}`,
-            reference: `PAYMENT-${paymentId}`,
-            status: "posted",
-            userId,
-            sourceType: "PAYROLL_PAYMENT",
-            sourceId: paymentId,
-            lines: {
-              create: [
-                {
-                  accountId: config.salaryPayableAccountId,
-                  debit: amount,
-                  credit: 0,
-                  description: `Salary Payment - ${employeeName}`,
-                },
-                {
-                  accountId: paymentAccountId,
-                  debit: 0,
-                  credit: amount,
-                  description: `Payment for ${employeeName} salary`,
-                },
-              ],
-            },
-          },
-          include: { lines: true },
-        });
-
-        return {
-          success: true,
-          journalEntry,
-        };
-      } catch (error) {
-        console.error("Error creating salary payment journal:", error);
-        throw error;
-      }
-    });
-
-    return session;
-  }
-
-  /**
-   * Create direct salary advance/loan repayment accounting entry
-   * Creates: DR Payment Account / CR Employee Advances/Loans
-   */
-  async createSalaryAdvanceRepaymentJournal(params) {
-    const {
-      tenantId,
-      branchId,
-      recoveryId,
-      amount,
-      paymentAccountId,
-      employeeName,
-      userId,
-      date,
-    } = params;
-
-    const session = await prisma.$transaction(async (tx) => {
-      const config = await tx.hRAccountingConfig.findUnique({ where: { tenantId } });
-      if (!config || !config.isConfigured || !config.salaryAdvanceAccountId) {
-        throw new Error(setupMessage(["salaryAdvance"]));
-      }
-
-      const accountIds = [config.salaryAdvanceAccountId, paymentAccountId];
-      const accounts = await tx.account.findMany({
+      const accountIds = [...new Set(normalizedLines.map((line) => line.accountId))];
+      const accounts = await db.account.findMany({
         where: { tenantId, id: { in: accountIds }, isActive: true },
       });
-
-      if (accounts.length !== accountIds.length) {
-        throw new Error("One or more salary advance repayment accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
+      const accountsById = new Map(accounts.map((account) => [account.id, account]));
+      if (accountIds.some((accountId) => !accountsById.has(accountId))) {
+        const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
+        error.statusCode = 400;
+        throw error;
       }
 
-      const lastEntry = await tx.journalEntry.findFirst({
-        where: { tenantId },
-        orderBy: { entryNo: "desc" },
-      });
-
-      const journalEntry = await tx.journalEntry.create({
+      const journalEntry = await db.journalEntry.create({
         data: {
-          entryNo: this.generateEntryNumber(lastEntry?.entryNo),
+          entryNo: await this.nextJournalEntryNo(db, tenantId),
           tenantId,
-          branchId,
+          branchId: branchId || null,
           date: new Date(date),
-          description: `Advance/Loan Repayment - ${employeeName}`,
-          reference: `ADV-REPAY-${recoveryId}`,
+          description,
+          reference,
           status: "posted",
           userId,
-          sourceType: "SALARY_ADVANCE_REPAYMENT",
-          sourceId: recoveryId,
-          lines: {
-            create: [
-              {
-                accountId: paymentAccountId,
-                debit: amount,
-                credit: 0,
-                description: `Direct repayment from ${employeeName}`,
-              },
-              {
-                accountId: config.salaryAdvanceAccountId,
-                debit: 0,
-                credit: amount,
-                description: `Reduce employee advance/loan - ${employeeName}`,
-              },
-            ],
-          },
+          sourceType,
+          sourceId,
+          lines: { create: normalizedLines },
         },
         include: { lines: true },
       });
 
+      for (const line of normalizedLines) {
+        const account = accountsById.get(line.accountId);
+        await db.account.update({
+          where: { id: line.accountId },
+          data: { balance: { increment: journalLineBalanceDelta(account, line.debit, line.credit) } },
+        });
+      }
+
       return { success: true, journalEntry };
     });
-
-    return session;
   }
 
-  /**
-   * Reverse an accounting entry (creates reversing journal)
-   * @param {object} params - Parameters
-   * @returns {Promise<{success: boolean, reversalEntry: object, error?: string}>}
-   */
-  async reverseJournalEntry(params) {
-    const { tenantId, originalEntryId, reason, userId, date } = params;
+  async createSalaryAdvanceJournal(params) {
+    const { tx = null, tenantId, branchId, salaryAdvanceId, amount, paymentAccountId, employeeName, userId, date } = params;
 
-    const session = await prisma.$transaction(async (tx) => {
-      try {
-        // Fetch original entry
-        const originalEntry = await tx.journalEntry.findUnique({
-          where: { id: originalEntryId },
-          include: { lines: true },
-        });
-
-        if (!originalEntry) {
-          throw new Error("Original journal entry not found");
-        }
-
-        // Generate entry number for reversal
-        const lastEntry = await tx.journalEntry.findFirst({
-          where: { tenantId },
-          orderBy: { entryNo: "desc" },
-        });
-
-        const entryNo = this.generateEntryNumber(lastEntry?.entryNo);
-
-        // Create reversing entry with opposite debits/credits
-        const reversalEntry = await tx.journalEntry.create({
-          data: {
-            entryNo,
-            tenantId,
-            branchId: originalEntry.branchId,
-            date: new Date(date),
-            description: `Reversal of ${originalEntry.description}`,
-            reference: originalEntry.reference,
-            status: "posted",
-            userId,
-            reversalOfId: originalEntryId,
-            reversalReason: reason,
-            reversedBy: userId,
-            reversedAt: new Date(date),
-            lines: {
-              create: originalEntry.lines.map((line) => ({
-                accountId: line.accountId,
-                debit: line.credit,
-                credit: line.debit,
-                description: `Reversal - ${line.description}`,
-              })),
-            },
-          },
-          include: { lines: true },
-        });
-
-        // Update original entry status
-        await tx.journalEntry.update({
-          where: { id: originalEntryId },
-          data: {
-            status: "reversed",
-            reversalJournalId: reversalEntry.id,
-          },
-        });
-
-        return {
-          success: true,
-          reversalEntry,
-        };
-      } catch (error) {
-        console.error("Error reversing journal entry:", error);
-        throw error;
+    return this.withTransaction(tx, async (db) => {
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
+      const paymentAccount = await db.account.findFirst({ where: { id: paymentAccountId, tenantId, isActive: true } });
+      if (!paymentAccount || String(paymentAccount.type || "").toLowerCase() !== "asset") {
+        throw new Error("Salary advance must be paid from an active Asset account such as Cash, Bank, or Mobile Money.");
       }
-    });
 
-    return session;
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Salary advance - ${employeeName}`,
+        reference: `ADV-${salaryAdvanceId}`,
+        sourceType: "SALARY_ADVANCE",
+        sourceId: salaryAdvanceId,
+        userId,
+        lines: [
+          { accountId: config.salaryAdvanceAccountId, debit: amount, credit: 0, description: `Salary advance to ${employeeName}` },
+          { accountId: paymentAccountId, debit: 0, credit: amount, description: `Payment for ${employeeName} salary advance` },
+        ],
+      });
+    });
   }
 
-  /**
-   * Get or create journal entry (idempotent - prevents double posting)
-   * @param {string} tenantId - Tenant ID
-   * @param {string} sourceType - Source type (SALARY_ADVANCE, PAYROLL, etc.)
-   * @param {string} sourceId - Source record ID
-   * @returns {Promise<object|null>}
-   */
-  async getExistingJournalEntry(tenantId, sourceType, sourceId) {
-    try {
-      const entry = await prisma.journalEntry.findFirst({
-        where: {
-          tenantId,
-          sourceType,
-          sourceId,
+  async createPayrollJournal(params) {
+    const {
+      tx = null,
+      tenantId,
+      branchId,
+      payrollId,
+      grossSalary,
+      salaryAdvanceRecovery = 0,
+      paye = 0,
+      socialSecurityTax = 0,
+      employeeName,
+      userId,
+      date,
+    } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const requiredAccounts = ["salaryExpense", "salaryPayable"];
+      if (money(salaryAdvanceRecovery) > 0) requiredAccounts.push("salaryAdvance");
+      if (money(paye) > 0) requiredAccounts.push("payeTax");
+      if (money(socialSecurityTax) > 0) requiredAccounts.push("socialSecurity");
+
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, requiredAccounts);
+      const salaryPayableCredit = money(grossSalary) - money(salaryAdvanceRecovery) - money(paye) - money(socialSecurityTax);
+      if (salaryPayableCredit < -0.01) {
+        throw new Error("Payroll deductions exceed gross salary. Review the payroll before posting.");
+      }
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Payroll - ${employeeName}`,
+        reference: `PAYROLL-${payrollId}`,
+        sourceType: "PAYROLL",
+        sourceId: payrollId,
+        userId,
+        lines: [
+          { accountId: config.salaryExpenseAccountId, debit: grossSalary, credit: 0, description: `Salary expense - ${employeeName}` },
+          { accountId: config.salaryPayableAccountId, debit: 0, credit: Math.max(0, salaryPayableCredit), description: `Salary payable and payroll deductions - ${employeeName}` },
+          money(paye) > 0 && { accountId: config.payeTaxAccountId, debit: 0, credit: paye, description: `PAYE tax payable - ${employeeName}` },
+          money(socialSecurityTax) > 0 && { accountId: config.socialSecurityAccountId, debit: 0, credit: socialSecurityTax, description: `Social security payable - ${employeeName}` },
+          money(salaryAdvanceRecovery) > 0 && { accountId: config.salaryAdvanceAccountId, debit: 0, credit: salaryAdvanceRecovery, description: `Salary advance recovery - ${employeeName}` },
+        ].filter(Boolean),
+      });
+    });
+  }
+
+  async createSalaryPaymentJournal(params) {
+    const { tx = null, tenantId, branchId, paymentId, amount, paymentAccountId, employeeName, userId, date } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryPayable"]);
+      const paymentAccount = await db.account.findFirst({ where: { id: paymentAccountId, tenantId, isActive: true } });
+      if (!paymentAccount || String(paymentAccount.type || "").toLowerCase() !== "asset") {
+        throw new Error("Salary payment must be made from an active Asset account such as Cash, Bank, or Mobile Money.");
+      }
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Salary payment - ${employeeName}`,
+        reference: `PAYMENT-${paymentId}`,
+        sourceType: "PAYROLL_PAYMENT",
+        sourceId: paymentId,
+        userId,
+        lines: [
+          { accountId: config.salaryPayableAccountId, debit: amount, credit: 0, description: `Salary payment - ${employeeName}` },
+          { accountId: paymentAccountId, debit: 0, credit: amount, description: `Payment for ${employeeName} salary` },
+        ],
+      });
+    });
+  }
+
+  async createSalaryAdvanceRepaymentJournal(params) {
+    const { tx = null, tenantId, branchId, recoveryId, amount, paymentAccountId, employeeName, userId, date } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
+      const paymentAccount = await db.account.findFirst({ where: { id: paymentAccountId, tenantId, isActive: true } });
+      if (!paymentAccount || String(paymentAccount.type || "").toLowerCase() !== "asset") {
+        throw new Error("Advance/loan repayment must be received into an active Asset account such as Cash, Bank, or Mobile Money.");
+      }
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Advance/loan repayment - ${employeeName}`,
+        reference: `ADV-REPAY-${recoveryId}`,
+        sourceType: "SALARY_ADVANCE_REPAYMENT",
+        sourceId: recoveryId,
+        userId,
+        lines: [
+          { accountId: paymentAccountId, debit: amount, credit: 0, description: `Direct repayment from ${employeeName}` },
+          { accountId: config.salaryAdvanceAccountId, debit: 0, credit: amount, description: `Reduce employee advance/loan - ${employeeName}` },
+        ],
+      });
+    });
+  }
+
+  async reverseJournalEntry(params) {
+    const { tx = null, tenantId, originalEntryId, reason, userId, date = new Date() } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const originalEntry = await db.journalEntry.findFirst({
+        where: { id: originalEntryId, tenantId },
+        include: { lines: true },
+      });
+
+      if (!originalEntry) throw new Error("Original journal entry not found");
+      if (originalEntry.status === "reversed" && originalEntry.reversalJournalId) {
+        const reversalEntry = await db.journalEntry.findUnique({
+          where: { id: originalEntry.reversalJournalId },
+          include: { lines: true },
+        });
+        return { success: true, reversalEntry, alreadyReversed: true };
+      }
+
+      const reversal = await this.createJournal({
+        tx: db,
+        tenantId,
+        branchId: originalEntry.branchId,
+        date,
+        description: `Reversal of ${originalEntry.description}`,
+        reference: originalEntry.reference,
+        sourceType: "HR_JOURNAL_REVERSAL",
+        sourceId: originalEntryId,
+        userId,
+        lines: originalEntry.lines.map((line) => ({
+          accountId: line.accountId,
+          debit: line.credit,
+          credit: line.debit,
+          description: `Reversal - ${line.description || originalEntry.description || "HR journal"}`,
+        })),
+      });
+
+      await db.journalEntry.update({
+        where: { id: originalEntryId },
+        data: {
+          status: "reversed",
+          reversalJournalId: reversal.journalEntry.id,
+          reversalReason: reason,
+          reversedBy: userId,
+          reversedAt: new Date(date),
         },
       });
 
-      return entry;
-    } catch (error) {
-      console.error("Error fetching existing journal entry:", error);
-      throw error;
-    }
+      return { success: true, reversalEntry: reversal.journalEntry };
+    });
   }
 
-  /**
-   * Generate next entry number
-   * Format: JE-YYYYMMDD-001
-   * @param {string} lastEntryNo - Previous entry number
-   * @returns {string}
-   */
+  async getExistingJournalEntry(tenantId, sourceType, sourceId, tx = null) {
+    return this.client(tx).journalEntry.findFirst({
+      where: { tenantId, sourceType, sourceId },
+      include: { lines: true },
+    });
+  }
+
   generateEntryNumber(lastEntryNo) {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0].replace(/-/g, "");
-
-    if (!lastEntryNo) {
-      return `JE-${dateStr}-001`;
-    }
+    if (!lastEntryNo) return `JE-${dateStr}-001`;
 
     const parts = lastEntryNo.split("-");
     const lastDate = parts[1];
-    const lastSequence = parseInt(parts[2]) || 0;
-
-    if (lastDate === dateStr) {
-      return `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`;
-    }
-
-    return `JE-${dateStr}-001`;
+    const lastSequence = parseInt(parts[2], 10) || 0;
+    return lastDate === dateStr
+      ? `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`
+      : `JE-${dateStr}-001`;
   }
 
-  /**
-   * Create audit log for HR transaction
-   * @param {object} params - Parameters
-   * @returns {Promise<object>}
-   */
   async createAuditLog(params) {
     const {
+      tx = null,
       tenantId,
       recordType,
       recordId,
@@ -645,54 +443,30 @@ class HRAccountingService {
       metadata,
     } = params;
 
-    try {
-      const log = await prisma.hRAuditLog.create({
-        data: {
-          tenantId,
-          recordType,
-          recordId,
-          employeeId,
-          action,
-          description,
-          amount,
-          userId,
-          branchId,
-          journalEntryId,
-          metadata,
-        },
-      });
-
-      return log;
-    } catch (error) {
-      console.error("Error creating HR audit log:", error);
-      throw error;
-    }
+    return this.client(tx).hRAuditLog.create({
+      data: {
+        tenantId,
+        recordType,
+        recordId,
+        employeeId,
+        action,
+        description,
+        amount,
+        userId,
+        branchId,
+        journalEntryId,
+        metadata,
+      },
+    });
   }
 
-  /**
-   * Get HR audit trail for a record
-   * @param {string} tenantId - Tenant ID
-   * @param {string} recordType - Record type
-   * @param {string} recordId - Record ID
-   * @returns {Promise<object[]>}
-   */
-  async getAuditTrail(tenantId, recordType, recordId) {
-    try {
-      const logs = await prisma.hRAuditLog.findMany({
-        where: {
-          tenantId,
-          recordType,
-          recordId,
-        },
-        orderBy: { createdAt: "asc" },
-      });
-
-      return logs;
-    } catch (error) {
-      console.error("Error fetching audit trail:", error);
-      throw error;
-    }
+  async getAuditTrail(tenantId, recordType, recordId, tx = null) {
+    return this.client(tx).hRAuditLog.findMany({
+      where: { tenantId, recordType, recordId },
+      orderBy: { createdAt: "asc" },
+    });
   }
 }
 
-module.exports = new HRAccountingService();
+export { setupMessage };
+export default new HRAccountingService();

@@ -3,21 +3,25 @@
  * Handles salary advance operations with accounting integration
  */
 
-const express = require("express");
-const router = express.Router();
-const salaryAdvanceService = require("../services/salaryAdvanceService");
-const { requireAuth, requireTenant } = require("../middleware/auth");
+import { Router } from "express";
+import salaryAdvanceService from "../services/salaryAdvanceService.js";
+import { authenticateToken, requirePermission, requireTenant } from "../../middleware/auth.js";
+
+const router = Router();
+const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
+const userIdFromRequest = (req) => req.user.id || req.user.userId;
 
 // Check HR configuration and permissions
-router.use(requireAuth, requireTenant);
+router.use(authenticateToken, requireTenant);
 
 /**
  * POST /api/hr/salary-advances
  * Issue a new salary advance
  */
-router.post("/", async (req, res) => {
+router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
   try {
-    const { tenantId, userId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
+    const userId = userIdFromRequest(req);
     const {
       employeeId,
       amount,
@@ -68,34 +72,12 @@ router.post("/", async (req, res) => {
 });
 
 /**
- * GET /api/hr/salary-advances/:id
- * Get salary advance details
- */
-router.get("/:id", async (req, res) => {
-  try {
-    const { tenantId } = req.user;
-    const { id } = req.params;
-
-    const advance = await salaryAdvanceService.getSalaryAdvance(tenantId, id);
-
-    if (!advance) {
-      return res.status(404).json({ error: "Salary advance not found" });
-    }
-
-    res.json(advance);
-  } catch (error) {
-    console.error("Error fetching salary advance:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
  * GET /api/hr/salary-advances/employee/:employeeId
  * Get all salary advances for an employee
  */
-router.get("/employee/:employeeId", async (req, res) => {
+router.get("/employee/:employeeId", requirePermission("canViewHRPayroll"), async (req, res) => {
   try {
-    const { tenantId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
     const { employeeId } = req.params;
 
     const advances =
@@ -115,12 +97,34 @@ router.get("/employee/:employeeId", async (req, res) => {
 });
 
 /**
+ * GET /api/hr/salary-advances/:id
+ * Get salary advance details
+ */
+router.get("/:id", requirePermission("canViewHRPayroll"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromRequest(req);
+    const { id } = req.params;
+
+    const advance = await salaryAdvanceService.getSalaryAdvance(tenantId, id);
+
+    if (!advance) {
+      return res.status(404).json({ error: "Salary advance not found" });
+    }
+
+    res.json(advance);
+  } catch (error) {
+    console.error("Error fetching salary advance:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/hr/salary-advances
  * Get outstanding salary advances (with optional branch filter)
  */
-router.get("/", async (req, res) => {
+router.get("/", requirePermission("canViewHRPayroll"), async (req, res) => {
   try {
-    const { tenantId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
     const { branchId } = req.query;
 
     const summary =
@@ -143,9 +147,10 @@ router.get("/", async (req, res) => {
  * POST /api/hr/salary-advances/:id/direct-repayment
  * Record direct salary advance repayment
  */
-router.post("/:id/direct-repayment", async (req, res) => {
+router.post("/:id/direct-repayment", requirePermission("canManageHRPayroll"), async (req, res) => {
   try {
-    const { tenantId, userId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
+    const userId = userIdFromRequest(req);
     const { id } = req.params;
     const { amount, paymentAccountId, date, notes } = req.body;
 
@@ -182,9 +187,10 @@ router.post("/:id/direct-repayment", async (req, res) => {
  * POST /api/hr/salary-advances/:id/cancel
  * Cancel salary advance
  */
-router.post("/:id/cancel", async (req, res) => {
+router.post("/:id/cancel", requirePermission("canManageHRPayroll"), async (req, res) => {
   try {
-    const { tenantId, userId } = req.user;
+    const tenantId = tenantIdFromRequest(req);
+    const userId = userIdFromRequest(req);
     const { id } = req.params;
     const { reason, date } = req.body;
 
@@ -216,4 +222,4 @@ router.post("/:id/cancel", async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
