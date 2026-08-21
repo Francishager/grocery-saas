@@ -55,6 +55,7 @@ import documentRoutes from "./routes/documentRoutes.js";
 import salaryHistoryRoutes from "./routes/salaryHistoryRoutes.js";
 import employmentHistoryRoutes from "./routes/employmentHistoryRoutes.js";
 import hrConfigRoutes from "./routes/hrConfigRoutes.js";
+import hrPayrollRoutes from "./routes/hrPayrollRoutes.js";
 import hrSalaryAdvancesRoutes from "./routes/hrSalaryAdvancesRoutes.js";
 
 // Phase 2 HR Attendance, Shift, Leave Routes
@@ -217,6 +218,7 @@ app.use("/api/hr/documents", documentRoutes);
 app.use("/api/hr/salary-history", salaryHistoryRoutes);
 app.use("/api/hr/employment-history", employmentHistoryRoutes);
 app.use("/api/hr/config", hrConfigRoutes);
+app.use("/api/hr/payroll", hrPayrollRoutes);
 app.use("/api/hr/salary-advances", hrSalaryAdvancesRoutes);
 
 // Phase 2 HR Attendance, Shift, Leave API routes

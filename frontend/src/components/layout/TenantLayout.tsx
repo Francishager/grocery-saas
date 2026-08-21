@@ -262,6 +262,14 @@ const accountingSubItems = [
   { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: ['canViewAccounting', 'canViewStaffTillSheet'] },
 ]
 
+const hrAccountingSubItems = [
+  { to: '/tenant/hr/accounting/overview', label: 'Overview', icon: Calculator, feature: 'hr', permission: 'canManageHRPayroll' },
+  { to: '/tenant/hr/accounting/mappings', label: 'Account Mappings', icon: Settings, feature: 'hr', permission: 'canManageHRPayroll' },
+  { to: '/tenant/hr/accounting/payroll', label: 'Payroll Posting', icon: Receipt, feature: 'hr', permission: 'canManageHRPayroll' },
+  { to: '/tenant/hr/accounting/payments', label: 'Salary Payments', icon: Wallet, feature: 'hr', permission: 'canManageHRPayroll' },
+  { to: '/tenant/hr/accounting/advances', label: 'Advances / Loans', icon: BadgeDollarSign, feature: 'hr', permission: 'canManageHRPayroll' },
+]
+
 const hrSubItems = [
   { to: '/tenant/hr', label: 'Dashboard', icon: LayoutDashboard, feature: 'hr', permission: 'canViewHR' },
   { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: 'canViewHR' },
@@ -275,7 +283,7 @@ const hrSubItems = [
   { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewHRShifts' },
   { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: ['canViewHRLeave', 'canRequestHRLeave'] },
   { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canApproveHRLeave' },
-  { to: '/tenant/hr/accounting', label: 'HR Accounting', icon: Calculator, feature: 'hr', permission: 'canManageHRPayroll' },
+  { to: '/tenant/hr/accounting/overview', label: 'HR Accounting', icon: Calculator, feature: 'hr', permission: 'canManageHRPayroll', children: hrAccountingSubItems },
 ]
 
 const settingsSubItems = [
@@ -296,6 +304,7 @@ export function TenantLayout() {
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
   const [hrExpanded, setHRExpanded] = useState(false)
+  const [hrAccountingExpanded, setHRAccountingExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
   const [showOnboardingModal, setShowOnboardingModal] = useState(false)
@@ -350,6 +359,7 @@ export function TenantLayout() {
     if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
     if (location.pathname.startsWith('/tenant/hr')) setHRExpanded(true)
+    if (location.pathname.startsWith('/tenant/hr/accounting')) setHRAccountingExpanded(true)
   }, [location.pathname, location.search])
   function hasRequiredPermission(permission?: string | string[]) {
     if (!permission) return true
@@ -362,7 +372,9 @@ export function TenantLayout() {
     if (item.permission && !hasRequiredPermission(item.permission)) return false
     return true
   }
-  const visibleHRSubItems = hrSubItems.filter(subItemVisible)
+  const visibleHRSubItems = hrSubItems
+    .map((item: any) => item.children ? { ...item, children: item.children.filter(subItemVisible) } : item)
+    .filter((item: any) => item.children ? item.children.length > 0 && subItemVisible(item) : subItemVisible(item))
   const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
   const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
@@ -662,12 +674,44 @@ export function TenantLayout() {
                   </button>
                   {hrExpanded && (
                     <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
-                      {visibleHRSubItems.map(sub => (
-                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
-                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
-                          <sub.icon className="h-4 w-4" />{sub.label}
-                        </NavLink>
-                      ))}
+                      {visibleHRSubItems.map((sub: any) => {
+                        const childItems = sub.children || []
+                        const isAccountingActive = location.pathname.startsWith('/tenant/hr/accounting')
+                        if (childItems.length > 0) {
+                          return (
+                            <div key={sub.to}>
+                              <button
+                                type="button"
+                                onClick={() => setHRAccountingExpanded((prev) => !prev)}
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+                                  isAccountingActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                                )}
+                              >
+                                <sub.icon className="h-4 w-4" />
+                                <span className="flex-1 text-left">{sub.label}</span>
+                                {hrAccountingExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              </button>
+                              {hrAccountingExpanded && (
+                                <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                                  {childItems.map((child: any) => (
+                                    <NavLink key={child.to} to={child.to} onClick={() => setSidebarOpen(false)}
+                                      className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive || (child.to.endsWith('/overview') && location.pathname === '/tenant/hr/accounting') ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                                      <child.icon className="h-4 w-4" />{child.label}
+                                    </NavLink>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        }
+                        return (
+                          <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                            className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                            <sub.icon className="h-4 w-4" />{sub.label}
+                          </NavLink>
+                        )
+                      })}
                     </div>
                   )}
                 </div>

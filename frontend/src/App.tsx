@@ -185,6 +185,7 @@ function App() {
           <Route path="hr/documents" element={<FeatureGuard feature="hr" permission={['canViewHRDocuments', 'canManageHRDocuments']}><DocumentManagementPage /></FeatureGuard>} />
           <Route path="hr/units-teams" element={<FeatureGuard feature="hr" permission="canViewHR"><UnitTeamManagementPage /></FeatureGuard>} />
           <Route path="hr/accounting" element={<FeatureGuard feature="hr" permission="canManageHRPayroll"><HRAccountingConfigPage /></FeatureGuard>} />
+          <Route path="hr/accounting/:tab" element={<FeatureGuard feature="hr" permission="canManageHRPayroll"><HRAccountingConfigPage /></FeatureGuard>} />
           <Route path="hr/settings" element={<Navigate to="/tenant/roles" replace />} />
           <Route path="hr/legacy" element={<FeatureGuard feature="hr" permission="canViewHR"><HRPage /></FeatureGuard>} />
           {/* Phase 2 HR Attendance, Shift, Leave Routes */}
