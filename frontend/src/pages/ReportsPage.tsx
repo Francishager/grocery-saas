@@ -1630,11 +1630,15 @@ function ExecutiveSummaryReport({ data }: { data: any }) {
 export default function ReportsPage() {
   const [searchParams] = useSearchParams()
   const selectedReport = searchParams.get('report')
+  const selectedCustomerIdParam = searchParams.get('customerId') || ''
+  const selectedSupplierIdParam = searchParams.get('supplierId') || ''
+  const selectedProductIdParam = searchParams.get('productId') || ''
+  const selectedEntityIdParam = selectedCustomerIdParam || selectedSupplierIdParam || selectedProductIdParam
   const [reportData, setReportData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [selectedEntityId, setSelectedEntityId] = useState('')
+  const [selectedEntityId, setSelectedEntityId] = useState(selectedEntityIdParam)
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [selectedDailyCustomerId, setSelectedDailyCustomerId] = useState('')
@@ -1657,7 +1661,12 @@ export default function ReportsPage() {
 
   // Fetch entity list when report changes
   useEffect(() => {
-    setSelectedEntityId('')
+    const initialEntityId =
+      currentReport?.entityType === 'customer' ? selectedCustomerIdParam :
+      currentReport?.entityType === 'supplier' ? selectedSupplierIdParam :
+      currentReport?.entityType === 'product' ? selectedProductIdParam :
+      ''
+    setSelectedEntityId(initialEntityId)
     setEntityList([])
     if (!currentReport?.entityType) return
     let cancelled = false
@@ -1701,7 +1710,7 @@ export default function ReportsPage() {
     })()
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReport])
+  }, [selectedReport, selectedCustomerIdParam, selectedSupplierIdParam, selectedProductIdParam])
 
   // Fetch business info for print/export headers
   useEffect(() => {

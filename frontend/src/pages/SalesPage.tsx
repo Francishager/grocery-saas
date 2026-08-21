@@ -1,5 +1,5 @@
  import { useEffect, useState, useRef, useMemo } from 'react'
-import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown } from 'lucide-react'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown, AlertTriangle } from 'lucide-react'
 import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, apiFetch, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,6 +36,56 @@ interface CustomerOption {
   creditLimit?: number
 }
 
+interface CustomerCreditInfo {
+  customer: CustomerOption & {
+    email?: string | null
+    address?: string | null
+    openingBalance?: number
+    openingBalanceDate?: string | null
+    openingBalanceNote?: string | null
+    status?: string
+  }
+  summary: {
+    balance: number
+    creditLimit: number
+    openingBalance: number
+    outstandingSalesCount: number
+    outstandingItemsCount: number
+    overdueSalesCount: number
+    oldestOutstandingDate?: string | null
+  }
+  outstandingSales: Array<{
+    id: string
+    receiptNo: string
+    date: string
+    dueDate?: string | null
+    total: number
+    amountPaid: number
+    balance: number
+    paymentStatus: string
+    staff?: string
+    branch?: string
+    items: Array<{
+      id: string
+      productName: string
+      itemType?: string
+      quantity: number
+      unitName?: string
+      unitPrice: number
+      discount: number
+      total: number
+    }>
+  }>
+  recentPayments: Array<{
+    id: string
+    receiptNo?: string
+    date: string
+    amount: number
+    paymentMethod: string
+    reference?: string
+  }>
+}
+
 export default function SalesPage() {
   const { hasPermission, user } = useJWTAuth()
   const [inventory, setInventory] = useState<InventoryItem[]>([])
@@ -66,6 +116,11 @@ export default function SalesPage() {
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const [businessSettings, setBusinessSettings] = useState<any>(null)
   const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const [creditAlertCustomer, setCreditAlertCustomer] = useState<CustomerOption | null>(null)
+  const [dismissedCreditAlertId, setDismissedCreditAlertId] = useState('')
+  const [creditInfo, setCreditInfo] = useState<CustomerCreditInfo | null>(null)
+  const [creditInfoLoading, setCreditInfoLoading] = useState(false)
+  const [creditInfoError, setCreditInfoError] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const ITEMS_PER_PAGE = 20
   const { toast } = useToast()
@@ -204,17 +259,21 @@ export default function SalesPage() {
 
   const loadCustomers = async () => {
     try {
-      const res = await apiFetch('/api/receivables/customers?limit=10000')
-      if (!res.ok) return
-      const data = await res.json()
-      const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
-      setCustomers(list.map((customer: any) => ({
-        id: customer.id,
-        name: customer.name,
-        phone: customer.phone,
-        balance: Number(customer.balance || 0),
-        creditLimit: Number(customer.creditLimit || 0),
-      })))
+      const endpoints = ['/api/sales/customers/credit-options?limit=10000', '/api/receivables/customers?limit=10000']
+      for (const endpoint of endpoints) {
+        const res = await apiFetch(endpoint)
+        if (!res.ok) continue
+        const data = await res.json()
+        const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+        setCustomers(list.map((customer: any) => ({
+          id: customer.id,
+          name: customer.name,
+          phone: customer.phone,
+          balance: Number(customer.balance || 0),
+          creditLimit: Number(customer.creditLimit || 0),
+        })))
+        return
+      }
     } catch { /* customer balance hint is optional */ }
   }
 
@@ -253,6 +312,47 @@ export default function SalesPage() {
     if (!name) return null
     return customers.find((customer) => customer.name.trim().toLowerCase() === name) || customers.find((customer) => customer.name.trim().toLowerCase().includes(name)) || null
   }, [customers, customerName])
+
+  useEffect(() => {
+    const balance = Number(matchedCustomer?.balance || 0)
+    const isExactCustomerName = matchedCustomer?.name.trim().toLowerCase() === customerName.trim().toLowerCase()
+    if (!matchedCustomer || balance <= 0) {
+      if (!customerName.trim()) setDismissedCreditAlertId('')
+      return
+    }
+    if (isExactCustomerName && dismissedCreditAlertId !== matchedCustomer.id) {
+      setCreditAlertCustomer(matchedCustomer)
+      setCreditInfo(null)
+      setCreditInfoError('')
+    }
+  }, [matchedCustomer, customerName, dismissedCreditAlertId])
+
+  const loadCustomerCreditInfo = async (customer: CustomerOption) => {
+    setCreditAlertCustomer(customer)
+    setCreditInfo(null)
+    setCreditInfoError('')
+    setCreditInfoLoading(true)
+    try {
+      let res = await apiFetch(`/api/sales/customers/${customer.id}/credit-info`)
+      if (!res.ok && (res.status === 403 || res.status === 404)) {
+        res = await apiFetch(`/api/receivables/customers/${customer.id}/credit-info`)
+      }
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Failed to load customer credit details')
+      setCreditInfo(data)
+    } catch (error: any) {
+      setCreditInfoError(error?.message || 'Failed to load customer credit details')
+    } finally {
+      setCreditInfoLoading(false)
+    }
+  }
+
+  const closeCreditAlert = () => {
+    if (creditAlertCustomer?.id) setDismissedCreditAlertId(creditAlertCustomer.id)
+    setCreditAlertCustomer(null)
+    setCreditInfo(null)
+    setCreditInfoError('')
+  }
 
   const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string, settings = businessSettings, customerName?: string) => {
     const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
@@ -952,11 +1052,22 @@ export default function SalesPage() {
                         ))}
                       </datalist>
                       {matchedCustomer && (
-                        <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
+                        <button
+                          type="button"
+                          className={cn(
+                            "mt-2 w-full rounded-md border p-3 text-left text-sm transition hover:border-primary hover:bg-muted/40",
+                            Number(matchedCustomer.balance || 0) > 0 ? "border-amber-300 bg-amber-50 text-amber-950" : "bg-muted/30"
+                          )}
+                          onClick={() => loadCustomerCreditInfo(matchedCustomer)}
+                        >
                           <div className="flex items-center justify-between gap-3">
-                            <span className="min-w-0">
-                              <span className="block break-words font-medium">{matchedCustomer.name}</span>
-                              {matchedCustomer.phone && <span className="text-xs text-muted-foreground">{matchedCustomer.phone}</span>}
+                            <span className="flex min-w-0 items-start gap-2">
+                              {Number(matchedCustomer.balance || 0) > 0 && <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
+                              <span className="min-w-0">
+                                <span className="block break-words font-medium">{matchedCustomer.name}</span>
+                                {Number(matchedCustomer.balance || 0) > 0 && <span className="text-xs font-medium text-amber-700">Outstanding customer credit. Click to view goods and dates.</span>}
+                                {matchedCustomer.phone && <span className="block text-xs text-muted-foreground">{matchedCustomer.phone}</span>}
+                              </span>
                             </span>
                             <span className="shrink-0 text-right">
                               <span className="block font-semibold">{formatCurrency(matchedCustomer.balance || 0)}</span>
@@ -966,7 +1077,7 @@ export default function SalesPage() {
                           {Number(matchedCustomer.creditLimit || 0) > 0 && (
                             <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(matchedCustomer.creditLimit || 0)}</p>
                           )}
-                        </div>
+                        </button>
                       )}
                     </div>
                     {cartTax > 0 && (
@@ -1139,6 +1250,147 @@ export default function SalesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Customer Credit Alert Dialog */}
+      <Dialog open={!!creditAlertCustomer} onOpenChange={(open) => { if (!open) closeCreditAlert() }}>
+        <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5" />
+              Customer has outstanding credit
+            </DialogTitle>
+            <DialogDescription>
+              {creditAlertCustomer?.name} currently owes {formatCurrency(creditAlertCustomer?.balance || 0)}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-md border bg-amber-50 p-3">
+                <p className="text-xs text-muted-foreground">Customer</p>
+                <p className="mt-1 break-words font-semibold">{creditAlertCustomer?.name}</p>
+                {creditAlertCustomer?.phone && <p className="text-xs text-muted-foreground">{creditAlertCustomer.phone}</p>}
+              </div>
+              <div className="rounded-md border bg-amber-50 p-3">
+                <p className="text-xs text-muted-foreground">Outstanding Balance</p>
+                <p className="mt-1 font-semibold">{formatCurrency(creditAlertCustomer?.balance || 0)}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Credit Limit</p>
+                <p className="mt-1 font-semibold">{formatCurrency(creditAlertCustomer?.creditLimit || 0)}</p>
+              </div>
+            </div>
+
+            {!creditInfo && !creditInfoLoading && (
+              <div className="rounded-md border p-4 text-sm text-muted-foreground">
+                Open the credit details to see which receipts, products/goods, dates, and balances created this customer credit.
+              </div>
+            )}
+
+            {creditInfoLoading && (
+              <div className="flex items-center justify-center rounded-md border p-8">
+                <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-primary" />
+              </div>
+            )}
+
+            {creditInfoError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{creditInfoError}</div>
+            )}
+
+            {creditInfo && (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Outstanding Receipts</p><p className="font-semibold">{creditInfo.summary.outstandingSalesCount}</p></div>
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Goods / Services</p><p className="font-semibold">{creditInfo.summary.outstandingItemsCount}</p></div>
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Overdue</p><p className="font-semibold">{creditInfo.summary.overdueSalesCount}</p></div>
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Opening Balance</p><p className="font-semibold">{formatCurrency(creditInfo.summary.openingBalance || 0)}</p></div>
+                </div>
+
+                {Number(creditInfo.summary.openingBalance || 0) > 0 && (
+                  <div className="rounded-md border p-3 text-sm">
+                    <p className="font-medium">Opening Balance</p>
+                    <p className="text-muted-foreground">
+                      {formatCurrency(creditInfo.summary.openingBalance)} on {creditInfo.customer.openingBalanceDate ? new Date(creditInfo.customer.openingBalanceDate).toLocaleDateString() : 'recorded date'}
+                      {creditInfo.customer.openingBalanceNote ? ` - ${creditInfo.customer.openingBalanceNote}` : ''}
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <h3 className="mb-2 font-semibold">Outstanding Credit Receipts</h3>
+                  <div className="space-y-2">
+                    {creditInfo.outstandingSales.length ? creditInfo.outstandingSales.map((sale) => (
+                      <div key={sale.id} className="rounded-md border p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="font-mono text-sm font-semibold">{sale.receiptNo}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(sale.date).toLocaleString()} {sale.dueDate ? `- Due ${new Date(sale.dueDate).toLocaleDateString()}` : ''}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{sale.staff || 'Staff'} {sale.branch ? `- ${sale.branch}` : ''}</p>
+                          </div>
+                          <div className="text-sm sm:text-right">
+                            <p>Total {formatCurrency(sale.total)}</p>
+                            <p>Paid {formatCurrency(sale.amountPaid)}</p>
+                            <p className="font-semibold text-amber-700">Balance {formatCurrency(sale.balance)}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 overflow-x-auto rounded-md border">
+                          <table className="min-w-[680px] w-full text-sm">
+                            <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                              <tr><th className="px-3 py-2 text-left">Goods / Service</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Price</th><th className="px-3 py-2 text-right">Discount</th><th className="px-3 py-2 text-right">Total</th></tr>
+                            </thead>
+                            <tbody>
+                              {sale.items.map((item) => (
+                                <tr key={item.id} className="border-t">
+                                  <td className="px-3 py-2">{item.productName}</td>
+                                  <td className="px-3 py-2 text-right">{item.quantity} {item.unitName || ''}</td>
+                                  <td className="px-3 py-2 text-right">{formatCurrency(item.unitPrice)}</td>
+                                  <td className="px-3 py-2 text-right">{formatCurrency(item.discount || 0)}</td>
+                                  <td className="px-3 py-2 text-right font-medium">{formatCurrency(item.total)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )) : <p className="rounded-md border p-4 text-sm text-muted-foreground">No open credit sale receipts. The balance may come from opening balance or older adjustments.</p>}
+                  </div>
+                </div>
+
+                {creditInfo.recentPayments.length > 0 && (
+                  <div>
+                    <h3 className="mb-2 font-semibold">Recent Payments</h3>
+                    <div className="space-y-2">
+                      {creditInfo.recentPayments.slice(0, 5).map((payment) => (
+                        <div key={payment.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
+                          <span className="min-w-0">
+                            <span className="block font-medium">{payment.receiptNo || payment.reference || payment.id}</span>
+                            <span className="text-xs text-muted-foreground">{new Date(payment.date).toLocaleString()} - {payment.paymentMethod?.replace(/_/g, ' ')}</span>
+                          </span>
+                          <span className="shrink-0 font-semibold">{formatCurrency(payment.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={closeCreditAlert}>Continue Sale</Button>
+            <div className="flex flex-wrap gap-2">
+              {creditAlertCustomer && !creditInfo && (
+                <Button onClick={() => loadCustomerCreditInfo(creditAlertCustomer)} disabled={creditInfoLoading}>View Credit Details</Button>
+              )}
+              {creditAlertCustomer && creditInfo && (
+                <Button variant="outline" onClick={() => window.location.assign(`/tenant/reports?report=customersStatement&customerId=${creditAlertCustomer.id}`)}>Customer Statement</Button>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick Edit Dialog — edit barcode & prices inline from sales */}
       <Dialog open={!!quickEditItem} onOpenChange={(open) => { if (!open) setQuickEditItem(null) }}>

@@ -166,6 +166,138 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
   }
 })
 
+// Get one customer's active credit position with outstanding goods/items
+router.get('/customers/:id/credit-info', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    const customer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id }),
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        creditLimit: true,
+        balance: true,
+        openingBalance: true,
+        openingBalanceDate: true,
+        openingBalanceNote: true,
+        status: true
+      }
+    })
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const [outstandingSales, recentPayments] = await Promise.all([
+      prisma.saleRecord.findMany({
+        where: scopedWhere(scope, {
+          customerId: id,
+          balance: { gt: 0 },
+          status: { not: 'cancelled' }
+        }),
+        include: {
+          items: {
+            include: {
+              product: { select: { id: true, name: true, itemType: true, baseUnit: true } }
+            }
+          },
+          User: { select: { id: true, fname: true, lname: true } },
+          branch: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+      }),
+      prisma.customerPayment.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          sale: { select: { id: true, receiptNo: true } },
+          branch: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      })
+    ])
+
+    const outstandingItems = outstandingSales.flatMap((sale) =>
+      sale.items.map((item) => ({
+        id: item.id,
+        saleId: sale.id,
+        receiptNo: sale.receiptNo,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        productId: item.productId,
+        productName: item.product?.name || 'Item',
+        itemType: item.product?.itemType || 'product',
+        quantity: item.quantity,
+        unitName: item.unitName || item.product?.baseUnit || '',
+        unitPrice: item.price,
+        discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+        total: item.total,
+        saleTotal: sale.total,
+        amountPaid: sale.amountPaid,
+        saleBalance: sale.balance,
+        paymentStatus: sale.paymentStatus,
+        staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
+        branch: sale.branch?.name || ''
+      }))
+    )
+
+    res.json({
+      customer,
+      summary: {
+        balance: toMoney(customer.balance),
+        creditLimit: toMoney(customer.creditLimit),
+        openingBalance: toMoney(customer.openingBalance),
+        outstandingSalesCount: outstandingSales.length,
+        outstandingItemsCount: outstandingItems.length,
+        overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
+        oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null
+      },
+      outstandingSales: outstandingSales.map((sale) => ({
+        id: sale.id,
+        receiptNo: sale.receiptNo,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        total: sale.total,
+        amountPaid: sale.amountPaid,
+        balance: sale.balance,
+        paymentStatus: sale.paymentStatus,
+        paymentMethod: sale.paymentMethod,
+        staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
+        branch: sale.branch?.name || '',
+        items: sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || item.product?.baseUnit || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total
+        }))
+      })),
+      outstandingItems,
+      recentPayments: recentPayments.map((payment) => ({
+        id: payment.id,
+        saleId: payment.saleId,
+        receiptNo: payment.sale?.receiptNo || '',
+        date: payment.createdAt,
+        amount: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        reference: payment.reference || payment.transactionId || '',
+        notes: payment.notes || '',
+        branch: payment.branch?.name || ''
+      }))
+    })
+  } catch (error) {
+    console.error('Customer credit info error:', error)
+    handleBranchError(res, error, 'Failed to fetch customer credit information')
+  }
+})
+
 // Create new customer
 router.post('/customers', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
   try {

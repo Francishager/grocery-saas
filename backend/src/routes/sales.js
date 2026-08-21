@@ -9,6 +9,11 @@ const router = Router();
 
 const saleRoles = ["owner", "manager", "attendant"];
 
+const toMoney = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
 function normalizeItems(items, idKey = "productId") {
   return items.map((item) => ({
     productId: item[idKey] || item.productId || item.id,
@@ -127,6 +132,166 @@ async function checkedSaleItems(items, scope) {
     };
   });
 }
+
+async function getCustomerCreditInfo(scope, customerId) {
+  const customer = await prisma.customer.findFirst({
+    where: scopedWhere(scope, { id: customerId }),
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      address: true,
+      creditLimit: true,
+      balance: true,
+      openingBalance: true,
+      openingBalanceDate: true,
+      openingBalanceNote: true,
+      status: true,
+    },
+  });
+
+  if (!customer) return null;
+
+  const [outstandingSales, recentPayments] = await Promise.all([
+    prisma.saleRecord.findMany({
+      where: scopedWhere(scope, {
+        customerId,
+        balance: { gt: 0 },
+        status: { not: "cancelled" },
+      }),
+      include: {
+        items: {
+          include: {
+            product: { select: { id: true, name: true, itemType: true, baseUnit: true } },
+          },
+        },
+        User: { select: { id: true, fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.customerPayment.findMany({
+      where: scopedWhere(scope, { customerId }),
+      include: {
+        sale: { select: { id: true, receiptNo: true } },
+        branch: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+  ]);
+
+  const saleItems = (sale) =>
+    sale.items.map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      productName: item.product?.name || "Item",
+      itemType: item.product?.itemType || "product",
+      quantity: item.quantity,
+      unitName: item.unitName || item.product?.baseUnit || "",
+      unitPrice: item.price,
+      discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+      total: item.total,
+    }));
+
+  const outstandingItems = outstandingSales.flatMap((sale) =>
+    saleItems(sale).map((item) => ({
+      ...item,
+      saleId: sale.id,
+      receiptNo: sale.receiptNo,
+      date: sale.createdAt,
+      dueDate: sale.dueDate,
+      saleTotal: sale.total,
+      amountPaid: sale.amountPaid,
+      saleBalance: sale.balance,
+      paymentStatus: sale.paymentStatus,
+      staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(" ") || "Staff",
+      branch: sale.branch?.name || "",
+    }))
+  );
+
+  return {
+    customer,
+    summary: {
+      balance: toMoney(customer.balance),
+      creditLimit: toMoney(customer.creditLimit),
+      openingBalance: toMoney(customer.openingBalance),
+      outstandingSalesCount: outstandingSales.length,
+      outstandingItemsCount: outstandingItems.length,
+      overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
+      oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null,
+    },
+    outstandingSales: outstandingSales.map((sale) => ({
+      id: sale.id,
+      receiptNo: sale.receiptNo,
+      date: sale.createdAt,
+      dueDate: sale.dueDate,
+      total: sale.total,
+      amountPaid: sale.amountPaid,
+      balance: sale.balance,
+      paymentStatus: sale.paymentStatus,
+      paymentMethod: sale.paymentMethod,
+      staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(" ") || "Staff",
+      branch: sale.branch?.name || "",
+      items: saleItems(sale),
+    })),
+    outstandingItems,
+    recentPayments: recentPayments.map((payment) => ({
+      id: payment.id,
+      saleId: payment.saleId,
+      receiptNo: payment.sale?.receiptNo || "",
+      date: payment.createdAt,
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod,
+      reference: payment.reference || payment.transactionId || "",
+      notes: payment.notes || "",
+      branch: payment.branch?.name || "",
+    })),
+  };
+}
+
+router.get("/customers/credit-options", authenticateToken, requirePermission("canCreateSale"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), 10000);
+    const search = String(req.query.search || "").trim();
+    const where = scopedWhere(scope, {
+      status: "active",
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { phone: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    });
+    const customers = await prisma.customer.findMany({
+      where,
+      select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+      orderBy: { name: "asc" },
+      take: limit,
+    });
+    res.json({ customers });
+  } catch (err) {
+    console.error("Sales customer credit options error:", err);
+    handleBranchError(res, err, "Failed to fetch customer credit options");
+  }
+});
+
+router.get("/customers/:id/credit-info", authenticateToken, requirePermission("canCreateSale"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const payload = await getCustomerCreditInfo(scope, req.params.id);
+    if (!payload) return res.status(404).json({ error: "Customer not found" });
+    res.json(payload);
+  } catch (err) {
+    console.error("Sales customer credit info error:", err);
+    handleBranchError(res, err, "Failed to fetch customer credit information");
+  }
+});
 
 // Create single sale
 router.post("/", authenticateToken, requirePermission("canCreateSale"), requireCashAccount, async (req, res) => {

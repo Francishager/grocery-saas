@@ -209,9 +209,9 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
       <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-muted-foreground">Daily Business Report</p>
-          <h1 className="break-words text-2xl font-bold">{data.header.businessName || 'Business'}</h1>
+          <h1 className="hidden break-words text-2xl font-bold print:block">{data.header.businessName || 'Business'}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{formatDisplayDate(data.header.date)} - {data.header.branch}</p>
-          {(data.header.businessPhone || data.header.businessAddress) && <p className="mt-1 text-xs text-muted-foreground">{[data.header.businessPhone, data.header.businessAddress].filter(Boolean).join(' - ')}</p>}
+          {(data.header.businessPhone || data.header.businessAddress) && <p className="mt-1 hidden text-xs text-muted-foreground print:block">{[data.header.businessPhone, data.header.businessAddress].filter(Boolean).join(' - ')}</p>}
         </div>
         <div className="text-left text-sm sm:text-right">
           <Badge variant={data.header.status === 'Closed' ? 'secondary' : 'default'}>{data.header.status}</Badge>
