@@ -1,6 +1,7 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requireTenant, requirePlatformAdmin } from "../../middleware/auth.js";
+import { requireFeature } from "../../middleware/featureCheck.js";
 
 const router = Router();
 
@@ -24,7 +25,7 @@ function generateCode(name) {
 // =====================================================
 
 // Get or create referral code for the authenticated tenant
-router.get("/my-code", authenticateToken, requireTenant, async (req, res) => {
+router.get("/my-code", authenticateToken, requireTenant, requireFeature("referrals"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     if (!tenantId) return res.status(400).json({ error: "Tenant ID required" });
@@ -77,7 +78,7 @@ router.get("/my-code", authenticateToken, requireTenant, async (req, res) => {
 });
 
 // Regenerate referral code
-router.post("/regenerate-code", authenticateToken, requireTenant, async (req, res) => {
+router.post("/regenerate-code", authenticateToken, requireTenant, requireFeature("referrals"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     if (!tenantId) return res.status(400).json({ error: "Tenant ID required" });
@@ -104,7 +105,7 @@ router.post("/regenerate-code", authenticateToken, requireTenant, async (req, re
 });
 
 // Refer someone by email
-router.post("/refer", authenticateToken, requireTenant, async (req, res) => {
+router.post("/refer", authenticateToken, requireTenant, requireFeature("referrals"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const { email, rewardType, rewardValue } = req.body;
@@ -176,7 +177,7 @@ router.post("/refer", authenticateToken, requireTenant, async (req, res) => {
 });
 
 // Claim a reward
-router.post("/claim-reward/:referralId", authenticateToken, requireTenant, async (req, res) => {
+router.post("/claim-reward/:referralId", authenticateToken, requireTenant, requireFeature("referrals"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const { referralId } = req.params;
@@ -230,7 +231,7 @@ router.post("/claim-reward/:referralId", authenticateToken, requireTenant, async
 });
 
 // Get referral rewards history
-router.get("/rewards", authenticateToken, requireTenant, async (req, res) => {
+router.get("/rewards", authenticateToken, requireTenant, requireFeature("referrals"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     const rewards = await prisma.referralReward.findMany({

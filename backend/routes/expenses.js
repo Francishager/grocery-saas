@@ -11,21 +11,14 @@ const router = express.Router()
 const prisma = new PrismaClient()
 
 const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
-  cash: { name: 'Cash Box', type: 'cash' },
-  safe: { name: 'Safe Account', type: 'safe' },
-  mobile_money: { name: 'Mobile Money', type: 'mobile_money' },
-  bank_transfer: { name: 'Bank Account', type: 'bank' },
-  bank: { name: 'Bank Account', type: 'bank' },
-  cheque: { name: 'Bank Account', type: 'bank' },
-  card: { name: 'Card Payments', type: 'card' }
+  cash: { type: 'cash' },
+  safe: { type: 'safe' },
+  mobile_money: { type: 'mobile_money' },
+  bank_transfer: { type: 'bank' },
+  bank: { type: 'bank' },
+  cheque: { type: 'bank' },
+  card: { type: 'card' }
 }
-
-const DEFAULT_CASH_ACCOUNTS = [
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash,
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.mobile_money,
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.bank_transfer,
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.card
-]
 
 const PAYMENT_METHOD_PERMISSION_KEYS = {
   cash: 'canUseCash',
@@ -45,8 +38,19 @@ const toMoney = (value, fallback = 0) => {
 const normalizePaymentMethod = (paymentMethod) =>
   String(paymentMethod || '').trim().toLowerCase()
 
-const accountForPaymentMethod = (paymentMethod) =>
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD[normalizePaymentMethod(paymentMethod)] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
+const normalizeCurrency = (currency) => {
+  const normalized = String(currency || 'UGX').trim().toUpperCase()
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : 'UGX'
+}
+
+async function tenantCurrency(tenantId, client = prisma) {
+  if (!tenantId) return 'UGX'
+  const tenant = await client.tenant.findUnique({
+    where: { id: tenantId },
+    select: { currency: true }
+  })
+  return normalizeCurrency(tenant?.currency)
+}
 
 const paymentMethodPermissionKey = (paymentMethod) =>
   PAYMENT_METHOD_PERMISSION_KEYS[normalizePaymentMethod(paymentMethod)]
@@ -87,48 +91,6 @@ const withUser = (record) => {
   if (!record) return record
   const { User, ...rest } = record
   return { ...rest, user: User || record.user || null }
-}
-
-async function ensureDefaultCashAccounts(tenantId, client = prisma) {
-  await Promise.all(
-    DEFAULT_CASH_ACCOUNTS.map((account) =>
-      client.cashAccount.upsert({
-        where: {
-          tenantId_name: {
-            tenantId,
-            name: account.name
-          }
-        },
-        update: { type: account.type, isActive: true },
-        create: {
-          tenantId,
-          name: account.name,
-          type: account.type,
-          currency: 'UGX'
-        }
-      })
-    )
-  )
-}
-
-async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = prisma) {
-  const account = accountForPaymentMethod(paymentMethod)
-
-  return client.cashAccount.upsert({
-    where: {
-      tenantId_name: {
-        tenantId,
-        name: account.name
-      }
-    },
-    update: { type: account.type, isActive: true },
-    create: {
-      tenantId,
-      name: account.name,
-      type: account.type,
-      currency: 'UGX'
-    }
-  })
 }
 
 async function paymentMethodPermissionsForRequest(req) {
@@ -255,7 +217,8 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       })
     }
 
-    // Determine cash account: prefer explicitly selected, then user's assigned, then tenant default for method
+    // Determine cash account: prefer explicitly selected, then user's assigned matching account.
+    // Never auto-create payment accounts; users should create intentional transaction accounts.
     let resolvedCashAccountId = null
     if (cashAccountId) {
       // Verify the selected account belongs to tenant and is active
@@ -287,10 +250,11 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       }
     }
 
-    // Fall back to a tenant-level default cash account for the payment method
     if (!resolvedCashAccountId) {
-      const defaultAcc = await cashAccountForPaymentMethod(req.tenant.id, resolvedPaymentMethod)
-      resolvedCashAccountId = defaultAcc.id
+      return res.status(400).json({
+        error: `Select an existing ${paymentMethodAccountLabel(resolvedPaymentMethod)} account for ${resolvedPaymentMethod} payments. Create it first in Transaction Accounts if it does not exist.`,
+        code: 'PAYMENT_ACCOUNT_REQUIRED'
+      })
     }
 
     // Validate sufficient balance
@@ -464,8 +428,6 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 // Get all cash accounts
 router.get('/cash-accounts', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
-    await ensureDefaultCashAccounts(req.tenant.id)
-
     // Include assigned users so we can surface staff + branch on the API response
     const rawAccounts = await prisma.cashAccount.findMany({
       where: {
@@ -537,7 +499,8 @@ router.get('/cash-accounts', authenticateToken, requireAnyPermission(['canViewAc
 // Create cash account
 router.post('/cash-accounts', authenticateToken, requireAnyPermission(['canCreateAccounting', 'canCreateExpense', 'canEditAccounting']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
-    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
+    const { name, type, currency, accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
+    const resolvedCurrency = normalizeCurrency(currency || await tenantCurrency(req.tenant.id))
 
     // Map frontend mobile money fields to schema columns
     const resolvedAccountNumber = accountNumber || phoneNumber || null
@@ -584,7 +547,7 @@ router.post('/cash-accounts', authenticateToken, requireAnyPermission(['canCreat
         tenantId: req.tenant.id,
         name,
         type,
-        currency,
+        currency: resolvedCurrency,
         accountNumber: resolvedAccountNumber,
         bankName: type === 'bank' ? bankName : null,
         accountHolder: resolvedAccountHolder,
@@ -619,7 +582,7 @@ router.post('/cash-accounts', authenticateToken, requireAnyPermission(['canCreat
 router.put('/cash-accounts/:id', authenticateToken, requireAnyPermission(['canEditAccounting', 'canCreateAccounting', 'canCreateExpense']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
-    const { name, type, currency = 'UGX', accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
+    const { name, type, currency, accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
 
     // Map frontend mobile money fields to schema columns
     const resolvedAccountNumber = accountNumber || phoneNumber || null
@@ -666,13 +629,14 @@ router.put('/cash-accounts/:id', authenticateToken, requireAnyPermission(['canEd
     }
 
     const balanceValue = balance !== undefined ? toMoney(balance, existing.balance) : existing.balance
+    const resolvedCurrency = normalizeCurrency(currency || existing.currency || await tenantCurrency(req.tenant.id))
 
     const account = await prisma.cashAccount.update({
       where: { id },
       data: {
         name,
         type,
-        currency,
+        currency: resolvedCurrency,
         accountNumber: resolvedAccountNumber,
         bankName: type === 'bank' ? bankName : null,
         accountHolder: resolvedAccountHolder,
@@ -760,7 +724,6 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { startDate, endDate } = req.query
-    await ensureDefaultCashAccounts(req.tenant.id)
 
     const dateFilter = startDate && endDate ? {
       createdAt: {

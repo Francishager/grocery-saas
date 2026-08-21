@@ -21,7 +21,7 @@ interface FeatureGuardProps {
 export function FeatureGuard({ feature, permission, children, fallback }: FeatureGuardProps) {
   const { hasFeature, hasAnyFeature, loading, features } = useFeatureAccess()
   const { hasPermission, user } = useJWTAuth()
-  const featureEnabled = Array.isArray(feature) ? hasAnyFeature(feature) : hasAnyFeature(feature)
+  const featureEnabled = Array.isArray(feature) ? hasAnyFeature(feature) : hasFeature(feature)
   const requiredPermissions = Array.isArray(permission) ? permission : permission ? [permission] : []
   const hasRequiredPermission = requiredPermissions.length === 0 || requiredPermissions.some((perm) => hasPermission(perm))
   const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
@@ -66,9 +66,9 @@ export function FeatureGuard({ feature, permission, children, fallback }: Featur
 /**
  * Upgrade plan screen shown when a feature is not available.
  */
-export function UpgradePlan({ feature }: { feature: string }) {
+export function UpgradePlan({ feature }: { feature: string | string[] }) {
   const navigate = useNavigate()
-  const featureLabel = feature
+  const featureLabel = (Array.isArray(feature) ? feature[0] || '' : feature)
     .split('.')
     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
     .join(' → ')
@@ -112,8 +112,8 @@ export function UpgradePlan({ feature }: { feature: string }) {
  * Renders nothing (null) if the feature is disabled — useful for hiding buttons.
  */
 export function FeatureGate({ feature, children, fallback = null }: { feature: string; children: ReactNode; fallback?: ReactNode }) {
-  const { hasAnyFeature } = useFeatureAccess()
-  const allowed = Array.isArray(feature) ? hasAnyFeature(feature) : hasAnyFeature(feature)
+  const { hasFeature } = useFeatureAccess()
+  const allowed = hasFeature(feature)
   if (allowed) return <>{children}</>
   return <>{fallback}</>
 }

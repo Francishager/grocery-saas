@@ -6,6 +6,18 @@ import { auditLog } from "../utils/audit.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
+const receiptDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatReceiptDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : receiptDateFormatter.format(date);
+}
 
 function authenticateReceipt(req, res, next) {
   if (!req.headers.authorization && req.query?.token) {
@@ -46,7 +58,7 @@ async function getReceiptData(req) {
 
   const tenant = await prisma.tenant.findUnique({
     where: { id: sale.tenantId || scope.tenantId },
-    select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
+    select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
   });
 
   return { scope, sale, tenant };
@@ -65,6 +77,8 @@ function receiptJson(data) {
       phone: tenant?.phone || null,
       address: tenant?.address || null,
       logo: tenant?.logo || null,
+      currency: tenant?.currency || "UGX",
+      dateFormat: "DD/MM/YY",
       taxEnabled: tenant?.taxEnabled || false,
       taxRate: tenant?.taxRate || 0,
       taxId: tenant?.taxId || null,
@@ -133,8 +147,9 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     // Get tenant info for receipt header
     const tenant = await prisma.tenant.findUnique({
       where: { id: sale.tenantId || scope.tenantId },
-      select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
+      select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
+    const receiptCurrency = tenant?.currency || "UGX";
 
     const doc = new PDFDocument({ size: [226.77, 600], margin: 10 }); // 80mm thermal width
     doc.fillColor("black");
@@ -184,12 +199,13 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
 
     // Receipt info
     doc.fontSize(9).font("Helvetica-Bold").text(`RECEIPT: ${sale.receiptNo}`, { align: "center" });
-    doc.fontSize(9).font("Helvetica-Bold").text(`Date: ${new Date(sale.createdAt).toLocaleString()}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Date: ${formatReceiptDate(sale.createdAt)}`, { align: "center" });
     doc.fontSize(9).font("Helvetica-Bold").text(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim(), { align: "center" });
     if (sale.customerName) {
       doc.fontSize(9).font("Helvetica-Bold").text(`Customer: ${sale.customerName}`, { align: "center" });
     }
     doc.fontSize(9).font("Helvetica-Bold").text(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Currency: ${receiptCurrency}`, { align: "center" });
     doc.moveDown(0.3);
 
     // Divider
@@ -269,8 +285,9 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: sale.tenantId || scope.tenantId },
-      select: { name: true, email: true, phone: true, address: true, logo: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
+      select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
+    const receiptCurrency = tenant?.currency || "UGX";
 
     // Build ESC/POS command array (hex strings)
     const cmds = [];
@@ -295,12 +312,13 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
 
     // Receipt info
     cmds.push(escText(`Receipt: ${sale.receiptNo}`));
-    cmds.push(escText(`Date: ${new Date(sale.createdAt).toLocaleString()}`));
+    cmds.push(escText(`Date: ${formatReceiptDate(sale.createdAt)}`));
     cmds.push(escText(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim()));
     if (sale.customerName) {
       cmds.push(escText(`Customer: ${sale.customerName}`));
     }
     cmds.push(escText(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`));
+    cmds.push(escText(`Currency: ${receiptCurrency}`));
     cmds.push(escText(""));
 
     // Separator

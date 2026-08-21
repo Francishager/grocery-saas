@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePlatformAdmin } from '../middleware/auth.js'
-import { invalidateFeatureCache } from '../middleware/featureCheck.js'
+import { filterPlanFeaturesByPlanList, invalidateFeatureCache, planFeatureIsAllowedByPlanList } from '../middleware/featureCheck.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -127,7 +127,9 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
     }
 
     planFeatures.forEach((pf) => {
-      if (pf.feature?.name) featureAccess[pf.feature.name] = { enabled: true, source: 'plan' }
+      if (pf.feature?.name && planFeatureIsAllowedByPlanList(tenant.plan, pf.feature.name)) {
+        featureAccess[pf.feature.name] = { enabled: true, source: 'plan' }
+      }
     })
 
     tenant.features.forEach((tf) => {
@@ -198,54 +200,15 @@ router.get('/plans', authenticateToken, requirePlatformAdmin, async (req, res) =
             feature: true
           }
         },
-        tenants: {
-          select: { id: true }
-        }
-      },
-      orderBy: { price: 'asc' }
-    })
-
-    // Backfill: for any plan whose JSON features array has entries without PlanFeature rows, create them
-    for (const plan of plans) {
-      const existingNames = new Set(plan.planFeatures.map(pf => pf.feature?.name).filter(Boolean))
-      const jsonFeatures = Array.isArray(plan.features) ? plan.features : []
-      const missing = jsonFeatures.filter(name => !existingNames.has(name))
-      if (missing.length > 0) {
-        for (const featureName of missing) {
-          let feature = await prisma.feature.findUnique({ where: { name: featureName } })
-          if (!feature) {
-            feature = await prisma.feature.create({
-              data: {
-                name: featureName,
-                displayName: featureName.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' '),
-                category: featureName.split('.')[0] || 'core',
-                module: featureName.split('.')[0] || 'core',
-                isActive: true,
-              }
-            })
-          }
-          await prisma.planFeature.create({
-            data: { planId: plan.id, featureId: feature.id, enabled: true }
-          })
-        }
-        // Invalidate cache for tenants on this plan
-        for (const t of plan.tenants) {
-          invalidateFeatureCache(t.id)
-        }
-      }
-    }
-
-    // Re-fetch with updated planFeatures if any were backfilled
-    const finalPlans = await prisma.plan.findMany({
-      include: {
-        planFeatures: { include: { feature: true } },
-        tenants: { select: { id: true } },
         _count: { select: { tenants: true } }
       },
       orderBy: { price: 'asc' }
     })
 
-    res.json(finalPlans)
+    res.json(plans.map((plan) => ({
+      ...plan,
+      planFeatures: filterPlanFeaturesByPlanList(plan, plan.planFeatures),
+    })))
   } catch (error) {
     console.error('Get plans error:', error)
     res.status(500).json({ error: 'Failed to fetch plans' })
@@ -429,11 +392,15 @@ router.delete('/plans/:id', authenticateToken, requirePlatformAdmin, async (req,
 // Get plan features (for toggling UI)
 router.get('/plans/:planId/features', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
+    const plan = await prisma.plan.findUnique({
+      where: { id: req.params.planId },
+      select: { features: true }
+    })
     const pfs = await prisma.planFeature.findMany({
       where: { planId: req.params.planId },
       include: { feature: true }
     })
-    res.json(pfs)
+    res.json(filterPlanFeaturesByPlanList(plan, pfs))
   } catch (err) {
     console.error('Get plan features error:', err)
     res.status(500).json({ error: 'Internal server error' })
@@ -764,7 +731,9 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
       featureAccess[feature.name] = { enabled: false, source: 'default', displayName: feature.displayName, category: feature.category }
     }
     planFeatures.forEach((pf) => {
-      if (pf.feature?.name) featureAccess[pf.feature.name] = { enabled: true, source: 'plan', displayName: pf.feature.displayName, category: pf.feature.category }
+      if (pf.feature?.name && planFeatureIsAllowedByPlanList(tenant.plan, pf.feature.name)) {
+        featureAccess[pf.feature.name] = { enabled: true, source: 'plan', displayName: pf.feature.displayName, category: pf.feature.category }
+      }
     })
     tenantFeatureOverrides.forEach((tf) => {
       if (tf.feature?.name) featureAccess[tf.feature.name] = { enabled: tf.enabled, source: 'override', displayName: tf.feature.displayName, category: tf.feature.category }

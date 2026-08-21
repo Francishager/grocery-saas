@@ -298,6 +298,12 @@ router.get("/dashboard", authenticateToken, requirePermission("canViewHR"), asyn
     const inSixtyDays = addDays(today, 60);
     const currentMonth = monthRange(0);
     const previousMonth = monthRange(-1);
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: scope.tenantId },
+      select: { currency: true },
+    }).catch(() => null);
+    const reportCurrency = /^[A-Z]{3}$/.test(String(tenant?.currency || "")) ? tenant.currency : "UGX";
+    const formatMoney = (value) => `${reportCurrency} ${money(value).toLocaleString("en-US")}`;
 
     const employeeWhere = scopedWhere(scope, {});
     const activeEmployeeWhere = scopedWhere(scope, { status: { notIn: ["terminated", "inactive"] } });
@@ -485,7 +491,7 @@ router.get("/dashboard", authenticateToken, requirePermission("canViewHR"), asyn
       insights: [
         `Payroll ${payrollChange >= 0 ? "increased" : "decreased"} by ${Math.abs(payrollChange).toFixed(1)}% compared with last month.`,
         `${contractsExpiringSoon} employees have contracts expiring within 60 days.`,
-        `${money(outstandingAdvances._sum.outstandingAmount).toLocaleString()} remains outstanding in salary advances.`,
+        `${formatMoney(outstandingAdvances._sum.outstandingAmount)} remains outstanding in salary advances.`,
       ],
     });
   } catch (err) {

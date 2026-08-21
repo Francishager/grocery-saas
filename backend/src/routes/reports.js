@@ -4235,6 +4235,12 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
   try {
     const s = await getScope(req);
     const { from, to } = req.query;
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: s.tenantId },
+      select: { currency: true },
+    }).catch(() => null);
+    const reportCurrency = tenant?.currency || "UGX";
+    const fmtTenantCurrency = (value) => fmtCurrency(value, reportCurrency);
 
     // Determine current and previous period
     let curStart, curEnd, prevStart, prevEnd;
@@ -4454,9 +4460,9 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     // Revenue insight
     if (prevRevenue > 0) {
       if (revChangePct > 10) {
-        insights.push({ type: 'positive', icon: 'trend-up', title: 'Revenue Growth', text: `Revenue grew ${fmtPct(revChangePct)} compared to the previous period. ${topGrowers.length > 0 ? `Top contributor: ${topGrowers[0].name} (+${fmtCurrency(topGrowers[0].revenueChange)}).` : ''}` });
+        insights.push({ type: 'positive', icon: 'trend-up', title: 'Revenue Growth', text: `Revenue grew ${fmtPct(revChangePct)} compared to the previous period. ${topGrowers.length > 0 ? `Top contributor: ${topGrowers[0].name} (+${fmtTenantCurrency(topGrowers[0].revenueChange)}).` : ''}` });
       } else if (revChangePct < -10) {
-        insights.push({ type: 'negative', icon: 'trend-down', title: 'Revenue Decline', text: `Revenue dropped ${fmtPct(revChangePct)} compared to the previous period. ${topDecliners.length > 0 ? `Biggest decline: ${topDecliners[0].name} (${fmtCurrency(topDecliners[0].revenueChange)}).` : 'Investigate market conditions or stock availability.'}` });
+        insights.push({ type: 'negative', icon: 'trend-down', title: 'Revenue Decline', text: `Revenue dropped ${fmtPct(revChangePct)} compared to the previous period. ${topDecliners.length > 0 ? `Biggest decline: ${topDecliners[0].name} (${fmtTenantCurrency(topDecliners[0].revenueChange)}).` : 'Investigate market conditions or stock availability.'}` });
       } else {
         insights.push({ type: 'neutral', icon: 'info', title: 'Revenue Stable', text: `Revenue changed by ${fmtPct(revChangePct)} — relatively stable period-over-period.` });
       }
@@ -4465,7 +4471,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     // Profitability insight
     if (prevNetProfit !== 0) {
       if (profitChangePct > 15) {
-        insights.push({ type: 'positive', icon: 'trend-up', title: 'Profitability Improvement', text: `Net profit increased ${fmtPct(profitChangePct)}. ${expChangePct < 0 ? `Expenses were reduced by ${fmtPct(Math.abs(expChangePct))}, contributing to better margins.` : curCogs < prevCogs ? `Lower COGS (by ${fmtCurrency(prevCogs - curCogs)}) improved gross margins.` : 'Revenue growth outpaced cost increases.'}` });
+        insights.push({ type: 'positive', icon: 'trend-up', title: 'Profitability Improvement', text: `Net profit increased ${fmtPct(profitChangePct)}. ${expChangePct < 0 ? `Expenses were reduced by ${fmtPct(Math.abs(expChangePct))}, contributing to better margins.` : curCogs < prevCogs ? `Lower COGS (by ${fmtTenantCurrency(prevCogs - curCogs)}) improved gross margins.` : 'Revenue growth outpaced cost increases.'}` });
       } else if (profitChangePct < -15) {
         const reasons = [];
         if (expChangePct > 10) reasons.push(`expenses rose ${fmtPct(expChangePct)}`);
@@ -4486,7 +4492,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
 
     // Expense insight
     if (expChangePct > 20) {
-      insights.push({ type: 'warning', icon: 'alert', title: 'Expense Surge', text: `Operating expenses jumped ${fmtPct(expChangePct)} (${fmtCurrency(prevExpenses)} → ${fmtCurrency(curExpenses)}). Review expense categories for cost-saving opportunities.` });
+      insights.push({ type: 'warning', icon: 'alert', title: 'Expense Surge', text: `Operating expenses jumped ${fmtPct(expChangePct)} (${fmtTenantCurrency(prevExpenses)} -> ${fmtTenantCurrency(curExpenses)}). Review expense categories for cost-saving opportunities.` });
     } else if (expChangePct < -15) {
       insights.push({ type: 'positive', icon: 'trend-down', title: 'Expense Reduction', text: `Operating expenses decreased by ${fmtPct(Math.abs(expChangePct))}. Good cost discipline maintained.` });
     }
@@ -4506,7 +4512,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
         type: curAvgSale > prevAvgSale ? 'positive' : 'negative',
         icon: curAvgSale > prevAvgSale ? 'trend-up' : 'trend-down',
         title: 'Average Transaction Value',
-        text: `Average sale ${dir} from ${fmtCurrency(prevAvgSale)} to ${fmtCurrency(curAvgSale)} (${fmtPct(pct(curAvgSale, prevAvgSale))}). ${curAvgSale > prevAvgSale ? 'Customers are spending more per visit.' : 'Consider upselling strategies or bundle offers.'}`,
+        text: `Average sale ${dir} from ${fmtTenantCurrency(prevAvgSale)} to ${fmtTenantCurrency(curAvgSale)} (${fmtPct(pct(curAvgSale, prevAvgSale))}). ${curAvgSale > prevAvgSale ? 'Customers are spending more per visit.' : 'Consider upselling strategies or bundle offers.'}`,
       });
     }
 
@@ -4528,7 +4534,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     if (categoryAnalysis.length > 0) {
       const topCat = categoryAnalysis[0];
       if (topCat.change > 20) {
-        insights.push({ type: 'positive', icon: 'trend-up', title: 'Category Performance', text: `${topCat.category} is your top revenue category (${fmtCurrency(topCat.currentRevenue)}) and grew ${fmtPct(topCat.change)} period-over-period.` });
+        insights.push({ type: 'positive', icon: 'trend-up', title: 'Category Performance', text: `${topCat.category} is your top revenue category (${fmtTenantCurrency(topCat.currentRevenue)}) and grew ${fmtPct(topCat.change)} period-over-period.` });
       } else if (topCat.change < -15) {
         insights.push({ type: 'warning', icon: 'trend-down', title: 'Category Concern', text: `Your top category ${topCat.category} declined ${fmtPct(topCat.change)}. Investigate demand, pricing, or competition in this segment.` });
       }
@@ -4558,6 +4564,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       branchAnalysis,
       paymentMethodAnalysis,
       snapshot,
+      currency: reportCurrency,
       periods: {
         current: { from: curStart, to: curEnd },
         previous: { from: prevStart, to: prevEnd },
@@ -4570,8 +4577,9 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
 });
 
 // Helper for currency formatting in insights
-function fmtCurrency(value) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'UGX', minimumFractionDigits: 0 }).format(value || 0);
+function fmtCurrency(value, currency = "UGX") {
+  const normalizedCurrency = /^[A-Z]{3}$/.test(String(currency || "")) ? currency : "UGX";
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: normalizedCurrency, minimumFractionDigits: 0 }).format(value || 0);
 }
 
 export default router;

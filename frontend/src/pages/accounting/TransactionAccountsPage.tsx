@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
+import { cacheTenantFormattingSettings, getTenantCurrency } from '@/lib/utils'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalCashAccounts, getLocalBranches } from '@/db/hybrid'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -63,6 +64,7 @@ export default function TransactionAccountsPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
+  const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<CashAccount[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [staff, setStaff] = useState<StaffMember[]>([])
@@ -80,7 +82,7 @@ export default function TransactionAccountsPage() {
     mobileMoneyName: '',
     network: '',
     balance: '0',
-    currency: 'USD',
+    currency: tenantCurrency,
     branchId: '',
     assignedStaffId: '',
     depletionAlertThreshold: '',
@@ -134,7 +136,10 @@ export default function TransactionAccountsPage() {
     apiFetch('/api/settings/tax-config').then(async (res) => {
       if (res.ok) {
         const data = await res.json()
-        if (data.currency) setForm(f => ({ ...f, currency: data.currency }))
+        if (data.currency) {
+          cacheTenantFormattingSettings(data)
+          setForm(f => ({ ...f, currency: data.currency }))
+        }
       }
     }).catch(() => {})
     if (user?.branchId && !hasPermission('canViewBranch')) {
@@ -155,7 +160,7 @@ export default function TransactionAccountsPage() {
 
   const fmt = (val: number) => Number(val || 0).toFixed(2)
 
-  const fmtCompact = (val: number, currency = 'UGX') => {
+  const fmtCompact = (val: number, currency = getTenantCurrency()) => {
     const num = Number(val || 0)
     const abs = Math.abs(num)
     let compact: string
@@ -166,7 +171,7 @@ export default function TransactionAccountsPage() {
     return `${currency} ${compact}`
   }
 
-  const fmtFull = (val: number, currency = 'UGX') => {
+  const fmtFull = (val: number, currency = getTenantCurrency()) => {
     return `${currency} ${Number(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
@@ -221,7 +226,7 @@ export default function TransactionAccountsPage() {
         toast({ title: editingAccount ? 'Account updated' : 'Account created' })
         setShowModal(false)
         setEditingAccount(null)
-        setForm({ name: '', type: form.type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency, branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
+        setForm({ name: '', type: form.type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
         fetchAccounts()
       } else {
         const data = await res.json()
@@ -243,7 +248,7 @@ export default function TransactionAccountsPage() {
       mobileMoneyName: account.mobileMoneyName || '',
       network: account.network || '',
       balance: String(account.balance || 0),
-      currency: account.currency || 'USD',
+      currency: account.currency || getTenantCurrency(),
       branchId: account.branchId || '',
       assignedStaffId: account.assignedStaffId || '',
       depletionAlertThreshold: account.depletionAlertThreshold != null ? String(account.depletionAlertThreshold) : '',
@@ -253,7 +258,7 @@ export default function TransactionAccountsPage() {
 
   const openCreate = (type: string) => {
     setEditingAccount(null)
-    setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency, branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
+    setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
     setShowModal(true)
   }
 
@@ -302,7 +307,7 @@ export default function TransactionAccountsPage() {
     </div>
   )
 
-  const businessCurrency = form.currency || 'UGX'
+  const businessCurrency = form.currency || getTenantCurrency()
 
   const summaryItems = [
     { label: 'Total Balance', value: totalBalance, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },

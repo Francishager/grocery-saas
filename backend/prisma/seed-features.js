@@ -188,6 +188,9 @@ async function seedFeatures() {
 
     // ===== Developer / Data Tools =====
     { name: 'developer.data_importer', displayName: 'Data Importer', module: 'developer', category: 'core', description: 'Bulk import products, customers, and inventory data via CSV/Excel' },
+
+    // ===== Referrals =====
+    { name: 'referrals', displayName: 'Refer & Earn', module: 'referrals', category: 'advanced', description: 'Business referral program' },
   ]
 
   for (const feature of allFeatures) {

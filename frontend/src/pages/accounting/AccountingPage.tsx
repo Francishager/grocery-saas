@@ -16,7 +16,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { formatDisplayDate } from '@/lib/utils'
+import { cacheTenantFormattingSettings, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
 
 interface Account {
   id: string
@@ -255,6 +255,7 @@ export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
+  const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -272,7 +273,7 @@ export default function AccountingPage() {
   const [accDescription, setAccDescription] = useState('')
   const [accCategory, setAccCategory] = useState('')
   const [accBranch, setAccBranch] = useState('')
-  const [accCurrency, setAccCurrency] = useState('USD')
+  const [accCurrency, setAccCurrency] = useState(tenantCurrency)
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set())
   const [selectedHistoryAccount, setSelectedHistoryAccount] = useState<Account | null>(null)
   const [branchSearch, setBranchSearch] = useState('')
@@ -284,7 +285,7 @@ export default function AccountingPage() {
   const [jeAccount, setJeAccount] = useState('')
   const [jeDescription, setJeDescription] = useState('')
   const [jeAmount, setJeAmount] = useState('')
-  const [jeCurrency, setJeCurrency] = useState('USD')
+  const [jeCurrency, setJeCurrency] = useState(tenantCurrency)
   const [jeVoucher, setJeVoucher] = useState('')
   const [jePaymentMethod, setJePaymentMethod] = useState('cash')
   const [jePaymentAccount, setJePaymentAccount] = useState('')
@@ -316,7 +317,7 @@ export default function AccountingPage() {
   const [taxForm, setTaxForm] = useState({
     branch: '',
     amount: '',
-    currency: 'USD',
+    currency: tenantCurrency,
     from: '',
     to: '',
     prn: '',
@@ -480,7 +481,12 @@ export default function AccountingPage() {
     apiFetch('/api/settings/tax-config').then(async (res) => {
       if (res.ok) {
         const data = await res.json()
-        if (data.currency) setAccCurrency(data.currency)
+        if (data.currency) {
+          cacheTenantFormattingSettings(data)
+          setAccCurrency(data.currency)
+          setJeCurrency(data.currency)
+          setTaxForm((current) => ({ ...current, currency: data.currency }))
+        }
       }
     }).catch(() => {})
   }, [user, hasPermission])
@@ -733,7 +739,7 @@ export default function AccountingPage() {
       if (res.ok) {
         toast({ title: 'Tax payment saved' })
         setShowTaxModal(false)
-        setTaxForm({ branch: '', amount: '', currency: 'USD', from: '', to: '', prn: '', paymentMethod: 'cash', dateOfPayment: new Date().toISOString().split('T')[0] })
+        setTaxForm({ branch: '', amount: '', currency: getTenantCurrency(), from: '', to: '', prn: '', paymentMethod: 'cash', dateOfPayment: new Date().toISOString().split('T')[0] })
         fetchTaxPayments()
       } else {
         const data = await res.json()

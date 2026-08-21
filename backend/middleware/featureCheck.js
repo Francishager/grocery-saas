@@ -5,6 +5,7 @@ const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 // Cache tenant features in-memory for 60 seconds to avoid DB hit on every request
 const featureCache = new Map(); // tenantId -> { features: Set, expiresAt: number }
 const CACHE_TTL = 60_000;
+const FEATURE_KEY_PATTERN = /^[a-z][a-z0-9_-]*(\.[a-z0-9_-]+)*$/i;
 
 function featureAliases(featureName) {
   const aliases = new Set([
@@ -36,6 +37,28 @@ export function hasFeatureAccess(features, featureName) {
   return [...featureAliases(featureName)].some((name) => features.has(name));
 }
 
+export function explicitPlanFeatureNames(plan) {
+  const featureList = Array.isArray(plan?.features) ? plan.features : [];
+  const explicit = featureList
+    .map((featureName) => String(featureName || "").trim())
+    .filter((featureName) => FEATURE_KEY_PATTERN.test(featureName));
+
+  return explicit.length > 0 ? new Set(explicit) : null;
+}
+
+export function planFeatureIsAllowedByPlanList(plan, featureName) {
+  const explicit = explicitPlanFeatureNames(plan);
+  if (!explicit) return true;
+  return explicit.has(featureName);
+}
+
+export function filterPlanFeaturesByPlanList(plan, planFeatures = []) {
+  return planFeatures.filter((planFeature) => {
+    const featureName = planFeature?.feature?.name;
+    return featureName && planFeatureIsAllowedByPlanList(plan, featureName);
+  });
+}
+
 /**
  * Resolve the effective feature set for a tenant.
  * Plan features (PlanFeature) are the primary source.
@@ -52,7 +75,14 @@ export async function getTenantFeatures(tenantId) {
   // 1. Plan-level features (primary source)
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    select: { planId: true },
+    select: {
+      planId: true,
+      plan: {
+        select: {
+          features: true,
+        },
+      },
+    },
   });
 
   if (tenant?.planId) {
@@ -61,7 +91,9 @@ export async function getTenantFeatures(tenantId) {
       include: { feature: true },
     });
     planFeatures.forEach((pf) => {
-      if (pf.feature?.name) effective.add(pf.feature.name);
+      if (pf.feature?.name && planFeatureIsAllowedByPlanList(tenant.plan, pf.feature.name)) {
+        effective.add(pf.feature.name);
+      }
     });
   }
 

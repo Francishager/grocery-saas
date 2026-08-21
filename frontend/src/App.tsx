@@ -203,13 +203,13 @@ function App() {
           <Route path="manufacturing" element={<FeatureGuard feature="manufacturing"><ManufacturingPage /></FeatureGuard>} />
           <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
           <Route path="service" element={<Navigate to="/tenant/service/appointments" replace />} />
-          <Route path="service/:tab" element={<FeatureGuard feature={["service", "fuel_station.car_wash", "fuel_station.garage", "fuel_station"]}><ServiceBusinessPage /></FeatureGuard>} />
+          <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />
           <Route path="staff" element={<FeatureGuard feature="settings.users"><StaffPage /></FeatureGuard>} />
           <Route path="profile" element={<UserProfilePage />} />
-          <Route path="referrals" element={<ReferralPage />} />
+          <Route path="referrals" element={<FeatureGuard feature="referrals"><ReferralPage /></FeatureGuard>} />
           <Route path="settings" element={<FeatureGuard feature="settings"><BusinessSettingsPage /></FeatureGuard>} />
           <Route path="tax" element={<FeatureGuard feature="settings.taxes"><TaxManagementPage /></FeatureGuard>} />
           <Route path="receipt-settings" element={<FeatureGuard feature="settings"><ReceiptSettingsPage /></FeatureGuard>} />

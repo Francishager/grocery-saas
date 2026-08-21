@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api'
 import { useToast } from '@/hooks/use-toast'
+import { formatCurrency } from '@/lib/utils'
 
 interface DashboardData {
   stats: Record<string, number>
@@ -30,16 +31,19 @@ const statLabels: Array<{ key: string; label: string; icon: any }> = [
   { key: 'newHires', label: 'New Hires', icon: Users },
 ]
 
+const moneyStatKeys = new Set(['monthlyPayroll', 'salaryPayable', 'salaryPaidThisMonth', 'outstandingSalaryAdvances'])
+
 function formatNumber(key: string, value: number) {
-  if (['monthlyPayroll', 'salaryPayable', 'salaryPaidThisMonth', 'outstandingSalaryAdvances'].includes(key)) {
-    return Number(value || 0).toLocaleString()
+  if (moneyStatKeys.has(key)) {
+    return formatCurrency(Number(value || 0))
   }
   if (key === 'employeeTurnover') return `${Number(value || 0).toFixed(1)}%`
   return Number(value || 0).toLocaleString()
 }
 
-function MiniBarChart({ data, valueKey = 'value' }: { data: Array<Record<string, any>>; valueKey?: string }) {
+function MiniBarChart({ data, valueKey = 'value', format = 'number' }: { data: Array<Record<string, any>>; valueKey?: string; format?: 'number' | 'currency' }) {
   const max = Math.max(1, ...data.map((row) => Number(row[valueKey] || 0)))
+  const formatValue = (value: number) => format === 'currency' ? formatCurrency(value) : value.toLocaleString()
   return (
     <div className="space-y-2">
       {data.length === 0 ? (
@@ -50,7 +54,7 @@ function MiniBarChart({ data, valueKey = 'value' }: { data: Array<Record<string,
           <div className="h-2 rounded bg-slate-100">
             <div className="h-2 rounded bg-primary" style={{ width: `${Math.max(4, (Number(row[valueKey] || 0) / max) * 100)}%` }} />
           </div>
-          <span className="text-right font-medium tabular-nums">{Number(row[valueKey] || 0).toLocaleString()}</span>
+          <span className="text-right font-medium tabular-nums">{formatValue(Number(row[valueKey] || 0))}</span>
         </div>
       ))}
     </div>
@@ -108,12 +112,12 @@ export default function HRDashboardPage() {
       },
       {
         label: 'Payroll Liability',
-        value: salaryPayable.toLocaleString(),
+        value: formatCurrency(salaryPayable),
         detail: 'Unpaid posted salary balance',
       },
       {
         label: 'Advance & Loan Exposure',
-        value: advances.toLocaleString(),
+        value: formatCurrency(advances),
         detail: 'Outstanding recoverable staff balances',
       },
     ]
@@ -151,7 +155,7 @@ export default function HRDashboardPage() {
             <CardTitle>Payroll Trend</CardTitle>
           </CardHeader>
           <CardContent>
-            <MiniBarChart data={payrollTrend} />
+            <MiniBarChart data={payrollTrend} format="currency" />
           </CardContent>
         </Card>
 

@@ -283,6 +283,11 @@ const MODULES = [
       { name: 'developer.webhooks', displayName: 'Webhooks' },
     ]
   },
+  {
+    id: 'referrals', name: 'Referrals', features: [
+      { name: 'referrals', displayName: 'Refer & Earn' },
+    ]
+  },
 ]
 
 const emptyForm = { name: '', slug: '', price: 0, currency: 'UGX', billingCycle: 'monthly', features: '', maxUsers: 5, maxProducts: 100, maxBranches: 3, maxCustomers: 100, maxSuppliers: 50, isDefault: false }
@@ -322,10 +327,10 @@ export const PlansPage: React.FC = () => {
   const openCreate = () => { setEditingId(null); setForm(emptyForm); setShowForm(true) }
   const openEdit = (p: Plan) => {
     setEditingId(p.id)
-    // Load checked features from planFeatures relation (enabled ones), fall back to JSON features field
-    const enabledFeatureNames = p.planFeatures
-      ? p.planFeatures.filter(pf => pf.enabled).map(pf => pf.feature?.name).filter(Boolean)
-      : (Array.isArray(p.features) ? p.features : [])
+    const enabledFeatureNames = (p.planFeatures || [])
+      .filter(pf => pf.enabled)
+      .map(pf => pf.feature?.name)
+      .filter(Boolean)
     setForm({ name: p.name, slug: p.slug, price: p.price, currency: p.currency, billingCycle: p.billingCycle, features: enabledFeatureNames.join(', '), maxUsers: p.maxUsers, maxProducts: p.maxProducts, maxBranches: p.maxBranches || 3, maxCustomers: p.maxCustomers || 100, maxSuppliers: p.maxSuppliers || 50, isDefault: p.isDefault })
     setShowForm(true)
   }
@@ -446,9 +451,10 @@ export const PlansPage: React.FC = () => {
                 <span className="px-2 py-1 bg-gray-100 rounded text-xs">{p.maxSuppliers || 50} suppliers</span>
               </div>
               {(() => {
-                const enabledNames = p.planFeatures
-                  ? p.planFeatures.filter(pf => pf.enabled).map(pf => pf.feature?.name).filter(Boolean)
-                  : (Array.isArray(p.features) ? p.features : [])
+                const enabledNames = (p.planFeatures || [])
+                  .filter(pf => pf.enabled)
+                  .map(pf => pf.feature?.name)
+                  .filter(Boolean)
                 return enabledNames.length > 0 ? (
                   <div className="flex flex-wrap gap-1">{enabledNames.slice(0, 8).map((f: string, i: number) => <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{featureLabel(f)}</span>)}{enabledNames.length > 8 && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">+{enabledNames.length - 8} more</span>}</div>
                 ) : null

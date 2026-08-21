@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { HRFormBuilder, HRFormField } from '@/components/hr/HRFormBuilder'
 import { Badge } from '@/components/ui/badge'
+import { formatCurrency } from '@/lib/utils'
 
 interface Employee {
   id: string
@@ -100,7 +101,7 @@ const fullName = (employee: any) =>
 
 const formatMoney = (value?: number | string) => {
   const amount = Number(value || 0)
-  return amount ? `UGX ${amount.toLocaleString()}` : '-'
+  return amount ? formatCurrency(amount) : '-'
 }
 
 const formatDate = (value?: string) => {

@@ -1,5 +1,5 @@
 import React, { useState, forwardRef } from 'react'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { User, Building, CreditCard, Search } from 'lucide-react'
 
 export interface ClientAccount {
@@ -100,11 +100,7 @@ export const FormClientAccount = forwardRef<HTMLInputElement, FormClientAccountP
 
     const formatBalance = (balance?: number) => {
       if (balance === undefined) return null
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'UGX',
-        minimumFractionDigits: 0,
-      }).format(balance)
+      return formatCurrency(balance)
     }
 
     return (

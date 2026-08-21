@@ -1,6 +1,6 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 
@@ -265,6 +265,11 @@ const MODULES = [
       { name: 'developer.data_exporter', displayName: 'Data Exporter' },
       { name: 'developer.api_keys', displayName: 'API Keys' },
       { name: 'developer.webhooks', displayName: 'Webhooks' },
+    ]
+  },
+  {
+    id: 'referrals', name: 'Referrals', icon: Gift, color: 'text-emerald-700 bg-emerald-100', features: [
+      { name: 'referrals', displayName: 'Refer & Earn' },
     ]
   },
 ]

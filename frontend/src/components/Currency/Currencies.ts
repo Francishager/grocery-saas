@@ -1,4 +1,5 @@
 // Currency data and utilities
+import { getTenantCurrency, normalizeCurrency } from '@/lib/utils'
 
 export interface Currency {
   code: string
@@ -48,15 +49,16 @@ export const getCurrency = (code: string): Currency | undefined => {
 // Format amount with currency
 export const formatCurrency = (
   amount: number,
-  currencyCode: string = 'UGX',
+  currencyCode: string = getTenantCurrency(),
   locale: string = 'en-US'
 ): string => {
-  const currency = getCurrency(currencyCode)
+  const resolvedCurrency = normalizeCurrency(currencyCode)
+  const currency = getCurrency(resolvedCurrency)
   
   if (!currency) {
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: currencyCode,
+      currency: resolvedCurrency,
     }).format(amount)
   }
 
@@ -73,8 +75,8 @@ export const formatCurrency = (
 }
 
 // Parse currency string to number
-export const parseCurrency = (value: string, currencyCode: string = 'UGX'): number => {
-  const currency = getCurrency(currencyCode)
+export const parseCurrency = (value: string, currencyCode: string = getTenantCurrency()): number => {
+  const currency = getCurrency(normalizeCurrency(currencyCode))
   
   if (!currency) {
     return parseFloat(value.replace(/[^0-9.-]/g, ''))

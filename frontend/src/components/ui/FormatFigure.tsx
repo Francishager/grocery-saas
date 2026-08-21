@@ -1,5 +1,5 @@
 import React from 'react'
-import { cn } from '@/lib/utils'
+import { cn, getTenantCurrency, normalizeCurrency } from '@/lib/utils'
 
 export interface FormatFigureProps {
   /** Value to format */
@@ -63,7 +63,7 @@ const colorClasses = {
 export const FormatFigure: React.FC<FormatFigureProps> = ({
   value,
   type = 'number',
-  currency = 'UGX',
+  currency,
   locale = 'en-US',
   minimumFractionDigits = 0,
   maximumFractionDigits = 2,
@@ -90,7 +90,7 @@ export const FormatFigure: React.FC<FormatFigureProps> = ({
     switch (type) {
       case 'currency':
         options.style = 'currency'
-        options.currency = currency
+        options.currency = normalizeCurrency(currency || getTenantCurrency())
         break
       case 'percent':
         options.style = 'percent'

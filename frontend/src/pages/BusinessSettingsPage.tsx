@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Upload, Building2 } from 'lucide-react'
 import { settingsApi } from '@/lib/api'
+import { cacheTenantFormattingSettings, DEFAULT_SYSTEM_DATE_FORMAT, getTenantCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,15 +24,21 @@ export default function BusinessSettingsPage() {
     try {
       if (online) {
         const data = await settingsApi.get()
-        setSettings(data)
+        const normalized = { ...data, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
+        cacheTenantFormattingSettings(normalized)
+        setSettings(normalized)
       } else {
         const local = await getLocalSettings()
-        setSettings(local)
+        const normalized = { ...local, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
+        cacheTenantFormattingSettings(normalized)
+        setSettings(normalized)
       }
     } catch (err: any) {
       try {
         const local = await getLocalSettings()
-        setSettings(local)
+        const normalized = { ...local, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
+        cacheTenantFormattingSettings(normalized)
+        setSettings(normalized)
       } catch {
         toast({ variant: 'destructive', title: 'Failed to load settings', description: err?.message })
       }
@@ -45,7 +52,10 @@ export default function BusinessSettingsPage() {
     }
     setSaving(true)
     try {
-      await settingsApi.update(settings)
+      const result = await settingsApi.update({ ...settings, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT })
+      const updatedSettings = result?.tenant || { ...settings, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
+      cacheTenantFormattingSettings(updatedSettings)
+      setSettings(updatedSettings)
       toast({ title: 'Settings saved' })
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Failed to save', description: err?.message })
@@ -111,7 +121,7 @@ export default function BusinessSettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>
-                <select value={settings.currency || 'UGX'} onChange={e => setSettings((s: any) => ({ ...s, currency: e.target.value }))}
+                <select value={settings.currency || getTenantCurrency()} onChange={e => setSettings((s: any) => ({ ...s, currency: e.target.value }))}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   <option value="UGX">UGX - Ugandan Shilling</option>
                   <option value="KES">KES - Kenyan Shilling</option>

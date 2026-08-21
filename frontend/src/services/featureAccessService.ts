@@ -221,7 +221,7 @@ class FeatureAccessService {
   private getFeatureCategory(featureName: string): string {
     const module = featureName.split('.')[0]
     const coreModules = ['dashboard', 'sales', 'inventory', 'customers', 'reports', 'settings']
-    const advancedModules = ['suppliers', 'receivables', 'payables', 'expenses', 'multi_branch', 'audit', 'rentals', 'hr', 'service', 'accounting', 'restaurant', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets', 'developer']
+    const advancedModules = ['suppliers', 'receivables', 'payables', 'expenses', 'multi_branch', 'audit', 'rentals', 'hr', 'service', 'accounting', 'restaurant', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets', 'developer', 'referrals']
     const integrationModules = ['communication', 'integrations']
     if (coreModules.includes(module)) return 'core'
     if (advancedModules.includes(module)) return 'advanced'

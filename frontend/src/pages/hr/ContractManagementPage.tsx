@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { HRFormBuilder, HRFormField } from '@/components/hr/HRFormBuilder'
 import { Badge } from '@/components/ui/badge'
+import { formatCurrency } from '@/lib/utils'
 
 interface Contract {
   id: string
@@ -78,7 +79,7 @@ export default function ContractManagementPage() {
       key: 'salary',
       label: 'Salary',
       width: '15%',
-      render: (value) => `$${Number(value).toLocaleString()}`,
+      render: (value) => formatCurrency(Number(value || 0)),
     },
     {
       key: 'startDate',

@@ -131,11 +131,15 @@ export function NotificationBell() {
   const generateJobNotifications = useCallback(async (): Promise<NotificationItem[]> => {
     const jobs: NotificationItem[] = []
     try {
+      const canUseInventory = hasFeature('inventory')
+      const canUseRentals = hasFeature('rentals')
+      const canUseHR = hasFeature('hr')
+      const canUsePayables = hasFeature('payables')
       const [products, rentals, leaveRequests, purchases] = await Promise.all([
-        db.products.toArray(),
-        db.rentals.toArray(),
-        db.leaveRequests.toArray(),
-        db.purchases.toArray(),
+        canUseInventory ? db.products.toArray() : Promise.resolve([]),
+        canUseRentals ? db.rentals.toArray() : Promise.resolve([]),
+        canUseHR ? db.leaveRequests.toArray() : Promise.resolve([]),
+        canUsePayables ? db.purchases.toArray() : Promise.resolve([]),
       ])
 
       // Low-stock products
@@ -229,7 +233,7 @@ export function NotificationBell() {
       // ignore
     }
     return jobs
-  }, [])
+  }, [hasFeature])
 
   const addDailyReminderIfNeeded = useCallback(async (base: NotificationItem[]) => {
     if (typeof window === 'undefined') return base

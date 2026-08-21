@@ -2,6 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
@@ -793,7 +794,14 @@ router.get("/me/features", authenticateToken, async (req, res) => {
       // 1. Plan-level features (primary source)
       const tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { planId: true },
+        select: {
+          planId: true,
+          plan: {
+            select: {
+              features: true,
+            },
+          },
+        },
       });
 
       if (tenant?.planId) {
@@ -802,7 +810,7 @@ router.get("/me/features", authenticateToken, async (req, res) => {
           include: { feature: true },
         });
         planFeatures.forEach((pf) => {
-          if (pf.feature?.name) {
+          if (pf.feature?.name && planFeatureIsAllowedByPlanList(tenant.plan, pf.feature.name)) {
             featureMap[pf.feature.name] = { enabled: true, source: "plan" };
           }
         });

@@ -48,13 +48,13 @@ function getUserPermissions(): string[] {
 function isFeatureEnabled(featureName: string): boolean {
   try {
     const cached = localStorage.getItem('cachedFeatures')
-    if (!cached) return true // No cache yet — allow (backend will 403 if not enabled)
+    if (!cached) return false
     const features = JSON.parse(cached)
     const entry = features?.[featureName]
     if (entry === undefined) return false // Not in plan
     return entry.enabled === true
   } catch {
-    return true // On error, allow
+    return false
   }
 }
 
@@ -113,6 +113,7 @@ export async function pullAll(): Promise<void> {
   setStatus('syncing')
   let total = 0
 
+  if (canPull('inventory', 'canViewProduct'))
   total += await pullTable('/api/inventory?limit=500', 'products', (p: any) => ({
     id: p.id, name: p.name, sku: p.sku, barcode: p.barcode,
     price: p.price ?? 0, cost: p.cost ?? 0, quantity: p.quantity ?? 0,
@@ -122,6 +123,7 @@ export async function pullAll(): Promise<void> {
     updatedAt: p.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('sales', 'canViewSale'))
   total += await pullTable('/api/sales?limit=500', 'sales', (s: any) => ({
     id: s.id, receiptNo: s.receiptNo, subtotal: s.subtotal ?? 0,
     discount: s.discount ?? 0, tax: s.tax ?? 0, total: s.total ?? 0,
@@ -131,6 +133,7 @@ export async function pullAll(): Promise<void> {
     createdAt: s.createdAt, updatedAt: s.updatedAt || s.createdAt,
   }))
 
+  if (canPull('receivables', 'canViewReceivable'))
   total += await pullTable('/api/receivables/customers?limit=500', 'customers', (c: any) => ({
     id: c.id, name: c.name, phone: c.phone, email: c.email,
     balance: c.balance ?? 0, branchId: c.branchId,
@@ -139,11 +142,13 @@ export async function pullAll(): Promise<void> {
     updatedAt: c.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('inventory', 'canViewProduct'))
   total += await pullTable('/api/inventory/categories', 'categories', (c: any) => ({
     id: c.id, name: c.name, slug: c.slug, categoryType: c.categoryType,
     updatedAt: c.updatedAt || new Date().toISOString(),
   }))
 
+  if (canPull('multi_branch', 'canViewBranch'))
   total += await pullTable('/api/branches', 'branches', (b: any) => ({
     id: b.id, name: b.name, address: b.address, isActive: b.isActive,
     updatedAt: b.updatedAt || new Date().toISOString(),

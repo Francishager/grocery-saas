@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { HRFormBuilder, HRFormField } from '@/components/hr/HRFormBuilder'
+import { formatCurrency } from '@/lib/utils'
 
 interface Position {
   id: string
@@ -84,13 +85,13 @@ export default function PositionManagementPage() {
       key: 'minSalary',
       label: 'Min Salary',
       width: '15%',
-      render: (value) => value ? `$${Number(value).toLocaleString()}` : '-',
+      render: (value) => value ? formatCurrency(Number(value)) : '-',
     },
     {
       key: 'maxSalary',
       label: 'Max Salary',
       width: '15%',
-      render: (value) => value ? `$${Number(value).toLocaleString()}` : '-',
+      render: (value) => value ? formatCurrency(Number(value)) : '-',
     },
     {
       key: 'isActive',

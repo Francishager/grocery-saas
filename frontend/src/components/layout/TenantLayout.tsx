@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
-import { cn } from '@/lib/utils'
+import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { SyncIndicator } from '@/components/SyncIndicator'
 import { NotificationBell } from '@/components/NotificationBell'
 import { WidgetLauncher } from '@/components/widgets/WidgetLauncher'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
 import OnboardingGuideCard from '@/components/OnboardingGuideCard'
 import OnboardingGuideModal from '@/components/OnboardingGuideModal'
 import UserGuideMenu from '@/components/UserGuideMenu'
@@ -71,7 +72,7 @@ const navItems = [
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
   { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', feature: 'settings', isSettings: true },
   { to: '/tenant/data-importer', label: 'Data Importer', icon: FileSpreadsheet, permission: 'canImportInventory', feature: 'developer.data_importer' },
-  { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: null },
+  { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: 'referrals' },
 ]
 
 interface ReportSubItem { id: string; label: string }
@@ -311,12 +312,30 @@ export function TenantLayout() {
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
   const { user, logout, hasPermission, hasCompletedOnboarding, refreshOnboardingStatus, tokens } = useJWTAuth()
+  const tenantId = user?.tenantId || (user as any)?.tenant_id
   const onboardingStorageKey = user?.id ? `jibu_sales_onboarding_seen_${user.id}` : 'jibu_sales_onboarding_seen_guest'
   const { theme, toggleTheme } = useTheme()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const location = useLocation()
   const handleLogout = () => { logout(); navigate('/login') }
+
+  useEffect(() => {
+    if (!tenantId) return
+    let cancelled = false
+
+    apiFetch('/api/settings/business-profile')
+      .then(async (res) => {
+        if (!res.ok) return
+        const data = await res.json().catch(() => null)
+        if (!cancelled && data) cacheTenantFormattingSettings(data)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [tenantId])
 
   const toggleReports = () => {
     setReportsExpanded(prev => !prev)
@@ -394,20 +413,8 @@ export function TenantLayout() {
     }
 
     if (item.feature && !canAccessFeature(item.feature)) {
-      // For parent items with sub-items, show if any sub-item is visible
-      // even when the parent's own feature is not enabled (e.g. Accounting
-      // parent has feature 'accounting' but Expenses sub-item has 'expenses')
-      if (item.isAccounting && visibleAccountingSubItems.length > 0) return true
-      if (item.isInventory && visibleInventorySubItems.length > 0) return true
-      if (item.isFuelStation && visibleFuelStationSubItems.length > 0) return true
-      if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
-      if (item.isService && visibleServiceSubItems.length > 0) return true
-      if (item.isHR && visibleHRSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
-      // For standalone items like Communication with no sub-items, hide strictly.
-      // Communication should only appear when the 'communication' feature itself is enabled,
-      // not when only child features like 'communication.notifications' are enabled.
       return false
     }
     if (item.permission && !hasRequiredPermission(item.permission)) {

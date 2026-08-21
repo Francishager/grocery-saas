@@ -15,43 +15,6 @@ const toMoney = (value, fallback = 0) => {
   return Number.isFinite(num) ? num : fallback
 }
 
-const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
-  cash: { name: 'Cash Box', type: 'cash' },
-  mobile_money: { name: 'Mobile Money', type: 'mobile_money' },
-  bank_transfer: { name: 'Bank Account', type: 'bank' },
-  card: { name: 'Card Payments', type: 'card' }
-}
-
-const DEFAULT_CASH_ACCOUNTS = [
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash,
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.mobile_money,
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.bank_transfer,
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD.card
-]
-
-const accountForPaymentMethod = (paymentMethod) =>
-  CASH_ACCOUNTS_BY_PAYMENT_METHOD[paymentMethod] || CASH_ACCOUNTS_BY_PAYMENT_METHOD.cash
-
-async function cashAccountForPaymentMethod(tenantId, paymentMethod, client = prisma) {
-  const account = accountForPaymentMethod(paymentMethod)
-
-  return client.cashAccount.upsert({
-    where: {
-      tenantId_name: {
-        tenantId,
-        name: account.name
-      }
-    },
-    update: { type: account.type, isActive: true },
-    create: {
-      tenantId,
-      name: account.name,
-      type: account.type,
-      currency: 'UGX'
-    }
-  })
-}
-
 const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
   const type = String(cashAccount?.type || '').toLowerCase()
   if (paymentMethod === 'cash') return type === 'cash' || type === 'safe'
@@ -84,7 +47,18 @@ async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cash
     }
   }
 
-  return cashAccountForPaymentMethod(scope.tenantId, paymentMethod, client)
+  throw Object.assign(
+    new Error(`Select an existing ${paymentMethodAccountLabel(paymentMethod)} account for ${paymentMethod} payments. Create it first in Transaction Accounts if it does not exist.`),
+    { statusCode: 400, code: 'PAYMENT_ACCOUNT_REQUIRED' }
+  )
+}
+
+const paymentMethodAccountLabel = (paymentMethod) => {
+  if (paymentMethod === 'cash') return 'cash or safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque' || paymentMethod === 'bank') return 'bank'
+  if (paymentMethod === 'mobile_money') return 'mobile money'
+  if (paymentMethod === 'card') return 'card'
+  return 'matching'
 }
 
 const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])

@@ -2,8 +2,11 @@ import prisma from '../db.js';
 import { sendNotificationToUser } from '../services/fcm.js';
 
 export function formatCurrency(value, currency = 'UGX') {
+  const normalizedCurrency = /^[A-Z]{3}$/.test(String(currency || '').trim().toUpperCase())
+    ? String(currency).trim().toUpperCase()
+    : 'UGX';
   const amount = Number(value || 0);
-  return `${currency} ${amount.toLocaleString('en-US')}`;
+  return `${normalizedCurrency} ${amount.toLocaleString('en-US')}`;
 }
 
 export function buildDailySalesSummaryMessage(summary = {}) {
@@ -46,12 +49,18 @@ export async function createTenantNotification({ prismaClient = prisma, tenantId
 
 export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale, user, productNames = [], branchName = null, itemDetails = [] }) {
   if (!tenantId) return null;
-  const owner = await prismaClient.user.findFirst({
-    where: { tenantId, role: 'owner' },
-    select: { id: true },
-  });
+  const [owner, tenant] = await Promise.all([
+    prismaClient.user.findFirst({
+      where: { tenantId, role: 'owner' },
+      select: { id: true },
+    }),
+    prismaClient.tenant.findUnique({
+      where: { id: tenantId },
+      select: { currency: true },
+    }).catch(() => null),
+  ]);
   if (!owner) return null;
-  const currency = sale?.currency || 'UGX';
+  const currency = sale?.currency || tenant?.currency || 'UGX';
   let summary;
   if (itemDetails.length) {
     const itemLines = itemDetails.map(i => `${i.name} (${formatCurrency(i.price, currency)})`).join(', ');

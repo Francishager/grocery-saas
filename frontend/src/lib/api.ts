@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './apiConfig'
+import { cacheTenantFormattingSettings } from './utils'
 
 const API_URL = getApiBaseUrl()
 
@@ -83,6 +84,10 @@ async function request<T>(
       response.status,
       data
     )
+  }
+
+  if (path.startsWith('/api/settings')) {
+    cacheTenantFormattingSettings(data?.tenant || data)
   }
 
   return data

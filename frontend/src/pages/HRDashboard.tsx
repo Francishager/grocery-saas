@@ -9,6 +9,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import axios from "axios";
+import { formatCurrency as formatTenantCurrency } from "@/lib/utils";
 
 export default function HRDashboard() {
   const [dashboard, setDashboard] = useState(null);
@@ -64,11 +65,7 @@ export default function HRDashboard() {
 
   // Helper to format currency
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat("en-UG", {
-      style: "currency",
-      currency: "UGX",
-      minimumFractionDigits: 0,
-    }).format(amount || 0);
+    return formatTenantCurrency(amount || 0);
   };
 
   // Helper for card styling

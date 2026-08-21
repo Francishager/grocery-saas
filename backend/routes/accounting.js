@@ -9,6 +9,7 @@ const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
 const BALANCE_EPSILON = 0.01;
 const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
+const AUTO_DEFAULT_CASH_ACCOUNT_NAMES = new Set(["Cash Box", "Mobile Money", "Bank Account", "Card Payments"]);
 const TRANSACTION_ACCOUNT_PERMISSION_KEYS = {
   cash: "canUseCash",
   safe: "canUseCash",
@@ -43,6 +44,20 @@ const journalLineBalanceDelta = (account, debit, credit) => {
 const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 
 const formatAmount = (value) => Number(value || 0).toFixed(2);
+
+const normalizeCurrency = (currency) => {
+  const normalized = String(currency || "UGX").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "UGX";
+};
+
+async function tenantCurrency(tenantId, client = prisma) {
+  if (!tenantId) return "UGX";
+  const tenant = await client.tenant.findUnique({
+    where: { id: tenantId },
+    select: { currency: true },
+  });
+  return normalizeCurrency(tenant?.currency);
+}
 
 const transactionAccountPermissionKey = (cashAccountType) => {
   return TRANSACTION_ACCOUNT_PERMISSION_KEYS[normalizeValue(cashAccountType)];
@@ -118,6 +133,15 @@ const normalizeJournalLines = (lines) => {
 async function ensureTransactionAccounts(tenantId, client = prisma) {
   const cashAccounts = await client.cashAccount.findMany({
     where: { tenantId, isActive: true },
+    include: {
+      _count: {
+        select: {
+          AssignedUsers: true,
+          CashTransaction: true,
+          Expense: true,
+        },
+      },
+    },
     orderBy: { name: "asc" },
   });
 
@@ -127,7 +151,21 @@ async function ensureTransactionAccounts(tenantId, client = prisma) {
     const subType = `transaction_${cashAccount.type}`;
     const existing = await client.account.findFirst({
       where: { tenantId, description: { contains: marker } },
+      include: { _count: { select: { journalLines: true, children: true } } },
     });
+    const isUnusedAutoDefault =
+      AUTO_DEFAULT_CASH_ACCOUNT_NAMES.has(cashAccount.name) &&
+      Number(cashAccount.balance || 0) === 0 &&
+      Number(cashAccount._count?.AssignedUsers || 0) === 0 &&
+      Number(cashAccount._count?.CashTransaction || 0) === 0 &&
+      Number(cashAccount._count?.Expense || 0) === 0;
+
+    if (isUnusedAutoDefault) {
+      if (existing && Number(existing._count?.journalLines || 0) === 0 && Number(existing._count?.children || 0) === 0) {
+        await client.account.delete({ where: { id: existing.id } });
+      }
+      continue;
+    }
 
     if (existing) {
       await client.account.update({
@@ -521,13 +559,14 @@ router.post("/tax-payments", authenticateToken, requirePermission("canCreateAcco
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { branch, amount, currency, from, to, prn, paymentMethod, dateOfPayment } = req.body;
     if (!amount) return res.status(400).json({ error: "Amount required" });
+    const resolvedCurrency = normalizeCurrency(currency || await tenantCurrency(tenantId));
 
     const payment = await prisma.taxPayment.create({
       data: {
         tenantId,
         branchId: branch || null,
         amount: Number(amount),
-        currency: currency || "USD",
+        currency: resolvedCurrency,
         periodFrom: from ? new Date(from) : null,
         periodTo: to ? new Date(to) : null,
         prn: prn || null,

@@ -6,6 +6,9 @@ import multer from "multer";
 import cloudinary from "cloudinary";
 
 const router = Router();
+const SYSTEM_DATE_FORMAT = "DD/MM/YY";
+
+const withSystemDateFormat = (tenant) => tenant ? { ...tenant, dateFormat: SYSTEM_DATE_FORMAT } : tenant;
 
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -31,7 +34,7 @@ router.get("/", authenticateToken, requirePermission("canViewSettings"), async (
       },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    res.json(tenant);
+    res.json(withSystemDateFormat(tenant));
   } catch (err) {
     console.error("Get settings error:", err);
     res.status(500).json({ error: "Failed to load settings" });
@@ -54,7 +57,7 @@ router.get("/business-profile", authenticateToken, async (req, res) => {
       },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    res.json(tenant);
+    res.json(withSystemDateFormat(tenant));
   } catch (err) {
     console.error("Get business profile error:", err);
     res.status(500).json({ error: "Failed to load business profile" });
@@ -75,7 +78,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     if (address !== undefined) data.address = address || null;
     if (currency !== undefined) data.currency = currency;
     if (timezone !== undefined) data.timezone = timezone;
-    if (dateFormat !== undefined) data.dateFormat = 'DD/MM/YY';
+    data.dateFormat = SYSTEM_DATE_FORMAT;
     if (taxRate !== undefined) data.taxRate = parseFloat(taxRate) || 0;
     if (taxEnabled !== undefined) data.taxEnabled = Boolean(taxEnabled);
     if (taxId !== undefined) data.taxId = taxId || null;
@@ -92,7 +95,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
         createdAt: true, updatedAt: true,
       },
     });
-    res.json({ message: "Settings updated", tenant });
+    res.json({ message: "Settings updated", tenant: withSystemDateFormat(tenant) });
   } catch (err) {
     if (err?.code === "P2002") return res.status(409).json({ error: "Email already in use" });
     console.error("Update settings error:", err);
@@ -108,10 +111,10 @@ router.get("/tax-config", authenticateToken, async (req, res) => {
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { taxEnabled: true, taxRate: true, taxId: true, currency: true },
+      select: { taxEnabled: true, taxRate: true, taxId: true, currency: true, dateFormat: true },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    res.json(tenant);
+    res.json(withSystemDateFormat(tenant));
   } catch (err) {
     console.error("Get tax config error:", err);
     res.status(500).json({ error: "Failed to load tax config" });
