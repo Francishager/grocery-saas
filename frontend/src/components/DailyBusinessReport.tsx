@@ -183,6 +183,16 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
     ['Expected Physical Cash', cash.expectedCash],
     ['Cash Retained / Float', cash.cashRetained],
   ]
+  const balancingTotals = [
+    { label: 'Cash at Hand', value: cash.expectedCash, note: 'Expected physical cash', kinds: ['sale', 'collection', 'cash-movement', 'transfer'] },
+    { label: 'Cash Sales', value: summary.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
+    { label: 'Credit Sales', value: summary.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
+    { label: 'Debt Collections', value: summary.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
+    { label: 'Expenses', value: summary.expenses, note: 'Money spent today', kinds: ['expense'] },
+    { label: 'Net Cash Movement', value: Number(cash.cashReceived || 0) - Number(cash.cashPaidOut || 0), note: 'Cash in minus cash out', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Gross Profit', value: profitability.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
+    { label: 'Net Profit', value: profitability.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
+  ]
 
   return (
     <div className="space-y-6 print:space-y-3">
@@ -199,6 +209,29 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
           {data.header.generatedBy && <p className="text-xs text-muted-foreground">By {data.header.generatedBy}</p>}
         </div>
       </div>
+
+      <section>
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Day Balancing Totals</h2>
+            <p className="text-xs text-muted-foreground">Use these totals to close and balance the business day.</p>
+          </div>
+          <Badge variant="outline" className="w-fit">{formatDisplayDate(data.header.date)}</Badge>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {balancingTotals.map((item) => (
+            <button key={item.label} className="min-w-0 text-left print:pointer-events-none" onClick={() => openKind(item.label, item.kinds, item.methods)}>
+              <Card className={item.label === 'Cash at Hand' ? 'h-full border-primary/60 bg-primary/5' : 'h-full transition hover:border-primary hover:shadow-sm'}>
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">{item.label}</p>
+                  <p className="mt-2 break-words text-xl font-bold leading-tight">{money(item.value)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.note}</p>
+                </CardContent>
+              </Card>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Sales and Collections</h2>

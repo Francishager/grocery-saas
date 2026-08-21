@@ -1851,6 +1851,19 @@ export default function ReportsPage() {
   const buildDailyBusinessExportRows = (data: any) => {
     const rows: any[] = []
     const pushAmount = (section: string, item: string, amount: any, details = '') => rows.push({ section, item, details, amount, cashAmount: null, creditAmount: null, balance: null })
+    const summary = data?.summary || {}
+    const cash = data?.cashMovement || {}
+    const profitability = data?.profitability || {}
+    ;[
+      ['Cash at Hand', cash.expectedCash, 'Expected physical cash'],
+      ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
+      ['Credit Sales', summary.creditSales, 'Customer balances created'],
+      ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
+      ['Expenses', summary.expenses, 'Money spent today'],
+      ['Net Cash Movement', Number(cash.cashReceived || 0) - Number(cash.cashPaidOut || 0), 'Cash in minus cash out'],
+      ['Gross Profit', profitability.grossProfit, 'Sales minus COGS'],
+      ['Net Profit', profitability.netProfit, 'Gross profit minus expenses'],
+    ].forEach(([item, amount, details]) => pushAmount('Day Balancing Totals', String(item), amount, String(details)))
     Object.entries(data?.summary || {}).forEach(([key, value]) => pushAmount('Summary', key.replace(/([A-Z])/g, ' $1'), value))
     Object.entries(data?.cashMovement || {}).forEach(([key, value]) => pushAmount('Cash Status', key.replace(/([A-Z])/g, ' $1'), value))
     Object.entries(data?.profitability || {}).forEach(([key, value]) => pushAmount('Profitability', key.replace(/([A-Z])/g, ' $1'), value))
