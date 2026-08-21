@@ -587,6 +587,7 @@ export type ReportParams = Record<string, string | number | boolean | undefined>
 export const reportsApiV2 = {
   // Sales Reports
   salesSummary: (params?: ReportParams) => api.get<any>('/api/reports/sales/summary', { params }),
+  dailyBusiness: (params?: ReportParams) => api.get<any>('/api/reports/daily-business', { params }),
   salesDaily: (params?: ReportParams) => api.get<any>('/api/reports/sales/daily', { params }),
   salesWeekly: (params?: ReportParams) => api.get<any>('/api/reports/sales/weekly', { params }),
   salesMonthly: (params?: ReportParams) => api.get<any>('/api/reports/sales/monthly', { params }),

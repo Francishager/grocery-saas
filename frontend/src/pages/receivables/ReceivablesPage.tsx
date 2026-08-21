@@ -1174,6 +1174,8 @@ export default function ReceivablesPage() {
     tab === 'fuel-cards' ? 'Manage fuel card accounts and transactions' :
     tab === 'credit-accounts' ? 'Manage customer credit account terms' :
     'Manage customer credit and outstanding payments'
+  const saleCustomerList = customerOptions.length ? customerOptions : customers
+  const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
 
   return (
     <div className="space-y-6">
@@ -1597,13 +1599,28 @@ export default function ReceivablesPage() {
                       <SelectValue placeholder="Select customer" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(customerOptions.length ? customerOptions : customers).map((customer) => (
+                      {saleCustomerList.map((customer) => (
                         <SelectItem key={customer.id} value={customer.id}>
-                          {customer.name} {customer.phone ? `(${customer.phone})` : ''}
+                          {customer.name} {customer.phone ? `(${customer.phone})` : ''} - Balance {formatCurrency(customer.balance || 0)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {selectedSaleCustomer && (
+                    <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="block break-words font-medium">{selectedSaleCustomer.name}</span>
+                          {selectedSaleCustomer.phone && <span className="text-xs text-muted-foreground">{selectedSaleCustomer.phone}</span>}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block font-semibold text-red-600">{formatCurrency(selectedSaleCustomer.balance || 0)}</span>
+                          <span className="text-xs text-muted-foreground">Current balance</span>
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>
+                    </div>
+                  )}
                 </div>
 
                 <div>

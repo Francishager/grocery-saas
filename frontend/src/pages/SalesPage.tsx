@@ -1,6 +1,6 @@
  import { useEffect, useState, useRef, useMemo } from 'react'
 import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown } from 'lucide-react'
-import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, type InventoryItem, type CartItem } from '@/lib/api'
+import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, apiFetch, type InventoryItem, type CartItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,6 +26,14 @@ interface RecentSale {
   createdAt: string
   items: { productId: string; quantity: number; price: number; total: number }[]
   user?: { fname: string; lname: string }
+}
+
+interface CustomerOption {
+  id: string
+  name: string
+  phone?: string | null
+  balance?: number
+  creditLimit?: number
 }
 
 export default function SalesPage() {
@@ -57,6 +65,7 @@ export default function SalesPage() {
   const [barcodeInput, setBarcodeInput] = useState('')
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const [businessSettings, setBusinessSettings] = useState<any>(null)
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [currentPage, setCurrentPage] = useState(1)
   const ITEMS_PER_PAGE = 20
   const { toast } = useToast()
@@ -67,6 +76,7 @@ export default function SalesPage() {
     loadRecentSales()
     loadTaxConfig()
     loadBusinessSettings()
+    loadCustomers()
   }, [])
 
   const filteredCategories = useMemo(() => {
@@ -192,6 +202,22 @@ export default function SalesPage() {
     }
   }
 
+  const loadCustomers = async () => {
+    try {
+      const res = await apiFetch('/api/receivables/customers?limit=10000')
+      if (!res.ok) return
+      const data = await res.json()
+      const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+      setCustomers(list.map((customer: any) => ({
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        balance: Number(customer.balance || 0),
+        creditLimit: Number(customer.creditLimit || 0),
+      })))
+    } catch { /* customer balance hint is optional */ }
+  }
+
   const ensureBusinessSettings = async () => {
     if (businessSettings?.name || businessSettings?.businessName) return businessSettings
 
@@ -222,6 +248,11 @@ export default function SalesPage() {
   const cartTax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
+  const matchedCustomer = useMemo(() => {
+    const name = customerName.trim().toLowerCase()
+    if (!name) return null
+    return customers.find((customer) => customer.name.trim().toLowerCase() === name) || customers.find((customer) => customer.name.trim().toLowerCase().includes(name)) || null
+  }, [customers, customerName])
 
   const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string, settings = businessSettings, customerName?: string) => {
     const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
@@ -909,11 +940,34 @@ export default function SalesPage() {
                     <div className="mb-4">
                       <label className="text-sm font-medium">Customer Name (optional)</label>
                       <Input
+                        list="cash-sale-customer-list"
                         value={customerName}
                         onChange={(e) => setCustomerName(e.target.value)}
                         placeholder="Walk-in / Customer name"
                         className="w-full"
                       />
+                      <datalist id="cash-sale-customer-list">
+                        {customers.slice(0, 200).map((customer) => (
+                          <option key={customer.id} value={customer.name} />
+                        ))}
+                      </datalist>
+                      {matchedCustomer && (
+                        <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="min-w-0">
+                              <span className="block break-words font-medium">{matchedCustomer.name}</span>
+                              {matchedCustomer.phone && <span className="text-xs text-muted-foreground">{matchedCustomer.phone}</span>}
+                            </span>
+                            <span className="shrink-0 text-right">
+                              <span className="block font-semibold">{formatCurrency(matchedCustomer.balance || 0)}</span>
+                              <span className="text-xs text-muted-foreground">Credit balance</span>
+                            </span>
+                          </div>
+                          {Number(matchedCustomer.creditLimit || 0) > 0 && (
+                            <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(matchedCustomer.creditLimit || 0)}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                     {cartTax > 0 && (
                       <div className="flex justify-between mb-1 text-sm">

@@ -34,7 +34,7 @@ const reportPermMap = {
   fuel: "canViewFuelStationReport",
   manufacturing: "canViewManufacturingReport",
   agriculture: "canViewAgricultureReport",
-  "daily-business": "canViewFinancialReport",
+  "daily-business": "canViewSalesReport",
   "service-business": "canViewServiceBusinessReport",
   restaurant: "canViewRestaurantReport",
 };
@@ -158,6 +158,31 @@ function addPaymentBreakdown(target, method, amount) {
   target[key] = (target[key] || 0) + Number(amount || 0);
 }
 
+function paymentMethodMatches(value, requestedMethod) {
+  if (!requestedMethod || requestedMethod === "all") return true;
+  return normalizedPaymentMethod(value) === requestedMethod;
+}
+
+function staffSalesValues(method, amount) {
+  const value = Number(amount || 0);
+  if (!value) return {};
+  if (method === "cash") return { cashSales: value };
+  if (method === "credit") return { creditSales: value };
+  if (method === "mobile_money") return { mobileMoneySales: value };
+  if (method === "bank") return { bankSales: value };
+  if (method === "card") return { cardSales: value };
+  return {};
+}
+
+function cashMovementDirection(type) {
+  const normalized = String(type || "").toLowerCase();
+  if (["income", "receipt", "deposit", "sale", "collection"].includes(normalized)) return "in";
+  if (["expense", "payment", "withdrawal", "purchase"].includes(normalized)) return "out";
+  if (normalized.includes("transfer_in") || normalized.includes("handover_in")) return "transfer-in";
+  if (normalized.includes("transfer_out") || normalized.includes("handover") || normalized.includes("transfer")) return "transfer-out";
+  return normalized.includes("out") ? "out" : "in";
+}
+
 function dayRange(from, to) {
   const start = from ? new Date(from) : new Date();
   if (!from) start.setHours(0, 0, 0, 0);
@@ -263,6 +288,477 @@ router.get("/profit", authenticateToken, async (req, res) => {
     const expenses = expensesAgg._sum.amount || 0;
     res.json({ revenue, cogs, grossProfit: revenue - cogs, expenses, netProfit: revenue - cogs - expenses });
   } catch (err) { console.error("Profit report error:", err); handleBranchError(res, err); }
+});
+
+router.get("/daily-business", authenticateToken, async (req, res) => {
+  try {
+    const scope = await getScope(req);
+    const { start, end } = dayRange(req.query.from, req.query.to);
+    const userId = req.query.userId || req.query.staffId || null;
+    const customerId = req.query.customerId || null;
+    const requestedMethod = req.query.paymentMethod ? normalizedPaymentMethod(req.query.paymentMethod) : null;
+    const take = Math.min(Math.max(Number.parseInt(req.query.limit || "700", 10) || 700, 1), 1500);
+    const dateWhere = { gte: start, lte: end };
+    const allowedCashAccountId = !scope.canAccessAllBranches ? req.user?.cashAccountId : null;
+
+    const [tenant, selectedCustomer] = await Promise.all([
+      prisma.tenant.findUnique({
+        where: { id: scope.tenantId },
+        select: { id: true, name: true, email: true, phone: true, address: true, logo: true },
+      }),
+      customerId
+        ? prisma.customer.findFirst({
+            where: scopedWhere(scope, { id: customerId }),
+            select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+          })
+        : null,
+    ]);
+
+    const saleWhere = customerId
+      ? scopedWhere(scope, {
+          createdAt: dateWhere,
+          status: "completed",
+          ...(userId ? { userId } : {}),
+          ...(selectedCustomer?.name ? { customerName: selectedCustomer.name } : { id: "__no_matching_cash_sale__" }),
+        })
+      : scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...(userId ? { userId } : {}) });
+    const saleRecordWhere = scopedWhere(scope, {
+      createdAt: dateWhere,
+      status: "completed",
+      ...(userId ? { userId } : {}),
+      ...(customerId ? { customerId } : {}),
+    });
+    const paymentWhere = scopedWhere(scope, { createdAt: dateWhere, ...(customerId ? { customerId } : {}) });
+    const expenseWhere = scopedWhere(scope, { date: dateWhere, ...(userId ? { userId } : {}) });
+
+    const [sales, creditSales, payments, expenses, branches, cashAccounts, cashTransactions, openingRows, customersForLookup] = await Promise.all([
+      prisma.sale.findMany({
+        where: saleWhere,
+        include: {
+          items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } } } },
+          user: { select: { id: true, fname: true, lname: true, email: true } },
+          branch: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "asc" },
+        take,
+      }),
+      prisma.saleRecord.findMany({
+        where: saleRecordWhere,
+        include: {
+          customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+          items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } } } },
+          User: { select: { id: true, fname: true, lname: true, email: true } },
+          branch: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "asc" },
+        take,
+      }),
+      prisma.customerPayment.findMany({
+        where: paymentWhere,
+        include: {
+          customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+          sale: { select: { id: true, receiptNo: true } },
+        },
+        orderBy: { createdAt: "asc" },
+        take,
+      }),
+      prisma.expense.findMany({
+        where: expenseWhere,
+        include: {
+          User: { select: { id: true, fname: true, lname: true, email: true } },
+          cashAccount: { select: { id: true, name: true, type: true } },
+          branch: { select: { id: true, name: true } },
+        },
+        orderBy: { date: "asc" },
+        take,
+      }),
+      prisma.branch.findMany({
+        where: { tenantId: scope.tenantId, isActive: true, ...(scope.canAccessAllBranches ? {} : { id: scope.branchId }) },
+        select: { id: true, name: true },
+      }),
+      prisma.cashAccount.findMany({
+        where: { tenantId: scope.tenantId, isActive: true, type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          balance: true,
+          AssignedUsers: { select: { id: true, fname: true, lname: true, email: true } },
+        },
+      }),
+      prisma.cashTransaction.findMany({
+        where: { tenantId: scope.tenantId, createdAt: dateWhere, ...(allowedCashAccountId ? { accountId: allowedCashAccountId } : {}), ...(userId ? { userId } : {}) },
+        include: {
+          account: { select: { id: true, name: true, type: true } },
+          User: { select: { id: true, fname: true, lname: true, email: true } },
+        },
+        orderBy: { createdAt: "asc" },
+        take: take * 2,
+      }),
+      prisma.cashTransaction.findMany({
+        where: { tenantId: scope.tenantId, createdAt: { lt: start }, account: { type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) } },
+        orderBy: { createdAt: "desc" },
+        distinct: ["accountId"],
+        select: { accountId: true, balanceAfter: true },
+      }),
+      prisma.customer.findMany({
+        where: scopedWhere(scope, customerId ? { id: customerId } : {}),
+        select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+        take: 5000,
+      }),
+    ]);
+
+    const transactionRows = [];
+    const salesBreakdown = { cash: 0, credit: 0, mobile_money: 0, bank: 0, card: 0 };
+    const staffMap = new Map();
+    const customerMap = new Map();
+    const productMap = new Map();
+    const customersByName = new Map(customersForLookup.map((customer) => [String(customer.name || "").trim().toLowerCase(), customer]));
+    const cashMovementsByReference = new Map();
+    cashTransactions.forEach((movement) => {
+      [movement.reference, movement.id].filter(Boolean).forEach((reference) => {
+        if (!cashMovementsByReference.has(reference)) cashMovementsByReference.set(reference, movement);
+      });
+    });
+
+    let totalSales = 0;
+    let cogs = 0;
+
+    const addStaff = (user, values = {}) => {
+      const id = user?.id || "unknown";
+      const row = staffMap.get(id) || {
+        id,
+        name: userLabel(user),
+        sales: 0,
+        cashSales: 0,
+        creditSales: 0,
+        mobileMoneySales: 0,
+        bankSales: 0,
+        cardSales: 0,
+        collections: 0,
+        expenses: 0,
+        cashHeld: 0,
+      };
+      Object.entries(values).forEach(([key, value]) => { row[key] = Number(row[key] || 0) + Number(value || 0); });
+      staffMap.set(id, row);
+      return row;
+    };
+
+    const addCustomer = (customer) => {
+      const id = customer?.id || (customer?.name ? `cash-name:${String(customer.name).trim().toLowerCase()}` : "walk-in");
+      const row = customerMap.get(id) || {
+        id,
+        customerId: customer?.id || null,
+        registered: Boolean(customer?.id),
+        name: customer?.name || "Walk-in",
+        phone: customer?.phone || null,
+        cashSales: 0,
+        creditSales: 0,
+        payments: 0,
+        currentBalance: Number(customer?.balance || 0),
+        creditLimit: Number(customer?.creditLimit || 0),
+        transactions: [],
+      };
+      if (customer?.id) {
+        row.customerId = customer.id;
+        row.registered = true;
+        row.currentBalance = Number(customer.balance || 0);
+        row.creditLimit = Number(customer.creditLimit || row.creditLimit || 0);
+      }
+      customerMap.set(id, row);
+      return row;
+    };
+
+    const addProducts = (items = []) => {
+      items.forEach((item) => {
+        const product = item.product;
+        if (!product?.id) return;
+        const row = productMap.get(product.id) || {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          quantitySold: 0,
+          salesValue: 0,
+          cogs: 0,
+          grossProfit: 0,
+          currentStock: product.quantity,
+        };
+        row.quantitySold += Number(item.quantity || 0);
+        row.salesValue += Number(item.total || 0);
+        row.cogs += saleLineCogs(item);
+        row.grossProfit = row.salesValue - row.cogs;
+        productMap.set(product.id, row);
+      });
+    };
+
+    const findMatchingMovement = (...references) => references.filter(Boolean).map((reference) => cashMovementsByReference.get(reference)).find(Boolean) || null;
+
+    for (const sale of sales) {
+      const method = normalizedPaymentMethod(sale.paymentMethod);
+      if (!paymentMethodMatches(method, requestedMethod)) continue;
+      totalSales += Number(sale.total || 0);
+      const cashAmount = method === "credit" ? 0 : Number(sale.total || 0);
+      const creditAmount = method === "credit" ? Number(sale.total || 0) : 0;
+      salesBreakdown[method] += cashAmount || creditAmount;
+      cogs += saleCogsForItems(sale.items);
+      addStaff(sale.user, { sales: sale.total, ...staffSalesValues(method, cashAmount || creditAmount) });
+      const matchedCustomer = sale.customerName ? customersByName.get(String(sale.customerName).trim().toLowerCase()) : null;
+      const customer = addCustomer(matchedCustomer || (sale.customerName ? { name: sale.customerName } : null));
+      customer[method === "credit" ? "creditSales" : "cashSales"] += cashAmount || creditAmount;
+      const row = {
+        id: sale.id,
+        kind: method === "credit" ? "credit-sale" : "sale",
+        date: sale.createdAt,
+        reference: sale.receiptNo,
+        customer: customer.name,
+        customerId: customer.customerId,
+        customerBalance: customer.currentBalance,
+        customerCreditLimit: customer.creditLimit,
+        staff: userLabel(sale.user),
+        staffId: sale.user?.id,
+        branch: sale.branch?.name || "",
+        amount: sale.total,
+        cashAmount,
+        creditAmount,
+        paymentMethod: method,
+        status: sale.status,
+        items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item), profit: saleItemProfit(item) })),
+      };
+      customer.transactions.push({ ...row, type: "SALE" });
+      transactionRows.push(row);
+      addProducts(sale.items);
+    }
+
+    for (const sale of creditSales) {
+      const paid = Number(sale.amountPaid || 0);
+      const creditAmount = Math.max(0, Number(sale.total || 0) - paid);
+      const method = normalizedPaymentMethod(sale.paymentMethod);
+      if (!paymentMethodMatches(method, requestedMethod)) continue;
+      totalSales += Number(sale.total || 0);
+      salesBreakdown.credit += creditAmount;
+      if (paid > 0 && method !== "credit") addPaymentBreakdown(salesBreakdown, method, paid);
+      cogs += saleCogsForItems(sale.items);
+      addStaff(sale.User, { sales: sale.total, creditSales: creditAmount, ...(paid > 0 && method !== "credit" ? staffSalesValues(method, paid) : {}) });
+      const customer = addCustomer(sale.customer);
+      customer.creditSales += creditAmount;
+      if (paid > 0 && method !== "credit") customer.cashSales += paid;
+      const row = {
+        id: sale.id,
+        kind: "credit-sale",
+        date: sale.createdAt,
+        reference: sale.receiptNo,
+        customer: sale.customer?.name || "Unknown customer",
+        customerId: sale.customerId,
+        customerBalance: Number(sale.customer?.balance || 0),
+        customerCreditLimit: Number(sale.customer?.creditLimit || 0),
+        staff: userLabel(sale.User),
+        staffId: sale.User?.id,
+        branch: sale.branch?.name || "",
+        amount: sale.total,
+        cashAmount: paid > 0 && method !== "credit" ? paid : 0,
+        creditAmount,
+        paymentMethod: method,
+        status: sale.paymentStatus,
+        items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item), profit: saleItemProfit(item) })),
+      };
+      customer.transactions.push({ ...row, type: "SALE" });
+      transactionRows.push(row);
+      addProducts(sale.items);
+    }
+
+    let debtCollections = 0;
+    for (const payment of payments) {
+      if (payment.saleId) continue;
+      const method = normalizedPaymentMethod(payment.paymentMethod);
+      if (!paymentMethodMatches(method, requestedMethod)) continue;
+      const paymentMovement = findMatchingMovement(payment.reference, payment.id, payment.transactionId);
+      if (userId && paymentMovement?.userId !== userId) continue;
+      debtCollections += Number(payment.amount || 0);
+      const paymentStaff = paymentMovement?.User || null;
+      if (paymentStaff) addStaff(paymentStaff, { collections: payment.amount });
+      const customer = addCustomer(payment.customer);
+      customer.payments += Number(payment.amount || 0);
+      const row = {
+        id: payment.id,
+        kind: "collection",
+        date: payment.createdAt,
+        reference: payment.reference || payment.id,
+        customer: payment.customer?.name || "Unknown customer",
+        customerId: payment.customerId,
+        customerBalance: Number(payment.customer?.balance || 0),
+        amount: payment.amount,
+        paymentMethod: method,
+        staff: paymentStaff ? userLabel(paymentStaff) : "Recorded payment",
+        staffId: paymentStaff?.id || null,
+        transactionId: payment.transactionId,
+        linkedSale: payment.sale?.receiptNo || null,
+      };
+      customer.transactions.push({ ...row, type: "PAYMENT" });
+      transactionRows.push(row);
+    }
+
+    let cashExpenses = 0;
+    const filteredExpenses = [];
+    for (const expense of expenses) {
+      const method = normalizedPaymentMethod(expense.paymentMethod);
+      if (!paymentMethodMatches(method, requestedMethod)) continue;
+      filteredExpenses.push(expense);
+      if (method === "cash") cashExpenses += Number(expense.amount || 0);
+      addStaff(expense.User, { expenses: expense.amount });
+      transactionRows.push({
+        id: expense.id,
+        kind: "expense",
+        date: expense.date,
+        reference: expense.reference || expense.id,
+        category: expense.category,
+        description: expense.description,
+        paymentMethod: method,
+        account: expense.cashAccount?.name || "",
+        staff: userLabel(expense.User),
+        staffId: expense.User?.id,
+        amount: expense.amount,
+      });
+    }
+
+    const knownReferences = new Set([
+      ...sales.flatMap((sale) => [sale.id, sale.receiptNo].filter(Boolean)),
+      ...creditSales.flatMap((sale) => [sale.id, sale.receiptNo].filter(Boolean)),
+      ...payments.flatMap((payment) => [payment.id, payment.reference, payment.transactionId, payment.sale?.receiptNo].filter(Boolean)),
+      ...filteredExpenses.flatMap((expense) => [expense.id, expense.reference].filter(Boolean)),
+    ]);
+    const accountMovementMap = new Map();
+    let otherCashIn = 0;
+    let otherCashOut = 0;
+    let cashTransfersIn = 0;
+    let cashTransfersOut = 0;
+    for (const movement of cashTransactions) {
+      if (knownReferences.has(movement.reference)) continue;
+      const direction = cashMovementDirection(movement.type);
+      const accountType = String(movement.account?.type || "").toLowerCase();
+      const isPhysicalCash = ["cash", "safe"].includes(accountType);
+      if (isPhysicalCash) {
+        if (direction === "transfer-in") cashTransfersIn += Number(movement.amount || 0);
+        else if (direction === "transfer-out") cashTransfersOut += Number(movement.amount || 0);
+        else if (direction === "in") otherCashIn += Number(movement.amount || 0);
+        else otherCashOut += Number(movement.amount || 0);
+
+        const accountStats = accountMovementMap.get(movement.accountId) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, lastBalance: null };
+        if (direction === "transfer-in") accountStats.transferIn += Number(movement.amount || 0);
+        else if (direction === "transfer-out") accountStats.transferOut += Number(movement.amount || 0);
+        else if (direction === "in") accountStats.cashIn += Number(movement.amount || 0);
+        else accountStats.cashOut += Number(movement.amount || 0);
+        accountStats.lastBalance = Number(movement.balanceAfter || 0);
+        accountMovementMap.set(movement.accountId, accountStats);
+      }
+      transactionRows.push({
+        id: movement.id,
+        kind: direction.includes("transfer") ? "transfer" : "cash-movement",
+        date: movement.createdAt,
+        reference: movement.reference || movement.id,
+        description: movement.description,
+        account: movement.account?.name,
+        staff: userLabel(movement.User),
+        staffId: movement.User?.id,
+        amount: movement.amount,
+        direction,
+        paymentMethod: normalizedPaymentMethod(movement.account?.type || "cash"),
+      });
+    }
+
+    const cashSales = salesBreakdown.cash;
+    const cashCollections = payments
+      .filter((payment) => !payment.saleId && paymentMethodMatches(payment.paymentMethod, requestedMethod) && normalizedPaymentMethod(payment.paymentMethod) === "cash")
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const openingByAccount = new Map(openingRows.map((row) => [row.accountId, Number(row.balanceAfter || 0)]));
+    const openingCash = openingRows.reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
+    const cashReceived = cashSales + cashCollections + otherCashIn + cashTransfersIn;
+    const cashPaidOut = cashExpenses + otherCashOut + cashTransfersOut;
+    const expectedCash = openingCash + cashReceived - cashPaidOut;
+    const expensesTotal = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+    const revenue = totalSales;
+    const grossProfit = revenue - cogs;
+    const staffTills = cashAccounts.map((account) => {
+      const stats = accountMovementMap.get(account.id) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, lastBalance: null };
+      const netMovement = stats.cashIn + stats.transferIn - stats.cashOut - stats.transferOut;
+      const closingBalance = stats.lastBalance !== null ? stats.lastBalance : Number(account.balance || 0);
+      const openingBalance = openingByAccount.has(account.id) ? openingByAccount.get(account.id) : closingBalance - netMovement;
+      const assignedUsers = account.AssignedUsers || [];
+      assignedUsers.forEach((user) => addStaff(user, { cashHeld: closingBalance / Math.max(assignedUsers.length, 1) }));
+      return {
+        id: account.id,
+        name: account.name,
+        type: account.type,
+        staff: assignedUsers.map(userLabel).join(", ") || "Unassigned",
+        openingCash: openingBalance,
+        cashIn: stats.cashIn,
+        cashOut: stats.cashOut,
+        cashTransfersIn: stats.transferIn,
+        cashTransfersOut: stats.transferOut,
+        expectedClosing: closingBalance,
+        balance: closingBalance,
+      };
+    });
+
+    res.json({
+      header: {
+        date: start.toISOString().slice(0, 10),
+        businessName: tenant?.name || "Business",
+        businessEmail: tenant?.email || "",
+        businessPhone: tenant?.phone || "",
+        businessAddress: tenant?.address || "",
+        branch: scope.branch?.name || "All authorized branches",
+        status: "Open",
+        generatedBy: userLabel(req.user),
+      },
+      filters: { from: start.toISOString(), to: end.toISOString(), branchId: scope.branchId || "all", userId, customerId, paymentMethod: req.query.paymentMethod || "all" },
+      summary: {
+        totalSales,
+        cashSales,
+        creditSales: salesBreakdown.credit,
+        mobileMoneySales: salesBreakdown.mobile_money,
+        bankSales: salesBreakdown.bank,
+        cardSales: salesBreakdown.card,
+        debtCollections,
+        cashReceived,
+        expenses: expensesTotal,
+        grossProfit,
+        netProfit: grossProfit - expensesTotal,
+        customersServed: customerMap.size,
+        transactionCount: transactionRows.length,
+      },
+      cashMovement: {
+        openingCash,
+        cashSales,
+        debtCollections,
+        cashCollections,
+        otherCashIn,
+        cashReceived,
+        cashExpenses,
+        otherCashOut,
+        cashTransfersIn,
+        cashTransfersOut,
+        cashPaidOut,
+        expectedCash,
+        physicalCashCounted: 0,
+        difference: 0,
+        cashHandedOver: cashTransfersOut,
+        cashRetained: expectedCash - cashTransfersOut,
+      },
+      profitability: { revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
+      customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),
+      staffActivity: [...staffMap.values()].sort((a, b) => b.sales - a.sales),
+      productActivity: [...productMap.values()].sort((a, b) => b.salesValue - a.salesValue),
+      expenses: filteredExpenses.map((expense) => ({ id: expense.id, date: expense.date, reference: expense.reference || expense.id, category: expense.category, description: expense.description, paymentMethod: normalizedPaymentMethod(expense.paymentMethod), account: expense.cashAccount?.name || "", staff: userLabel(expense.User), amount: expense.amount })),
+      transactions: transactionRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+      staffTills,
+      branches,
+      pagination: { returned: transactionRows.length, limit: take },
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Daily business report error:", err);
+    handleBranchError(res, err);
+  }
 });
 
 // ==================== DAILY BUSINESS CONTROL REPORT ====================

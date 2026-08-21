@@ -22,6 +22,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReportData } from '@/db/hybrid'
 import { EnrichedReport, type EnrichedReportData } from '@/components/EnrichedReportRenderer'
+import DailyBusinessReport from '@/components/DailyBusinessReport'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -29,7 +30,7 @@ interface ReportItem {
   id: string
   label: string
   apiFn: (params?: ReportParams) => Promise<any>
-  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched'
+  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched' | 'dailyBusiness'
   columns?: { key: string; label: string; format?: 'currency' | 'number' | 'date' | 'text' }[]
   summaryKeys?: { key: string; label: string; format?: 'currency' | 'number' | 'text' }[]
   entityType?: 'customer' | 'supplier' | 'product'
@@ -67,19 +68,7 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'avgSale', label: 'Average Sale', format: 'currency' },
         ]
       },
-      { id: 'salesDaily', label: 'Daily Sales Report', apiFn: reportsApiV2.salesDaily, renderType: 'enriched',
-        summaryKeys: [
-          { key: 'totalSales', label: 'Total Sales', format: 'number' },
-          { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
-          { key: 'cashSales', label: 'Cash Sales', format: 'currency' },
-          { key: 'creditSales', label: 'Credit Sales', format: 'currency' },
-          { key: 'mobileMoneySales', label: 'Mobile Money', format: 'currency' },
-          { key: 'bankSales', label: 'Bank', format: 'currency' },
-          { key: 'cardSales', label: 'Card', format: 'currency' },
-          { key: 'totalCogs', label: 'Cost of Goods Sold', format: 'currency' },
-          { key: 'grossProfit', label: 'Gross Profit', format: 'currency' },
-        ]
-      },
+      { id: 'salesDaily', label: 'Daily Sales Report', apiFn: reportsApiV2.dailyBusiness, renderType: 'dailyBusiness', showBranchFilter: true },
       { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'enriched',
         summaryKeys: [
           { key: 'totalSales', label: 'Total Sales', format: 'number' },
@@ -1647,8 +1636,13 @@ export default function ReportsPage() {
   const [to, setTo] = useState('')
   const [selectedEntityId, setSelectedEntityId] = useState('')
   const [selectedBranchId, setSelectedBranchId] = useState('')
+  const [selectedStaffId, setSelectedStaffId] = useState('')
+  const [selectedDailyCustomerId, setSelectedDailyCustomerId] = useState('')
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
   const [entityList, setEntityList] = useState<any[]>([])
   const [branchList, setBranchList] = useState<any[]>([])
+  const [dailyStaffList, setDailyStaffList] = useState<any[]>([])
+  const [dailyCustomerList, setDailyCustomerList] = useState<any[]>([])
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null)
   const { toast } = useToast()
   const { hasPermission, user } = useJWTAuth()
@@ -1746,6 +1740,39 @@ export default function ReportsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedReport])
 
+  useEffect(() => {
+    setSelectedStaffId('')
+    setSelectedDailyCustomerId('')
+    setSelectedPaymentMethod('')
+    setDailyStaffList([])
+    setDailyCustomerList([])
+    if (currentReport?.id !== 'salesDaily') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [staffRes, customerRes] = await Promise.all([
+          apiFetch('/api/staff'),
+          apiFetch('/api/receivables/customers?limit=10000'),
+        ])
+        if (staffRes.ok && !cancelled) {
+          const data = await staffRes.json()
+          const list = Array.isArray(data?.staff) ? data.staff : Array.isArray(data) ? data : []
+          setDailyStaffList(list.map((staff: any) => ({
+            id: staff.id,
+            label: [staff.fname, staff.lname].filter(Boolean).join(' ') || staff.email || staff.name || 'Staff',
+          })))
+        }
+        if (customerRes.ok && !cancelled) {
+          const data = await customerRes.json()
+          const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+          setDailyCustomerList(list.map((customer: any) => ({ id: customer.id, label: customer.name })))
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport])
+
   const loadReport = useCallback(async () => {
     if (!currentReport) return
     setLoading(true)
@@ -1759,6 +1786,11 @@ export default function ReportsPage() {
         if (currentReport.entityType === 'supplier' && selectedEntityId) params.supplierId = selectedEntityId
         if (currentReport.entityType === 'product' && selectedEntityId) params.productId = selectedEntityId
         if (currentReport.showBranchFilter && selectedBranchId && selectedBranchId !== 'all') params.branchId = selectedBranchId
+        if (currentReport.id === 'salesDaily') {
+          if (selectedStaffId) params.staffId = selectedStaffId
+          if (selectedDailyCustomerId) params.customerId = selectedDailyCustomerId
+          if (selectedPaymentMethod) params.paymentMethod = selectedPaymentMethod
+        }
         const result = await currentReport.apiFn(params)
         setReportData(result)
       } else {
@@ -1780,7 +1812,7 @@ export default function ReportsPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentReport, from, to, selectedEntityId, selectedBranchId, toast, online])
+  }, [currentReport, from, to, selectedEntityId, selectedBranchId, selectedStaffId, selectedDailyCustomerId, selectedPaymentMethod, toast, online])
 
   useEffect(() => {
     if (!currentReport) {
@@ -1790,7 +1822,7 @@ export default function ReportsPage() {
     // Entity selection is optional — load report with or without entity
     loadReport()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReport, selectedEntityId, selectedBranchId, from, to])
+  }, [selectedReport, selectedEntityId, selectedBranchId, selectedStaffId, selectedDailyCustomerId, selectedPaymentMethod, from, to])
 
   const canExport = hasPermission('canExportReport')
 
@@ -1806,19 +1838,52 @@ export default function ReportsPage() {
     { key: 'balance', label: 'Balance', format: 'currency' },
   ]
 
+  const dailyBusinessColumns: NonNullable<ReportItem['columns']> = [
+    { key: 'section', label: 'Section', format: 'text' },
+    { key: 'item', label: 'Item', format: 'text' },
+    { key: 'details', label: 'Details', format: 'text' },
+    { key: 'amount', label: 'Amount', format: 'currency' },
+    { key: 'cashAmount', label: 'Cash', format: 'currency' },
+    { key: 'creditAmount', label: 'Credit', format: 'currency' },
+    { key: 'balance', label: 'Balance', format: 'currency' },
+  ]
+
+  const buildDailyBusinessExportRows = (data: any) => {
+    const rows: any[] = []
+    const pushAmount = (section: string, item: string, amount: any, details = '') => rows.push({ section, item, details, amount, cashAmount: null, creditAmount: null, balance: null })
+    Object.entries(data?.summary || {}).forEach(([key, value]) => pushAmount('Summary', key.replace(/([A-Z])/g, ' $1'), value))
+    Object.entries(data?.cashMovement || {}).forEach(([key, value]) => pushAmount('Cash Status', key.replace(/([A-Z])/g, ' $1'), value))
+    Object.entries(data?.profitability || {}).forEach(([key, value]) => pushAmount('Profitability', key.replace(/([A-Z])/g, ' $1'), value))
+    ;(data?.customerActivity || []).forEach((row: any) => rows.push({ section: 'Customer Activity', item: row.name, details: row.phone || '', amount: Number(row.cashSales || 0) + Number(row.creditSales || 0), cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.currentBalance || 0 }))
+    ;(data?.staffActivity || []).forEach((row: any) => rows.push({ section: 'Staff Activity', item: row.name, details: `Collections ${formatCurrency(row.collections || 0)}`, amount: row.sales || 0, cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.cashHeld || 0 }))
+    ;(data?.productActivity || []).forEach((row: any) => rows.push({ section: 'Product Activity', item: row.name, details: `Qty ${row.quantitySold || 0}, Stock ${row.currentStock ?? ''}`, amount: row.salesValue || 0, cashAmount: row.cogs || 0, creditAmount: row.grossProfit || 0, balance: null }))
+    ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: row.reference || row.id, details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.cashAmount || 0, creditAmount: row.creditAmount || 0, balance: row.customerBalance || 0 }))
+    return rows
+  }
+
   // Get data and columns for export based on report type
   const getExportData = () => {
     if (currentReport?.renderType === 'statement' && reportData?.transactions) {
       return { data: reportData.transactions, columns: statementColumns }
     }
+    if (currentReport?.renderType === 'dailyBusiness') {
+      return { data: buildDailyBusinessExportRows(reportData), columns: dailyBusinessColumns }
+    }
     return { data: reportData?.data || reportData, columns: currentReport?.columns }
+  }
+
+  const reportTitle = () => {
+    const entityName = reportData?.customer?.name || reportData?.supplier?.name || ''
+    if (currentReport?.renderType === 'statement' && entityName) return `${currentReport.label} - ${entityName}`
+    if (currentReport?.renderType === 'dailyBusiness' && reportData?.header?.businessName) return `${currentReport.label} - ${reportData.header.businessName}`
+    return currentReport?.label || 'Report'
   }
 
   const handlePrint = () => {
     const { data, columns } = getExportData()
     printReport(
       data,
-      currentReport?.label || 'Report',
+      reportTitle(),
       currentReport?.categoryLabel || '',
       columns,
       reportData?.summary,
@@ -1830,7 +1895,7 @@ export default function ReportsPage() {
     const { data, columns } = getExportData()
     exportToExcel(
       data,
-      currentReport?.label || 'Report',
+      reportTitle(),
       columns,
       reportData?.summary,
       businessInfo || undefined
@@ -1841,7 +1906,7 @@ export default function ReportsPage() {
     const { data, columns } = getExportData()
     exportToPDF(
       data,
-      currentReport?.label || 'Report',
+      reportTitle(),
       currentReport?.categoryLabel,
       columns,
       reportData?.summary,
@@ -1866,6 +1931,13 @@ export default function ReportsPage() {
                 <p className="text-sm text-muted-foreground">{currentReport.categoryLabel}</p>
               </div>
               <div className="flex flex-wrap items-end gap-2">
+                {currentReport.id === 'salesDaily' && (
+                  <div className="flex items-center gap-1 rounded-md border p-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const value = new Date().toISOString().slice(0, 10); setFrom(value); setTo(value) }}>Today</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const date = new Date(); date.setDate(date.getDate() - 1); const value = date.toISOString().slice(0, 10); setFrom(value); setTo(value) }}>Yesterday</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(''); setTo('') }}>Custom</Button>
+                  </div>
+                )}
                 {currentReport.entityType && (
                   <div>
                     <Label className="text-xs">
@@ -1899,6 +1971,45 @@ export default function ReportsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                )}
+                {currentReport.id === 'salesDaily' && (
+                  <>
+                    <div>
+                      <Label className="text-xs">Staff</Label>
+                      <Select value={selectedStaffId || 'all'} onValueChange={(value) => setSelectedStaffId(value === 'all' ? '' : value)}>
+                        <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Staff" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Staff</SelectItem>
+                          {dailyStaffList.map((staff) => <SelectItem key={staff.id} value={staff.id}>{staff.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Customer</Label>
+                      <Select value={selectedDailyCustomerId || 'all'} onValueChange={(value) => setSelectedDailyCustomerId(value === 'all' ? '' : value)}>
+                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="All Customers" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Customers</SelectItem>
+                          {dailyCustomerList.map((customer) => <SelectItem key={customer.id} value={customer.id}>{customer.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Payment Method</Label>
+                      <Select value={selectedPaymentMethod || 'all'} onValueChange={(value) => setSelectedPaymentMethod(value === 'all' ? '' : value)}>
+                        <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Methods" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Methods</SelectItem>
+                          <SelectItem value="cash">Cash</SelectItem>
+                          <SelectItem value="credit">Credit</SelectItem>
+                          <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                          <SelectItem value="bank_transfer">Bank</SelectItem>
+                          <SelectItem value="card">Card</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={() => { setFrom(''); setTo(''); setSelectedBranchId(''); setSelectedStaffId(''); setSelectedDailyCustomerId(''); setSelectedPaymentMethod('') }}>Reset Filters</Button>
+                  </>
                 )}
                 <div>
                   <Label htmlFor="from" className="text-xs">From</Label>
@@ -1949,7 +2060,7 @@ export default function ReportsPage() {
                   </div>
                 ) : reportData ? (
                   <div className="space-y-4">
-                    {reportData.summary && (
+                    {currentReport.renderType !== 'dailyBusiness' && reportData.summary && (
                       <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
                         {Object.entries(reportData.summary).map(([k, v]) => {
                           // Skip complex objects that should be displayed as breakdowns
@@ -1979,6 +2090,7 @@ export default function ReportsPage() {
                     )}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
+                    {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
                     {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}
                     {currentReport.renderType === 'summary' && (
                       <>
