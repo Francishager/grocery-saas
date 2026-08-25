@@ -14,6 +14,7 @@ import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
+import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
@@ -160,6 +161,7 @@ export default function ReceivablesPage() {
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<Customer | null>(null)
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
+  const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [mobileProvider, setMobileProvider] = useState('')
@@ -784,6 +786,24 @@ export default function ReceivablesPage() {
     )
   }
 
+  const openCustomerHistory = (customer?: CustomerHistoryTarget | null) => {
+    if (!customer?.id) return
+    setHistoryCustomer(customer)
+  }
+
+  const renderCustomerNameButton = (customer?: CustomerHistoryTarget | null, fallback = 'Walk-in customer') => {
+    if (!customer?.id) return <span>{customer?.name || fallback}</span>
+    return (
+      <button
+        type="button"
+        className="break-words text-left font-medium text-primary underline-offset-2 hover:underline"
+        onClick={() => openCustomerHistory(customer)}
+      >
+        {customer.name || fallback}
+      </button>
+    )
+  }
+
   const buildInvoiceData = (sale: any, customerOverride?: any) => {
     const business = businessProfile || {}
     const saleItems = Array.isArray(sale?.items) ? sale.items : []
@@ -1289,7 +1309,7 @@ export default function ReceivablesPage() {
                         <Users className="h-5 w-5 text-primary" />
                       </div>
                       <div>
-                        <h3 className="font-semibold">{customer.name}</h3>
+                        <h3>{renderCustomerNameButton(customer, customer.name)}</h3>
                         <p className="text-sm text-muted-foreground">{customer.phone}</p>
                         <p className="text-sm text-muted-foreground">{customer.email}</p>
                       </div>
@@ -1371,7 +1391,7 @@ export default function ReceivablesPage() {
                       <div>
                         <h3 className="font-semibold">{sale.receiptNo}</h3>
                         <p className="text-sm text-muted-foreground">
-                          {sale.customer?.name || 'Walk-in customer'}
+                          {renderCustomerNameButton(sale.customer, 'Walk-in customer')}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatDisplayDate(sale.createdAt)}
@@ -1451,7 +1471,7 @@ export default function ReceivablesPage() {
                       <div>
                         <h3 className="font-semibold">{Number(payment.amount || 0).toFixed(2)}</h3>
                         <p className="text-sm text-muted-foreground">
-                          From {payment.customer?.name || 'Customer'}
+                          From {renderCustomerNameButton(payment.customer, 'Customer')}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatDisplayDate(payment.createdAt)}
@@ -1510,7 +1530,7 @@ export default function ReceivablesPage() {
                     <tr key={card.id} className="border-t">
                       <td className="p-2 font-medium">{card.cardNumber}</td>
                       <td className="p-2">{card.holderName}</td>
-                      <td className="p-2">{card.customer?.name || '—'}</td>
+                      <td className="p-2">{card.customer ? renderCustomerNameButton(card.customer, card.customer.name) : '—'}</td>
                       <td className="p-2 capitalize">{card.cardType}</td>
                       <td className="p-2 text-right font-semibold">{Number(card.balance).toFixed(2)}</td>
                       <td className="p-2 text-right">{Number(card.creditLimit).toFixed(2)}</td>
@@ -1567,7 +1587,7 @@ export default function ReceivablesPage() {
                 <tbody>
                   {creditAccounts.map(acct => (
                     <tr key={acct.id} className="border-t">
-                      <td className="p-2 font-medium">{acct.name}</td>
+                      <td className="p-2">{renderCustomerNameButton(acct, acct.name)}</td>
                       <td className="p-2">{acct.phone || '—'}</td>
                       <td className="p-2 text-right">{Number(acct.creditLimit).toFixed(2)}</td>
                       <td className="p-2 text-right text-red-600 font-semibold">{Number(acct.balance).toFixed(2)}</td>
@@ -1597,6 +1617,14 @@ export default function ReceivablesPage() {
           )}
         </div>
       )}
+
+      <CustomerTransactionHistoryDialog
+        customer={historyCustomer}
+        open={!!historyCustomer}
+        onOpenChange={(open) => {
+          if (!open) setHistoryCustomer(null)
+        }}
+      />
 
       <CreateCustomerModal
         isOpen={showCustomerModal}
@@ -1642,7 +1670,7 @@ export default function ReceivablesPage() {
                     <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
                       <div className="flex items-center justify-between gap-3">
                         <span className="min-w-0">
-                          <span className="block break-words font-medium">{selectedSaleCustomer.name}</span>
+                          <span className="block">{renderCustomerNameButton(selectedSaleCustomer, selectedSaleCustomer.name)}</span>
                           {selectedSaleCustomer.phone && <span className="text-xs text-muted-foreground">{selectedSaleCustomer.phone}</span>}
                         </span>
                         <span className="shrink-0 text-right">
@@ -2040,7 +2068,7 @@ export default function ReceivablesPage() {
                   </Button>
                 </div>
                 <div>
-                  <DetailRow label="Customer" value={selectedSaleDetail.customer?.name || 'Walk-in customer'} />
+                  <DetailRow label="Customer" value={renderCustomerNameButton(selectedSaleDetail.customer, 'Walk-in customer')} />
                   <DetailRow label="Status" value={getPaymentStatusBadge(selectedSaleDetail.paymentStatus)} />
                   <DetailRow label="Payment Method" value={selectedSaleDetail.paymentMethod} />
                   <DetailRow label="Subtotal" value={formatCurrency(Number(selectedSaleDetail.subtotal || 0))} />

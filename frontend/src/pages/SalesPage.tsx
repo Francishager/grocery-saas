@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
+import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 import { openReceiptPrintWindow, printReceiptInBrowser } from '@/lib/receiptPrint'
 import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
 import { useOnlineStatus } from '@/db/hooks'
@@ -23,6 +24,7 @@ interface RecentSale {
   receiptNo: string
   total: number
   paymentMethod: string
+  customerName?: string | null
   createdAt: string
   items: { productId: string; quantity: number; price: number; total: number }[]
   user?: { fname: string; lname: string }
@@ -121,6 +123,7 @@ export default function SalesPage() {
   const [creditInfo, setCreditInfo] = useState<CustomerCreditInfo | null>(null)
   const [creditInfoLoading, setCreditInfoLoading] = useState(false)
   const [creditInfoError, setCreditInfoError] = useState('')
+  const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const ITEMS_PER_PAGE = 20
   const { toast } = useToast()
@@ -312,6 +315,12 @@ export default function SalesPage() {
     if (!name) return null
     return customers.find((customer) => customer.name.trim().toLowerCase() === name) || customers.find((customer) => customer.name.trim().toLowerCase().includes(name)) || null
   }, [customers, customerName])
+
+  const findCustomerByName = (name?: string | null) => {
+    const normalized = String(name || '').trim().toLowerCase()
+    if (!normalized) return null
+    return customers.find((customer) => customer.name.trim().toLowerCase() === normalized) || null
+  }
 
   useEffect(() => {
     const balance = Number(matchedCustomer?.balance || 0)
@@ -1232,10 +1241,26 @@ export default function SalesPage() {
                 const payLabel = (sale.paymentMethod || "cash").split("_").join(" ")
                 const staff = sale.user ? [sale.user.fname, sale.user.lname].filter(Boolean).join(" ") || "—" : "—"
                 const dateStr = new Date(sale.createdAt).toLocaleString("en-GB", {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"})
+                const matchedSaleCustomer = findCustomerByName(sale.customerName)
                 return (
                   <div key={sale.id} className="flex items-center justify-between rounded-lg border p-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-mono text-sm font-medium">{sale.receiptNo}</p>
+                      {sale.customerName && (
+                        <p className="text-xs">
+                          {matchedSaleCustomer ? (
+                            <button
+                              type="button"
+                              className="break-words text-left font-medium text-primary underline-offset-2 hover:underline"
+                              onClick={() => setHistoryCustomer(matchedSaleCustomer)}
+                            >
+                              {sale.customerName}
+                            </button>
+                          ) : (
+                            <span className="break-words text-muted-foreground">{sale.customerName}</span>
+                          )}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">{sale.items ? sale.items.length : 0} items &middot; {payLabel} &middot; {staff}</p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -1250,6 +1275,14 @@ export default function SalesPage() {
           )}
         </CardContent>
       </Card>
+
+      <CustomerTransactionHistoryDialog
+        customer={historyCustomer}
+        open={!!historyCustomer}
+        onOpenChange={(open) => {
+          if (!open) setHistoryCustomer(null)
+        }}
+      />
 
       {/* Customer Credit Alert Dialog */}
       <Dialog open={!!creditAlertCustomer} onOpenChange={(open) => { if (!open) closeCreditAlert() }}>

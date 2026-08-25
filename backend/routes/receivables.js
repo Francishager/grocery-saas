@@ -131,6 +131,16 @@ const withUser = (record) => {
   return { ...rest, user: User || record.user || null }
 }
 
+const userName = (user) => [user?.fname, user?.lname].filter(Boolean).join(' ') || 'Staff'
+
+const sortLedgerRows = (rows) => rows.sort((a, b) => {
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+  const aTime = a.date ? new Date(a.date).getTime() : 0
+  const bTime = b.date ? new Date(b.date).getTime() : 0
+  if (aTime !== bTime) return aTime - bTime
+  return String(a.reference || a.id).localeCompare(String(b.reference || b.id))
+})
+
 // === CUSTOMERS ===
 
 // Get all customers for tenant
@@ -308,6 +318,320 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
   } catch (error) {
     console.error('Customer credit info error:', error)
     handleBranchError(res, error, 'Failed to fetch customer credit information')
+  }
+})
+
+// Get one customer's transaction history without requiring the statement report screen
+router.get('/customers/:id/history', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const limit = Math.min(Math.max(Number(req.query.limit || 250), 25), 1000)
+
+    const customer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id }),
+      include: { branch: { select: { id: true, name: true } } }
+    })
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const customerNameFilter = customer.name
+      ? { customerName: { equals: customer.name, mode: 'insensitive' } }
+      : { id: '__no_matching_customer_name__' }
+
+    const [receivableSales, payments, posSales, creditNotes, saleReturns, trustScore] = await Promise.all([
+      prisma.saleRecord.findMany({
+        where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          User: userSelect,
+          items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }),
+      prisma.customerPayment.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          sale: { select: { id: true, receiptNo: true } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }),
+      prisma.sale.findMany({
+        where: scopedWhere(scope, { ...customerNameFilter, status: { not: 'cancelled' } }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          user: userSelect,
+          items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }),
+      prisma.creditNote.findMany({
+        where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }),
+      prisma.saleReturn.findMany({
+        where: scopedWhere(scope, { customerId: id, status: 'completed' }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          user: userSelect,
+          sale: { select: { id: true, receiptNo: true } },
+          items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }),
+      getRepaymentTrustScore(prisma, scope, customer)
+    ])
+
+    const rows = []
+    const paymentTotalBySale = new Map()
+    payments.forEach((payment) => {
+      if (!payment.saleId) return
+      paymentTotalBySale.set(payment.saleId, toMoney(paymentTotalBySale.get(payment.saleId)) + toMoney(payment.amount))
+    })
+
+    if (toMoney(customer.openingBalance) > 0) {
+      rows.push({
+        id: `opening-${customer.id}`,
+        source: 'opening_balance',
+        type: 'Opening Balance',
+        date: customer.openingBalanceDate || customer.createdAt,
+        reference: 'Opening Balance',
+        description: customer.openingBalanceNote || 'Balance brought forward before using JibuSales',
+        debit: toMoney(customer.openingBalance),
+        credit: 0,
+        amount: toMoney(customer.openingBalance),
+        balanceImpact: toMoney(customer.openingBalance),
+        affectsBalance: true,
+        paymentMethod: null,
+        status: 'system',
+        branch: customer.branch?.name || '',
+        staff: 'System',
+        items: [],
+        sortOrder: 0
+      })
+    }
+
+    receivableSales.forEach((sale) => {
+      rows.push({
+        id: sale.id,
+        source: 'receivable_sale',
+        type: toMoney(sale.balance) > 0 ? 'Credit Sale' : 'Customer Sale',
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        reference: sale.receiptNo,
+        description: `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold`,
+        debit: toMoney(sale.total),
+        credit: 0,
+        amount: toMoney(sale.total),
+        amountPaid: toMoney(sale.amountPaid),
+        remainingBalance: toMoney(sale.balance),
+        balanceImpact: toMoney(sale.total),
+        affectsBalance: true,
+        paymentMethod: sale.paymentMethod,
+        status: sale.paymentStatus,
+        branch: sale.branch?.name || '',
+        staff: userName(sale.User),
+        items: sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total
+        })),
+        sortOrder: 10
+      })
+
+      const missingPayment = Math.max(0, Math.round((toMoney(sale.amountPaid) - toMoney(paymentTotalBySale.get(sale.id))) * 100) / 100)
+      if (missingPayment > 0) {
+        rows.push({
+          id: `${sale.id}-paid-at-sale`,
+          source: 'sale_payment_adjustment',
+          type: 'Paid At Sale',
+          date: sale.createdAt,
+          reference: sale.receiptNo,
+          description: `Payment captured on ${sale.receiptNo}`,
+          debit: 0,
+          credit: missingPayment,
+          amount: missingPayment,
+          balanceImpact: -missingPayment,
+          affectsBalance: true,
+          paymentMethod: sale.paymentMethod,
+          status: 'paid',
+          branch: sale.branch?.name || '',
+          staff: userName(sale.User),
+          items: [],
+          sortOrder: 11
+        })
+      }
+    })
+
+    payments.forEach((payment) => {
+      rows.push({
+        id: payment.id,
+        source: 'customer_payment',
+        type: 'Payment',
+        date: payment.createdAt,
+        reference: payment.reference || payment.transactionId || payment.sale?.receiptNo || payment.id,
+        description: payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : (payment.notes || 'Customer payment'),
+        debit: 0,
+        credit: toMoney(payment.amount),
+        amount: toMoney(payment.amount),
+        balanceImpact: -toMoney(payment.amount),
+        affectsBalance: true,
+        paymentMethod: payment.paymentMethod,
+        status: 'paid',
+        branch: payment.branch?.name || '',
+        staff: '',
+        items: [],
+        sortOrder: 20
+      })
+    })
+
+    creditNotes.forEach((note) => {
+      rows.push({
+        id: note.id,
+        source: 'credit_note',
+        type: 'Credit Note',
+        date: note.createdAt,
+        reference: note.noteNo,
+        description: note.notes || note.reason || 'Customer credit note',
+        debit: 0,
+        credit: toMoney(note.amount),
+        amount: toMoney(note.amount),
+        balanceImpact: -toMoney(note.amount),
+        affectsBalance: true,
+        paymentMethod: null,
+        status: note.status,
+        branch: note.branch?.name || '',
+        staff: '',
+        items: [],
+        sortOrder: 30
+      })
+    })
+
+    saleReturns.forEach((ret) => {
+      const affectsBalance = ret.refundMethod === 'credit'
+      rows.push({
+        id: ret.id,
+        source: 'sale_return',
+        type: 'Sale Return',
+        date: ret.createdAt,
+        reference: ret.returnNo,
+        description: ret.sale?.receiptNo ? `Return for ${ret.sale.receiptNo}` : (ret.reason || 'Returned goods'),
+        debit: 0,
+        credit: affectsBalance ? toMoney(ret.total) : 0,
+        amount: toMoney(ret.total),
+        balanceImpact: affectsBalance ? -toMoney(ret.total) : 0,
+        affectsBalance,
+        paymentMethod: ret.refundMethod,
+        status: ret.status,
+        branch: ret.branch?.name || '',
+        staff: userName(ret.user),
+        items: ret.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitPrice: item.price,
+          total: item.total
+        })),
+        sortOrder: 40
+      })
+    })
+
+    posSales.forEach((sale) => {
+      rows.push({
+        id: sale.id,
+        source: 'pos_sale',
+        type: 'Cash Sale',
+        date: sale.createdAt,
+        reference: sale.receiptNo,
+        description: `${sale.items.length || 0} POS item${sale.items.length === 1 ? '' : 's'} sold`,
+        debit: 0,
+        credit: 0,
+        amount: toMoney(sale.total),
+        balanceImpact: 0,
+        affectsBalance: false,
+        paymentMethod: sale.paymentMethod,
+        status: sale.status,
+        branch: sale.branch?.name || '',
+        staff: userName(sale.user),
+        items: sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total
+        })),
+        sortOrder: 50
+      })
+    })
+
+    let runningBalance = 0
+    const transactions = sortLedgerRows(rows).map(({ sortOrder, ...row }) => {
+      runningBalance = Math.round((runningBalance + toMoney(row.balanceImpact)) * 100) / 100
+      return { ...row, balance: runningBalance }
+    }).reverse()
+
+    const totals = rows.reduce((acc, row) => {
+      acc.debit += toMoney(row.debit)
+      acc.credit += toMoney(row.credit)
+      acc.amount += toMoney(row.amount)
+      if (row.source === 'receivable_sale') acc.receivableSales += toMoney(row.amount)
+      if (row.source === 'pos_sale') acc.cashSales += toMoney(row.amount)
+      if (row.source === 'customer_payment') acc.payments += toMoney(row.amount)
+      if (row.source === 'credit_note') acc.creditNotes += toMoney(row.amount)
+      if (row.source === 'sale_return') acc.returns += toMoney(row.amount)
+      return acc
+    }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, creditNotes: 0, returns: 0 })
+
+    res.json({
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        address: customer.address,
+        status: customer.status,
+        creditLimit: toMoney(customer.creditLimit),
+        balance: toMoney(customer.balance),
+        openingBalance: toMoney(customer.openingBalance),
+        openingBalanceDate: customer.openingBalanceDate,
+        openingBalanceNote: customer.openingBalanceNote,
+        trustScore
+      },
+      summary: {
+        ...totals,
+        transactionCount: transactions.length,
+        currentBalance: toMoney(customer.balance),
+        computedBalance: runningBalance,
+        availableCredit: toMoney(customer.creditLimit) - toMoney(customer.balance),
+        lastTransactionDate: transactions[0]?.date || null
+      },
+      transactions
+    })
+  } catch (error) {
+    console.error('Customer history error:', error)
+    handleBranchError(res, error, 'Failed to fetch customer transaction history')
   }
 })
 

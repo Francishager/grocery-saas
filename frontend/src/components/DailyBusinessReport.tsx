@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatCurrency, formatDisplayDate } from '@/lib/utils'
+import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 
 export interface DailyBusinessData {
   header: {
@@ -31,7 +32,11 @@ type SummaryCard = { label: string; value: number; kinds: string[]; methods?: st
 
 const money = (value: unknown) => formatCurrency(Number(value || 0))
 const text = (value: unknown) => String(value || '-').replace(/_/g, ' ')
-const customerIdOf = (row: any) => row?.customerId || (row?.registered ? row?.id : '')
+const customerIdOf = (row: any) => {
+  const id = row?.customerId || row?.id || ''
+  if (!id || id === 'walk-in' || String(id).startsWith('cash-name:')) return ''
+  return id
+}
 
 function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldown; onClose: () => void; onTransaction: (row: any) => void }) {
   if (!drilldown) return null
@@ -155,6 +160,7 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
   const [drilldown, setDrilldown] = useState<Drilldown>(null)
   const [transaction, setTransaction] = useState<any>(null)
   const [customer, setCustomer] = useState<any>(null)
+  const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
   const transactions = data.transactions || []
   const summary = data.summary || {}
   const cash = data.cashMovement || {}
@@ -166,6 +172,11 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
   const openRows = (title: string, rows: any[]) => setDrilldown({ title, rows })
   const customerTransactions = useMemo(() => customer ? (customer.transactions || transactions.filter((row) => row.customerId === customerIdOf(customer) || row.customer === customer.name)) : [], [customer, transactions])
   const selectedCustomerId = customerIdOf(customer)
+  const openCustomerHistory = (row: any) => {
+    const customerId = customerIdOf(row)
+    if (!customerId) return
+    setHistoryCustomer({ id: customerId, name: row.name || row.customer || 'Customer', phone: row.phone })
+  }
 
   const cards: SummaryCard[] = [
     { label: 'Total Sales', value: Number(summary.totalSales || 0), kinds: ['sale', 'credit-sale'], icon: BarChart3 },
@@ -338,7 +349,15 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
                     <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                     <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{row.reference || row.id}</button></td>
                     <td className="px-3 py-2 capitalize">{text(row.kind)}</td>
-                    <td className="px-3 py-2">{row.customer || row.account || '-'}</td>
+                    <td className="px-3 py-2">
+                      {row.customerId ? (
+                        <button className="break-words text-left font-medium text-primary underline-offset-2 hover:underline" onClick={() => openCustomerHistory(row)}>
+                          {row.customer || 'Customer'}
+                        </button>
+                      ) : (
+                        row.customer || row.account || '-'
+                      )}
+                    </td>
                     <td className="px-3 py-2">{row.staff || '-'}</td>
                     <td className="px-3 py-2 capitalize">{text(row.paymentMethod || row.direction)}</td>
                     <td className="px-3 py-2 text-right">{money(row.debit)}</td>
@@ -372,13 +391,20 @@ export default function DailyBusinessReport({ data }: { data: DailyBusinessData 
             <div className="mt-2 space-y-2">
               {customerTransactions.length ? customerTransactions.map((row: any) => <button key={row.id} className="flex w-full items-center justify-between gap-3 rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => setTransaction(row)}><span className="min-w-0"><span className="block break-words text-sm font-medium">{row.type || row.kind} - {row.reference}</span><span className="text-xs text-muted-foreground">{text(row.paymentMethod)} - Cash {money(row.cashAmount)} - Credit {money(row.creditAmount)}</span></span><span className="shrink-0 font-semibold">{money(row.amount)}</span></button>) : <p className="rounded-md border p-4 text-sm text-muted-foreground">No transactions for this customer on this date.</p>}
             </div>
-            {selectedCustomerId && <div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" onClick={() => window.location.assign('/tenant/receivables/customers')}>View Customer</Button><Button variant="outline" onClick={() => window.location.assign(`/tenant/reports?report=customersStatement&customerId=${selectedCustomerId}`)}>Print Statement</Button></div>}
+            {selectedCustomerId && <div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" onClick={() => openCustomerHistory(customer)}>View Full History</Button><Button variant="outline" onClick={() => window.location.assign(`/tenant/reports?report=customersStatement&customerId=${selectedCustomerId}`)}>Print Statement</Button></div>}
           </div>
         </div>
       )}
 
       <DetailModal drilldown={drilldown} onClose={() => setDrilldown(null)} onTransaction={(row) => { setDrilldown(null); setTransaction(row) }} />
       <TransactionModal row={transaction} onClose={() => setTransaction(null)} />
+      <CustomerTransactionHistoryDialog
+        customer={historyCustomer}
+        open={!!historyCustomer}
+        onOpenChange={(open) => {
+          if (!open) setHistoryCustomer(null)
+        }}
+      />
     </div>
   )
 }
