@@ -32,13 +32,13 @@ export async function nextEmployeeNumber(prisma, tenantId, { firstName, middleNa
   });
 
   const employees = await prisma.employee.findMany({
-    where: { tenantId, employeeNumber: { startsWith: prefix } },
+    where: { tenantId },
     select: { employeeNumber: true },
   });
 
   const highest = employees.reduce((max, employee) => {
-    const suffix = String(employee.employeeNumber || '').slice(prefix.length);
-    const value = /^\d+$/.test(suffix) ? Number(suffix) : 0;
+    const match = String(employee.employeeNumber || '').match(/(\d+)$/);
+    const value = match ? Number(match[1]) : 0;
     return Math.max(max, value);
   }, 0);
 
@@ -51,5 +51,5 @@ export async function nextEmployeeNumber(prisma, tenantId, { firstName, middleNa
     if (!existing) return employeeNumber;
   }
 
-  throw new Error('No available staff number sequence for this business and employee name prefix');
+  throw new Error('No available staff number sequence for this business');
 }
