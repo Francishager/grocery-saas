@@ -4,6 +4,7 @@ import { authenticateToken, requirePermission, requireCashAccount } from "../../
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
 import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
 import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
+import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 
 const router = Router();
 
@@ -153,7 +154,7 @@ async function getCustomerCreditInfo(scope, customerId) {
 
   if (!customer) return null;
 
-  const [outstandingSales, recentPayments] = await Promise.all([
+  const [outstandingSales, recentPayments, trustScore] = await Promise.all([
     prisma.saleRecord.findMany({
       where: scopedWhere(scope, {
         customerId,
@@ -180,6 +181,7 @@ async function getCustomerCreditInfo(scope, customerId) {
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
+    getRepaymentTrustScore(prisma, scope, customer),
   ]);
 
   const saleItems = (sale) =>
@@ -212,10 +214,11 @@ async function getCustomerCreditInfo(scope, customerId) {
   );
 
   return {
-    customer,
+    customer: { ...customer, trustScore },
     summary: {
       balance: toMoney(customer.balance),
       creditLimit: toMoney(customer.creditLimit),
+      trustScore,
       openingBalance: toMoney(customer.openingBalance),
       outstandingSalesCount: outstandingSales.length,
       outstandingItemsCount: outstandingItems.length,

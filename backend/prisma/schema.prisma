@@ -970,7 +970,7 @@ model Customer {
   openingBalanceDate DateTime?
   openingBalanceNote String?
   status             CustomerStatus @default(active)
-  trustScore         Int            @default(50) // 0-100, affects credit eligibility
+  trustScore         Int            @default(0) // Calculated from repayment history
   notes              String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt

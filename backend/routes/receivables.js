@@ -6,6 +6,7 @@ import { authenticateToken, requirePermission, requireTenant, checkPaymentMethod
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
+import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -87,6 +88,41 @@ const paymentStatusFor = (total, amountPaid) => {
   return 'unpaid'
 }
 
+const validateCreditLimitRequired = (creditLimit) => {
+  const creditLimitAmount = toMoney(creditLimit)
+  if (creditLimitAmount <= 0) {
+    return {
+      valid: false,
+      amount: creditLimitAmount,
+      message: 'Customer credit limit is required. Set a credit limit greater than zero before saving this customer.'
+    }
+  }
+  return { valid: true, amount: creditLimitAmount }
+}
+
+const validateCreditSaleLimit = (customer, balance) => {
+  if (balance <= 0) return { valid: true }
+  const creditLimitAmount = toMoney(customer.creditLimit)
+  if (creditLimitAmount <= 0) {
+    return {
+      valid: false,
+      statusCode: 400,
+      code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED',
+      message: `Set a credit limit for ${customer.name || 'this customer'} before making a credit sale.`
+    }
+  }
+  const newBalance = toMoney(customer.balance) + balance
+  if (newBalance > creditLimitAmount) {
+    return {
+      valid: false,
+      statusCode: 400,
+      code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED',
+      message: `Credit limit exceeded. Available credit is ${Math.max(0, creditLimitAmount - toMoney(customer.balance)).toFixed(2)}.`
+    }
+  }
+  return { valid: true }
+}
+
 const userSelect = { select: { id: true, fname: true, lname: true } }
 
 const withUser = (record) => {
@@ -115,7 +151,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
       })
     })
 
-    const [customers, total] = await Promise.all([
+    const [customersRaw, total] = await Promise.all([
       prisma.customer.findMany({
         where,
         skip,
@@ -124,6 +160,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
       }),
       prisma.customer.count({ where })
     ])
+    const customers = await attachRepaymentTrustScores(prisma, scope, customersRaw)
 
     res.json({
       customers,
@@ -165,7 +202,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
 
-    const [outstandingSales, recentPayments] = await Promise.all([
+    const [outstandingSales, recentPayments, trustScore] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(scope, {
           customerId: id,
@@ -191,7 +228,8 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         },
         orderBy: { createdAt: 'desc' },
         take: 20
-      })
+      }),
+      getRepaymentTrustScore(prisma, scope, customer)
     ])
 
     const outstandingItems = outstandingSales.flatMap((sale) =>
@@ -219,10 +257,11 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
     )
 
     res.json({
-      customer,
+      customer: { ...customer, trustScore },
       summary: {
         balance: toMoney(customer.balance),
         creditLimit: toMoney(customer.creditLimit),
+        trustScore,
         openingBalance: toMoney(customer.openingBalance),
         outstandingSalesCount: outstandingSales.length,
         outstandingItemsCount: outstandingItems.length,
@@ -285,6 +324,11 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
       return res.status(400).json({ error: 'Customer name is required' })
     }
 
+    const creditLimitCheck = validateCreditLimitRequired(creditLimit)
+    if (!creditLimitCheck.valid) {
+      return res.status(400).json({ error: creditLimitCheck.message, code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+    }
+
     const openingBalance = toMoney(req.body.openingBalance, 0)
     if (openingBalance < 0) {
       return res.status(400).json({ error: 'Opening balance cannot be negative' })
@@ -316,23 +360,25 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
       }
     }
 
-    const customer = await prisma.customer.create({
+    const customerRaw = await prisma.customer.create({
       data: {
         name: name.trim(),
         email,
         phone,
         address,
-        creditLimit: toMoney(creditLimit),
+        creditLimit: creditLimitCheck.amount,
         balance: openingBalance,
         openingBalance,
         openingBalanceDate,
         openingBalanceNote,
         notes,
+        trustScore: 0,
         tenantId: scope.tenantId,
         branchId: scope.branchId
       }
     })
 
+    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
     res.status(201).json(customer)
   } catch (error) {
     if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
@@ -346,7 +392,7 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { name, email, phone, address, creditLimit, status, trustScore, notes, branchId, openingBalanceNote } = req.body
+    const { name, email, phone, address, creditLimit, status, notes, branchId, openingBalanceNote } = req.body
 
     // Check if customer belongs to tenant
     const existingCustomer = await prisma.customer.findFirst({
@@ -411,14 +457,19 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
       openingBalanceData.openingBalanceNote = openingBalanceNote
     }
 
+    const nextCreditLimit = creditLimit !== undefined ? creditLimit : existingCustomer.creditLimit
+    const creditLimitCheck = validateCreditLimitRequired(nextCreditLimit)
+    if (!creditLimitCheck.valid) {
+      return res.status(400).json({ error: creditLimitCheck.message, code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+    }
+
     const data = {
       name,
       email,
       phone,
       address,
-      creditLimit,
+      creditLimit: creditLimit !== undefined ? creditLimitCheck.amount : undefined,
       status,
-      trustScore,
       notes,
       ...openingBalanceData
     }
@@ -432,11 +483,12 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
       data.branchId = targetScope.branchId
     }
 
-    const customer = await prisma.customer.update({
+    const customerRaw = await prisma.customer.update({
       where: { id },
       data
     })
 
+    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
     res.json(customer)
   } catch (error) {
     console.error('Update customer error:', error)
@@ -584,9 +636,12 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     const receiptNo = `SALE-${Date.now()}`
 
     if (balance > 0) {
-      const newBalance = customer.balance + balance
-      if (customer.creditLimit > 0 && newBalance > customer.creditLimit) {
-        return res.status(400).json({ error: 'Credit limit exceeded' })
+      const creditLimitCheck = validateCreditSaleLimit(customer, balance)
+      if (!creditLimitCheck.valid) {
+        return res.status(creditLimitCheck.statusCode || 400).json({
+          error: creditLimitCheck.message,
+          code: creditLimitCheck.code
+        })
       }
     }
 
@@ -1123,10 +1178,11 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
       })
     })
 
-    const accounts = await prisma.customer.findMany({
+    const accountsRaw = await prisma.customer.findMany({
       where,
       orderBy: { balance: 'desc' }
     })
+    const accounts = await attachRepaymentTrustScores(prisma, scope, accountsRaw)
 
     res.json({ accounts })
   } catch (error) {
@@ -1135,26 +1191,35 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
   }
 })
 
-// Update credit terms (credit limit, status, trust score)
+// Update credit terms. Trust score is calculated from repayment history.
 router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { creditLimit, status, trustScore, notes } = req.body
+    const { creditLimit, status, notes } = req.body
 
     const existing = await prisma.customer.findFirst({ where: scopedWhere(scope, { id }) })
     if (!existing) return res.status(404).json({ error: 'Customer not found' })
 
-    const customer = await prisma.customer.update({
+    let creditLimitAmount
+    if (creditLimit !== undefined) {
+      const creditLimitCheck = validateCreditLimitRequired(creditLimit)
+      if (!creditLimitCheck.valid) {
+        return res.status(400).json({ error: creditLimitCheck.message, code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+      }
+      creditLimitAmount = creditLimitCheck.amount
+    }
+
+    const customerRaw = await prisma.customer.update({
       where: { id },
       data: {
-        ...(creditLimit !== undefined && { creditLimit: toMoney(creditLimit) }),
+        ...(creditLimit !== undefined && { creditLimit: creditLimitAmount }),
         ...(status !== undefined && { status }),
-        ...(trustScore !== undefined && { trustScore: Math.max(0, Math.min(100, Number(trustScore))) }),
         ...(notes !== undefined && { notes })
       }
     })
 
+    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
     res.json(customer)
   } catch (error) {
     console.error('Update credit account error:', error)

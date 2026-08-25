@@ -1,0 +1,1 @@
+ALTER TABLE "Customer" ALTER COLUMN "trustScore" SET DEFAULT 0;

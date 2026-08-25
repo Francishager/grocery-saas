@@ -191,7 +191,7 @@ export default function ReceivablesPage() {
   const [creditAccounts, setCreditAccounts] = useState<Customer[]>([])
   const [editingCreditAccount, setEditingCreditAccount] = useState<Customer | null>(null)
   const [creditAccountForm, setCreditAccountForm] = useState({
-    creditLimit: '0', status: 'active' as 'active' | 'inactive' | 'blocked', trustScore: '50', notes: ''
+    creditLimit: '0', status: 'active' as 'active' | 'inactive' | 'blocked', trustScore: '0', notes: ''
   })
 
   useEffect(() => {
@@ -438,6 +438,14 @@ export default function ReceivablesPage() {
 
   const saveCreditAccount = async () => {
     if (!editingCreditAccount) return
+    if (Number(creditAccountForm.creditLimit || 0) <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Credit limit required',
+        description: 'Set a customer credit limit greater than zero before saving credit terms.'
+      })
+      return
+    }
     try {
       const response = await apiFetch(`/api/receivables/credit-accounts/${editingCreditAccount.id}`, {
         method: 'PUT',
@@ -445,7 +453,6 @@ export default function ReceivablesPage() {
         body: JSON.stringify({
           creditLimit: Number(creditAccountForm.creditLimit) || 0,
           status: creditAccountForm.status,
-          trustScore: Number(creditAccountForm.trustScore) || 0,
           notes: creditAccountForm.notes || null,
         }),
       })
@@ -605,6 +612,29 @@ export default function ReceivablesPage() {
       return
     }
 
+    const paidAmount = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
+    const balanceAfterPayment = Math.max(0, saleTotal - paidAmount)
+    if (balanceAfterPayment > 0) {
+      const customerCreditLimit = Number(selectedSaleCustomer?.creditLimit || 0)
+      if (customerCreditLimit <= 0) {
+        toast({
+          title: 'Credit limit required',
+          description: `Set a credit limit for ${selectedSaleCustomer?.name || 'this customer'} before making a credit sale.`,
+          variant: 'destructive'
+        })
+        return
+      }
+      const currentCustomerBalance = Number(selectedSaleCustomer?.balance || 0)
+      if (currentCustomerBalance + balanceAfterPayment > customerCreditLimit) {
+        toast({
+          title: 'Credit limit exceeded',
+          description: `Available credit is ${formatCurrency(Math.max(0, customerCreditLimit - currentCustomerBalance))}.`,
+          variant: 'destructive'
+        })
+        return
+      }
+    }
+
     setSavingSale(true)
     try {
       const response = await apiFetch('/api/receivables/sales', {
@@ -617,7 +647,7 @@ export default function ReceivablesPage() {
           tax: parseAmount(saleForm.tax),
           discount: parseAmount(saleForm.discount),
           total: saleTotal,
-          amountPaid: Math.min(parseAmount(saleForm.amountPaid), saleTotal),
+          amountPaid: paidAmount,
           notes: saleForm.notes || undefined,
         })
       })
@@ -1176,6 +1206,8 @@ export default function ReceivablesPage() {
     'Manage customer credit and outstanding payments'
   const saleCustomerList = customerOptions.length ? customerOptions : customers
   const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
+  const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
+  const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
 
   return (
     <div className="space-y-6">
@@ -1619,6 +1651,11 @@ export default function ReceivablesPage() {
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>
+                      {saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
+                        <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                          Set a credit limit for this customer before recording a credit sale.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1778,7 +1815,7 @@ export default function ReceivablesPage() {
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>Balance after payment</span>
-                  <span>{formatCurrency(Math.max(0, saleTotal - parseAmount(saleForm.amountPaid)))}</span>
+                  <span>{formatCurrency(saleBalanceAfterPayment)}</span>
                 </div>
               </div>
 
@@ -2103,7 +2140,7 @@ export default function ReceivablesPage() {
             <h3 className="text-lg font-semibold mb-1">Edit Credit Terms</h3>
             <p className="text-sm text-muted-foreground mb-4">{editingCreditAccount.name}</p>
             <div className="space-y-3">
-              <div><Label>Credit Limit</Label><Input type="number" value={creditAccountForm.creditLimit} onChange={e => setCreditAccountForm({ ...creditAccountForm, creditLimit: e.target.value })} /></div>
+              <div><Label>Credit Limit *</Label><Input type="number" min="0.01" step="0.01" value={creditAccountForm.creditLimit} onChange={e => setCreditAccountForm({ ...creditAccountForm, creditLimit: e.target.value })} /></div>
               <div>
                 <Label>Status</Label>
                 <Select value={creditAccountForm.status} onValueChange={v => setCreditAccountForm({ ...creditAccountForm, status: v as any })}>
@@ -2115,7 +2152,13 @@ export default function ReceivablesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>Trust Score (0-100)</Label><Input type="number" min="0" max="100" value={creditAccountForm.trustScore} onChange={e => setCreditAccountForm({ ...creditAccountForm, trustScore: e.target.value })} /></div>
+              <div>
+                <Label>Trust Score</Label>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-semibold">
+                  {editingCreditAccount.trustScore || 0}/100
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Calculated from repayment history.</p>
+              </div>
               <div><Label>Notes</Label><Textarea value={creditAccountForm.notes} onChange={e => setCreditAccountForm({ ...creditAccountForm, notes: e.target.value })} rows={2} /></div>
             </div>
             <div className="flex justify-end gap-2 mt-4">

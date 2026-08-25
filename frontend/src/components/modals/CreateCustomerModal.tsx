@@ -125,6 +125,15 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       return
     }
 
+    if (Number(formData.creditLimit || 0) <= 0) {
+      toast({
+        title: 'Credit limit required',
+        description: 'Set a customer credit limit greater than zero before saving this customer.',
+        variant: 'destructive'
+      })
+      return
+    }
+
     setLoading(true)
     
     try {
@@ -150,6 +159,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       }
       const payload = {
         ...formData,
+        creditLimit: Number(formData.creditLimit || 0),
         branchId: canManageCustomers ? formData.branchId : undefined,
         openingBalance: canManageOpeningBalances ? Number(formData.openingBalance || 0) : undefined,
         openingBalanceDate: canManageOpeningBalances ? formData.openingBalanceDate || null : undefined,
@@ -272,15 +282,16 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="creditLimit">Credit Limit</Label>
+              <Label htmlFor="creditLimit">Credit Limit *</Label>
               <Input
                 id="creditLimit"
                 type="number"
                 value={formData.creditLimit}
                 onChange={(e) => handleInputChange('creditLimit', Number(e.target.value))}
-                placeholder="0"
-                min="0"
+                placeholder="Enter credit limit"
+                min="0.01"
                 step="0.01"
+                required
               />
             </div>
           </div>
