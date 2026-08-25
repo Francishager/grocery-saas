@@ -764,10 +764,17 @@ export default function HRAccountingConfigPage() {
                 <AccountSelect value={selectedAccounts.salaryAdvanceAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryAdvanceAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder="Select asset account" />
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={handleSaveMapping} disabled={saving}>Save Mapping</Button>
-              <Button variant="outline" onClick={handleInitializeAccounts} disabled={saving}>Auto-Create Default Accounts</Button>
-            </div>
+            {isConfigured ? (
+              <div className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" />
+                Account mappings configured
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleSaveMapping} disabled={saving}>Save Mapping</Button>
+                <Button variant="outline" onClick={handleInitializeAccounts} disabled={saving}>Auto-Create Default Accounts</Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

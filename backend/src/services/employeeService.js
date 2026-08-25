@@ -92,13 +92,14 @@ class EmployeeService {
           { employeeNumber: '' },
         ],
       },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, middleName: true, lastName: true },
       orderBy: { createdAt: 'asc' },
     });
 
     for (const employee of missingEmployees) {
       const employeeNumber = await nextEmployeeNumber(prisma, tenantId, {
         firstName: employee.firstName,
+        middleName: employee.middleName,
         lastName: employee.lastName,
       });
       await prisma.employee.update({
@@ -297,7 +298,7 @@ class EmployeeService {
 
     const basicSalary = Number(data.basicSalary ?? data.salary ?? 0) || 0;
     const hireDate = optionalDate(data.hireDate || data.dateOfJoining) || new Date();
-    const employeeNumber = await nextEmployeeNumber(prisma, tenantId, { firstName, lastName });
+    const employeeNumber = await nextEmployeeNumber(prisma, tenantId, { firstName, middleName: data.middleName, lastName });
     const status = data.status || data.employmentStatus || 'active';
     const nationalId = normalizeNationalId(data.nationalId ?? data.idNumber);
     const taxId = normalizeTenDigitNumber(data.taxId, 'Employee PAYE TIN');

@@ -1,3 +1,7 @@
+const STAFF_NUMBER_PREFIX_LENGTH = 5;
+const STAFF_NUMBER_SEQUENCE_LENGTH = 5;
+const STAFF_NUMBER_MAX_SEQUENCE = 99999;
+
 const lettersOnly = (value = '') => String(value).replace(/[^a-zA-Z]/g, '').toUpperCase();
 
 function firstLetters(value = '', length = 2) {
@@ -7,14 +11,14 @@ function firstLetters(value = '', length = 2) {
   return compact.slice(0, length).padEnd(length, 'X');
 }
 
-export function buildEmployeeNumberPrefix({ businessName, firstName, lastName }) {
+export function buildEmployeeNumberPrefix({ businessName, firstName, middleName, lastName }) {
   const businessPart = firstLetters(businessName, 2);
-  const staffSource = [firstName, lastName].filter(Boolean).join(' ');
-  const staffPart = firstLetters(staffSource, 2);
-  return `${businessPart}${staffPart}`.slice(0, 4).padEnd(4, 'X');
+  const staffSource = [firstName, middleName, lastName].filter(Boolean).join(' ');
+  const staffPart = firstLetters(staffSource, 3);
+  return `${businessPart}${staffPart}`.slice(0, STAFF_NUMBER_PREFIX_LENGTH).padEnd(STAFF_NUMBER_PREFIX_LENGTH, 'X');
 }
 
-export async function nextEmployeeNumber(prisma, tenantId, { firstName, lastName } = {}) {
+export async function nextEmployeeNumber(prisma, tenantId, { firstName, middleName, lastName } = {}) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { name: true },
@@ -23,6 +27,7 @@ export async function nextEmployeeNumber(prisma, tenantId, { firstName, lastName
   const prefix = buildEmployeeNumberPrefix({
     businessName: tenant?.name || 'Business',
     firstName,
+    middleName,
     lastName,
   });
 
@@ -37,8 +42,8 @@ export async function nextEmployeeNumber(prisma, tenantId, { firstName, lastName
     return Math.max(max, value);
   }, 0);
 
-  for (let sequence = highest + 1; sequence <= 999999; sequence += 1) {
-    const employeeNumber = `${prefix}${String(sequence).padStart(6, '0')}`;
+  for (let sequence = highest + 1; sequence <= STAFF_NUMBER_MAX_SEQUENCE; sequence += 1) {
+    const employeeNumber = `${prefix}${String(sequence).padStart(STAFF_NUMBER_SEQUENCE_LENGTH, '0')}`;
     const existing = await prisma.employee.findFirst({
       where: { tenantId, employeeNumber },
       select: { id: true },
