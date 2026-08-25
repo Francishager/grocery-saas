@@ -10,6 +10,7 @@ import { authenticateToken, requirePermission, requireTenant } from "../../middl
 const router = Router();
 const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
 const userIdFromRequest = (req) => req.user.id || req.user.userId;
+const optionalNumber = (value) => (value === undefined || value === null || value === "" ? undefined : Number(value || 0));
 
 // Check authentication and tenant
 router.use(authenticateToken, requireTenant);
@@ -53,8 +54,8 @@ router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
       bonus: bonus || 0,
       overtime: overtime || 0,
       otherEarnings: otherEarnings || 0,
-      paye: paye || 0,
-      socialSecurityTax: socialSecurityTax || 0,
+      paye: optionalNumber(paye),
+      socialSecurityTax: optionalNumber(socialSecurityTax),
       healthInsurance: healthInsurance || 0,
       otherDeductions: otherDeductions || 0,
       salaryAdvanceRecovery: salaryAdvanceRecovery || 0,

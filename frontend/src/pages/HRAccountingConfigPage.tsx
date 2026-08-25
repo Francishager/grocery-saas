@@ -148,6 +148,62 @@ const defaultPaymentAccountId = (accounts: Account[], paymentMethod?: string | n
   return accounts.length === 1 ? accounts[0].id : ""
 }
 
+const roundMoney = (value: number) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+const payrollAmount = (value: number | string | null | undefined) => Number(value || 0)
+const usesJuly2026PayeSchedule = (period?: string) => String(period || "") >= "2026-07"
+
+function calculateUgandaResidentPaye(monthlyTaxableIncome: number, period?: string) {
+  const income = Math.max(0, Number(monthlyTaxableIncome || 0))
+
+  if (usesJuly2026PayeSchedule(period)) {
+    if (income <= 335000) return 0
+    if (income <= 410000) return roundMoney((income - 335000) * 0.2)
+    if (income <= 485000) return roundMoney(15000 + (income - 410000) * 0.25)
+    if (income <= 10000000) return roundMoney(33750 + (income - 485000) * 0.3)
+    return roundMoney(33750 + (income - 485000) * 0.3 + (income - 10000000) * 0.1)
+  }
+
+  if (income <= 235000) return 0
+  if (income <= 335000) return roundMoney((income - 235000) * 0.1)
+  if (income <= 410000) return roundMoney(10000 + (income - 335000) * 0.2)
+  if (income <= 10000000) return roundMoney(25000 + (income - 410000) * 0.3)
+  return roundMoney(25000 + (income - 410000) * 0.3 + (income - 10000000) * 0.1)
+}
+
+function calculateUgandaPayroll(form: Record<string, any>, employee?: Employee | null, period?: string) {
+  const grossSalary = roundMoney(
+    payrollAmount(form.basicSalary) +
+      payrollAmount(form.allowances) +
+      payrollAmount(form.bonus) +
+      payrollAmount(form.overtime) +
+      payrollAmount(form.otherEarnings)
+  )
+  const hasTin = Boolean(employee?.taxId)
+  const hasSocialSecurityNumber = Boolean(employee?.socialSecurityNumber)
+  const paye = hasTin ? calculateUgandaResidentPaye(grossSalary, period) : 0
+  const employeeSocialSecurity = hasSocialSecurityNumber ? roundMoney(grossSalary * 0.05) : 0
+  const employerSocialSecurity = hasSocialSecurityNumber ? roundMoney(grossSalary * 0.1) : 0
+  const manualDeductions =
+    payrollAmount(form.healthInsurance) +
+    payrollAmount(form.otherDeductions) +
+    payrollAmount(form.salaryAdvanceRecovery)
+  const totalDeductions = roundMoney(paye + employeeSocialSecurity + manualDeductions)
+
+  return {
+    grossSalary,
+    taxableIncome: grossSalary,
+    hasTin,
+    hasSocialSecurityNumber,
+    paye,
+    employeeSocialSecurity,
+    employerSocialSecurity,
+    totalSocialSecurity: roundMoney(employeeSocialSecurity + employerSocialSecurity),
+    totalDeductions,
+    netSalary: Math.max(0, roundMoney(grossSalary - totalDeductions)),
+    scheduleLabel: usesJuly2026PayeSchedule(period) ? "Resident PAYE from Jul 2026" : "Resident PAYE up to Jun 2026",
+  }
+}
+
 async function fetchJson(path: string, init?: RequestInit) {
   const response = await apiFetch(path, init)
   const data = await response.json().catch(() => ({}))
@@ -290,6 +346,23 @@ export default function HRAccountingConfigPage() {
     () => employees.find((employee) => employee.id === payrollForm.employeeId),
     [employees, payrollForm.employeeId]
   )
+  const salaryCalculator = useMemo(
+    () => calculateUgandaPayroll(payrollForm, selectedEmployee, payrollPeriod),
+    [
+      payrollForm.basicSalary,
+      payrollForm.allowances,
+      payrollForm.bonus,
+      payrollForm.overtime,
+      payrollForm.otherEarnings,
+      payrollForm.healthInsurance,
+      payrollForm.otherDeductions,
+      payrollForm.salaryAdvanceRecovery,
+      selectedEmployee?.id,
+      selectedEmployee?.taxId,
+      selectedEmployee?.socialSecurityNumber,
+      payrollPeriod,
+    ]
+  )
 
   const isConfigured = Boolean(
     config?.isConfigured ||
@@ -383,6 +456,24 @@ export default function HRAccountingConfigPage() {
     loadPayroll().catch((err) => setError(err instanceof Error ? err.message : "Failed to load payroll"))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payrollPeriod])
+
+  useEffect(() => {
+    setPayrollForm((prev) => {
+      const nextPaye = salaryCalculator.hasTin ? String(salaryCalculator.paye) : "0"
+      const nextSocialSecurity = salaryCalculator.hasSocialSecurityNumber ? String(salaryCalculator.employeeSocialSecurity) : "0"
+      if (prev.paye === nextPaye && prev.socialSecurityTax === nextSocialSecurity) return prev
+      return {
+        ...prev,
+        paye: nextPaye,
+        socialSecurityTax: nextSocialSecurity,
+      }
+    })
+  }, [
+    salaryCalculator.hasTin,
+    salaryCalculator.hasSocialSecurityNumber,
+    salaryCalculator.paye,
+    salaryCalculator.employeeSocialSecurity,
+  ])
 
   useEffect(() => {
     setPaymentForm((prev) => {
@@ -801,6 +892,37 @@ export default function HRAccountingConfigPage() {
                 <div>
                   <Label>Basic Salary</Label>
                   <Input type="number" value={payrollForm.basicSalary} onChange={(event) => setPayrollForm((prev) => ({ ...prev, basicSalary: event.target.value }))} />
+                </div>
+              </div>
+              <div className="rounded-md border bg-muted/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">Uganda Salary Calculator</p>
+                    <p className="text-xs text-muted-foreground">{salaryCalculator.scheduleLabel}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={salaryCalculator.hasTin ? "default" : "secondary"}>
+                      {salaryCalculator.hasTin ? "TIN on profile" : "No TIN"}
+                    </Badge>
+                    <Badge variant={salaryCalculator.hasSocialSecurityNumber ? "default" : "secondary"}>
+                      {salaryCalculator.hasSocialSecurityNumber ? "Social security on profile" : "No social security"}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  {[
+                    ["Gross Salary", money(salaryCalculator.grossSalary)],
+                    ["Taxable Income", money(salaryCalculator.taxableIncome)],
+                    ["PAYE", money(salaryCalculator.paye)],
+                    ["Employee Social Security", money(salaryCalculator.employeeSocialSecurity)],
+                    ["Employer Social Security", money(salaryCalculator.employerSocialSecurity)],
+                    ["Net Salary", money(salaryCalculator.netSalary)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0 rounded-md border bg-background p-3">
+                      <p className="truncate text-xs text-muted-foreground">{label}</p>
+                      <p className="mt-1 break-words text-sm font-semibold">{value}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-5">

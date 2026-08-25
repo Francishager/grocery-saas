@@ -5,6 +5,7 @@
 
 import prisma from "../db.js";
 import hrAccountingService from "./hrAccountingService.js";
+import { calculateUgandaPayrollDeductions } from "../utils/ugandaPayrollCalculator.js";
 
 class PayrollService {
   /**
@@ -22,8 +23,8 @@ class PayrollService {
       bonus = 0,
       overtime = 0,
       otherEarnings = 0,
-      paye = 0,
-      socialSecurityTax = 0,
+      paye,
+      socialSecurityTax,
       healthInsurance = 0,
       otherDeductions = 0,
       salaryAdvanceRecovery = 0,
@@ -68,10 +69,27 @@ class PayrollService {
       };
     }
 
+    const statutoryDeductions = calculateUgandaPayrollDeductions({
+      period,
+      basicSalary,
+      allowances,
+      bonus,
+      overtime,
+      otherEarnings,
+      hasTin: Boolean(employee.taxId),
+      hasSocialSecurityNumber: Boolean(employee.socialSecurityNumber),
+    });
+    const resolvedPaye = paye === undefined || paye === null || paye === ""
+      ? statutoryDeductions.paye
+      : Number(paye || 0);
+    const resolvedSocialSecurityTax = socialSecurityTax === undefined || socialSecurityTax === null || socialSecurityTax === ""
+      ? statutoryDeductions.employeeSocialSecurity
+      : Number(socialSecurityTax || 0);
+
     // Calculate totals
     const grossSalary = basicSalary + allowances + bonus + overtime + otherEarnings;
     const totalDeductions =
-      paye + socialSecurityTax + healthInsurance + otherDeductions + salaryAdvanceRecovery;
+      resolvedPaye + resolvedSocialSecurityTax + healthInsurance + otherDeductions + salaryAdvanceRecovery;
     const netSalary = Math.max(0, grossSalary - totalDeductions);
 
     // Validate salary advance recovery
@@ -113,8 +131,8 @@ class PayrollService {
             overtime,
             otherEarnings,
             grossSalary,
-            paye,
-            socialSecurityTax,
+            paye: resolvedPaye,
+            socialSecurityTax: resolvedSocialSecurityTax,
             healthInsurance,
             otherDeductions,
             salaryAdvanceRecovery,
