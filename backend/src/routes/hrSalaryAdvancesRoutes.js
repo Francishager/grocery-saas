@@ -5,11 +5,20 @@
 
 import { Router } from "express";
 import salaryAdvanceService from "../services/salaryAdvanceService.js";
-import { authenticateToken, requirePermission, requireTenant } from "../../middleware/auth.js";
+import { authenticateToken, requireAnyPermission, requireTenant } from "../../middleware/auth.js";
 
 const router = Router();
 const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
 const userIdFromRequest = (req) => req.user.id || req.user.userId;
+const viewAnyHRPayroll = requireAnyPermission([
+  "canViewHRPayroll",
+  "canCreateHRPayroll",
+  "canApproveHRPayroll",
+  "canPostHRPayroll",
+  "canPayHRPayroll",
+  "canManageHRPayrollSettings",
+  "canManageHRPayroll",
+]);
 
 // Check HR configuration and permissions
 router.use(authenticateToken, requireTenant);
@@ -18,7 +27,7 @@ router.use(authenticateToken, requireTenant);
  * POST /api/hr/salary-advances
  * Issue a new salary advance
  */
-router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
+router.post("/", requireAnyPermission(["canCreateHRPayroll", "canPayHRPayroll", "canManageHRPayroll"]), async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);
@@ -77,7 +86,7 @@ router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
  * GET /api/hr/salary-advances/employee/:employeeId
  * Get all salary advances for an employee
  */
-router.get("/employee/:employeeId", requirePermission("canViewHRPayroll"), async (req, res) => {
+router.get("/employee/:employeeId", viewAnyHRPayroll, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const { employeeId } = req.params;
@@ -102,7 +111,7 @@ router.get("/employee/:employeeId", requirePermission("canViewHRPayroll"), async
  * GET /api/hr/salary-advances/:id
  * Get salary advance details
  */
-router.get("/:id", requirePermission("canViewHRPayroll"), async (req, res) => {
+router.get("/:id", viewAnyHRPayroll, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const { id } = req.params;
@@ -124,7 +133,7 @@ router.get("/:id", requirePermission("canViewHRPayroll"), async (req, res) => {
  * GET /api/hr/salary-advances
  * Get outstanding salary advances (with optional branch filter)
  */
-router.get("/", requirePermission("canViewHRPayroll"), async (req, res) => {
+router.get("/", viewAnyHRPayroll, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const { branchId } = req.query;
@@ -149,7 +158,7 @@ router.get("/", requirePermission("canViewHRPayroll"), async (req, res) => {
  * POST /api/hr/salary-advances/:id/direct-repayment
  * Record direct salary advance repayment
  */
-router.post("/:id/direct-repayment", requirePermission("canManageHRPayroll"), async (req, res) => {
+router.post("/:id/direct-repayment", requireAnyPermission(["canPayHRPayroll", "canManageHRPayroll"]), async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);
@@ -190,7 +199,7 @@ router.post("/:id/direct-repayment", requirePermission("canManageHRPayroll"), as
  * POST /api/hr/salary-advances/:id/cancel
  * Cancel salary advance
  */
-router.post("/:id/cancel", requirePermission("canManageHRPayroll"), async (req, res) => {
+router.post("/:id/cancel", requireAnyPermission(["canApproveHRPayroll", "canManageHRPayroll"]), async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);

@@ -4,7 +4,14 @@ import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
-import { ALL_PERMISSION_KEYS as PERM_KEYS, ROLE_DEFAULTS } from "../utils/permissions.js";
+import {
+  ALL_PERMISSION_KEYS as PERM_KEYS,
+  PERMISSION_CATEGORIES,
+  PERMISSION_METADATA,
+  ROLE_DEFAULTS,
+  normalizePermissionRecord,
+  permissionAllowedForTenant,
+} from "../utils/permissions.js";
 
 const router = Router();
 
@@ -12,7 +19,14 @@ const staffRoles = new Set(["manager", "accountant", "attendant"]);
 
 // Get permission keys and role defaults
 router.get("/permissions/schema", authenticateToken, requirePermission("canViewStaff"), (req, res) => {
-  res.json({ keys: PERM_KEYS, defaults: ROLE_DEFAULTS });
+  const visibleKeys = PERM_KEYS.filter((key) => permissionAllowedForTenant(key, req.tenantFeatures));
+  const visibleCategories = new Set(visibleKeys.map((key) => PERMISSION_METADATA[key]?.category).filter(Boolean));
+  res.json({
+    keys: visibleKeys,
+    defaults: ROLE_DEFAULTS,
+    categories: PERMISSION_CATEGORIES.filter((category) => visibleCategories.has(category.id)),
+    permissions: visibleKeys.map((key) => PERMISSION_METADATA[key] || { id: key, name: key, category: "settings" }),
+  });
 });
 
 function splitName(name = "") {
@@ -118,7 +132,9 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
     // Build permission data from request or role defaults
     const permData = {};
     for (const key of PERM_KEYS) {
-      if (permissions && permissions[key] !== undefined) {
+      if (!permissionAllowedForTenant(key, req.tenantFeatures)) {
+        permData[key] = false;
+      } else if (permissions && permissions[key] !== undefined) {
         permData[key] = Boolean(permissions[key]);
       } else {
         permData[key] = ROLE_DEFAULTS[role]?.[key] ?? ROLE_DEFAULTS.attendant[key];
@@ -304,7 +320,7 @@ router.get("/:id/permissions", authenticateToken, requirePermission("canViewStaf
       for (const key of PERM_KEYS) permData[key] = defaults[key] ?? false;
       perms = await prisma.userPermission.create({ data: { userId: user.id, ...permData } });
     }
-    res.json(perms);
+    res.json(normalizePermissionRecord(perms));
   } catch (err) {
     console.error("Get permissions error:", err);
     res.status(500).json({ error: "Failed to load permissions" });
@@ -322,23 +338,18 @@ router.put("/:id/permissions", authenticateToken, requirePermission("canEditStaf
     });
     if (!user) return res.status(404).json({ error: "Staff not found" });
 
+    const requestPermissions = req.body || {};
     const data = {};
-    console.log('[staff] Updating permissions for user:', user.id, 'Request body keys:', Object.keys(req.body));
     for (const key of PERM_KEYS) {
-      if (req.body[key] !== undefined) {
-        data[key] = Boolean(req.body[key]);
-        console.log(`[staff] Setting ${key} = ${data[key]}`);
-      }
+      data[key] = permissionAllowedForTenant(key, req.tenantFeatures) && Boolean(requestPermissions[key] ?? false);
     }
-    console.log('[staff] Final data to update:', Object.keys(data));
 
     const perms = await prisma.userPermission.upsert({
       where: { userId: user.id },
       update: data,
       create: { userId: user.id, ...data },
     });
-    console.log('[staff] Permissions updated successfully for user:', user.id);
-    res.json({ message: "Permissions updated", permissions: perms });
+    res.json({ message: "Permissions updated", permissions: normalizePermissionRecord(perms) });
   } catch (err) {
     console.error("Update permissions error:", err);
     res.status(500).json({ error: "Failed to update permissions" });

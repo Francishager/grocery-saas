@@ -278,9 +278,17 @@ export default function HRAccountingConfigPage() {
   const { tab } = useParams()
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { user } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const assignedCashAccountId = userCashAccountId(user)
   const activeTab = HR_ACCOUNTING_VIEWS.has(String(tab)) ? String(tab) : "overview"
+  const isOwner = user?.role === "owner" || user?.role === "saas_admin"
+  const canUseLegacyPayroll = hasPermission("canManageHRPayroll")
+  const canManagePayrollSettings = isOwner || canUseLegacyPayroll || hasPermission("canManageHRPayrollSettings")
+  const canCreatePayroll = isOwner || canUseLegacyPayroll || hasPermission("canCreateHRPayroll")
+  const canApprovePayroll = isOwner || canUseLegacyPayroll || hasPermission("canApproveHRPayroll")
+  const canPostPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPostHRPayroll")
+  const canPayPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPayHRPayroll")
+  const canIssueAdvance = canCreatePayroll || canPayPayroll
 
   const [config, setConfig] = useState<any>(null)
   const [availableAccounts, setAvailableAccounts] = useState<{
@@ -802,7 +810,9 @@ export default function HRAccountingConfigPage() {
                     </div>
                   )
                 })}
-                <Button variant="outline" onClick={() => navigate("/tenant/hr/accounting/mappings")}>Review mappings</Button>
+                {canManagePayrollSettings && (
+                  <Button variant="outline" onClick={() => navigate("/tenant/hr/accounting/mappings")}>Review mappings</Button>
+                )}
               </CardContent>
             </Card>
 
@@ -832,7 +842,7 @@ export default function HRAccountingConfigPage() {
         </div>
       )}
 
-      {activeTab === "mappings" && (
+      {activeTab === "mappings" && canManagePayrollSettings && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -870,16 +880,25 @@ export default function HRAccountingConfigPage() {
         </Card>
       )}
 
+      {activeTab === "mappings" && !canManagePayrollSettings && (
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            You have payroll access, but account mapping changes require HR payroll setup permission.
+          </CardContent>
+        </Card>
+      )}
+
       {activeTab === "payroll" && (
         <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ReceiptText className="h-4 w-4" />
-                Create Payroll Record
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          {canCreatePayroll && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ReceiptText className="h-4 w-4" />
+                  Create Payroll Record
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-4">
                 <div>
                   <Label>Period</Label>
@@ -947,9 +966,10 @@ export default function HRAccountingConfigPage() {
                 <Label>Notes</Label>
                 <Input value={payrollForm.notes} onChange={(event) => setPayrollForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional payroll note" />
               </div>
-              <Button onClick={createPayroll} disabled={saving || !isConfigured}>Create Payroll</Button>
-            </CardContent>
-          </Card>
+                <Button onClick={createPayroll} disabled={saving || !isConfigured}>Create Payroll</Button>
+              </CardContent>
+            </Card>
+          )}
 
           <PayrollTable
             payrolls={payrolls}
@@ -958,13 +978,17 @@ export default function HRAccountingConfigPage() {
             onPost={(payroll) => payrollAction(payroll, "post")}
             onPay={preparePayment}
             saving={saving}
+            canApprove={canApprovePayroll}
+            canPost={canPostPayroll}
+            canPay={canPayPayroll}
           />
         </div>
       )}
 
       {activeTab === "payments" && (
         <div className="space-y-5">
-          <Card>
+          {canPayPayroll && (
+            <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Wallet className="h-4 w-4" />
@@ -1016,15 +1040,17 @@ export default function HRAccountingConfigPage() {
               )}
               <Button onClick={paySalary} disabled={saving || !isConfigured}>Record Payment</Button>
             </CardContent>
-          </Card>
-          <PayrollTable payrolls={payrolls} loading={payrollLoading} onApprove={(payroll) => payrollAction(payroll, "approve")} onPost={(payroll) => payrollAction(payroll, "post")} onPay={preparePayment} saving={saving} />
+            </Card>
+          )}
+          <PayrollTable payrolls={payrolls} loading={payrollLoading} onApprove={(payroll) => payrollAction(payroll, "approve")} onPost={(payroll) => payrollAction(payroll, "post")} onPay={preparePayment} saving={saving} canApprove={canApprovePayroll} canPost={canPostPayroll} canPay={canPayPayroll} />
         </div>
       )}
 
       {activeTab === "advances" && (
         <div className="space-y-5">
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+            {canIssueAdvance && (
+              <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <BadgeDollarSign className="h-4 w-4" />
@@ -1077,9 +1103,11 @@ export default function HRAccountingConfigPage() {
                 </div>
                 <Button onClick={issueAdvance} disabled={saving || !isConfigured}>Issue and Post</Button>
               </CardContent>
-            </Card>
+              </Card>
+            )}
 
-            <Card>
+            {canPayPayroll && (
+              <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <FileText className="h-4 w-4" />
@@ -1134,7 +1162,8 @@ export default function HRAccountingConfigPage() {
                 )}
                 <Button onClick={repayAdvance} disabled={saving || !isConfigured}>Record Repayment</Button>
               </CardContent>
-            </Card>
+              </Card>
+            )}
           </div>
 
           <Card>
@@ -1188,6 +1217,9 @@ function PayrollTable({
   onPost,
   onPay,
   saving,
+  canApprove,
+  canPost,
+  canPay,
 }: {
   payrolls: Payroll[]
   loading: boolean
@@ -1195,6 +1227,9 @@ function PayrollTable({
   onPost: (payroll: Payroll) => void
   onPay: (payroll: Payroll) => void
   saving: boolean
+  canApprove: boolean
+  canPost: boolean
+  canPay: boolean
 }) {
   return (
     <Card>
@@ -1239,9 +1274,9 @@ function PayrollTable({
                     <td className="px-3 py-2">{payroll.journalEntryId ? "Posted" : "Pending"}</td>
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-2">
-                        {payroll.status === "draft" && <Button size="sm" variant="outline" onClick={() => onApprove(payroll)} disabled={saving}>Approve</Button>}
-                        {payroll.status === "approved" && <Button size="sm" onClick={() => onPost(payroll)} disabled={saving}>Post</Button>}
-                        {["posted", "partially_paid"].includes(payroll.status) && remaining > 0 && <Button size="sm" variant="outline" onClick={() => onPay(payroll)} disabled={saving}>Pay</Button>}
+                        {canApprove && payroll.status === "draft" && <Button size="sm" variant="outline" onClick={() => onApprove(payroll)} disabled={saving}>Approve</Button>}
+                        {canPost && payroll.status === "approved" && <Button size="sm" onClick={() => onPost(payroll)} disabled={saving}>Post</Button>}
+                        {canPay && ["posted", "partially_paid"].includes(payroll.status) && remaining > 0 && <Button size="sm" variant="outline" onClick={() => onPay(payroll)} disabled={saving}>Pay</Button>}
                       </div>
                     </td>
                   </tr>

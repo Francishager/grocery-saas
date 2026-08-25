@@ -38,9 +38,11 @@ const HR_PERMISSION_DEFINITIONS = [
   ['HR_SALARY_VIEW', 'canViewHRSalaries', 'View HR salaries'],
   ['HR_SALARY_RECORD', 'canManageHRSalaries', 'Record HR salary changes'],
   ['ATTENDANCE_VIEW', 'canViewHRAttendance', 'View HR attendance'],
-  ['ATTENDANCE_EDIT', 'canManageHRAttendance', 'Edit HR attendance'],
-  ['ATTENDANCE_IMPORT', 'canManageHRAttendance', 'Import HR attendance'],
-  ['ATTENDANCE_CONFIG', 'canManageHRAttendance', 'Configure HR attendance'],
+  ['ATTENDANCE_RECORD', 'canRecordHRAttendance', 'Record employee check-in/check-out', ['canManageHRAttendance']],
+  ['ATTENDANCE_EDIT', 'canEditHRAttendance', 'Edit HR attendance', ['canManageHRAttendance']],
+  ['ATTENDANCE_DELETE', 'canDeleteHRAttendance', 'Delete HR attendance records', ['canManageHRAttendance']],
+  ['ATTENDANCE_IMPORT', 'canImportHRAttendance', 'Import HR attendance', ['canManageHRAttendance']],
+  ['ATTENDANCE_CONFIG', 'canConfigureHRAttendance', 'Configure HR attendance', ['canManageHRAttendance']],
   ['ATTENDANCE_APPROVE', 'canApproveHRAttendance', 'Approve HR attendance'],
   ['SHIFT_VIEW', 'canViewHRShifts', 'View HR shifts'],
   ['SHIFT_MANAGE', 'canManageHRShifts', 'Manage HR shifts'],
@@ -53,11 +55,17 @@ const HR_PERMISSION_DEFINITIONS = [
   ['LEAVE_APPROVE_L1', 'canApproveHRLeave', 'Approve HR leave'],
   ['LEAVE_APPROVE_L2', 'canApproveHRLeave', 'Final approve HR leave'],
   ['HR_PAYROLL_VIEW', 'canViewHRPayroll', 'View HR payroll'],
+  ['HR_PAYROLL_CREATE', 'canCreateHRPayroll', 'Create HR payroll drafts', ['canManageHRPayroll']],
+  ['HR_PAYROLL_APPROVE', 'canApproveHRPayroll', 'Approve HR payroll', ['canManageHRPayroll']],
+  ['HR_PAYROLL_POST', 'canPostHRPayroll', 'Post HR payroll to accounting', ['canManageHRPayroll']],
+  ['HR_PAYROLL_PAY', 'canPayHRPayroll', 'Pay HR salaries', ['canManageHRPayroll']],
+  ['HR_PAYROLL_SETTINGS', 'canManageHRPayrollSettings', 'Manage HR payroll accounting setup', ['canManageHRPayroll']],
   ['HR_PAYROLL_MANAGE', 'canManageHRPayroll', 'Manage HR payroll'],
 ];
 
-const CODE_TO_PERMISSION = new Map(HR_PERMISSION_DEFINITIONS.map(([code, field]) => [code, field]));
-const DEFINITION_BY_CODE = new Map(HR_PERMISSION_DEFINITIONS.map(([code, field, description]) => [code, { code, field, description }]));
+const permissionFieldsForDefinition = ([, field, , fallbackFields = []]) => [field, ...fallbackFields].filter(Boolean);
+const CODE_TO_PERMISSIONS = new Map(HR_PERMISSION_DEFINITIONS.map((definition) => [definition[0], permissionFieldsForDefinition(definition)]));
+const DEFINITION_BY_CODE = new Map(HR_PERMISSION_DEFINITIONS.map(([code, field, description, fallbackFields = []]) => [code, { code, field, fields: [field, ...fallbackFields], description }]));
 
 function normalizeCode(code = '') {
   return String(code).replace(/\./g, '_').toUpperCase();
@@ -82,9 +90,9 @@ class HRPermissionService {
     if (PLATFORM_ROLES.has(user.role) || user.role === 'owner') return true;
 
     const normalized = normalizeCode(permissionCode);
-    const permissionField = CODE_TO_PERMISSION.get(normalized) || 'canViewHR';
+    const permissionFields = CODE_TO_PERMISSIONS.get(normalized) || ['canViewHR'];
     const permissionRecord = Array.isArray(user.permissions) ? user.permissions[0] : null;
-    return Boolean(permissionRecord?.[permissionField]);
+    return permissionFields.some((permissionField) => Boolean(permissionRecord?.[permissionField]));
   }
 
   async getPermissionsByUser(tenantId, userId) {
@@ -104,11 +112,12 @@ class HRPermissionService {
   }
 
   async getAllPermissions() {
-    return HR_PERMISSION_DEFINITIONS.map(([permissionCode, field, description]) => ({
+    return HR_PERMISSION_DEFINITIONS.map(([permissionCode, field, description, fallbackFields = []]) => ({
       id: permissionCode,
       permissionCode,
       code: permissionCode,
       field,
+      fields: [field, ...fallbackFields],
       permissionName: permissionCode,
       name: permissionCode,
       description,
@@ -137,6 +146,7 @@ class HRPermissionService {
       permissionCode: definition.code,
       code: definition.code,
       field: definition.field,
+      fields: definition.fields,
       name: definition.code,
       description: definition.description,
       status: 'active',
@@ -146,12 +156,13 @@ class HRPermissionService {
   permissionsFromRecord(permissionRecord, role = '') {
     const ownerLike = role === 'owner' || PLATFORM_ROLES.has(role);
     return HR_PERMISSION_DEFINITIONS
-      .filter(([, field]) => ownerLike || Boolean(permissionRecord?.[field]))
-      .map(([permissionCode, field, description]) => ({
+      .filter((definition) => ownerLike || permissionFieldsForDefinition(definition).some((field) => Boolean(permissionRecord?.[field])))
+      .map(([permissionCode, field, description, fallbackFields = []]) => ({
         id: permissionCode,
         permissionCode,
         code: permissionCode,
         field,
+        fields: [field, ...fallbackFields],
         permissionName: permissionCode,
         name: permissionCode,
         description,

@@ -91,6 +91,9 @@ router.get('/:departmentId', async (req, res) => {
 router.get('/:id/detail', async (req, res) => {
   try {
     const { tenantId } = req.user;
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_UNIT_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
     const unit = await unitService.getUnitById(tenantId, req.params.id);
     res.json({ success: true, data: unit });
   } catch (error) {
@@ -140,6 +143,9 @@ router.delete('/:id', async (req, res) => {
 router.get('/:id/stats', async (req, res) => {
   try {
     const { tenantId } = req.user;
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_UNIT_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
     const stats = await unitService.getUnitStats(tenantId, req.params.id);
     res.json({ success: true, data: stats });
   } catch (error) {

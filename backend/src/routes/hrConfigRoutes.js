@@ -5,20 +5,34 @@
 
 import { Router } from "express";
 import hrConfigurationService from "../services/hrConfigurationService.js";
-import { authenticateToken, requirePermission, requireTenant } from "../../middleware/auth.js";
+import { authenticateToken, requireAnyPermission, requireTenant } from "../../middleware/auth.js";
 
 // Check authentication and tenant
 const router = Router();
 const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
 const userIdFromRequest = (req) => req.user.id || req.user.userId;
 
-router.use(authenticateToken, requireTenant, requirePermission("canManageHRPayroll"));
+router.use(authenticateToken, requireTenant);
+
+const viewHRPayrollSetup = requireAnyPermission([
+  "canViewHRPayroll",
+  "canCreateHRPayroll",
+  "canApproveHRPayroll",
+  "canPostHRPayroll",
+  "canPayHRPayroll",
+  "canManageHRPayrollSettings",
+  "canManageHRPayroll",
+]);
+const manageHRPayrollSetup = requireAnyPermission([
+  "canManageHRPayrollSettings",
+  "canManageHRPayroll",
+]);
 
 /**
  * GET /api/hr/config
  * Get current HR configuration
  */
-router.get("/", async (req, res) => {
+router.get("/", viewHRPayrollSetup, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
 
@@ -38,7 +52,7 @@ router.get("/", async (req, res) => {
  * GET /api/hr/config/status
  * Check HR configuration status
  */
-router.get("/status", async (req, res) => {
+router.get("/status", viewHRPayrollSetup, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
 
@@ -55,7 +69,7 @@ router.get("/status", async (req, res) => {
  * GET /api/hr/config/available-accounts
  * Get available accounts grouped by type for mapping
  */
-router.get("/available-accounts", async (req, res) => {
+router.get("/available-accounts", viewHRPayrollSetup, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
 
@@ -77,7 +91,7 @@ router.get("/available-accounts", async (req, res) => {
  * POST /api/hr/config/mapping
  * Update HR accounting account mappings
  */
-router.post("/mapping", async (req, res) => {
+router.post("/mapping", manageHRPayrollSetup, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);
@@ -116,7 +130,7 @@ router.post("/mapping", async (req, res) => {
  * POST /api/hr/config/initialize-accounts
  * Initialize default HR accounts for first-time setup
  */
-router.post("/initialize-accounts", async (req, res) => {
+router.post("/initialize-accounts", manageHRPayrollSetup, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);

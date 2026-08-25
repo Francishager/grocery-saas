@@ -842,7 +842,12 @@ export const staffApi = {
     api.get<any>(`/api/staff/${id}/permissions`),
 
   getPermissionsSchema: () =>
-    api.get<{ keys: string[]; defaults: Record<string, Record<string, boolean>> }>('/api/staff/permissions/schema'),
+    api.get<{
+      keys: string[]
+      defaults: Record<string, Record<string, boolean>>
+      permissions?: Array<{ id: string; name: string; description?: string; category: string }>
+      categories?: Array<{ id: string; name: string; description?: string }>
+    }>('/api/staff/permissions/schema'),
 
   updatePermissions: (id: string, data: Record<string, boolean>) =>
     api.put<{ message: string; permissions: any }>(`/api/staff/${id}/permissions`, { body: data }),

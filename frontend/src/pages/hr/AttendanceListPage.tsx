@@ -5,6 +5,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { HRTable, HRColumn } from '@/components/hr/HRTable'
 import { Badge } from '@/components/ui/badge'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface AttendanceRecord {
   id: string
@@ -23,6 +24,7 @@ interface AttendanceRecord {
 
 export default function AttendanceListPage() {
   const { toast } = useToast()
+  const { hasPermission, user } = useJWTAuth()
   const [records, setRecords] = useState<AttendanceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
@@ -87,6 +89,9 @@ export default function AttendanceListPage() {
       render: (value) => value ? 'Yes' : 'No',
     },
   ]
+  const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
+  const canApproveAttendance = isOwner || hasPermission('canApproveHRAttendance') || hasPermission('canManageHRAttendance')
+  const canDeleteAttendance = isOwner || hasPermission('canDeleteHRAttendance') || hasPermission('canManageHRAttendance')
 
   const fetchRecords = async () => {
     try {
@@ -204,12 +209,13 @@ export default function AttendanceListPage() {
               {
                 label: 'Approve',
                 onClick: (row) => handleApprove(row.id),
-                visible: (row) => !row.isApproved,
+                visible: (row) => canApproveAttendance && !row.isApproved,
                 variant: 'default',
               },
               {
                 label: 'Delete',
                 onClick: (row) => handleDelete(row.id),
+                visible: () => canDeleteAttendance,
                 variant: 'destructive',
               },
             ]}

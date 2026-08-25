@@ -9,6 +9,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 
+type PermissionDefinition = {
+  id: string
+  name: string
+  description?: string
+  category: string
+}
+
+type PermissionCategoryDefinition = {
+  id: string
+  name: string
+  description?: string
+}
+
+type PermissionSchema = {
+  keys: string[]
+  defaults: Record<string, Record<string, boolean>>
+  permissions?: PermissionDefinition[]
+  categories?: PermissionCategoryDefinition[]
+}
+
 const PERM_LABELS: Record<string, string> = {
   canViewDashboard:'Can view dashboard',
   canCreateSale:'Can create sales', canViewSale:'Can view sales', canEditSale:'Can edit sales', canDeleteSale:'Can delete sales', canRefundSale:'Can refund sales',
@@ -32,7 +52,12 @@ const PERM_LABELS: Record<string, string> = {
   canViewHRSalaries:'Can view HR salaries',
   canManageHRSalaries:'Can manage HR salary records',
   canViewHRAttendance:'Can view HR attendance',
+  canRecordHRAttendance:'Can record employee check-in/check-out',
   canManageHRAttendance:'Can manage HR attendance',
+  canEditHRAttendance:'Can edit HR attendance',
+  canDeleteHRAttendance:'Can delete HR attendance',
+  canImportHRAttendance:'Can import HR attendance',
+  canConfigureHRAttendance:'Can configure HR attendance',
   canApproveHRAttendance:'Can approve HR attendance',
   canViewHRShifts:'Can view HR shifts',
   canManageHRShifts:'Can manage HR shifts',
@@ -43,6 +68,11 @@ const PERM_LABELS: Record<string, string> = {
   canManageHRLeaveTypes:'Can manage HR leave types',
   canApproveHRLeave:'Can approve HR leave',
   canViewHRPayroll:'Can view HR payroll',
+  canCreateHRPayroll:'Can create HR payroll drafts',
+  canApproveHRPayroll:'Can approve HR payroll',
+  canPostHRPayroll:'Can post HR payroll to accounting',
+  canPayHRPayroll:'Can pay salaries',
+  canManageHRPayrollSettings:'Can manage HR payroll setup',
   canManageHRPayroll:'Can manage HR payroll',
   canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
   canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance reports', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
@@ -73,10 +103,14 @@ const HR_PERMISSION_KEYS = [
   'canViewHR', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee',
   'canManageHRStructure', 'canViewHRContracts', 'canManageHRContracts',
   'canViewHRDocuments', 'canManageHRDocuments', 'canViewHRSalaries', 'canManageHRSalaries',
-  'canViewHRAttendance', 'canManageHRAttendance', 'canApproveHRAttendance',
+  'canViewHRAttendance', 'canRecordHRAttendance', 'canManageHRAttendance',
+  'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance',
+  'canConfigureHRAttendance', 'canApproveHRAttendance',
   'canViewHRShifts', 'canManageHRShifts', 'canAssignHRShifts', 'canApproveHRShifts',
   'canViewHRLeave', 'canRequestHRLeave', 'canManageHRLeaveTypes', 'canApproveHRLeave',
-  'canViewHRPayroll', 'canManageHRPayroll',
+  'canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll',
+  'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings',
+  'canManageHRPayroll',
 ]
 const EXPENSE_PERMISSION_KEYS = ['canCreateExpense', 'canViewExpense', 'canEditExpense', 'canDeleteExpense']
 
@@ -126,10 +160,176 @@ function matchesPermissionGroup(group: { prefix?: string; matcher?: (key: string
   return key.includes(group.prefix || '')
 }
 
+function fallbackPermissionName(key: string) {
+  if (PERM_LABELS[key]) return PERM_LABELS[key]
+  return key
+    .replace(/^can/, '')
+    .replace(/([A-Z])/g, ' $1')
+    .trim()
+}
+
+function fallbackPermissionCategory(key: string) {
+  const group = PERM_GROUPS.find(g => matchesPermissionGroup(g, key))
+  return group?.label || 'Other'
+}
+
+function getPermissionGroups(schema: PermissionSchema | null, search: string) {
+  const keys = schema?.keys?.length ? schema.keys : Object.keys(PERM_LABELS)
+  const definitions = new Map((schema?.permissions || []).map(permission => [permission.id, permission]))
+  const categories = new Map((schema?.categories || []).map(category => [category.id, category]))
+  const query = search.trim().toLowerCase()
+  const groups = new Map<string, { id: string; name: string; permissions: PermissionDefinition[] }>()
+
+  keys.forEach((key) => {
+    const definition = definitions.get(key)
+    const fallbackCategory = fallbackPermissionCategory(key)
+    const categoryId = definition?.category || fallbackCategory
+    const categoryName = categories.get(categoryId)?.name || fallbackCategory
+    const permission: PermissionDefinition = {
+      id: key,
+      name: definition?.name || PERM_LABELS[key] || fallbackPermissionName(key),
+      description: definition?.description,
+      category: categoryId,
+    }
+
+    if (query) {
+      const searchable = `${permission.name} ${permission.description || ''} ${permission.id} ${categoryName}`.toLowerCase()
+      if (!searchable.includes(query)) return
+    }
+
+    if (!groups.has(categoryId)) {
+      groups.set(categoryId, { id: categoryId, name: categoryName, permissions: [] })
+    }
+    groups.get(categoryId)?.permissions.push(permission)
+  })
+
+  const backendOrder = (schema?.categories || []).map(category => category.id)
+  const fallbackOrder = PERM_GROUPS.map(group => group.label)
+  const order = [...backendOrder, ...fallbackOrder, 'Other']
+
+  return [...groups.values()].sort((a, b) => {
+    const aIndex = order.indexOf(a.id)
+    const bIndex = order.indexOf(b.id)
+    if (aIndex === -1 && bIndex === -1) return a.name.localeCompare(b.name)
+    if (aIndex === -1) return 1
+    if (bIndex === -1) return -1
+    return aIndex - bIndex
+  })
+}
+
+function PermissionMatrix({
+  title,
+  description,
+  schema,
+  values,
+  onChange,
+  search,
+  onSearch,
+}: {
+  title: string
+  description?: string
+  schema: PermissionSchema | null
+  values: Record<string, boolean>
+  onChange: (next: Record<string, boolean>) => void
+  search: string
+  onSearch: (value: string) => void
+}) {
+  const allKeys = schema?.keys?.length ? schema.keys : Object.keys(PERM_LABELS)
+  const groups = getPermissionGroups(schema, search)
+
+  const setAll = (checked: boolean) => {
+    if (!checked) {
+      onChange({})
+      return
+    }
+    const next: Record<string, boolean> = {}
+    allKeys.forEach((key) => {
+      next[key] = true
+    })
+    onChange(next)
+  }
+
+  const setGroup = (keys: string[], checked: boolean) => {
+    const next = { ...values }
+    keys.forEach((key) => {
+      if (checked) next[key] = true
+      else delete next[key]
+    })
+    onChange(next)
+  }
+
+  const setPermission = (key: string, checked: boolean) => {
+    const next = { ...values }
+    if (checked) next[key] = true
+    else delete next[key]
+    onChange(next)
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-sm font-medium">{title}</p>
+          {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input className="h-8 w-full text-xs sm:w-48" placeholder="Search permissions..." value={search} onChange={e => onSearch(e.target.value)} />
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAll(true)}><CheckCheck className="h-3 w-3 mr-1" /> All</Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAll(false)}><Square className="h-3 w-3 mr-1" /> None</Button>
+        </div>
+      </div>
+      <div className="mt-4 space-y-4">
+        {groups.map((group) => {
+          const groupKeys = group.permissions.map(permission => permission.id)
+          const selectedCount = groupKeys.filter(key => values[key]).length
+          const allSelected = groupKeys.length > 0 && selectedCount === groupKeys.length
+          return (
+            <div key={group.id} className="rounded-md border bg-muted/20 p-3">
+              <label className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold">
+                <span className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={e => setGroup(groupKeys, e.target.checked)}
+                    className="rounded"
+                  />
+                  {group.name}
+                </span>
+                <span className="text-xs font-normal text-muted-foreground">{selectedCount}/{groupKeys.length}</span>
+              </label>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {group.permissions.map(permission => (
+                  <label key={permission.id} className="flex min-h-16 cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={!!values[permission.id]}
+                      onChange={e => setPermission(permission.id, e.target.checked)}
+                      className="mt-0.5 rounded"
+                    />
+                    <span className="min-w-0 leading-5">
+                      <span className="block font-medium text-foreground">{permission.name}</span>
+                      {permission.description && (
+                        <span className="mt-0.5 block text-muted-foreground">{permission.description}</span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+        {!groups.length && (
+          <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">No permissions match your search.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function RolesPermissionsPage() {
   const [staff, setStaff] = useState<any[]>([])
   const [branches, setBranches] = useState<any[]>([])
-  const [permSchema, setPermSchema] = useState<{ keys: string[]; defaults: Record<string, Record<string, boolean>> } | null>(null)
+  const [permSchema, setPermSchema] = useState<PermissionSchema | null>(null)
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [expandedPermId, setExpandedPermId] = useState<string | null>(null)
@@ -373,50 +573,15 @@ export default function RolesPermissionsPage() {
                 <p className="text-xs text-muted-foreground">Required for staff who handle cash, record sales, or make payments</p>
               </div>
             </div>
-            {/* Permissions checkboxes on create form */}
-            <div className="mt-4 border rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium">Permissions (tick to allow this staff member to do these tasks)</p>
-              </div>
-              <p className="mb-3 text-xs text-muted-foreground">
-                For accounting, choose the exact action clearly: view, create, edit, or delete for transaction accounts and expense records.
-              </p>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Input className="h-7 w-40 text-xs" placeholder="Search permissions..." value={permSearch} onChange={e => setPermSearch(e.target.value)} />
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
-                    const allKeys = permSchema?.keys || Object.keys(PERM_LABELS)
-                    const allTrue: Record<string, boolean> = {}
-                    allKeys.forEach((k: string) => allTrue[k] = true)
-                    setFormPerms(allTrue)
-                  }}><CheckCheck className="h-3 w-3 mr-1" /> All</Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setFormPerms({})}><Square className="h-3 w-3 mr-1" /> None</Button>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {PERM_GROUPS.map(g => {
-                  let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => matchesPermissionGroup(g, k))
-                  if (permSearch) {
-                    const q = permSearch.toLowerCase()
-                    groupKeys = groupKeys.filter(k => (PERM_LABELS[k] || k).toLowerCase().includes(q))
-                  }
-                  if (!groupKeys.length) return null
-                  return (
-                    <div key={g.prefix}>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{g.label}</p>
-                      <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
-                        {groupKeys.map(key => (
-                          <label key={key} className="flex items-center gap-1.5 text-xs">
-                            <input type="checkbox" checked={!!formPerms[key]} onChange={e => setFormPerms(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
-                            {PERM_LABELS[key]?.replace(g.label + ' ', '').replace(g.prefix, '') || key}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+            <PermissionMatrix
+              title="Permissions"
+              description="Tick a whole module or choose only the actions this staff member should access."
+              schema={permSchema}
+              values={formPerms}
+              onChange={setFormPerms}
+              search={permSearch}
+              onSearch={setPermSearch}
+            />
             <div className="flex gap-2 mt-4">
               <Button onClick={handleCreate}>Create Staff</Button>
               <Button onClick={() => setShowAddForm(false)} variant="outline">Cancel</Button>
@@ -521,42 +686,15 @@ export default function RolesPermissionsPage() {
 
                   {expandedPermId === s.id && (
                     <div className="mt-4 border-t pt-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-medium">Permissions for {s.name || s.email}</p>
-                        <div className="flex items-center gap-2">
-                          <Input className="h-7 w-40 text-xs" placeholder="Search permissions..." value={permSearch} onChange={e => setPermSearch(e.target.value)} />
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
-                            const allKeys = permSchema?.keys || Object.keys(PERM_LABELS)
-                            const allTrue: Record<string, boolean> = {}
-                            allKeys.forEach((k: string) => allTrue[k] = true)
-                            setPermissions(allTrue)
-                          }}><CheckCheck className="h-3 w-3 mr-1" /> All</Button>
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPermissions({})}><Square className="h-3 w-3 mr-1" /> None</Button>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {PERM_GROUPS.map(g => {
-                          let groupKeys = (permSchema?.keys || Object.keys(PERM_LABELS)).filter(k => matchesPermissionGroup(g, k))
-                          if (permSearch) {
-                            const q = permSearch.toLowerCase()
-                            groupKeys = groupKeys.filter(k => (PERM_LABELS[k] || k).toLowerCase().includes(q))
-                          }
-                          if (!groupKeys.length) return null
-                          return (
-                            <div key={g.prefix}>
-                              <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{g.label}</p>
-                              <div className="grid gap-1 grid-cols-2 sm:grid-cols-4">
-                                {groupKeys.map(key => (
-                                  <label key={key} className="flex items-center gap-1.5 text-xs">
-                                    <input type="checkbox" checked={!!permissions[key]} onChange={e => setPermissions(p => ({ ...p, [key]: e.target.checked }))} className="rounded" />
-                                    {PERM_LABELS[key]?.replace(g.label + ' ', '').replace(g.prefix, '') || key}
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
+                      <PermissionMatrix
+                        title={`Permissions for ${s.name || s.email}`}
+                        description="Tick a whole module or choose only the actions this staff member should access."
+                        schema={permSchema}
+                        values={permissions}
+                        onChange={setPermissions}
+                        search={permSearch}
+                        onSearch={setPermSearch}
+                      />
                       <Button onClick={() => handleSavePermissions(s.id)} size="sm" className="mt-3">Save Permissions</Button>
                     </div>
                   )}

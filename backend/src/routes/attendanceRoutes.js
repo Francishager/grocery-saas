@@ -26,7 +26,7 @@ const requireHRPermission = (permissionCode) => async (req, res, next) => {
  */
 
 // Manual check-in
-router.post('/attendance/checkin', async (req, res) => {
+router.post('/attendance/checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
     const { employeeId, location } = req.body;
     const tenantId = req.tenant.id;
@@ -40,7 +40,7 @@ router.post('/attendance/checkin', async (req, res) => {
 });
 
 // QR code check-in
-router.post('/attendance/qr-checkin', async (req, res) => {
+router.post('/attendance/qr-checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
     const { employeeId, qrData, location } = req.body;
     const tenantId = req.tenant.id;
@@ -56,7 +56,7 @@ router.post('/attendance/qr-checkin', async (req, res) => {
 });
 
 // Biometric check-in
-router.post('/attendance/biometric-checkin', async (req, res) => {
+router.post('/attendance/biometric-checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
     const { employeeId, biometricData, location } = req.body;
     const tenantId = req.tenant.id;
@@ -71,7 +71,7 @@ router.post('/attendance/biometric-checkin', async (req, res) => {
 });
 
 // Check-out
-router.post('/attendance/checkout', async (req, res) => {
+router.post('/attendance/checkout', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
     const { employeeId, location } = req.body;
     const tenantId = req.tenant.id;
@@ -88,7 +88,7 @@ router.post('/attendance/checkout', async (req, res) => {
  */
 
 // Get attendance records (list with filtering)
-router.get('/attendance', async (req, res) => {
+router.get('/attendance', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { employeeId, status, fromDate, toDate, page = 1, limit = 50 } = req.query;
@@ -103,7 +103,7 @@ router.get('/attendance', async (req, res) => {
 });
 
 // Get single attendance record
-router.get('/attendance/:id', async (req, res) => {
+router.get('/attendance/:id', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -133,7 +133,7 @@ router.put('/attendance/:id', requireHRPermission('ATTENDANCE_EDIT'), async (req
 });
 
 // Soft-delete attendance record
-router.delete('/attendance/:id', requireHRPermission('ATTENDANCE_EDIT'), async (req, res) => {
+router.delete('/attendance/:id', requireHRPermission('ATTENDANCE_DELETE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -207,7 +207,7 @@ router.post('/attendance/batch-import', requireHRPermission('ATTENDANCE_IMPORT')
  */
 
 // Get monthly attendance summary for employee
-router.get('/attendance/summary/:employeeId', async (req, res) => {
+router.get('/attendance/summary/:employeeId', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { employeeId } = req.params;
@@ -221,7 +221,7 @@ router.get('/attendance/summary/:employeeId', async (req, res) => {
 });
 
 // Get attendance stats for branch
-router.get('/attendance/stats/:branchId', async (req, res) => {
+router.get('/attendance/stats/:branchId', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId } = req.params;
@@ -248,7 +248,7 @@ router.get('/attendance/stats/:branchId', async (req, res) => {
  */
 
 // Get audit history for record
-router.get('/attendance/audit/:recordId', async (req, res) => {
+router.get('/attendance/audit/:recordId', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const data = await attendanceService.getAudit(tenantId, req.params.recordId);
@@ -263,7 +263,7 @@ router.get('/attendance/audit/:recordId', async (req, res) => {
  */
 
 // Get attendance configuration
-router.get('/config/attendance', async (req, res) => {
+router.get('/config/attendance', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId } = req.query;

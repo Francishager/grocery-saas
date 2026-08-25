@@ -264,27 +264,27 @@ const accountingSubItems = [
 ]
 
 const hrAccountingSubItems = [
-  { to: '/tenant/hr/accounting/overview', label: 'Overview', icon: Calculator, feature: 'hr', permission: 'canManageHRPayroll' },
-  { to: '/tenant/hr/accounting/mappings', label: 'Account Mappings', icon: Settings, feature: 'hr', permission: 'canManageHRPayroll' },
-  { to: '/tenant/hr/accounting/payroll', label: 'Payroll Posting', icon: Receipt, feature: 'hr', permission: 'canManageHRPayroll' },
-  { to: '/tenant/hr/accounting/payments', label: 'Salary Payments', icon: Wallet, feature: 'hr', permission: 'canManageHRPayroll' },
-  { to: '/tenant/hr/accounting/advances', label: 'Advances / Loans', icon: BadgeDollarSign, feature: 'hr', permission: 'canManageHRPayroll' },
+  { to: '/tenant/hr/accounting/overview', label: 'Overview', icon: Calculator, feature: 'hr', permission: ['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/mappings', label: 'Account Mappings', icon: Settings, feature: 'hr', permission: ['canManageHRPayrollSettings', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/payroll', label: 'Payroll Posting', icon: Receipt, feature: 'hr', permission: ['canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/payments', label: 'Salary Payments', icon: Wallet, feature: 'hr', permission: ['canPayHRPayroll', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/advances', label: 'Advances / Loans', icon: BadgeDollarSign, feature: 'hr', permission: ['canCreateHRPayroll', 'canPayHRPayroll', 'canManageHRPayroll'] },
 ]
 
 const hrSubItems = [
   { to: '/tenant/hr', label: 'Dashboard', icon: LayoutDashboard, feature: 'hr', permission: 'canViewHR' },
-  { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: 'canViewHR' },
-  { to: '/tenant/hr/departments', label: 'Departments', icon: Building2, feature: 'hr', permission: 'canViewHR' },
-  { to: '/tenant/hr/positions', label: 'Positions', icon: Badge, feature: 'hr', permission: 'canViewHR' },
-  { to: '/tenant/hr/units-teams', label: 'Teams', icon: Users, feature: 'hr', permission: 'canViewHR' },
+  { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee'] },
+  { to: '/tenant/hr/departments', label: 'Departments', icon: Building2, feature: 'hr', permission: ['canViewHR', 'canManageHRStructure'] },
+  { to: '/tenant/hr/positions', label: 'Positions', icon: Badge, feature: 'hr', permission: ['canViewHR', 'canManageHRStructure'] },
+  { to: '/tenant/hr/units-teams', label: 'Teams', icon: Users, feature: 'hr', permission: ['canViewHR', 'canManageHRStructure'] },
   { to: '/tenant/hr/contracts', label: 'Contracts', icon: FileText, feature: 'hr', permission: ['canViewHRContracts', 'canManageHRContracts'] },
   { to: '/tenant/hr/documents', label: 'Documents', icon: ClipboardList, feature: 'hr', permission: ['canViewHRDocuments', 'canManageHRDocuments'] },
-  { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: 'canViewHRAttendance' },
-  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: 'canManageHRAttendance' },
+  { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: ['canViewHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canApproveHRAttendance', 'canManageHRAttendance'] },
+  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: ['canRecordHRAttendance', 'canManageHRAttendance'] },
   { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewHRShifts' },
   { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: ['canViewHRLeave', 'canRequestHRLeave'] },
   { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canApproveHRLeave' },
-  { to: '/tenant/hr/accounting/overview', label: 'HR Accounting', icon: Calculator, feature: 'hr', permission: 'canManageHRPayroll', children: hrAccountingSubItems },
+  { to: '/tenant/hr/accounting/overview', label: 'HR Accounting', icon: Calculator, feature: 'hr', permission: ['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll'], children: hrAccountingSubItems },
 ]
 
 const settingsSubItems = [

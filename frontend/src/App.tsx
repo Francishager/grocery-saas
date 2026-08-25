@@ -178,19 +178,19 @@ function App() {
           <Route path="data-importer" element={<FeatureGuard feature="developer.data_importer"><DataImporterPage /></FeatureGuard>} />
           <Route path="hr" element={<FeatureGuard feature="hr" permission="canViewHR"><HRDashboardPage /></FeatureGuard>} />
           {/* Phase 1 HR Core Routes */}
-          <Route path="hr/departments" element={<FeatureGuard feature="hr" permission="canViewHR"><DepartmentManagementPage /></FeatureGuard>} />
-          <Route path="hr/positions" element={<FeatureGuard feature="hr" permission="canViewHR"><PositionManagementPage /></FeatureGuard>} />
-          <Route path="hr/employees" element={<FeatureGuard feature="hr" permission="canViewHR"><EmployeeManagementPage /></FeatureGuard>} />
+          <Route path="hr/departments" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canManageHRStructure']}><DepartmentManagementPage /></FeatureGuard>} />
+          <Route path="hr/positions" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canManageHRStructure']}><PositionManagementPage /></FeatureGuard>} />
+          <Route path="hr/employees" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee']}><EmployeeManagementPage /></FeatureGuard>} />
           <Route path="hr/contracts" element={<FeatureGuard feature="hr" permission={['canViewHRContracts', 'canManageHRContracts']}><ContractManagementPage /></FeatureGuard>} />
           <Route path="hr/documents" element={<FeatureGuard feature="hr" permission={['canViewHRDocuments', 'canManageHRDocuments']}><DocumentManagementPage /></FeatureGuard>} />
-          <Route path="hr/units-teams" element={<FeatureGuard feature="hr" permission="canViewHR"><UnitTeamManagementPage /></FeatureGuard>} />
-          <Route path="hr/accounting" element={<FeatureGuard feature="hr" permission="canManageHRPayroll"><HRAccountingConfigPage /></FeatureGuard>} />
-          <Route path="hr/accounting/:tab" element={<FeatureGuard feature="hr" permission="canManageHRPayroll"><HRAccountingConfigPage /></FeatureGuard>} />
+          <Route path="hr/units-teams" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canManageHRStructure']}><UnitTeamManagementPage /></FeatureGuard>} />
+          <Route path="hr/accounting" element={<FeatureGuard feature="hr" permission={['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll']}><HRAccountingConfigPage /></FeatureGuard>} />
+          <Route path="hr/accounting/:tab" element={<FeatureGuard feature="hr" permission={['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll']}><HRAccountingConfigPage /></FeatureGuard>} />
           <Route path="hr/settings" element={<Navigate to="/tenant/roles" replace />} />
           <Route path="hr/legacy" element={<FeatureGuard feature="hr" permission="canViewHR"><HRPage /></FeatureGuard>} />
           {/* Phase 2 HR Attendance, Shift, Leave Routes */}
-          <Route path="hr/attendance" element={<FeatureGuard feature="hr" permission="canViewHRAttendance"><AttendanceListPage /></FeatureGuard>} />
-          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr" permission="canManageHRAttendance"><AttendanceCheckPage /></FeatureGuard>} />
+          <Route path="hr/attendance" element={<FeatureGuard feature="hr" permission={['canViewHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canApproveHRAttendance', 'canManageHRAttendance']}><AttendanceListPage /></FeatureGuard>} />
+          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr" permission={['canRecordHRAttendance', 'canManageHRAttendance']}><AttendanceCheckPage /></FeatureGuard>} />
           <Route path="hr/shifts" element={<FeatureGuard feature="hr" permission="canViewHRShifts"><ShiftManagementPage /></FeatureGuard>} />
           <Route path="hr/leaves" element={<FeatureGuard feature="hr" permission={['canViewHRLeave', 'canRequestHRLeave']}><LeaveRequestPage /></FeatureGuard>} />
           <Route path="hr/leaves/approval" element={<FeatureGuard feature="hr" permission="canApproveHRLeave"><LeaveApprovalPage /></FeatureGuard>} />

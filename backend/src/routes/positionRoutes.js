@@ -166,6 +166,10 @@ router.get('/:id/salary-range', async (req, res) => {
     const { tenantId } = req.user;
     const { id } = req.params;
 
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_POSITION_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
     const salaryRange = await positionService.getPositionSalaryRange(tenantId, id);
 
     res.json({

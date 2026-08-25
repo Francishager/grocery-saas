@@ -96,6 +96,9 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_EMPLOYEE_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
     const employee = await employeeService.getEmployeeById(tenantId, req.params.id);
     res.json({ success: true, data: employee });
   } catch (error) {
@@ -211,6 +214,9 @@ router.post('/:id/supervisor', async (req, res) => {
 router.get('/:id/subordinates', async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
+    if (!(await hrPermissionService.hasPermission(tenantId, req.user.id, 'HR_EMPLOYEE_VIEW'))) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
     const subordinates = await employeeService.getSubordinates(tenantId, req.params.id);
     res.json({ success: true, data: subordinates });
   } catch (error) {

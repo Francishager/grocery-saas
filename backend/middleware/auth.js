@@ -237,6 +237,48 @@ export const requirePermission = (permission) => {
   };
 };
 
+export const requireAnyPermission = (permissions = []) => {
+  const requiredPermissions = Array.isArray(permissions) ? permissions.filter(Boolean) : [permissions].filter(Boolean);
+
+  return async (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    if (requiredPermissions.length === 0) {
+      return next();
+    }
+
+    const fallbackPermissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
+    const hasDirectAccess = fallbackPermissions.includes('*') ||
+      requiredPermissions.some((permission) => fallbackPermissions.includes(permission));
+    if (hasDirectAccess) {
+      return next();
+    }
+
+    try {
+      const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+      const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
+      const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+      const effectivePermissions = resolveEffectivePermissions(req.user, userPerm, [], tenantFeatures);
+
+      req.user.permissions = effectivePermissions;
+      req.userPermissions = userPerm;
+
+      if (effectivePermissions.includes('*') || requiredPermissions.some((permission) => effectivePermissions.includes(permission))) {
+        return next();
+      }
+    } catch (err) {
+      console.error('requireAnyPermission fallback error:', err);
+    }
+
+    return res.status(403).json({
+      message: 'Permission denied',
+      required: requiredPermissions,
+    });
+  };
+};
+
 export const hasAccountingPermission = (req) => {
   if (!req?.user) return false;
   const permissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
@@ -462,6 +504,7 @@ export default {
   blockPlatformAdmin,
   optionalAuth,
   requirePermission,
+  requireAnyPermission,
   requireFeature,
   enforceTenantIsolation,
   requireCashAccount,
