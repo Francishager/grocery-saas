@@ -133,7 +133,7 @@ export default function CustomerTransactionHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-none overflow-y-auto p-3 sm:w-[96vw] sm:p-5 2xl:w-[94vw]">
+      <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-2 pr-8 text-lg">
             <UserRound className="h-5 w-5 text-primary" />
