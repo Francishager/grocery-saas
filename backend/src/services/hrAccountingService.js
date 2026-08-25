@@ -9,6 +9,8 @@ import { linkedCashAccountId, syncLinkedTransactionAccountBalance } from "../uti
 
 const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
 const BALANCE_EPSILON = 0.01;
+const OPENING_BALANCE_EQUITY_NAME = "Opening Balance Equity";
+const OPENING_BALANCE_EQUITY_CODE = "3999";
 
 const ACCOUNT_LABELS = {
   salaryExpense: "Staff Salaries & Wages expense account",
@@ -224,6 +226,46 @@ class HRAccountingService {
     return { config: validation.config, accounts: accountCheck.accounts };
   }
 
+  async ensureOpeningBalanceEquityAccount(tx, tenantId, branchId = null) {
+    const db = this.client(tx);
+    const existingByName = await db.account.findFirst({
+      where: {
+        tenantId,
+        name: OPENING_BALANCE_EQUITY_NAME,
+        type: "equity",
+        isActive: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    if (existingByName) return existingByName;
+
+    for (let suffix = 0; suffix < 100; suffix += 1) {
+      const code = suffix === 0 ? OPENING_BALANCE_EQUITY_CODE : `${OPENING_BALANCE_EQUITY_CODE}-${suffix}`;
+      const existingCode = await db.account.findUnique({
+        where: { tenantId_code: { tenantId, code } },
+      });
+      if (existingCode) continue;
+
+      return db.account.create({
+        data: {
+          tenantId,
+          branchId: branchId || null,
+          code,
+          name: OPENING_BALANCE_EQUITY_NAME,
+          type: "equity",
+          subType: "opening_balance",
+          balance: 0,
+          isActive: true,
+          description: "System account for balances brought forward from before the business started using this system.",
+        },
+      });
+    }
+
+    const error = new Error("Could not create Opening Balance Equity account because all reserved opening balance account codes are already used.");
+    error.statusCode = 400;
+    throw error;
+  }
+
   async nextJournalEntryNo(tx, tenantId) {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0].replace(/-/g, "");
@@ -422,6 +464,66 @@ class HRAccountingService {
         lines: [
           { accountId: config.salaryAdvanceAccountId, debit: amount, credit: 0, description: `Salary advance to ${employeeName}` },
           { accountId: paymentAccountId, debit: 0, credit: amount, description: `Payment for ${employeeName} salary advance` },
+        ],
+      });
+    });
+  }
+
+  async createEmployeeOpeningAdvanceJournal(params) {
+    const { tx = null, tenantId, branchId, salaryAdvanceId, amount, employeeName, userId, date } = params;
+    const openingAmount = money(amount);
+
+    return this.withTransaction(tx, async (db) => {
+      if (openingAmount <= 0) {
+        return { success: true, journalEntry: null, skipped: true };
+      }
+
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"], { branchId, userId });
+      const openingEquity = await this.ensureOpeningBalanceEquityAccount(db, tenantId, branchId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Opening advance/loan balance - ${employeeName}`,
+        reference: `OPEN-ADV-${salaryAdvanceId}`,
+        sourceType: "HR_OPENING_ADVANCE",
+        sourceId: salaryAdvanceId,
+        userId,
+        lines: [
+          { accountId: config.salaryAdvanceAccountId, debit: openingAmount, credit: 0, description: `Opening advance/loan owed by ${employeeName}` },
+          { accountId: openingEquity.id, debit: 0, credit: openingAmount, description: `Opening balance equity - ${employeeName}` },
+        ],
+      });
+    });
+  }
+
+  async createEmployeeOpeningSalaryPayableJournal(params) {
+    const { tx = null, tenantId, branchId, employeeId, amount, employeeName, userId, date } = params;
+    const openingAmount = money(amount);
+
+    return this.withTransaction(tx, async (db) => {
+      if (openingAmount <= 0) {
+        return { success: true, journalEntry: null, skipped: true };
+      }
+
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryPayable"], { branchId, userId });
+      const openingEquity = await this.ensureOpeningBalanceEquityAccount(db, tenantId, branchId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Opening salary payable - ${employeeName}`,
+        reference: `OPEN-SAL-${employeeId}`,
+        sourceType: "HR_OPENING_SALARY_PAYABLE",
+        sourceId: employeeId,
+        userId,
+        lines: [
+          { accountId: openingEquity.id, debit: openingAmount, credit: 0, description: `Opening balance equity - ${employeeName}` },
+          { accountId: config.salaryPayableAccountId, debit: 0, credit: openingAmount, description: `Opening salary owed to ${employeeName}` },
         ],
       });
     });

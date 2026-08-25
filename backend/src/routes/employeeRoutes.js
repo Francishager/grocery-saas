@@ -46,7 +46,12 @@ router.post('/', upload.single('profilePhoto'), async (req, res) => {
     }
 
     const body = await attachProfilePhoto(req);
-    const employee = await employeeService.createEmployee(tenantId, { ...body, createdBy: userId });
+    const canManageHROpeningBalances = await hrPermissionService.hasPermission(tenantId, userId, 'HR_PAYROLL_MANAGE');
+    const employee = await employeeService.createEmployee(tenantId, {
+      ...body,
+      createdBy: userId,
+      canManageHROpeningBalances,
+    });
     res.status(201).json({ success: true, data: employee });
   } catch (error) {
     res.status(error.status || 400).json({ error: error.message });
@@ -111,7 +116,12 @@ router.put('/:id', upload.single('profilePhoto'), async (req, res) => {
     }
 
     const body = await attachProfilePhoto(req);
-    const employee = await employeeService.updateEmployee(tenantId, req.params.id, { ...body, updatedBy: userId });
+    const canManageHROpeningBalances = await hrPermissionService.hasPermission(tenantId, userId, 'HR_PAYROLL_MANAGE');
+    const employee = await employeeService.updateEmployee(tenantId, req.params.id, {
+      ...body,
+      updatedBy: userId,
+      canManageHROpeningBalances,
+    });
     res.json({ success: true, data: employee });
   } catch (error) {
     res.status(error.status || 400).json({ error: error.message });

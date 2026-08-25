@@ -414,6 +414,7 @@ class SalaryAdvanceService {
         await tx.employee.update({
           where: { id: advance.employeeId },
           data: {
+            ...(advance.isOpeningBalance ? { openingSalaryAdvanceBalance: 0 } : {}),
             salaryAdvanceBalance: {
               decrement: advance.amount,
             },

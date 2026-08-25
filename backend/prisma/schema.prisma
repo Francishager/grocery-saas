@@ -1741,6 +1741,11 @@ model Employee {
   terminationDate      DateTime?
   status               String    @default("active") // active, terminated, on_leave, suspended, on_probation
   salaryAdvanceBalance Float     @default(0) // Total outstanding salary advances
+  salaryPayableBalance Float     @default(0) // Total outstanding salary payable
+  openingSalaryAdvanceBalance Float @default(0) // Advance/loan owed back to the business before onboarding
+  openingSalaryPayableBalance Float @default(0) // Salary already owed before onboarding
+  openingHrBalanceDate DateTime?
+  openingHrBalanceNote String?
 
   // =====================
   // TIMESTAMPS
@@ -1822,9 +1827,10 @@ model SalaryAdvance {
   employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   advanceNo        String // e.g., ADV-001-2025
   amount           Float
-  paymentAccountId String // Cash/Bank account used for payment
+  paymentAccountId String? // Cash/Bank account used for payment; null for opening balances
   date             DateTime @default(now())
   reason           String?
+  isOpeningBalance Boolean  @default(false)
 
   // Recovery tracking
   totalRecovered    Float   @default(0)

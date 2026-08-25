@@ -57,6 +57,12 @@ interface Employee {
   status: string
   employmentType?: string
   basicSalary?: number
+  salaryAdvanceBalance?: number
+  salaryPayableBalance?: number
+  openingSalaryAdvanceBalance?: number
+  openingSalaryPayableBalance?: number
+  openingHrBalanceDate?: string
+  openingHrBalanceNote?: string
   tenantId: string
   employeeDocuments?: Array<{ id: string; fileName: string; fileUrl?: string; documentType: string }>
 }
@@ -154,6 +160,12 @@ const validateTenDigitNumber = (label: string) => (value?: string) => {
   if (!normalized) return null
   return /^\d{10}$/.test(normalized) ? null : `${label} must be exactly 10 digits`
 }
+const validateNonNegativeAmount = (label: string) => (value?: string) => {
+  if (value === undefined || value === null || value === '') return null
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return `${label} must be a valid amount`
+  return amount >= 0 ? null : `${label} cannot be negative`
+}
 
 const initialFormData = () => ({
   firstName: '',
@@ -183,6 +195,10 @@ const initialFormData = () => ({
   department: '',
   employmentType: 'permanent',
   basicSalary: '',
+  openingSalaryAdvanceBalance: '',
+  openingSalaryPayableBalance: '',
+  openingHrBalanceDate: '',
+  openingHrBalanceNote: '',
   status: 'active',
   profilePhoto: '',
 })
@@ -392,6 +408,18 @@ export default function EmployeeManagementPage() {
       render: (value) => formatMoney(value),
     },
     {
+      key: 'salaryAdvanceBalance',
+      label: 'Advance / Loan',
+      width: '14%',
+      render: (value) => formatMoney(value),
+    },
+    {
+      key: 'salaryPayableBalance',
+      label: 'Salary Owed',
+      width: '14%',
+      render: (value) => formatMoney(value),
+    },
+    {
       key: 'workLocation',
       label: 'Work Location',
       width: '16%',
@@ -517,6 +545,10 @@ export default function EmployeeManagementPage() {
       department: departmentName,
       employmentType: row.employmentType || 'permanent',
       basicSalary: row.basicSalary || '',
+      openingSalaryAdvanceBalance: row.openingSalaryAdvanceBalance || '',
+      openingSalaryPayableBalance: row.openingSalaryPayableBalance || '',
+      openingHrBalanceDate: toDateInput(row.openingHrBalanceDate),
+      openingHrBalanceNote: row.openingHrBalanceNote || '',
       status: row.status || 'active',
       profilePhoto: row.profilePhoto || '',
     })
@@ -583,6 +615,28 @@ export default function EmployeeManagementPage() {
         const normalized = String(value || '').trim()
         return normalized && normalized !== NONE_VALUE ? normalized : null
       }
+      const openingSalaryAdvanceBalance = formData.openingSalaryAdvanceBalance === ''
+        ? 0
+        : Number(formData.openingSalaryAdvanceBalance)
+      const openingSalaryPayableBalance = formData.openingSalaryPayableBalance === ''
+        ? 0
+        : Number(formData.openingSalaryPayableBalance)
+
+      if (
+        !Number.isFinite(openingSalaryAdvanceBalance) ||
+        !Number.isFinite(openingSalaryPayableBalance) ||
+        openingSalaryAdvanceBalance < 0 ||
+        openingSalaryPayableBalance < 0
+      ) {
+        setFormError('Opening advance, loan, and salary balances must be valid non-negative amounts')
+        return
+      }
+
+      if ((openingSalaryAdvanceBalance > 0 || openingSalaryPayableBalance > 0) && !formData.openingHrBalanceDate) {
+        setFormError('Opening balance date is required when an opening advance, loan, or salary balance is entered')
+        return
+      }
+
       const payload = {
         ...formData,
         nationalId: formData.nationalId ? normalizeNin(formData.nationalId) : undefined,
@@ -598,6 +652,10 @@ export default function EmployeeManagementPage() {
         position: selectedPosition?.name || formData.position || undefined,
         jobTitle: selectedPosition?.name || formData.position || undefined,
         basicSalary: formData.basicSalary === '' ? undefined : Number(formData.basicSalary),
+        openingSalaryAdvanceBalance,
+        openingSalaryPayableBalance,
+        openingHrBalanceDate: formData.openingHrBalanceDate || null,
+        openingHrBalanceNote: formData.openingHrBalanceNote || null,
       }
       const body = profilePhotoFile
         ? (() => {
@@ -829,6 +887,31 @@ export default function EmployeeManagementPage() {
       type: 'number',
     },
     {
+      name: 'openingSalaryAdvanceBalance',
+      label: 'Opening Advance / Loan Balance',
+      type: 'number',
+      placeholder: '0',
+      validation: validateNonNegativeAmount('Opening advance / loan balance'),
+    },
+    {
+      name: 'openingSalaryPayableBalance',
+      label: 'Opening Salary Owed',
+      type: 'number',
+      placeholder: '0',
+      validation: validateNonNegativeAmount('Opening salary owed'),
+    },
+    {
+      name: 'openingHrBalanceDate',
+      label: 'Opening Balance Date',
+      type: 'date',
+    },
+    {
+      name: 'openingHrBalanceNote',
+      label: 'Opening Balance Notes',
+      type: 'textarea',
+      placeholder: 'Optional note',
+    },
+    {
       name: 'status',
       label: 'Status',
       type: 'select',
@@ -890,6 +973,12 @@ export default function EmployeeManagementPage() {
       ['Work Location', employment.workLocation || selectedEmployee.workLocation || '-'],
       ['Cost Centre', employment.costCentre || selectedEmployee.costCentre || '-'],
       ['Basic Salary', formatMoney(compensation.basicSalary || selectedEmployee.basicSalary)],
+      ['Opening Advance / Loan', formatMoney(compensation.openingSalaryAdvanceBalance || selectedEmployee.openingSalaryAdvanceBalance)],
+      ['Opening Salary Owed', formatMoney(compensation.openingSalaryPayableBalance || selectedEmployee.openingSalaryPayableBalance)],
+      ['Opening Balance Date', formatDate(compensation.openingHrBalanceDate || selectedEmployee.openingHrBalanceDate)],
+      ['Opening Balance Notes', compensation.openingHrBalanceNote || selectedEmployee.openingHrBalanceNote || '-'],
+      ['Current Advance / Loan Balance', formatMoney(compensation.salaryAdvanceBalance || selectedEmployee.salaryAdvanceBalance)],
+      ['Current Salary Owed', formatMoney(compensation.salaryPayableBalance || selectedEmployee.salaryPayableBalance)],
     ]
 
     return (

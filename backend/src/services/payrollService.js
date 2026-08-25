@@ -373,6 +373,15 @@ class PayrollService {
           throw new Error(journalResult.error || "Failed to create journal entry");
         }
 
+        await tx.employee.update({
+          where: { id: payroll.employeeId },
+          data: {
+            salaryPayableBalance: {
+              increment: payroll.netSalary,
+            },
+          },
+        });
+
         // Update payroll with journal entry
         const updated = await tx.payroll.update({
           where: { id: payrollId },
@@ -525,6 +534,15 @@ class PayrollService {
                 : payroll.paymentDate,
             paymentReference:
               newStatus === "paid" ? referenceNo : null,
+          },
+        });
+
+        await tx.employee.update({
+          where: { id: payroll.employeeId },
+          data: {
+            salaryPayableBalance: {
+              decrement: amount,
+            },
           },
         });
 
