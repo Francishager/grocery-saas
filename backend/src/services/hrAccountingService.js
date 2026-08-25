@@ -4,6 +4,7 @@
  */
 
 import prisma from "../db.js";
+import hrConfigurationService from "./hrConfigurationService.js";
 import { linkedCashAccountId, syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 
 const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
@@ -47,8 +48,8 @@ function journalLineBalanceDelta(account, debit, credit) {
 
 function paymentMethodAccountTypes(paymentMethod) {
   const method = normalizeValue(paymentMethod || "cash");
-  if (method === "cash") return ["cash", "safe"];
-  if (method === "safe") return ["safe", "cash"];
+  if (method === "cash") return ["cash"];
+  if (method === "safe") return ["safe"];
   if (method === "bank" || method === "bank_transfer" || method === "cheque") return ["bank"];
   if (method === "mobile_money") return ["mobile_money"];
   if (method === "card") return ["card"];
@@ -57,8 +58,8 @@ function paymentMethodAccountTypes(paymentMethod) {
 
 function paymentMethodAccountLabel(paymentMethod) {
   const method = normalizeValue(paymentMethod || "cash");
-  if (method === "cash") return "cash or safe";
-  if (method === "safe") return "safe or cash";
+  if (method === "cash") return "cash";
+  if (method === "safe") return "safe";
   if (method === "bank" || method === "bank_transfer" || method === "cheque") return "bank";
   if (method === "mobile_money") return "mobile money";
   if (method === "card") return "card";
@@ -123,7 +124,7 @@ class HRAccountingService {
     };
   }
 
-  async requirePaymentAccountForMethod(tx, tenantId, paymentAccountId, paymentMethod = "cash", context = "payment") {
+  async requirePaymentAccountForMethod(tx, tenantId, paymentAccountId, paymentMethod = "cash", context = "payment", userId = null) {
     const db = this.client(tx);
     const method = normalizeValue(paymentMethod || "cash");
     const account = await db.account.findFirst({
@@ -156,6 +157,27 @@ class HRAccountingService {
         throw error;
       }
       resolvedType = normalizeValue(cashAccount.type);
+
+      if (method === "cash") {
+        const user = userId
+          ? await db.user.findFirst({
+              where: { id: userId, tenantId, isActive: true },
+              select: { cashAccountId: true },
+            })
+          : null;
+
+        if (!user?.cashAccountId || user.cashAccountId !== cashAccount.id) {
+          const error = new Error(`Cash ${context} must use your assigned cash account.`);
+          error.statusCode = 403;
+          throw error;
+        }
+      }
+    }
+
+    if (method === "cash" && !cashAccountId) {
+      const error = new Error(`Cash ${context} must use your assigned linked cash transaction account.`);
+      error.statusCode = 400;
+      throw error;
     }
 
     if (!resolvedType || !paymentMethodAccountTypes(method).includes(resolvedType)) {
@@ -167,7 +189,16 @@ class HRAccountingService {
     return account;
   }
 
-  async requireConfiguredAccounts(tx, tenantId, requiredAccounts) {
+  async requireConfiguredAccounts(tx, tenantId, requiredAccounts, options = {}) {
+    if (requiredAccounts.includes("payeTax") || requiredAccounts.includes("socialSecurity")) {
+      await hrConfigurationService.ensureDefaultDeductionAccounts({
+        tx: this.client(tx),
+        tenantId,
+        branchId: options.branchId || null,
+        userId: options.userId || null,
+      });
+    }
+
     const validation = await this.validateHRAccountConfiguration(tenantId, requiredAccounts, tx);
     if (!validation.isValid) {
       const error = new Error(validation.error || setupMessage(validation.missingAccounts));
@@ -376,7 +407,7 @@ class HRAccountingService {
 
     return this.withTransaction(tx, async (db) => {
       const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
-      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary advance payment");
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary advance payment", userId);
 
       return this.createJournal({
         tx: db,
@@ -417,7 +448,7 @@ class HRAccountingService {
       if (money(paye) > 0) requiredAccounts.push("payeTax");
       if (money(socialSecurityTax) > 0) requiredAccounts.push("socialSecurity");
 
-      const { config } = await this.requireConfiguredAccounts(db, tenantId, requiredAccounts);
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, requiredAccounts, { branchId, userId });
       const salaryPayableCredit = money(grossSalary) - money(salaryAdvanceRecovery) - money(paye) - money(socialSecurityTax);
       if (salaryPayableCredit < -0.01) {
         throw new Error("Payroll deductions exceed gross salary. Review the payroll before posting.");
@@ -449,7 +480,7 @@ class HRAccountingService {
 
     return this.withTransaction(tx, async (db) => {
       const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryPayable"]);
-      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary payment");
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary payment", userId);
 
       return this.createJournal({
         tx: db,
@@ -474,7 +505,7 @@ class HRAccountingService {
 
     return this.withTransaction(tx, async (db) => {
       const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
-      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "advance repayment");
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "advance repayment", userId);
 
       return this.createJournal({
         tx: db,

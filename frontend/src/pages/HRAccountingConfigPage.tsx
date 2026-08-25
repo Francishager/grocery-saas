@@ -16,6 +16,7 @@ import {
 import { apiFetch } from "@/lib/api"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
+import { useJWTAuth } from "@/contexts/JWTAuthContext"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -38,6 +39,8 @@ type Employee = {
   middleName?: string
   lastName?: string
   employeeNumber?: string
+  taxId?: string | null
+  socialSecurityNumber?: string | null
   basicSalary?: number
   salary?: number
   status?: string
@@ -80,8 +83,8 @@ const PAYMENT_METHOD_OPTIONS = [
 ]
 
 const PAYMENT_METHOD_ACCOUNT_LABELS: Record<string, string> = {
-  cash: "cash or safe",
-  safe: "safe or cash",
+  cash: "cash",
+  safe: "safe",
   mobile_money: "mobile money",
   bank: "bank",
   bank_transfer: "bank",
@@ -105,19 +108,29 @@ const employeeName = (employee?: Employee | null) =>
   [employee?.firstName, employee?.middleName, employee?.lastName].filter(Boolean).join(" ").trim() || "Employee"
 const normalizeValue = (value?: string | null) => String(value || "").trim().toLowerCase()
 
+const linkedCashAccountId = (account?: Account | null) => {
+  const match = String(account?.description || "").match(/cashAccount:([^\s]+)/)
+  return match?.[1] || null
+}
+
+const userCashAccountId = (user: any) => user?.cashAccountId || user?.cashAccount?.id || null
+
 const getTransactionAccountType = (account: Account) => {
   const subType = normalizeValue(account.subType)
   if (subType.startsWith("transaction_")) return subType.replace("transaction_", "")
-  if (String(account.description || "").includes("cashAccount:")) return "cash"
+  if (linkedCashAccountId(account)) return "cash"
   return null
 }
 
-const transactionAccountMatchesMethod = (account: Account, paymentMethod?: string | null) => {
+const transactionAccountMatchesMethod = (account: Account, paymentMethod?: string | null, assignedCashAccountId?: string | null) => {
   const type = getTransactionAccountType(account)
   const method = normalizeValue(paymentMethod || "cash")
   if (!type) return false
-  if (method === "cash") return type === "cash" || type === "safe"
-  if (method === "safe") return type === "safe" || type === "cash"
+  if (method === "cash") {
+    if (type !== "cash") return false
+    return assignedCashAccountId ? linkedCashAccountId(account) === assignedCashAccountId : false
+  }
+  if (method === "safe") return type === "safe"
   if (method === "bank" || method === "bank_transfer" || method === "cheque") return type === "bank"
   if (method === "mobile_money") return type === "mobile_money"
   if (method === "card") return type === "card"
@@ -126,6 +139,14 @@ const transactionAccountMatchesMethod = (account: Account, paymentMethod?: strin
 
 const paymentAccountPlaceholder = (paymentMethod?: string | null) =>
   `Select ${PAYMENT_METHOD_ACCOUNT_LABELS[normalizeValue(paymentMethod || "cash")] || "payment"} account`
+
+const defaultPaymentAccountId = (accounts: Account[], paymentMethod?: string | null, assignedCashAccountId?: string | null) => {
+  const method = normalizeValue(paymentMethod || "cash")
+  if (method === "cash" && assignedCashAccountId) {
+    return accounts.find((account) => linkedCashAccountId(account) === assignedCashAccountId)?.id || ""
+  }
+  return accounts.length === 1 ? accounts[0].id : ""
+}
 
 async function fetchJson(path: string, init?: RequestInit) {
   const response = await apiFetch(path, init)
@@ -201,6 +222,8 @@ export default function HRAccountingConfigPage() {
   const { tab } = useParams()
   const navigate = useNavigate()
   const { toast } = useToast()
+  const { user } = useJWTAuth()
+  const assignedCashAccountId = userCashAccountId(user)
   const activeTab = HR_ACCOUNTING_VIEWS.has(String(tab)) ? String(tab) : "overview"
 
   const [config, setConfig] = useState<any>(null)
@@ -279,16 +302,16 @@ export default function HRAccountingConfigPage() {
     ["outstanding", "partially_recovered"].includes(advance.status) && Number(advance.outstandingAmount || 0) > 0
   )
   const paymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, paymentForm.paymentMethod)),
-    [availableAccounts.assetAccounts, paymentForm.paymentMethod]
+    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, paymentForm.paymentMethod, assignedCashAccountId)),
+    [availableAccounts.assetAccounts, paymentForm.paymentMethod, assignedCashAccountId]
   )
   const advancePaymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, advanceForm.paymentMethod)),
-    [availableAccounts.assetAccounts, advanceForm.paymentMethod]
+    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, advanceForm.paymentMethod, assignedCashAccountId)),
+    [availableAccounts.assetAccounts, advanceForm.paymentMethod, assignedCashAccountId]
   )
   const repaymentPaymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, repaymentForm.paymentMethod)),
-    [availableAccounts.assetAccounts, repaymentForm.paymentMethod]
+    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, repaymentForm.paymentMethod, assignedCashAccountId)),
+    [availableAccounts.assetAccounts, repaymentForm.paymentMethod, assignedCashAccountId]
   )
 
   const loadConfiguration = async () => {
@@ -362,22 +385,28 @@ export default function HRAccountingConfigPage() {
   }, [payrollPeriod])
 
   useEffect(() => {
-    if (paymentForm.paymentAccountId && !paymentAccountOptions.some((account) => account.id === paymentForm.paymentAccountId)) {
-      setPaymentForm((prev) => ({ ...prev, paymentAccountId: "" }))
-    }
-  }, [paymentAccountOptions, paymentForm.paymentAccountId])
+    setPaymentForm((prev) => {
+      if (prev.paymentAccountId && paymentAccountOptions.some((account) => account.id === prev.paymentAccountId)) return prev
+      const fallback = defaultPaymentAccountId(paymentAccountOptions, prev.paymentMethod, assignedCashAccountId)
+      return prev.paymentAccountId === fallback ? prev : { ...prev, paymentAccountId: fallback }
+    })
+  }, [paymentAccountOptions, assignedCashAccountId])
 
   useEffect(() => {
-    if (advanceForm.paymentAccountId && !advancePaymentAccountOptions.some((account) => account.id === advanceForm.paymentAccountId)) {
-      setAdvanceForm((prev) => ({ ...prev, paymentAccountId: "" }))
-    }
-  }, [advancePaymentAccountOptions, advanceForm.paymentAccountId])
+    setAdvanceForm((prev) => {
+      if (prev.paymentAccountId && advancePaymentAccountOptions.some((account) => account.id === prev.paymentAccountId)) return prev
+      const fallback = defaultPaymentAccountId(advancePaymentAccountOptions, prev.paymentMethod, assignedCashAccountId)
+      return prev.paymentAccountId === fallback ? prev : { ...prev, paymentAccountId: fallback }
+    })
+  }, [advancePaymentAccountOptions, assignedCashAccountId])
 
   useEffect(() => {
-    if (repaymentForm.paymentAccountId && !repaymentPaymentAccountOptions.some((account) => account.id === repaymentForm.paymentAccountId)) {
-      setRepaymentForm((prev) => ({ ...prev, paymentAccountId: "" }))
-    }
-  }, [repaymentPaymentAccountOptions, repaymentForm.paymentAccountId])
+    setRepaymentForm((prev) => {
+      if (prev.paymentAccountId && repaymentPaymentAccountOptions.some((account) => account.id === prev.paymentAccountId)) return prev
+      const fallback = defaultPaymentAccountId(repaymentPaymentAccountOptions, prev.paymentMethod, assignedCashAccountId)
+      return prev.paymentAccountId === fallback ? prev : { ...prev, paymentAccountId: fallback }
+    })
+  }, [repaymentPaymentAccountOptions, assignedCashAccountId])
 
   const notifySuccess = (message: string) => {
     setSuccess(message)
@@ -391,7 +420,11 @@ export default function HRAccountingConfigPage() {
       setError("")
       const response = await fetchJson("/api/hr/config/mapping", {
         method: "POST",
-        body: JSON.stringify(selectedAccounts),
+        body: JSON.stringify({
+          salaryExpenseAccountId: selectedAccounts.salaryExpenseAccountId,
+          salaryPayableAccountId: selectedAccounts.salaryPayableAccountId,
+          salaryAdvanceAccountId: selectedAccounts.salaryAdvanceAccountId,
+        }),
       })
       setConfig(response.config)
       notifySuccess("HR account mapping updated")
@@ -669,8 +702,6 @@ export default function HRAccountingConfigPage() {
                   ["Salary Expense", selectedAccounts.salaryExpenseAccountId, availableAccounts.expenseAccounts],
                   ["Salary Payable", selectedAccounts.salaryPayableAccountId, availableAccounts.liabilityAccounts],
                   ["Advance / Loan Asset", selectedAccounts.salaryAdvanceAccountId, availableAccounts.assetAccounts],
-                  ["PAYE Tax", selectedAccounts.payeTaxAccountId, availableAccounts.liabilityAccounts],
-                  ["Social Security", selectedAccounts.socialSecurityAccountId, availableAccounts.liabilityAccounts],
                 ].map(([label, id, list]) => {
                   const account = (list as Account[]).find((item) => item.id === id)
                   return (
@@ -732,14 +763,6 @@ export default function HRAccountingConfigPage() {
                 <Label>Employee Advance / Loan Account *</Label>
                 <AccountSelect value={selectedAccounts.salaryAdvanceAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryAdvanceAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder="Select asset account" />
               </div>
-              <div>
-                <Label>PAYE Tax Account</Label>
-                <AccountSelect value={selectedAccounts.payeTaxAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, payeTaxAccountId: value }))} accounts={availableAccounts.liabilityAccounts} placeholder="Select tax liability account" />
-              </div>
-              <div>
-                <Label>Social Security Account</Label>
-                <AccountSelect value={selectedAccounts.socialSecurityAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, socialSecurityAccountId: value }))} accounts={availableAccounts.liabilityAccounts} placeholder="Select liability account" />
-              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleSaveMapping} disabled={saving}>Save Mapping</Button>
@@ -780,8 +803,8 @@ export default function HRAccountingConfigPage() {
                   ["overtime", "Overtime"],
                   ["otherEarnings", "Other Earnings"],
                   ["salaryAdvanceRecovery", "Advance Recovery"],
-                  ["paye", "PAYE"],
-                  ["socialSecurityTax", "Social Security"],
+                  ["paye", "PAYE Amount"],
+                  ["socialSecurityTax", "Social Security Amount"],
                   ["healthInsurance", "Health Insurance"],
                   ["otherDeductions", "Other Deductions"],
                 ].map(([key, label]) => (

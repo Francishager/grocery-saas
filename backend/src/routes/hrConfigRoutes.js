@@ -85,8 +85,6 @@ router.post("/mapping", async (req, res) => {
       salaryExpenseAccountId,
       salaryPayableAccountId,
       salaryAdvanceAccountId,
-      payeTaxAccountId,
-      socialSecurityAccountId,
     } = req.body;
 
     const result = await hrConfigurationService.updateHRAccountMapping({
@@ -94,8 +92,6 @@ router.post("/mapping", async (req, res) => {
       salaryExpenseAccountId,
       salaryPayableAccountId,
       salaryAdvanceAccountId,
-      payeTaxAccountId,
-      socialSecurityAccountId,
       userId,
     });
 
@@ -112,7 +108,7 @@ router.post("/mapping", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating HR account mapping:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
 });
 
@@ -145,7 +141,7 @@ router.post("/initialize-accounts", async (req, res) => {
     });
   } catch (error) {
     console.error("Error initializing HR accounts:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
 });
 

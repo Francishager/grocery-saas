@@ -26,7 +26,7 @@ export const DropdownMenu: React.FC<{ children: React.ReactNode }> = ({ children
   )
 }
 
-interface DropdownMenuTriggerProps {
+interface DropdownMenuTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode
   open?: boolean
   setOpen?: (open: boolean) => void
@@ -36,12 +36,15 @@ export const DropdownMenuTrigger: React.FC<DropdownMenuTriggerProps> = ({
   children,
   open,
   setOpen,
+  className = '',
+  ...props
 }) => {
   return (
     <button
       onClick={() => setOpen?.(!open)}
-      className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 transition-colors"
+      className={`inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 transition-colors ${className}`}
       type="button"
+      {...props}
     >
       {children}
     </button>

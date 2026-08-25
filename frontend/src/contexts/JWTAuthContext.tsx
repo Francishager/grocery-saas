@@ -20,6 +20,8 @@ export interface User {
   isPlatformUser?: boolean
   /** Tenant ID for business users */
   tenantId?: string
+  cashAccountId?: string | null
+  cashAccount?: { id: string; name: string; type: string } | null
 }
 
 export interface AuthTokens {

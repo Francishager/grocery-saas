@@ -17,9 +17,9 @@ export interface FormNinInputProps extends Omit<React.InputHTMLAttributes<HTMLIn
 // NIN format patterns by country
 const ninPatterns: Record<string, { pattern: RegExp; length: number; description: string }> = {
   uganda: {
-    pattern: /^[A-Z]{2}\d{7}[A-Z]$/,
-    length: 10,
-    description: 'Uganda NIN: 2 letters, 7 digits, 1 letter (e.g., CM1234567A)',
+    pattern: /^[A-Z0-9]{14}$/,
+    length: 14,
+    description: 'Uganda NIN: 14 letters and digits',
   },
   kenya: {
     pattern: /^\d{7,8}$/,

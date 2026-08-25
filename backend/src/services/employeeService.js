@@ -11,9 +11,54 @@ function defined(data) {
   return Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
 }
 
+function normalizeNationalId(value) {
+  const normalized = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!normalized) return null;
+  if (!/^[A-Z0-9]{14}$/.test(normalized)) {
+    throw new Error('Ugandan NIN must be exactly 14 letters and digits');
+  }
+  return normalized;
+}
+
+function normalizeTenDigitNumber(value, label) {
+  const normalized = String(value || '').replace(/\D/g, '');
+  if (!normalized) return null;
+  if (!/^\d{10}$/.test(normalized)) {
+    throw new Error(`${label} must be exactly 10 digits`);
+  }
+  return normalized;
+}
+
 class EmployeeService {
   async nextEmployeeNumber(tenantId) {
     return nextEmployeeNumber(prisma, tenantId);
+  }
+
+  async ensureEmployeeNumbers(tenantId) {
+    const missingEmployees = await prisma.employee.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { employeeNumber: null },
+          { employeeNumber: '' },
+        ],
+      },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    for (const employee of missingEmployees) {
+      const employeeNumber = await nextEmployeeNumber(prisma, tenantId, {
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+      });
+      await prisma.employee.update({
+        where: { id: employee.id },
+        data: { employeeNumber },
+      });
+    }
+
+    return missingEmployees.length;
   }
 
   async validateTenantEmployee(tenantId, employeeId, label = 'Employee') {
@@ -35,6 +80,12 @@ class EmployeeService {
     const hireDate = optionalDate(data.hireDate || data.dateOfJoining) || new Date();
     const employeeNumber = await nextEmployeeNumber(prisma, tenantId, { firstName, lastName });
     const status = data.status || data.employmentStatus || 'active';
+    const nationalId = normalizeNationalId(data.nationalId ?? data.idNumber);
+    const taxId = normalizeTenDigitNumber(data.taxId, 'Employee PAYE TIN');
+    const socialSecurityNumber = normalizeTenDigitNumber(
+      data.socialSecurityNumber ?? data.socialSecurityNo ?? data.nssfNumber,
+      'Employee social security number'
+    );
 
     const createData = {
       tenantId,
@@ -51,9 +102,10 @@ class EmployeeService {
       nationality: data.nationality || null,
       maritalStatus: data.maritalStatus || null,
       bloodType: data.bloodType || null,
-      nationalId: data.nationalId || data.idNumber || null,
+      nationalId,
       nationalIdType: data.nationalIdType || null,
-      taxId: data.taxId || null,
+      taxId,
+      socialSecurityNumber,
       address: data.address || null,
       city: data.city || null,
       state: data.state || null,
@@ -134,6 +186,8 @@ class EmployeeService {
   }
 
   async getEmployees(tenantId, options = {}) {
+    await this.ensureEmployeeNumbers(tenantId);
+
     const {
       skip = 0,
       take = 50,
@@ -161,6 +215,8 @@ class EmployeeService {
           { phone: { contains: search, mode: 'insensitive' } },
           { employeeNumber: { contains: search, mode: 'insensitive' } },
           { nationalId: { contains: search, mode: 'insensitive' } },
+          { taxId: { contains: search, mode: 'insensitive' } },
+          { socialSecurityNumber: { contains: search, mode: 'insensitive' } },
         ],
       }),
     };
@@ -176,12 +232,15 @@ class EmployeeService {
         team: true,
         positionRole: true,
         supervisor: { select: { id: true, firstName: true, lastName: true } },
+        employeeDocuments: { select: { id: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async getEmployeeById(tenantId, employeeId) {
+    await this.ensureEmployeeNumbers(tenantId);
+
     const employee = await prisma.employee.findFirst({
       where: { id: employeeId, tenantId },
       include: {
@@ -210,6 +269,20 @@ class EmployeeService {
       await this.validateSupervisorHierarchy(tenantId, data.supervisorId, employeeId);
     }
 
+    const nationalId = data.nationalId !== undefined || data.idNumber !== undefined
+      ? normalizeNationalId(data.nationalId ?? data.idNumber)
+      : undefined;
+    const taxId = data.taxId !== undefined
+      ? normalizeTenDigitNumber(data.taxId, 'Employee PAYE TIN')
+      : undefined;
+    const socialSecurityNumber =
+      data.socialSecurityNumber !== undefined || data.socialSecurityNo !== undefined || data.nssfNumber !== undefined
+        ? normalizeTenDigitNumber(
+            data.socialSecurityNumber ?? data.socialSecurityNo ?? data.nssfNumber,
+            'Employee social security number'
+          )
+        : undefined;
+
     const updateData = defined({
       branchId: data.branchId,
       firstName: data.firstName,
@@ -223,9 +296,10 @@ class EmployeeService {
       nationality: data.nationality,
       maritalStatus: data.maritalStatus,
       bloodType: data.bloodType,
-      nationalId: data.nationalId ?? data.idNumber,
+      nationalId,
       nationalIdType: data.nationalIdType,
-      taxId: data.taxId,
+      taxId,
+      socialSecurityNumber,
       address: data.address,
       city: data.city,
       state: data.state,
@@ -473,6 +547,8 @@ class EmployeeService {
         gender: employee.gender,
         nationality: employee.nationality,
         nationalId: employee.nationalId,
+        taxId: employee.taxId,
+        socialSecurityNumber: employee.socialSecurityNumber,
         address: employee.address,
         emergencyContactName: employee.emergencyContactName,
         emergencyContactPhone: employee.emergencyContactPhone,

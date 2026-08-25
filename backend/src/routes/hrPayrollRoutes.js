@@ -232,7 +232,7 @@ router.post("/:id/pay", requirePermission("canManageHRPayroll"), async (req, res
     });
   } catch (error) {
     console.error("Error paying salary:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
 });
 

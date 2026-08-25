@@ -27,6 +27,8 @@ interface Employee {
   phone?: string
   idNumber?: string
   nationalId?: string
+  taxId?: string
+  socialSecurityNumber?: string
   dateOfBirth?: string
   hireDate: string
   branchId?: string
@@ -140,6 +142,19 @@ const formatDate = (value?: string) => {
   return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString()
 }
 
+const normalizeNin = (value?: string) => String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+const validateUgandanNin = (value?: string) => {
+  const normalized = normalizeNin(value)
+  if (!normalized) return null
+  return /^[A-Z0-9]{14}$/.test(normalized) ? null : 'Ugandan NIN must be exactly 14 letters and digits'
+}
+const normalizeDigits = (value?: string) => String(value || '').replace(/\D/g, '')
+const validateTenDigitNumber = (label: string) => (value?: string) => {
+  const normalized = normalizeDigits(value)
+  if (!normalized) return null
+  return /^\d{10}$/.test(normalized) ? null : `${label} must be exactly 10 digits`
+}
+
 const initialFormData = () => ({
   firstName: '',
   middleName: '',
@@ -147,6 +162,8 @@ const initialFormData = () => ({
   email: '',
   phone: '',
   nationalId: '',
+  taxId: '',
+  socialSecurityNumber: '',
   gender: '',
   nationality: '',
   address: '',
@@ -222,13 +239,9 @@ export default function EmployeeManagementPage() {
       width: '12%',
       render: (value) => value || '-',
     },
-    {
-      key: 'firstName',
-      label: 'Full Name',
-      sortable: true,
-      width: '22%',
-      render: (value, row) => [row.firstName, row.middleName, row.lastName].filter(Boolean).join(' '),
-    },
+    { key: 'firstName', label: 'First Name', sortable: true, width: '14%', render: (value) => value || '-' },
+    { key: 'middleName', label: 'Middle Name', width: '14%', render: (value) => value || '-' },
+    { key: 'lastName', label: 'Last Name', sortable: true, width: '14%', render: (value) => value || '-' },
     {
       key: 'email',
       label: 'Email',
@@ -242,10 +255,113 @@ export default function EmployeeManagementPage() {
       render: (value) => value || '-',
     },
     {
+      key: 'nationalId',
+      label: 'NIN / National ID',
+      width: '16%',
+      render: (value, row) => value || row.idNumber || '-',
+      searchValue: (row) => row.nationalId || row.idNumber || '',
+    },
+    {
+      key: 'taxId',
+      label: 'PAYE TIN',
+      width: '14%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'socialSecurityNumber',
+      label: 'Social Security No.',
+      width: '16%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'gender',
+      label: 'Gender',
+      width: '12%',
+      render: (value) => formatOptionalLabel(value),
+    },
+    {
+      key: 'nationality',
+      label: 'Nationality',
+      width: '14%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'address',
+      label: 'Address',
+      width: '20%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'emergencyContactName',
+      label: 'Emergency Contact',
+      width: '16%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'emergencyContactPhone',
+      label: 'Emergency Phone',
+      width: '16%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'nextOfKinName',
+      label: 'Next of Kin',
+      width: '16%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'nextOfKinPhone',
+      label: 'Next of Kin Phone',
+      width: '16%',
+      render: (value) => value || '-',
+    },
+    {
       key: 'position',
       label: 'Position',
       width: '15%',
       render: (_value, row) => employeePositionName(row) || '-',
+      searchValue: (row) => employeePositionName(row),
+    },
+    {
+      key: 'departmentId',
+      label: 'Department',
+      width: '15%',
+      render: (_value, row) => employeeDepartmentName(row) || '-',
+      searchValue: (row) => employeeDepartmentName(row),
+    },
+    {
+      key: 'branchId',
+      label: 'Branch',
+      width: '15%',
+      render: (_value, row) => row.branch?.name || '-',
+      searchValue: (row) => row.branch?.name || '',
+    },
+    {
+      key: 'unitId',
+      label: 'Unit',
+      width: '15%',
+      render: (_value, row) => row.unit?.name || '-',
+      searchValue: (row) => row.unit?.name || '',
+    },
+    {
+      key: 'teamId',
+      label: 'Team',
+      width: '15%',
+      render: (_value, row) => row.team?.name || '-',
+      searchValue: (row) => row.team?.name || '',
+    },
+    {
+      key: 'supervisorId',
+      label: 'Supervisor',
+      width: '18%',
+      render: (_value, row) => row.supervisor ? fullName(row.supervisor) : '-',
+      searchValue: (row) => row.supervisor ? fullName(row.supervisor) : '',
+    },
+    {
+      key: 'employmentType',
+      label: 'Employment Type',
+      width: '14%',
+      render: (value) => formatOptionalLabel(value),
     },
     {
       key: 'status',
@@ -258,10 +374,40 @@ export default function EmployeeManagementPage() {
       ),
     },
     {
+      key: 'dateOfBirth',
+      label: 'Date of Birth',
+      width: '12%',
+      render: (value) => formatDate(value),
+    },
+    {
       key: 'hireDate',
       label: 'Hire Date',
       width: '10%',
-      render: (value) => value ? new Date(value).toLocaleDateString() : '-',
+      render: (value) => formatDate(value),
+    },
+    {
+      key: 'basicSalary',
+      label: 'Basic Salary',
+      width: '14%',
+      render: (value) => formatMoney(value),
+    },
+    {
+      key: 'workLocation',
+      label: 'Work Location',
+      width: '16%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'costCentre',
+      label: 'Cost Centre',
+      width: '14%',
+      render: (value) => value || '-',
+    },
+    {
+      key: 'employeeDocuments',
+      label: 'Documents',
+      width: '12%',
+      render: (value) => Array.isArray(value) ? value.length : 0,
     },
   ]
 
@@ -350,6 +496,8 @@ export default function EmployeeManagementPage() {
       email: row.email || '',
       phone: row.phone || '',
       nationalId: row.nationalId || row.idNumber || '',
+      taxId: row.taxId || '',
+      socialSecurityNumber: row.socialSecurityNumber || '',
       gender: row.gender || '',
       nationality: row.nationality || '',
       address: row.address || '',
@@ -437,6 +585,9 @@ export default function EmployeeManagementPage() {
       }
       const payload = {
         ...formData,
+        nationalId: formData.nationalId ? normalizeNin(formData.nationalId) : undefined,
+        taxId: formData.taxId ? normalizeDigits(formData.taxId) : null,
+        socialSecurityNumber: formData.socialSecurityNumber ? normalizeDigits(formData.socialSecurityNumber) : null,
         departmentId: relationValue(formData.departmentId),
         positionId: relationValue(formData.positionId),
         branchId: relationValue(formData.branchId),
@@ -547,8 +698,24 @@ export default function EmployeeManagementPage() {
     },
     {
       name: 'nationalId',
-      label: 'National ID',
+      label: 'NIN / National ID',
       type: 'text',
+      placeholder: '14 letters and digits',
+      validation: validateUgandanNin,
+    },
+    {
+      name: 'taxId',
+      label: 'PAYE TIN',
+      type: 'text',
+      placeholder: '10 digits',
+      validation: validateTenDigitNumber('PAYE TIN'),
+    },
+    {
+      name: 'socialSecurityNumber',
+      label: 'Social Security No.',
+      type: 'text',
+      placeholder: '10 digits',
+      validation: validateTenDigitNumber('Social security number'),
     },
     {
       name: 'gender',
@@ -701,6 +868,8 @@ export default function EmployeeManagementPage() {
       ['Email', personal.email || selectedEmployee.email || '-'],
       ['Phone', personal.phone || selectedEmployee.phone || '-'],
       ['National ID', personal.nationalId || selectedEmployee.nationalId || selectedEmployee.idNumber || '-'],
+      ['PAYE TIN', personal.taxId || selectedEmployee.taxId || '-'],
+      ['Social Security No.', personal.socialSecurityNumber || selectedEmployee.socialSecurityNumber || '-'],
       ['Date of Birth', formatDate(personal.dateOfBirth || selectedEmployee.dateOfBirth)],
       ['Gender', formatOptionalLabel(personal.gender || selectedEmployee.gender)],
       ['Nationality', personal.nationality || selectedEmployee.nationality || '-'],
@@ -800,7 +969,9 @@ export default function EmployeeManagementPage() {
             onView={handleView}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            searchPlaceholder="Search employees by name, email or phone..."
+            searchPlaceholder="Search employees by name, staff no, NIN, TIN, social security, email or phone..."
+            pageSize={10}
+            enableColumnFilter
           />
         </CardContent>
       </Card>

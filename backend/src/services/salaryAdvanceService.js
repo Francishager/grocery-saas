@@ -56,12 +56,14 @@ class SalaryAdvanceService {
         tenantId,
         paymentAccountId,
         paymentMethod,
-        "salary advance payment"
+        "salary advance payment",
+        userId
       );
     } catch (error) {
       return {
         success: false,
         error: error.message,
+        statusCode: error.statusCode || error.status || 400,
       };
     }
 
@@ -254,7 +256,8 @@ class SalaryAdvanceService {
           tenantId,
           paymentAccountId,
           paymentMethod,
-          "advance repayment"
+          "advance repayment",
+          userId
         );
 
         // Create recovery record

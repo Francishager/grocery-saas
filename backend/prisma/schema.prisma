@@ -1671,9 +1671,10 @@ model Employee {
   // =====================
   // IDENTIFICATION DOCUMENTS
   // =====================
-  nationalId     String? // Passport, ID number (Phase 1: New)
-  nationalIdType String? // passport, national_id, drivers_license (Phase 1: New)
-  taxId          String? // Tax identification number (Phase 1: New)
+  nationalId            String? // Passport, ID number (Phase 1: New)
+  nationalIdType        String? // passport, national_id, drivers_license (Phase 1: New)
+  taxId                 String? // Tax identification number (Phase 1: New)
+  socialSecurityNumber String?
 
   // =====================
   // ADDRESS & CONTACT

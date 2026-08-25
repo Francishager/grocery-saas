@@ -460,7 +460,8 @@ class PayrollService {
           tenantId,
           paymentAccountId,
           paymentMethod,
-          "salary payment"
+          "salary payment",
+          userId
         );
 
         // Create payment record

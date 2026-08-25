@@ -39,6 +39,8 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     role: user.role,
     tenantId: user.tenantId,
     branchId: primaryBranchId(user),
+    cashAccountId: user.cashAccountId || null,
+    cashAccount: user.cashAccount || null,
     isPlatformUser,
     permissions,
   };
@@ -54,6 +56,7 @@ router.post("/login", async (req, res) => {
       where: { email },
       include: {
         tenant: true,
+        cashAccount: { select: { id: true, name: true, type: true } },
         branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
     });
@@ -146,7 +149,11 @@ router.post("/refresh", async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      include: { tenant: true, branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] } },
+      include: {
+        tenant: true,
+        cashAccount: { select: { id: true, name: true, type: true } },
+        branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      },
     });
     if (!user || !user.isActive) {
       return res.status(401).json({ message: "User not found or inactive" });
@@ -182,6 +189,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       where: { id: req.user.id },
       include: {
         tenant: true,
+        cashAccount: { select: { id: true, name: true, type: true } },
         branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
     });

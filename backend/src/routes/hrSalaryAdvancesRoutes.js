@@ -56,7 +56,7 @@ router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
     });
 
     if (!result.success) {
-      return res.status(400).json({
+      return res.status(result.statusCode || 400).json({
         error: result.error,
         missingAccounts: result.missingAccounts,
       });
@@ -69,7 +69,7 @@ router.post("/", requirePermission("canManageHRPayroll"), async (req, res) => {
     });
   } catch (error) {
     console.error("Error issuing salary advance:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
 });
 
@@ -182,7 +182,7 @@ router.post("/:id/direct-repayment", requirePermission("canManageHRPayroll"), as
     });
   } catch (error) {
     console.error("Error recording direct repayment:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
 });
 
