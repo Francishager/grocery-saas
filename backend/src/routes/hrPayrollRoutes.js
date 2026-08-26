@@ -20,6 +20,12 @@ const viewAnyHRPayroll = requireAnyPermission([
   "canManageHRPayrollSettings",
   "canManageHRPayroll",
 ]);
+const useSalaryCalculator = requireAnyPermission([
+  "canViewHR",
+  "canViewHRPayroll",
+  "canCreateHRPayroll",
+  "canManageHRPayroll",
+]);
 
 // Check authentication and tenant
 router.use(authenticateToken, requireTenant);
@@ -28,7 +34,7 @@ router.use(authenticateToken, requireTenant);
  * POST /api/hr/payroll/calculate
  * Preview Uganda PAYE/NSSF salary calculations without creating payroll.
  */
-router.post("/calculate", viewAnyHRPayroll, async (req, res) => {
+router.post("/calculate", useSalaryCalculator, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const result = await payrollService.calculateSalaryPreview({
@@ -138,13 +144,8 @@ router.get("/:id", viewAnyHRPayroll, async (req, res) => {
 router.get("/", viewAnyHRPayroll, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
-    const { period, branchId } = req.query;
-
-    if (!period) {
-      return res.status(400).json({
-        error: "Period query parameter is required (YYYY-MM)",
-      });
-    }
+    const { branchId } = req.query;
+    const period = req.query.period || new Date().toISOString().slice(0, 7);
 
     const { summary, payrolls } =
       await payrollService.getPayrollSummary(

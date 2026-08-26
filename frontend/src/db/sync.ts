@@ -93,7 +93,7 @@ async function pullTable<T extends { id: string; updatedAt?: string }>(
          json?.branches || json?.expenses || json?.suppliers || json?.purchases ||
          json?.payments || json?.transfers || json?.rentals || json?.returns ||
          json?.accounts || json?.entries || json?.journal || json?.employees ||
-         json?.leaveRequests || json?.payroll || json?.notifications || json?.logs ||
+         json?.leaveRequests || json?.payroll || json?.payrolls || json?.notifications || json?.logs ||
          json?.staff || json?.cashAccounts || json?.cashTransactions ||
          json?.data || json?.records || [])
     const records: T[] = arr.map(mapFn)
@@ -251,8 +251,9 @@ export async function pullAll(): Promise<void> {
     }))
   }
 
-  if (canPull('hr', 'canViewStaff')) {
-    total += await pullTable('/api/hr/payroll', 'payroll', (p: any) => ({
+  if (canPull('hr', 'canViewHRPayroll')) {
+    const payrollPeriod = new Date().toISOString().slice(0, 7)
+    total += await pullTable(`/api/hr/payroll?period=${payrollPeriod}`, 'payroll', (p: any) => ({
       id: p.id, period: p.period, grossSalary: p.grossSalary ?? 0,
       deductions: p.deductions ?? 0, netSalary: p.netSalary ?? 0,
       bonus: p.bonus ?? 0, status: p.status, paidAt: p.paidAt,

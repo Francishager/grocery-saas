@@ -185,6 +185,7 @@ function App() {
           <Route path="hr/documents" element={<FeatureGuard feature="hr" permission={['canViewHRDocuments', 'canManageHRDocuments']}><DocumentManagementPage /></FeatureGuard>} />
           <Route path="hr/units-teams" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canManageHRStructure']}><UnitTeamManagementPage /></FeatureGuard>} />
           <Route path="hr/accounting" element={<FeatureGuard feature="hr" permission={['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll']}><HRAccountingConfigPage /></FeatureGuard>} />
+          <Route path="hr/accounting/calculator" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canViewHRPayroll', 'canCreateHRPayroll', 'canManageHRPayroll']}><HRAccountingConfigPage /></FeatureGuard>} />
           <Route path="hr/accounting/:tab" element={<FeatureGuard feature="hr" permission={['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll']}><HRAccountingConfigPage /></FeatureGuard>} />
           <Route path="hr/settings" element={<Navigate to="/tenant/roles" replace />} />
           <Route path="hr/legacy" element={<FeatureGuard feature="hr" permission="canViewHR"><HRPage /></FeatureGuard>} />

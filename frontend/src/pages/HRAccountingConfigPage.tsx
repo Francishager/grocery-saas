@@ -309,6 +309,15 @@ export default function HRAccountingConfigPage() {
   const canPostPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPostHRPayroll")
   const canPayPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPayHRPayroll")
   const canIssueAdvance = canCreatePayroll || canPayPayroll
+  const canViewPayrollData =
+    isOwner ||
+    canUseLegacyPayroll ||
+    hasPermission("canViewHRPayroll") ||
+    hasPermission("canCreateHRPayroll") ||
+    hasPermission("canApproveHRPayroll") ||
+    hasPermission("canPostHRPayroll") ||
+    hasPermission("canPayHRPayroll") ||
+    hasPermission("canManageHRPayrollSettings")
 
   const [config, setConfig] = useState<any>(null)
   const [availableAccounts, setAvailableAccounts] = useState<{
@@ -468,6 +477,7 @@ export default function HRAccountingConfigPage() {
   }
 
   const loadPayroll = async () => {
+    if (!canViewPayrollData) return
     if (!payrollPeriod) return
     setPayrollLoading(true)
     try {
@@ -480,6 +490,7 @@ export default function HRAccountingConfigPage() {
   }
 
   const loadAdvances = async () => {
+    if (!canViewPayrollData) return
     const data = await fetchJson("/api/hr/salary-advances")
     setAdvanceSummary(data.summary || null)
     setAdvances(data.advances || data.summary?.advances || [])
@@ -489,7 +500,11 @@ export default function HRAccountingConfigPage() {
     try {
       setLoading(true)
       setError("")
-      await Promise.all([loadConfiguration(), loadEmployees(), loadPayroll(), loadAdvances()])
+      const tasks = [loadEmployees()]
+      if (canViewPayrollData) {
+        tasks.push(loadConfiguration(), loadPayroll(), loadAdvances())
+      }
+      await Promise.all(tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load HR accounting data")
     } finally {
@@ -503,9 +518,10 @@ export default function HRAccountingConfigPage() {
   }, [])
 
   useEffect(() => {
+    if (!canViewPayrollData || activeTab === "calculator") return
     loadPayroll().catch((err) => setError(err instanceof Error ? err.message : "Failed to load payroll"))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payrollPeriod])
+  }, [payrollPeriod, activeTab, canViewPayrollData])
 
   useEffect(() => {
     setPayrollForm((prev) => {
