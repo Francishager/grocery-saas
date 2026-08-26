@@ -266,6 +266,7 @@ const accountingSubItems = [
 const hrAccountingSubItems = [
   { to: '/tenant/hr/accounting/overview', label: 'Overview', icon: Calculator, feature: 'hr', permission: ['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll'] },
   { to: '/tenant/hr/accounting/mappings', label: 'Account Mappings', icon: Settings, feature: 'hr', permission: ['canManageHRPayrollSettings', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/calculator', label: 'Salary Calculator', icon: Calculator, feature: 'hr', permission: ['canViewHRPayroll', 'canCreateHRPayroll', 'canManageHRPayroll'] },
   { to: '/tenant/hr/accounting/payroll', label: 'Payroll Posting', icon: Receipt, feature: 'hr', permission: ['canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canManageHRPayroll'] },
   { to: '/tenant/hr/accounting/payments', label: 'Salary Payments', icon: Wallet, feature: 'hr', permission: ['canPayHRPayroll', 'canManageHRPayroll'] },
   { to: '/tenant/hr/accounting/advances', label: 'Advances / Loans', icon: BadgeDollarSign, feature: 'hr', permission: ['canCreateHRPayroll', 'canPayHRPayroll', 'canManageHRPayroll'] },

@@ -9,6 +9,117 @@ import { calculateUgandaPayrollDeductions } from "../utils/ugandaPayrollCalculat
 
 class PayrollService {
   /**
+   * Calculate a Uganda salary preview without creating payroll or accounting entries.
+   */
+  async calculateSalaryPreview(params) {
+    const {
+      tenantId,
+      employeeId,
+      period,
+      basicSalary,
+      allowances = 0,
+      bonus = 0,
+      overtime = 0,
+      otherEarnings = 0,
+      healthInsurance = 0,
+      otherDeductions = 0,
+      salaryAdvanceRecovery = 0,
+      payeMode = "auto",
+      socialSecurityMode = "auto",
+      residencyStatus = "resident",
+      multipleEmployment = false,
+    } = params;
+
+    if (!period || !/^\d{4}-\d{2}$/.test(period)) {
+      return {
+        success: false,
+        error: "Invalid period format. Use YYYY-MM",
+      };
+    }
+
+    let employee = null;
+    if (employeeId) {
+      employee = await prisma.employee.findFirst({
+        where: { id: employeeId, tenantId },
+        select: {
+          id: true,
+          employeeNumber: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          taxId: true,
+          socialSecurityNumber: true,
+          basicSalary: true,
+          status: true,
+        },
+      });
+
+      if (!employee) {
+        return {
+          success: false,
+          error: "Employee not found",
+        };
+      }
+    }
+
+    const resolveMode = (mode, profileHasValue, fallback = true) => {
+      if (mode === "on") return true;
+      if (mode === "off") return false;
+      return employee ? profileHasValue : fallback;
+    };
+
+    const baseSalary =
+      basicSalary === undefined || basicSalary === null || basicSalary === ""
+        ? Number(employee?.basicSalary || 0)
+        : Number(basicSalary || 0);
+    const hasTin = Boolean(employee?.taxId);
+    const hasSocialSecurityNumber = Boolean(employee?.socialSecurityNumber);
+    const taxEnabled = resolveMode(payeMode, hasTin);
+    const socialSecurityEnabled = resolveMode(socialSecurityMode, hasSocialSecurityNumber);
+    const calculation = calculateUgandaPayrollDeductions({
+      period,
+      basicSalary: baseSalary,
+      allowances: Number(allowances || 0),
+      bonus: Number(bonus || 0),
+      overtime: Number(overtime || 0),
+      otherEarnings: Number(otherEarnings || 0),
+      healthInsurance: Number(healthInsurance || 0),
+      otherDeductions: Number(otherDeductions || 0),
+      salaryAdvanceRecovery: Number(salaryAdvanceRecovery || 0),
+      hasTin,
+      hasSocialSecurityNumber,
+      taxEnabled,
+      socialSecurityEnabled,
+      residencyStatus,
+      multipleEmployment: Boolean(multipleEmployment),
+    });
+
+    return {
+      success: true,
+      employee,
+      input: {
+        period,
+        employeeId: employee?.id || null,
+        basicSalary: baseSalary,
+        allowances: Number(allowances || 0),
+        bonus: Number(bonus || 0),
+        overtime: Number(overtime || 0),
+        otherEarnings: Number(otherEarnings || 0),
+        healthInsurance: Number(healthInsurance || 0),
+        otherDeductions: Number(otherDeductions || 0),
+        salaryAdvanceRecovery: Number(salaryAdvanceRecovery || 0),
+        payeMode,
+        socialSecurityMode,
+        residencyStatus,
+        multipleEmployment: Boolean(multipleEmployment),
+        taxEnabled,
+        socialSecurityEnabled,
+      },
+      calculation,
+    };
+  }
+
+  /**
    * Create a payroll record
    * @param {object} params - Parameters
    * @returns {Promise<{success: boolean, payroll: object, error?: string}>}

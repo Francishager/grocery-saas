@@ -25,6 +25,29 @@ const viewAnyHRPayroll = requireAnyPermission([
 router.use(authenticateToken, requireTenant);
 
 /**
+ * POST /api/hr/payroll/calculate
+ * Preview Uganda PAYE/NSSF salary calculations without creating payroll.
+ */
+router.post("/calculate", viewAnyHRPayroll, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromRequest(req);
+    const result = await payrollService.calculateSalaryPreview({
+      tenantId,
+      ...req.body,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error calculating salary:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/hr/payroll
  * Create a new payroll record
  */
