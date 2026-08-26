@@ -30,12 +30,108 @@ export interface DailyBusinessData {
 type Drilldown = { title: string; rows: any[] } | null
 type SummaryCard = { label: string; value: number; kinds: string[]; methods?: string[]; icon: typeof BarChart3 }
 
+const today = () => new Date().toISOString().slice(0, 10)
+const numberValue = (value: unknown) => Number(value || 0)
 const money = (value: unknown) => formatCurrency(Number(value || 0))
 const text = (value: unknown) => String(value || '-').replace(/_/g, ' ')
 const customerIdOf = (row: any) => {
   const id = row?.customerId || row?.id || ''
   if (!id || id === 'walk-in' || String(id).startsWith('cash-name:')) return ''
   return id
+}
+
+function normalizeDailyBusinessData(input: any): DailyBusinessData {
+  const fallbackDate = today()
+  const empty: DailyBusinessData = {
+    header: {
+      date: fallbackDate,
+      businessName: 'Business',
+      businessPhone: '',
+      businessAddress: '',
+      branch: 'All authorized branches',
+      status: 'Open',
+    },
+    summary: {},
+    cashMovement: {},
+    profitability: {},
+    customerActivity: [],
+    staffActivity: [],
+    productActivity: [],
+    transactions: [],
+    staffTills: [],
+    generatedAt: new Date().toISOString(),
+  }
+
+  if (Array.isArray(input)) {
+    const totalSales = input.reduce((sum, row) => sum + numberValue(row.revenue ?? row.total ?? row.gross ?? row.grossSales), 0)
+    const totalTax = input.reduce((sum, row) => sum + numberValue(row.tax), 0)
+    const totalDiscount = input.reduce((sum, row) => sum + numberValue(row.discount), 0)
+    const totalCost = input.reduce((sum, row) => sum + numberValue(row.cost ?? row.cogs), 0)
+    const totalProfit = input.reduce((sum, row) => sum + numberValue(row.profit), 0)
+    const transactionCount = input.reduce((sum, row) => sum + numberValue(row.count || 1), 0)
+    return {
+      ...empty,
+      header: {
+        ...empty.header,
+        date: input[0]?.date || input[0]?.createdAt || fallbackDate,
+      },
+      summary: {
+        totalSales,
+        grossSales: totalSales + totalTax,
+        revenue: totalSales,
+        totalDiscount,
+        taxCollected: totalTax,
+        transactionCount,
+      },
+      cashMovement: {
+        cashAtHand: 0,
+        netCashMovement: 0,
+      },
+      profitability: {
+        revenue: totalSales,
+        cogs: totalCost,
+        grossProfit: totalProfit || totalSales - totalCost,
+        expenses: 0,
+        netProfit: totalProfit || totalSales - totalCost,
+      },
+      transactions: input.map((row, index) => ({
+        id: row.id || `${row.date || fallbackDate}-${index}`,
+        kind: 'sale',
+        date: row.date || row.createdAt || fallbackDate,
+        reference: row.receiptNo || row.reference || row.date || `SALE-${index + 1}`,
+        customer: row.customer || row.customerName || 'Walk-in',
+        staff: row.staff || row.user || '',
+        paymentMethod: row.paymentMethod || '',
+        amount: numberValue(row.revenue ?? row.total ?? row.gross ?? row.grossSales),
+        debit: numberValue(row.revenue ?? row.total ?? row.gross ?? row.grossSales),
+        credit: 0,
+      })),
+    }
+  }
+
+  if (!input || typeof input !== 'object') return empty
+
+  return {
+    ...empty,
+    ...input,
+    header: {
+      ...empty.header,
+      ...(input.header || {}),
+      date: input.header?.date || input.date || fallbackDate,
+      businessName: input.header?.businessName || input.businessName || 'Business',
+      branch: input.header?.branch || input.branch || 'All authorized branches',
+      status: input.header?.status || 'Open',
+    },
+    summary: input.summary || {},
+    cashMovement: input.cashMovement || {},
+    profitability: input.profitability || {},
+    customerActivity: Array.isArray(input.customerActivity) ? input.customerActivity : [],
+    staffActivity: Array.isArray(input.staffActivity) ? input.staffActivity : [],
+    productActivity: Array.isArray(input.productActivity) ? input.productActivity : [],
+    transactions: Array.isArray(input.transactions) ? input.transactions : [],
+    staffTills: Array.isArray(input.staffTills) ? input.staffTills : [],
+    generatedAt: input.generatedAt || new Date().toISOString(),
+  }
 }
 
 function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldown; onClose: () => void; onTransaction: (row: any) => void }) {
@@ -156,7 +252,8 @@ function TransactionModal({ row, onClose }: { row: any; onClose: () => void }) {
   )
 }
 
-export default function DailyBusinessReport({ data }: { data: DailyBusinessData }) {
+export default function DailyBusinessReport({ data: rawData }: { data: DailyBusinessData | any[] | any }) {
+  const data = useMemo(() => normalizeDailyBusinessData(rawData), [rawData])
   const [drilldown, setDrilldown] = useState<Drilldown>(null)
   const [transaction, setTransaction] = useState<any>(null)
   const [customer, setCustomer] = useState<any>(null)
