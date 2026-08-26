@@ -515,6 +515,8 @@ const lineCogs = (item: any) => {
   return effectiveCost * Number(item?.quantity || 0)
 }
 
+const saleNetRevenue = (sale: any) => Math.max(0, Number(sale?.total || 0) - Number(sale?.tax || 0))
+
 export const reportsApi = {
   getProducts: async () => {
     const data = await api.get<any>('/api/reports/sales')
@@ -542,9 +544,9 @@ export const reportsApi = {
       const name = sale.user ? `${sale.user.fname || ''} ${sale.user.lname || ''}`.trim() || 'Unknown' : 'Unknown'
       if (!staffMap[name]) staffMap[name] = { staff: name, sales_count: 0, total_revenue: 0, profit: 0 }
       staffMap[name].sales_count += 1
-      staffMap[name].total_revenue += sale.total || 0
-      const itemProfit = (sale.items || []).reduce((s: number, i: any) => s + ((i.total || 0) - lineCogs(i)), 0)
-      staffMap[name].profit += itemProfit
+      staffMap[name].total_revenue += saleNetRevenue(sale)
+      const cost = (sale.items || []).reduce((s: number, i: any) => s + lineCogs(i), 0)
+      staffMap[name].profit += saleNetRevenue(sale) - cost
     }
     return Object.values(staffMap).sort((a, b) => b.profit - a.profit)
   },
@@ -557,12 +559,13 @@ export const reportsApi = {
     for (const sale of sales) {
       const day = new Date(sale.createdAt).toISOString().slice(0, 10)
       if (!dayMap[day]) dayMap[day] = { date: day, gross: 0, discount: 0, tax: 0, cost: 0, profit: 0 }
-      dayMap[day].gross += sale.total || 0
+      const revenue = saleNetRevenue(sale)
+      dayMap[day].gross += revenue
       dayMap[day].discount += sale.discount || 0
       dayMap[day].tax += sale.tax || 0
       const cost = (sale.items || []).reduce((s: number, i: any) => s + lineCogs(i), 0)
       dayMap[day].cost += cost
-      dayMap[day].profit += (sale.total || 0) - cost - (sale.discount || 0)
+      dayMap[day].profit += revenue - cost
     }
     return Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date))
   },
@@ -575,12 +578,13 @@ export const reportsApi = {
     for (const sale of sales) {
       const m = new Date(sale.createdAt).toISOString().slice(0, 7)
       if (!monthMap[m]) monthMap[m] = { month: m, gross: 0, discount: 0, tax: 0, cost: 0, profit: 0 }
-      monthMap[m].gross += sale.total || 0
+      const revenue = saleNetRevenue(sale)
+      monthMap[m].gross += revenue
       monthMap[m].discount += sale.discount || 0
       monthMap[m].tax += sale.tax || 0
       const cost = (sale.items || []).reduce((s: number, i: any) => s + lineCogs(i), 0)
       monthMap[m].cost += cost
-      monthMap[m].profit += (sale.total || 0) - cost - (sale.discount || 0)
+      monthMap[m].profit += revenue - cost
     }
     return Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month))
   },

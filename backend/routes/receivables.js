@@ -909,7 +909,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
 
     const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
     const products = await prisma.product.findMany({
-      where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } })
+      where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } }),
+      include: { units: true }
     })
     const productsById = new Map(products.map((product) => [product.id, product]))
     if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
@@ -917,21 +918,38 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     const saleItems = items.map((item) => {
       const product = productsById.get(item.productId)
       const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1)
-      const price = toMoney(item.price, product?.price || 0)
-      const cost = toMoney(item.cost, product?.cost || 0)
+      let price = toMoney(item.price, product?.price || 0)
+      let conversionFactor = item.conversionFactor != null ? Number(item.conversionFactor) : null
+      const unitName = item.unitName || null
+      if (unitName) {
+        const unit = (product.units || []).find((entry) => entry.unitName === unitName)
+        if (unit) {
+          price = toMoney(unit.sellingPrice, price)
+          conversionFactor = Number(unit.conversionFactor || 1)
+        }
+      }
+      const normalizedConversionFactor = Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1
+      const baseQty = quantity * normalizedConversionFactor
+      if (!Number.isInteger(baseQty) || baseQty <= 0) {
+        throw Object.assign(new Error(`${product.name} selling unit must convert to a whole stock quantity`), { statusCode: 400 })
+      }
+      const cost = toMoney(product?.cost, 0) * normalizedConversionFactor
       const itemDiscount = toMoney(item.discount)
       const lineTotal = Math.max(0, price * quantity - itemDiscount)
 
-      if (product.itemType !== 'service' && product.quantity < quantity) {
+      if (product.itemType !== 'service' && product.quantity < baseQty) {
         throw Object.assign(new Error(`${product.name} has only ${product.quantity} in stock`), { statusCode: 400 })
       }
 
       return {
         productId: item.productId,
         quantity,
+        baseQty,
         price,
         cost,
         discount: itemDiscount,
+        unitName,
+        conversionFactor: normalizedConversionFactor,
         total: lineTotal
       }
     })
@@ -1010,6 +1028,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           price: item.price,
           cost: item.cost,
           discount: item.discount,
+          unitName: item.unitName,
+          conversionFactor: item.conversionFactor,
           total: item.total
         }))
       })
@@ -1021,7 +1041,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           where: { id: item.productId },
           data: {
             quantity: {
-              decrement: item.quantity
+              decrement: item.baseQty
             }
           }
         })

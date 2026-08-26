@@ -8,12 +8,16 @@ export function transformSalesData(data) {
   const salesArray = Array.isArray(data) ? data : data?.data ? Array.isArray(data.data) ? data.data : [data.data] : data ? [data] : [];
   
   let totalRevenue = 0;
+  let grossSales = 0;
   let totalDiscount = 0;
   let totalTax = 0;
   let totalSales = 0;
   
   const transactions = salesArray.map((sale) => {
-    totalRevenue += Number(sale.revenue || sale.total || 0);
+    const saleGross = Number(sale.grossSales || sale.total || 0);
+    const saleRevenue = Number(sale.revenue ?? Math.max(0, saleGross - Number(sale.tax || 0)));
+    grossSales += saleGross;
+    totalRevenue += saleRevenue;
     totalDiscount += Number(sale.discount || 0);
     totalTax += Number(sale.tax || 0);
     totalSales += 1;
@@ -24,7 +28,7 @@ export function transformSalesData(data) {
       type: 'Sale',
       description: `Sale Invoice ${sale.receiptNo || sale.id?.substring(0, 8) || ''}`,
       details: `Items: ${sale.items || sale.itemCount || 1}, Status: ${sale.status || 'Completed'}`,
-      debit: Number(sale.revenue || sale.total || 0),
+      debit: saleRevenue,
       credit: 0,
       reference: sale.receiptNo || sale.id?.substring(0, 8) || '',
       status: sale.status || 'Completed',
@@ -46,6 +50,7 @@ export function transformSalesData(data) {
     currentBalance: totalRevenue,
     summary: {
       totalSales,
+      grossSales,
       totalRevenue,
       totalDiscount,
       totalTax,

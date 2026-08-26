@@ -128,6 +128,18 @@ function saleCogs(sale) {
   return (sale?.items || []).reduce((sum, item) => sum + saleLineCogs(item), 0);
 }
 
+function saleNetRevenue(sale) {
+  const total = Number(sale?.total || 0);
+  const tax = Number(sale?.tax || 0);
+  return Math.max(0, total - tax);
+}
+
+function aggregateNetRevenue(aggregate) {
+  const total = Number(aggregate?._sum?.total || 0);
+  const tax = Number(aggregate?._sum?.tax || 0);
+  return Math.max(0, total - tax);
+}
+
 function saleItemProfit(item) {
   return Number(item?.total || 0) - saleLineCogs(item);
 }
@@ -239,7 +251,9 @@ router.get("/sales", authenticateToken, async (req, res) => {
       prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } }, User: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } }),
     ]);
     const allSales = [...sales, ...saleRecords];
-    res.json({ sales: allSales, summary: { count: allSales.length, totalRevenue: allSales.reduce((a, x) => a + x.total, 0), totalDiscount: allSales.reduce((a, x) => a + (x.discount || 0), 0), totalTax: allSales.reduce((a, x) => a + (x.tax || 0), 0) } });
+    const grossSales = allSales.reduce((a, x) => a + Number(x.total || 0), 0);
+    const totalTax = allSales.reduce((a, x) => a + Number(x.tax || 0), 0);
+    res.json({ sales: allSales, summary: { count: allSales.length, grossSales, totalRevenue: Math.max(0, grossSales - totalTax), totalDiscount: allSales.reduce((a, x) => a + (x.discount || 0), 0), totalTax } });
   } catch (err) { console.error("Sales report error:", err); handleBranchError(res, err); }
 });
 
@@ -271,8 +285,8 @@ router.get("/profit", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [salesAgg, saleRecordAgg, expensesAgg, salesWithItems, saleRecordsWithItems] = await Promise.all([
-      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
-      prisma.saleRecord.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
+      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
@@ -283,7 +297,7 @@ router.get("/profit", authenticateToken, async (req, res) => {
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
     ]);
-    const revenue = (salesAgg._sum.total || 0) + (saleRecordAgg._sum.total || 0);
+    const revenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
     const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const expenses = expensesAgg._sum.amount || 0;
     res.json({ revenue, cogs, grossProfit: revenue - cogs, expenses, netProfit: revenue - cogs - expenses });
@@ -422,6 +436,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     });
 
     let totalSales = 0;
+    let netRevenue = 0;
+    let taxCollected = 0;
     let cogs = 0;
 
     const addStaff = (user, values = {}) => {
@@ -496,9 +512,12 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     for (const sale of sales) {
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (!paymentMethodMatches(method, requestedMethod)) continue;
-      totalSales += Number(sale.total || 0);
-      const cashAmount = method === "credit" ? 0 : Number(sale.total || 0);
-      const creditAmount = method === "credit" ? Number(sale.total || 0) : 0;
+      const grossAmount = Number(sale.total || 0);
+      totalSales += grossAmount;
+      netRevenue += saleNetRevenue(sale);
+      taxCollected += Number(sale.tax || 0);
+      const cashAmount = method === "credit" ? 0 : grossAmount;
+      const creditAmount = method === "credit" ? grossAmount : 0;
       salesBreakdown[method] += cashAmount || creditAmount;
       cogs += saleCogsForItems(sale.items);
       addStaff(sale.user, { sales: sale.total, ...staffSalesValues(method, cashAmount || creditAmount) });
@@ -533,10 +552,13 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     for (const sale of creditSales) {
       const paid = Number(sale.amountPaid || 0);
-      const creditAmount = Math.max(0, Number(sale.total || 0) - paid);
+      const grossAmount = Number(sale.total || 0);
+      const creditAmount = Math.max(0, grossAmount - paid);
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (!paymentMethodMatches(method, requestedMethod)) continue;
-      totalSales += Number(sale.total || 0);
+      totalSales += grossAmount;
+      netRevenue += saleNetRevenue(sale);
+      taxCollected += Number(sale.tax || 0);
       salesBreakdown.credit += creditAmount;
       if (paid > 0 && method !== "credit") addPaymentBreakdown(salesBreakdown, method, paid);
       cogs += saleCogsForItems(sale.items);
@@ -719,7 +741,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const cashAtHand = openingCashAtHand + cashSales + cashCollections + otherPhysicalCashIn + cashTransfersIn - cashExpenses - otherPhysicalCashOut - cashTransfersOut - cashToSafe - cashToBank - cashToMobileMoney;
     const netCashMovement = cashReceived - cashPaidOut - cashToSafe - cashToBank - cashToMobileMoney;
     const expensesTotal = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-    const revenue = totalSales;
+    const revenue = netRevenue;
     const grossProfit = revenue - cogs;
     const staffTills = cashAccounts.map((account) => {
       const stats = accountMovementMap.get(account.id) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, debit: 0, credit: 0, lastBalance: null };
@@ -759,6 +781,9 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       filters: { from: start.toISOString(), to: end.toISOString(), branchId: scope.branchId || "all", userId, customerId, paymentMethod: req.query.paymentMethod || "all" },
       summary: {
         totalSales,
+        grossSales: totalSales,
+        taxCollected,
+        revenue,
         cashSales,
         creditSales: salesBreakdown.credit,
         mobileMoneySales: salesBreakdown.mobile_money,
@@ -799,7 +824,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         cashHandedOver: cashTransfersOut,
         cashRetained: cashAtHand,
       },
-      profitability: { revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
+      profitability: { grossSales: totalSales, taxCollected, revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
       customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),
       staffActivity: [...staffMap.values()].sort((a, b) => b.sales - a.sales),
       productActivity: [...productMap.values()].sort((a, b) => b.salesValue - a.salesValue),
@@ -878,6 +903,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const customerMap = new Map();
     const productMap = new Map();
     let totalSales = 0;
+    let netRevenue = 0;
+    let taxCollected = 0;
     let cogs = 0;
 
     const addStaff = (user, values = {}) => {
@@ -898,8 +925,11 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     for (const sale of sales) {
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (requestedMethod && method !== requestedMethod) continue;
-      totalSales += Number(sale.total || 0);
-      const amount = method === "credit" ? 0 : Number(sale.total || 0);
+      const grossAmount = Number(sale.total || 0);
+      totalSales += grossAmount;
+      netRevenue += saleNetRevenue(sale);
+      taxCollected += Number(sale.tax || 0);
+      const amount = method === "credit" ? 0 : grossAmount;
       salesBreakdown[method] += amount;
       cogs += saleCogsForItems(sale.items);
       addStaff(sale.user, { sales: sale.total, [`${method === "mobile_money" ? "mobile_money" : method}Sales`]: amount });
@@ -911,10 +941,13 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     for (const sale of creditSales) {
       const paid = Number(sale.amountPaid || 0);
-      const credit = Math.max(0, Number(sale.total || 0) - paid);
+      const grossAmount = Number(sale.total || 0);
+      const credit = Math.max(0, grossAmount - paid);
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (requestedMethod && method !== requestedMethod) continue;
-      totalSales += Number(sale.total || 0);
+      totalSales += grossAmount;
+      netRevenue += saleNetRevenue(sale);
+      taxCollected += Number(sale.tax || 0);
       salesBreakdown.credit += credit;
       if (paid > 0 && method !== "credit") addPaymentBreakdown(salesBreakdown, method, paid);
       cogs += saleCogsForItems(sale.items);
@@ -981,15 +1014,15 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const openingCash = openingRows.reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
     const expectedCash = openingCash + cashSales + cashCollections + otherCashIn - cashExpenses - otherCashOut;
     const expensesTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-    const revenue = totalSales;
+    const revenue = netRevenue;
     const grossProfit = revenue - cogs;
 
     res.json({
       header: { date: start.toISOString().slice(0, 10), branch: scope.branch?.name || "All authorized branches", status: "Open" },
       filters: { from: start.toISOString(), to: end.toISOString(), branchId: scope.branchId || "all", userId, customerId, paymentMethod: req.query.paymentMethod || "all" },
-      summary: { totalSales, cashSales, creditSales: salesBreakdown.credit, mobileMoneySales: salesBreakdown.mobile_money, bankSales: salesBreakdown.bank, cardSales: salesBreakdown.card, debtCollections, cashReceived: cashSales + cashCollections + otherCashIn, expenses: expensesTotal },
+      summary: { totalSales, grossSales: totalSales, taxCollected, revenue, cashSales, creditSales: salesBreakdown.credit, mobileMoneySales: salesBreakdown.mobile_money, bankSales: salesBreakdown.bank, cardSales: salesBreakdown.card, debtCollections, cashReceived: cashSales + cashCollections + otherCashIn, expenses: expensesTotal },
       cashMovement: { openingCash, cashSales, debtCollections, cashCollections, otherCashIn, cashExpenses, otherCashOut, cashTransfersIn: 0, cashTransfersOut: 0, expectedCash },
-      profitability: { revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
+      profitability: { grossSales: totalSales, taxCollected, revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
       customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),
       staffActivity: [...staffMap.values()].sort((a, b) => b.sales - a.sales),
       productActivity: [...productMap.values()].sort((a, b) => b.salesValue - a.salesValue),
@@ -1018,8 +1051,9 @@ router.get("/sales/summary", authenticateToken, async (req, res) => {
       prisma.saleRecord.count({ where }),
     ]);
     const totalCount = count + recordCount;
-    const totalRevenue = (agg._sum.total || 0) + (recordAgg._sum.total || 0);
-    res.json({ count: totalCount, totalRevenue, totalSubtotal: (agg._sum.subtotal || 0) + (recordAgg._sum.subtotal || 0), totalDiscount: (agg._sum.discount || 0) + (recordAgg._sum.discount || 0), totalTax: (agg._sum.tax || 0) + (recordAgg._sum.tax || 0), avgSale: totalCount ? totalRevenue / totalCount : 0 });
+    const grossSales = Number(agg._sum.total || 0) + Number(recordAgg._sum.total || 0);
+    const totalRevenue = aggregateNetRevenue(agg) + aggregateNetRevenue(recordAgg);
+    res.json({ count: totalCount, grossSales, totalRevenue, totalSubtotal: (agg._sum.subtotal || 0) + (recordAgg._sum.subtotal || 0), totalDiscount: (agg._sum.discount || 0) + (recordAgg._sum.discount || 0), totalTax: (agg._sum.tax || 0) + (recordAgg._sum.tax || 0), avgSale: totalCount ? totalRevenue / totalCount : 0, avgGrossSale: totalCount ? grossSales / totalCount : 0 });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -1042,19 +1076,23 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
     // Combine and normalize status field, then transform
     const allSales = [...sales, ...saleRecords].map(sale => ({
       ...sale,
-      revenue: sale.total,
+      grossSales: Number(sale.total || 0),
+      revenue: saleNetRevenue(sale),
       status: saleStatus(sale)
     })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const enriched = transformSalesData(allSales);
     const summary = allSales.reduce((result, sale) => {
       const total = Number(sale.total || 0);
+      const revenue = saleNetRevenue(sale);
       const method = normalizedPaymentMethod(sale.paymentMethod);
       const paid = sale.amountPaid === undefined || sale.amountPaid === null ? total : Math.min(total, Number(sale.amountPaid || 0));
       const credit = sale.paymentStatus || sale.customerId ? Math.max(0, total - paid) : 0;
       const cogs = saleCogs(sale);
 
       result.totalSales += 1;
-      result.totalRevenue += total;
+      result.grossSales += total;
+      result.totalRevenue += revenue;
+      result.totalTax += Number(sale.tax || 0);
       result.totalCogs += cogs;
       result.cashSales += sale.paymentStatus ? (method === 'cash' ? paid : 0) : (method === 'cash' ? total : 0);
       result.creditSales += credit;
@@ -1062,7 +1100,7 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
       result.bankSales += sale.paymentStatus ? (method === 'bank' ? paid : 0) : (method === 'bank' ? total : 0);
       result.cardSales += sale.paymentStatus ? (method === 'card' ? paid : 0) : (method === 'card' ? total : 0);
       return result;
-    }, { totalSales: 0, totalRevenue: 0, totalCogs: 0, cashSales: 0, creditSales: 0, mobileMoneySales: 0, bankSales: 0, cardSales: 0 });
+    }, { totalSales: 0, grossSales: 0, totalRevenue: 0, totalTax: 0, totalCogs: 0, cashSales: 0, creditSales: 0, mobileMoneySales: 0, bankSales: 0, cardSales: 0 });
     summary.grossProfit = summary.totalRevenue - summary.totalCogs;
     enriched.summary = { ...(enriched.summary || {}), ...summary };
     res.json(enriched);
@@ -1078,7 +1116,8 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
     ]);
     const allSales = [...sales, ...saleRecords].map(sale => ({
       ...sale,
-      revenue: sale.total,
+      grossSales: Number(sale.total || 0),
+      revenue: saleNetRevenue(sale),
       status: saleStatus(sale)
     })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const enriched = transformSalesData(allSales);
@@ -1096,7 +1135,8 @@ router.get("/sales/monthly", authenticateToken, async (req, res) => {
     ]);
     const allSales = [...sales, ...saleRecords].map(sale => ({
       ...sale,
-      revenue: sale.total,
+      grossSales: Number(sale.total || 0),
+      revenue: saleNetRevenue(sale),
       status: saleStatus(sale)
     })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const enriched = transformSalesData(allSales);
@@ -1635,14 +1675,14 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
       prisma.saleRecord.findMany({ where: prevWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
     ]);
 
-    const revenue = (salesAgg._sum.total || 0) + (saleRecordAgg._sum.total || 0);
+    const revenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
     const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const expenses = expensesAgg._sum.amount || 0;
     const grossProfit = revenue - cogs;
     const netProfit = grossProfit - expenses;
 
     // Previous period
-    const prevRevenue = (prevSalesAgg._sum.total || 0) + (prevSaleRecordAgg._sum.total || 0);
+    const prevRevenue = aggregateNetRevenue(prevSalesAgg) + aggregateNetRevenue(prevSaleRecordAgg);
     const prevCogs = [...prevSalesWithItems, ...prevSaleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const prevExpenses = prevExpensesAgg._sum.amount || 0;
     const prevGrossProfit = prevRevenue - prevCogs;
@@ -1691,11 +1731,11 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
       revenue, cogs, grossProfit, expenses, netProfit,
       totalDiscount: (salesAgg._sum.discount || 0) + (saleRecordAgg._sum.discount || 0),
       totalTax: (salesAgg._sum.tax || 0) + (saleRecordAgg._sum.tax || 0),
-      salesCount,
+      salesCount: salesCount + saleRecordCount,
       grossMargin, netMargin,
       previous: {
         revenue: prevRevenue, cogs: prevCogs, grossProfit: prevGrossProfit,
-        expenses: prevExpenses, netProfit: prevNetProfit, salesCount: prevSalesCount,
+        expenses: prevExpenses, netProfit: prevNetProfit, salesCount: prevSalesCount + prevSaleRecordCount,
         grossMargin: prevGrossMargin, netMargin: prevNetMargin,
       },
       changes: {
@@ -1717,11 +1757,26 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
 router.get("/financial/income", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, customerPayments] = await Promise.all([
-      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
+    const [salesAgg, saleRecordAgg, customerPayments] = await Promise.all([
+      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
       prisma.customerPayment.aggregate({ where: scopedWhere(s, df(req)), _sum: { amount: true } }),
     ]);
-    res.json({ salesRevenue: salesAgg._sum.total || 0, customerPayments: customerPayments._sum.amount || 0, totalIncome: (salesAgg._sum.total || 0) + (customerPayments._sum.amount || 0) });
+    const posSalesRevenue = aggregateNetRevenue(salesAgg);
+    const receivableSalesRevenue = aggregateNetRevenue(saleRecordAgg);
+    const salesRevenue = posSalesRevenue + receivableSalesRevenue;
+    const grossSales = Number(salesAgg._sum.total || 0) + Number(saleRecordAgg._sum.total || 0);
+    const totalTax = Number(salesAgg._sum.tax || 0) + Number(saleRecordAgg._sum.tax || 0);
+    res.json({
+      salesRevenue,
+      posSalesRevenue,
+      receivableSalesRevenue,
+      grossSales,
+      totalTax,
+      customerPayments: customerPayments._sum.amount || 0,
+      customerCollections: customerPayments._sum.amount || 0,
+      totalIncome: salesRevenue,
+    });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -1742,24 +1797,40 @@ router.get("/financial/expense", authenticateToken, async (req, res) => {
 router.get("/financial/cash-flow", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, purchasesAgg, expensesAgg, customerPaymentsAgg, supplierPaymentsAgg] = await Promise.all([
-      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
-      prisma.purchase.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
-      prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
-      prisma.customerPayment.aggregate({ where: scopedWhere(s, df(req)), _sum: { amount: true } }),
-      prisma.supplierPayment.aggregate({ where: scopedWhere(s, df(req)), _sum: { amount: true } }),
-    ]);
-    const inflow = (salesAgg._sum.total || 0) + (customerPaymentsAgg._sum.amount || 0);
-    const outflow = (purchasesAgg._sum.total || 0) + (expensesAgg._sum.amount || 0) + (supplierPaymentsAgg._sum.amount || 0);
-    res.json({ inflow, outflow, netCashFlow: inflow - outflow, details: { sales: salesAgg._sum.total || 0, customerPayments: customerPaymentsAgg._sum.amount || 0, purchases: purchasesAgg._sum.total || 0, expenses: expensesAgg._sum.amount || 0, supplierPayments: supplierPaymentsAgg._sum.amount || 0 } });
+    const cashTransactions = await prisma.cashTransaction.findMany({
+      where: { tenantId: s.tenantId, ...df(req) },
+      select: { type: true, amount: true },
+    });
+    const details = { sales: 0, customerPayments: 0, otherInflows: 0, purchases: 0, expenses: 0, supplierPayments: 0, otherOutflows: 0, transfersIn: 0, transfersOut: 0 };
+    for (const movement of cashTransactions) {
+      const amount = Number(movement.amount || 0);
+      const type = String(movement.type || "").toLowerCase();
+      const direction = cashMovementDirection(type);
+      if (direction === "transfer-in") details.transfersIn += amount;
+      else if (direction === "transfer-out") details.transfersOut += amount;
+      else if (direction === "in") {
+        if (type === "sale") details.sales += amount;
+        else if (type === "receipt" || type === "collection") details.customerPayments += amount;
+        else details.otherInflows += amount;
+      } else {
+        if (type === "expense") details.expenses += amount;
+        else if (type === "purchase") details.purchases += amount;
+        else if (type === "payment") details.supplierPayments += amount;
+        else details.otherOutflows += amount;
+      }
+    }
+    const inflow = details.sales + details.customerPayments + details.otherInflows;
+    const outflow = details.purchases + details.expenses + details.supplierPayments + details.otherOutflows;
+    res.json({ inflow, outflow, netCashFlow: inflow - outflow, transfersIn: details.transfersIn, transfersOut: details.transfersOut, netAccountMovement: inflow + details.transfersIn - outflow - details.transfersOut, details });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [salesAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts, salesWithItems] = await Promise.all([
-      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true } }),
+    const [salesAgg, saleRecordAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts, salesWithItems, saleRecordsWithItems, taxPaymentsAgg] = await Promise.all([
+      prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
       prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
@@ -1769,16 +1840,25 @@ router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
         where: scopedWhere(s, df(req)),
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
+      prisma.saleRecord.findMany({
+        where: scopedWhere(s, df(req)),
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
+      }),
+      prisma.taxPayment.aggregate({ where: scopedWhere(s, df(req, "dateOfPayment")), _sum: { amount: true } }),
     ]);
     const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
-    const cogs = salesWithItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const salesRevenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
+    const taxCollected = Number(salesAgg._sum.tax || 0) + Number(saleRecordAgg._sum.tax || 0);
+    const taxPayable = Math.max(0, taxCollected - Number(taxPaymentsAgg._sum.amount || 0));
     res.json({
       accounts: [
         { account: "Cash & Bank", debit: cashAccounts._sum.balance || 0, credit: 0 },
         { account: "Accounts Receivable", debit: customerBalances._sum.balance || 0, credit: 0 },
         { account: "Inventory", debit: inventoryValue, credit: 0 },
         { account: "Accounts Payable", debit: 0, credit: supplierBalances._sum.balance || 0 },
-        { account: "Sales Revenue", debit: 0, credit: salesAgg._sum.total || 0 },
+        { account: "Sales Revenue", debit: 0, credit: salesRevenue },
+        { account: "Tax Payable", debit: 0, credit: taxPayable },
         { account: "Cost of Goods Sold", debit: cogs, credit: 0 },
         { account: "Operating Expenses", debit: expensesAgg._sum.amount || 0, credit: 0 },
       ],
@@ -1789,26 +1869,35 @@ router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
 router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [cashAccounts, customerBalances, products, supplierBalances, salesAgg, expensesAgg, salesWithItems] = await Promise.all([
+    const [cashAccounts, customerBalances, products, supplierBalances, salesAgg, saleRecordAgg, expensesAgg, salesWithItems, saleRecordsWithItems, taxPaymentsAgg] = await Promise.all([
       prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
       prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
       prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
-      prisma.sale.aggregate({ where: scopedWhere(s), _sum: { total: true } }),
+      prisma.sale.aggregate({ where: scopedWhere(s), _sum: { total: true, tax: true } }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(s), _sum: { total: true, tax: true } }),
       prisma.expense.aggregate({ where: scopedWhere(s), _sum: { amount: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s),
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
+      prisma.saleRecord.findMany({
+        where: scopedWhere(s),
+        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
+      }),
+      prisma.taxPayment.aggregate({ where: scopedWhere(s), _sum: { amount: true } }),
     ]);
     const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
-    const cogs = salesWithItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
-    const retainedEarnings = (salesAgg._sum.total || 0) - cogs - (expensesAgg._sum.amount || 0);
+    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const salesRevenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
+    const taxCollected = Number(salesAgg._sum.tax || 0) + Number(saleRecordAgg._sum.tax || 0);
+    const taxPayable = Math.max(0, taxCollected - Number(taxPaymentsAgg._sum.amount || 0));
+    const retainedEarnings = salesRevenue - cogs - (expensesAgg._sum.amount || 0);
     const totalAssets = (cashAccounts._sum.balance || 0) + (customerBalances._sum.balance || 0) + inventoryValue;
-    const totalLiabilities = supplierBalances._sum.balance || 0;
+    const totalLiabilities = (supplierBalances._sum.balance || 0) + taxPayable;
     res.json({
       assets: { cash: cashAccounts._sum.balance || 0, accountsReceivable: customerBalances._sum.balance || 0, inventory: inventoryValue, totalAssets },
-      liabilities: { accountsPayable: supplierBalances._sum.balance || 0, totalLiabilities },
+      liabilities: { accountsPayable: supplierBalances._sum.balance || 0, taxPayable, totalLiabilities },
       equity: { retainedEarnings, totalEquity: totalAssets - totalLiabilities },
     });
   } catch (err) { handleBranchError(res, err); }
@@ -1820,14 +1909,13 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
     const { customerId, branchId } = req.query;
     const customerFilter = customerId ? { customerId } : {};
     const branchFilter = branchId ? { branchId } : {};
-    const combinedFilter = { ...customerFilter, ...branchFilter };
     const [sales, saleRecords, purchases, supplierPurchases, expenses, customerPayments, supplierPayments, creditNotes, debitNotes, saleReturns, openingCustomers, openingSuppliers] = await Promise.all([
       // POS sales
-      prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...combinedFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter, ...(customerId ? { id: "__no_matching_cash_sale__" } : {}) }), select: { id: true, receiptNo: true, total: true, tax: true, paymentMethod: true, createdAt: true, items: { select: { quantity: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       // Credit sales (SaleRecord)
-      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, receiptNo: true, total: true, createdAt: true, items: { select: { quantity: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, receiptNo: true, total: true, tax: true, paymentMethod: true, createdAt: true, items: { select: { quantity: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } }, orderBy: { createdAt: "desc" } }),
       // Quick purchases
-      prisma.purchase.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.purchase.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, refNo: true, total: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Credit purchases (SupplierPurchase)
       prisma.supplierPurchase.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Expenses
@@ -1864,29 +1952,46 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       // POS Sales: credit Sales Revenue, debit COGS (perpetual inventory)
       ...sales.flatMap((x) => {
         const cogs = saleCogs(x);
+        const grossAmount = Number(x.total || 0);
+        const taxAmount = Number(x.tax || 0);
+        const revenue = saleNetRevenue(x);
         return [
-          { date: x.createdAt, account: "Sales Revenue", description: `Sale ${x.receiptNo}`, debit: 0, credit: x.total },
+          { date: x.createdAt, account: normalizedPaymentMethod(x.paymentMethod) === "bank" ? "Bank" : "Cash", description: `Sale ${x.receiptNo}`, debit: grossAmount, credit: 0 },
+          { date: x.createdAt, account: "Sales Revenue", description: `Sale ${x.receiptNo}`, debit: 0, credit: revenue },
+          ...(taxAmount > 0 ? [{ date: x.createdAt, account: "Tax Payable", description: `Sale tax ${x.receiptNo}`, debit: 0, credit: taxAmount }] : []),
           { date: x.createdAt, account: "Cost of Goods Sold", description: `Sale ${x.receiptNo}`, debit: cogs, credit: 0 },
+          { date: x.createdAt, account: "Inventory", description: `Inventory issued ${x.receiptNo}`, debit: 0, credit: cogs },
         ];
       }),
       // Credit Sales (SaleRecord): credit Sales Revenue, debit COGS + Accounts Receivable
       ...saleRecords.flatMap((x) => {
         const cogs = saleCogs(x);
+        const grossAmount = Number(x.total || 0);
+        const taxAmount = Number(x.tax || 0);
+        const revenue = saleNetRevenue(x);
         return [
-          { date: x.createdAt, account: "Sales Revenue", description: `Credit Sale ${x.receiptNo}`, debit: 0, credit: x.total },
+          { date: x.createdAt, account: "Accounts Receivable", description: `Credit Sale ${x.receiptNo}`, debit: grossAmount, credit: 0 },
+          { date: x.createdAt, account: "Sales Revenue", description: `Credit Sale ${x.receiptNo}`, debit: 0, credit: revenue },
+          ...(taxAmount > 0 ? [{ date: x.createdAt, account: "Tax Payable", description: `Credit sale tax ${x.receiptNo}`, debit: 0, credit: taxAmount }] : []),
           { date: x.createdAt, account: "Cost of Goods Sold", description: `Credit Sale ${x.receiptNo}`, debit: cogs, credit: 0 },
-          { date: x.createdAt, account: "Accounts Receivable", description: `Credit Sale ${x.receiptNo}`, debit: x.total, credit: 0 },
+          { date: x.createdAt, account: "Inventory", description: `Inventory issued ${x.receiptNo}`, debit: 0, credit: cogs },
         ];
       }),
       // Quick Purchases: debit Inventory
-      ...purchases.map((x) => ({ date: x.createdAt, account: "Inventory", description: `Purchase ${x.refNo || ""}`, debit: x.total, credit: 0 })),
+      ...purchases.flatMap((x) => [
+        { date: x.createdAt, account: "Inventory", description: `Purchase ${x.refNo || ""}`, debit: x.total, credit: 0 },
+        { date: x.createdAt, account: normalizedPaymentMethod(x.paymentMethod) === "bank" ? "Bank" : "Cash", description: `Purchase payment ${x.refNo || ""}`, debit: 0, credit: x.total },
+      ]),
       // Credit Purchases (SupplierPurchase): debit Inventory, credit Accounts Payable
       ...supplierPurchases.flatMap((x) => [
         { date: x.createdAt, account: "Inventory", description: `Supplier Purchase ${x.refNo || ""}`, debit: x.total, credit: 0 },
         { date: x.createdAt, account: "Accounts Payable", description: `Supplier Purchase ${x.refNo || ""}`, debit: 0, credit: x.total },
       ]),
-      // Expenses: debit expense category
-      ...expenses.map((x) => ({ date: x.date, account: x.category, description: "Expense", debit: x.amount, credit: 0 })),
+      // Expenses: debit expense category, credit payment account
+      ...expenses.flatMap((x) => [
+        { date: x.date, account: x.category, description: "Expense", debit: x.amount, credit: 0 },
+        { date: x.date, account: "Cash/Bank", description: "Expense payment", debit: 0, credit: x.amount },
+      ]),
       // Customer payments: debit Cash, credit Accounts Receivable
       ...customerPayments.flatMap((x) => [
         { date: x.createdAt, account: "Cash", description: "Customer Payment", debit: x.amount, credit: 0 },
@@ -1897,10 +2002,16 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
         { date: x.createdAt, account: "Accounts Payable", description: "Supplier Payment", debit: x.amount, credit: 0 },
         { date: x.createdAt, account: "Cash", description: "Supplier Payment", debit: 0, credit: x.amount },
       ]),
-      // Credit notes: credit Accounts Receivable (reduces customer balance)
-      ...creditNotes.map((x) => ({ date: x.createdAt, account: "Accounts Receivable", description: `Credit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount })),
-      // Debit notes: debit Accounts Payable (reduces supplier balance)
-      ...debitNotes.map((x) => ({ date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: x.amount, credit: 0 })),
+      // Credit notes: debit sales allowances, credit Accounts Receivable
+      ...creditNotes.flatMap((x) => [
+        { date: x.createdAt, account: "Sales Allowances", description: `Credit Note ${x.noteNo} (${x.reason})`, debit: x.amount, credit: 0 },
+        { date: x.createdAt, account: "Accounts Receivable", description: `Credit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount },
+      ]),
+      // Debit notes: debit Accounts Payable, credit purchase returns/allowances
+      ...debitNotes.flatMap((x) => [
+        { date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: x.amount, credit: 0 },
+        { date: x.createdAt, account: "Purchase Returns & Allowances", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount },
+      ]),
       // Sale returns: debit Sales Returns (contra-revenue), credit Accounts Receivable/Cash
       ...saleReturns.flatMap((x) => [
         { date: x.createdAt, account: "Sales Returns", description: `Sales Return ${x.returnNo} (${x.reason || ""})`, debit: x.total, credit: 0 },
@@ -1938,11 +2049,16 @@ router.get("/financial/bank-transactions", authenticateToken, async (req, res) =
 router.get("/financial/tax", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const sales = await prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true, discount: true, subtotal: true } });
-    const totalTax = sales.reduce((a, x) => a + x.tax, 0);
-    const totalRevenue = sales.reduce((a, x) => a + x.total, 0);
-    const totalDiscount = sales.reduce((a, x) => a + x.discount, 0);
-    res.json({ totalRevenue, totalTax, totalDiscount, salesCount: sales.length, averageTaxRate: totalRevenue ? (totalTax / totalRevenue * 100).toFixed(2) : 0 });
+    const [sales, saleRecords] = await Promise.all([
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true, discount: true, subtotal: true } }),
+      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true, discount: true, subtotal: true } }),
+    ]);
+    const allSales = [...sales, ...saleRecords];
+    const totalTax = allSales.reduce((a, x) => a + Number(x.tax || 0), 0);
+    const grossSales = allSales.reduce((a, x) => a + Number(x.total || 0), 0);
+    const totalRevenue = allSales.reduce((a, x) => a + saleNetRevenue(x), 0);
+    const totalDiscount = allSales.reduce((a, x) => a + Number(x.discount || 0), 0);
+    res.json({ grossSales, totalRevenue, totalTax, totalDiscount, salesCount: allSales.length, averageTaxRate: totalRevenue ? (totalTax / totalRevenue * 100).toFixed(2) : 0 });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -3171,8 +3287,8 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const [sales, saleRecords, purchases, products, expenses, suppliers, salesWithItems, saleRecordsWithItems] = await Promise.all([
-      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
-      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
+      prisma.sale.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true } }),
+      prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true } }),
       prisma.supplierPurchase.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, minStock: true, expiryDate: true } }),
       prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), select: { amount: true } }),
@@ -4281,10 +4397,10 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       prisma.saleRecord.findMany({ where: curWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
       prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
       prisma.saleRecord.findMany({ where: prevWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
-      prisma.sale.findMany({ where: curWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.saleRecord.findMany({ where: curWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.sale.findMany({ where: prevWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.saleRecord.findMany({ where: prevWhere, select: { total: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ where: curWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleRecord.findMany({ where: curWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.sale.findMany({ where: prevWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.saleRecord.findMany({ where: prevWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.purchase.aggregate({ where: curWhere, _sum: { total: true } }),
       prisma.supplierPurchase.aggregate({ where: curWhere, _sum: { total: true } }),
       prisma.purchase.aggregate({ where: prevWhere, _sum: { total: true } }),
@@ -4307,8 +4423,8 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     const prevCogs = prevSalesAllItems.reduce((sum, sale) => sum + saleCogs(sale), 0);
 
     // Core metrics
-    const curRevenue = (curSalesAgg._sum.total || 0) + (curSaleRecordsAgg._sum.total || 0);
-    const prevRevenue = (prevSalesAgg._sum.total || 0) + (prevSaleRecordsAgg._sum.total || 0);
+    const curRevenue = aggregateNetRevenue(curSalesAgg) + aggregateNetRevenue(curSaleRecordsAgg);
+    const prevRevenue = aggregateNetRevenue(prevSalesAgg) + aggregateNetRevenue(prevSaleRecordsAgg);
     const curExpenses = curExpAgg._sum.amount || 0;
     const prevExpenses = prevExpAgg._sum.amount || 0;
     const curGrossProfit = curRevenue - curCogs;
@@ -4418,13 +4534,13 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     curSalesAllFull.forEach(sale => {
       const name = sale.branch?.name || 'Main';
       if (!curBranchMap[name]) curBranchMap[name] = { revenue: 0, count: 0 };
-      curBranchMap[name].revenue += sale.total;
+      curBranchMap[name].revenue += saleNetRevenue(sale);
       curBranchMap[name].count += 1;
     });
     prevSalesAllFull.forEach(sale => {
       const name = sale.branch?.name || 'Main';
       if (!prevBranchMap[name]) prevBranchMap[name] = { revenue: 0, count: 0 };
-      prevBranchMap[name].revenue += sale.total;
+      prevBranchMap[name].revenue += saleNetRevenue(sale);
       prevBranchMap[name].count += 1;
     });
     const branchAnalysis = Object.keys(curBranchMap).map(name => ({
@@ -4440,7 +4556,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
     curSalesAllFull.forEach(sale => {
       const m = sale.paymentMethod || 'cash';
       if (!curPayMap[m]) curPayMap[m] = { total: 0, count: 0 };
-      curPayMap[m].total += sale.total;
+      curPayMap[m].total += saleNetRevenue(sale);
       curPayMap[m].count += 1;
     });
     const paymentMethodAnalysis = Object.keys(curPayMap).map(m => ({

@@ -49,7 +49,9 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
 }
 
 export function buildDecisionSupportSummary({ sales = [], purchases = [], products = [], expenses = [], suppliers = [], cogs = null }) {
-  const salesTotal = Array.isArray(sales) ? sales.reduce((sum, item) => sum + Number(item?.total || 0), 0) : 0;
+  const salesTotal = Array.isArray(sales)
+    ? sales.reduce((sum, item) => sum + Math.max(0, Number(item?.total || 0) - Number(item?.tax || 0)), 0)
+    : 0;
   const purchasesTotal = Array.isArray(purchases) ? purchases.reduce((sum, item) => sum + Number(item?.total || 0), 0) : 0;
   const expensesTotal = Array.isArray(expenses) ? expenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0) : 0;
   const supplierBalanceTotal = Array.isArray(suppliers) ? suppliers.reduce((sum, item) => sum + Number(item?.balance || 0), 0) : 0;

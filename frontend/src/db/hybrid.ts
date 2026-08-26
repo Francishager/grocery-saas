@@ -15,6 +15,8 @@ const lineCogs = (item: any, product?: any) => {
   return effectiveCost * Number(item?.quantity || 0)
 }
 
+const saleNetRevenue = (sale: any) => Math.max(0, Number(sale?.total || 0) - Number(sale?.tax || 0))
+
 // ─── Hybrid Query: API-first, IndexedDB fallback ───
 
 export function useHybridQuery<T>(
@@ -166,7 +168,7 @@ export async function getLocalDashboardKpis(): Promise<any> {
   const monthSales = sales.filter(s => new Date(s.createdAt) >= monthStart && s.status === 'completed')
   const monthExpenses = expenses.filter(e => new Date(e.date) >= monthStart).reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
 
-  const revenue = monthSales.reduce((sum, s) => sum + s.total, 0)
+  const revenue = monthSales.reduce((sum, s) => sum + saleNetRevenue(s), 0)
   const cogs = monthSales.reduce((sum, s) => {
     return sum + (s.items || []).reduce((itemSum, i: any) => {
       const product = products.find(p => p.id === i.productId)
@@ -221,7 +223,7 @@ export async function getLocalDashboardCharts(): Promise<any> {
       return ed >= d && ed < next
     }).reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
 
-    const monthRevenue = monthSales.reduce((sum, s) => sum + s.total, 0)
+    const monthRevenue = monthSales.reduce((sum, s) => sum + saleNetRevenue(s), 0)
     const monthCogs = monthSales.reduce((sum, s) => {
       return sum + (s.items || []).reduce((itemSum, i: any) => {
         const product = products.find(p => p.id === i.productId)
@@ -425,18 +427,19 @@ export async function getLocalReportData(reportId: string, params?: any): Promis
   switch (reportId) {
     case 'salesSummary': {
       const count = filteredSales.length
-      const totalRevenue = filteredSales.reduce((s, x) => s + x.total, 0)
+      const grossSales = filteredSales.reduce((s, x) => s + Number(x.total || 0), 0)
+      const totalRevenue = filteredSales.reduce((s, x) => s + saleNetRevenue(x), 0)
       const totalSubtotal = filteredSales.reduce((s, x) => s + x.subtotal, 0)
       const totalDiscount = filteredSales.reduce((s, x) => s + (x.discount || 0), 0)
       const totalTax = filteredSales.reduce((s, x) => s + (x.tax || 0), 0)
-      return { count, totalRevenue, totalSubtotal, totalDiscount, totalTax, avgSale: count ? totalRevenue / count : 0 }
+      return { count, grossSales, totalRevenue, totalSubtotal, totalDiscount, totalTax, avgSale: count ? totalRevenue / count : 0, avgGrossSale: count ? grossSales / count : 0 }
     }
     case 'salesDaily': {
       const map: Record<string, any> = {}
       for (const s of filteredSales) {
         const d = new Date(s.createdAt).toISOString().split('T')[0]
         if (!map[d]) map[d] = { date: d, count: 0, revenue: 0, discount: 0, tax: 0 }
-        map[d].count++; map[d].revenue += s.total; map[d].discount += s.discount || 0; map[d].tax += s.tax || 0
+        map[d].count++; map[d].revenue += saleNetRevenue(s); map[d].discount += s.discount || 0; map[d].tax += s.tax || 0
       }
       return Object.values(map)
     }
@@ -482,7 +485,7 @@ export async function getLocalReportData(reportId: string, params?: any): Promis
       for (const s of filteredSales) {
         const b = s.branchId || 'Main'
         if (!map[b]) map[b] = { branch: b, count: 0, revenue: 0, discount: 0 }
-        map[b].count++; map[b].revenue += s.total; map[b].discount += s.discount || 0
+        map[b].count++; map[b].revenue += saleNetRevenue(s); map[b].discount += s.discount || 0
       }
       return Object.values(map)
     }
@@ -513,7 +516,7 @@ export async function getLocalReportData(reportId: string, params?: any): Promis
       }))
     }
     case 'profitLoss': {
-      const revenue = filteredSales.reduce((s, x) => s + x.total, 0)
+      const revenue = filteredSales.reduce((s, x) => s + saleNetRevenue(x), 0)
       const cogs = filteredSales.reduce((s, x) => {
         return s + (x.items || []).reduce((is: number, i: any) => {
           const p = products.find(p => p.id === i.productId)
