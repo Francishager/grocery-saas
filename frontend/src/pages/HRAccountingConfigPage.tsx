@@ -1036,14 +1036,19 @@ export default function HRAccountingConfigPage() {
               </div>
             )}
             {isConfigured && !mappingEditable ? (
-              <div className="flex flex-col gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
                 <div className="inline-flex items-center gap-2 font-medium">
                   <CheckCircle2 className="h-4 w-4" />
                   Account mappings configured
                 </div>
-                <Button variant="outline" onClick={startMappingReconfiguration} disabled={saving}>
-                  Reconfigure Mappings
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={startMappingReconfiguration} disabled={saving}>
+                    Reconfigure Mappings
+                  </Button>
+                  <Button variant="outline" onClick={handleInitializeAccounts} disabled={saving}>
+                    Re-auto-create Default Accounts
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
