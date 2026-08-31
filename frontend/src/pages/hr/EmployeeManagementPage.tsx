@@ -1081,14 +1081,27 @@ export default function EmployeeManagementPage() {
                   <span className="text-xs font-medium text-muted-foreground">Photo</span>
                 )}
               </div>
-              <Input
-                id="profilePhoto"
-                type="file"
-                accept="image/*"
-                onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
-              />
+              <div className="flex flex-1 flex-col gap-2">
+                <Input
+                  id="profilePhoto"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  aria-label="Select or take an employee photo"
+                  onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => document.getElementById('profilePhoto')?.click()}
+                >
+                  Select or Take Photo
+                </Button>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">Used as the employee passport photo across HR records.</p>
+            <p className="text-xs text-muted-foreground">Upload a photo from the gallery or use the device camera to capture the employee’s passport photo.</p>
           </div>
           <HRFormBuilder
             fields={formFields}
