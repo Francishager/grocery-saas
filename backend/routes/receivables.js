@@ -16,6 +16,14 @@ const toMoney = (value, fallback = 0) => {
   return Number.isFinite(num) ? num : fallback
 }
 
+const roundMoney = (value) => Math.round(toMoney(value) * 100) / 100
+
+const customerBalanceWithOpeningBalance = (customer, nextOpeningBalance) => {
+  const existingOpeningBalance = toMoney(customer?.openingBalance, 0)
+  const nonOpeningBalance = roundMoney(toMoney(customer?.balance, 0) - existingOpeningBalance)
+  return roundMoney(nonOpeningBalance + nextOpeningBalance)
+}
+
 const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
   const type = String(cashAccount?.type || '').toLowerCase()
   if (paymentMethod === 'cash') return type === 'cash' || type === 'safe'
@@ -624,6 +632,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         transactionCount: transactions.length,
         currentBalance: toMoney(customer.balance),
         computedBalance: runningBalance,
+        openingBalance: toMoney(customer.openingBalance),
+        openingBalanceDate: customer.openingBalanceDate,
+        openingBalanceNote: customer.openingBalanceNote,
         availableCredit: toMoney(customer.creditLimit) - toMoney(customer.balance),
         lastTransactionDate: transactions[0]?.date || null
       },
@@ -757,10 +768,7 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
         }
       }
 
-      const nextBalance = toMoney(existingCustomer.balance, 0) + openingBalanceDelta
-      if (nextBalance < 0) {
-        return res.status(400).json({ error: 'Opening balance change would make the customer balance negative' })
-      }
+      const nextBalance = customerBalanceWithOpeningBalance(existingCustomer, openingBalance)
 
       openingBalanceData.openingBalance = openingBalance
       openingBalanceData.balance = nextBalance

@@ -1325,19 +1325,26 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
                   
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Credit Limit</p>
-                      <p className="font-semibold">{Number(customer.creditLimit || 0).toFixed(2)}</p>
+                      <p className="font-semibold">{formatCurrency(customer.creditLimit || 0)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Opening Balance</p>
+                      <p className="font-semibold">{formatCurrency(customer.openingBalance || 0)}</p>
+                      {customer.openingBalanceDate && (
+                        <p className="text-xs text-muted-foreground">{formatDisplayDate(customer.openingBalanceDate)}</p>
+                      )}
                     </div>
                     <div>
                       <p className="text-muted-foreground">Balance</p>
-                      <p className="font-semibold text-red-600">{Number(customer.balance || 0).toFixed(2)}</p>
+                      <p className="font-semibold text-red-600">{formatCurrency(customer.balance || 0)}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Available</p>
                       <p className="font-semibold text-green-600">
-                        {(Number(customer.creditLimit || 0) - Number(customer.balance || 0)).toFixed(2)}
+                        {formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}
                       </p>
                     </div>
                   </div>
@@ -1571,12 +1578,13 @@ export default function ReceivablesPage() {
             <Card><CardContent className="p-6 text-sm text-muted-foreground">No credit accounts found. Set a credit limit on a customer to create a credit account.</CardContent></Card>
           ) : (
             <div className="rounded-md border overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
+              <table className="w-full text-sm min-w-[760px]">
                 <thead className="bg-muted">
                   <tr>
                     <th className="p-2 text-left">Customer</th>
                     <th className="p-2 text-left">Phone</th>
                     <th className="p-2 text-right">Credit Limit</th>
+                    <th className="p-2 text-right">Opening Balance</th>
                     <th className="p-2 text-right">Balance</th>
                     <th className="p-2 text-right">Available</th>
                     <th className="p-2 text-left">Trust Score</th>
@@ -1590,6 +1598,7 @@ export default function ReceivablesPage() {
                       <td className="p-2">{renderCustomerNameButton(acct, acct.name)}</td>
                       <td className="p-2">{acct.phone || '—'}</td>
                       <td className="p-2 text-right">{Number(acct.creditLimit).toFixed(2)}</td>
+                      <td className="p-2 text-right">{formatCurrency(acct.openingBalance || 0)}</td>
                       <td className="p-2 text-right text-red-600 font-semibold">{Number(acct.balance).toFixed(2)}</td>
                       <td className="p-2 text-right text-green-600">{(Number(acct.creditLimit) - Number(acct.balance)).toFixed(2)}</td>
                       <td className="p-2">{acct.trustScore}/100</td>
@@ -1679,6 +1688,7 @@ export default function ReceivablesPage() {
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Opening balance: {formatCurrency(selectedSaleCustomer.openingBalance || 0)}</p>
                       {saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
                         <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
                           Set a credit limit for this customer before recording a credit sale.

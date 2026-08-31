@@ -63,6 +63,9 @@ type CustomerHistoryResponse = {
     creditNotes?: number
     returns?: number
     transactionCount?: number
+    openingBalance?: number
+    openingBalanceDate?: string | null
+    openingBalanceNote?: string | null
     lastTransactionDate?: string | null
   }
   transactions: CustomerHistoryTransaction[]
@@ -180,6 +183,7 @@ export default function CustomerTransactionHistoryDialog({
 
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
+                {metric('Opening Balance', data.summary.openingBalance ?? data.customer.openingBalance)}
                 {metric('Available Credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700')}
                 {metric('Credit / Customer Sales', data.summary.receivableSales)}
                 {metric('Cash POS Sales', data.summary.cashSales)}
@@ -192,6 +196,17 @@ export default function CustomerTransactionHistoryDialog({
                 </div>
               </div>
             </div>
+
+            {Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0) > 0 && (
+              <div className="rounded-md border bg-muted/30 p-4 text-sm">
+                <p className="font-medium">Opening Balance</p>
+                <p className="mt-1 text-muted-foreground">
+                  {formatCurrency(Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0))}
+                  {' '}from {data.summary.openingBalanceDate || data.customer.openingBalanceDate ? formatDisplayDate(data.summary.openingBalanceDate || data.customer.openingBalanceDate || '') : 'the recorded opening date'}
+                  {(data.summary.openingBalanceNote || (data.customer as any).openingBalanceNote) ? ` - ${data.summary.openingBalanceNote || (data.customer as any).openingBalanceNote}` : ''}
+                </p>
+              </div>
+            )}
 
             <div className="overflow-x-auto rounded-md border">
               <table className="min-w-[1320px] w-full text-sm">
