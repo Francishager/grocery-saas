@@ -1085,44 +1085,32 @@ export default function EmployeeManagementPage() {
                 )}
               </div>
               <div className="flex flex-1 flex-col gap-2">
-                <Input
-                  ref={profilePhotoInputRef}
-                  id="profilePhoto"
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  aria-label="Choose an employee photo from the gallery"
-                  onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
-                />
-                <Input
-                  ref={profilePhotoCameraInputRef}
-                  id="profilePhotoCamera"
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  aria-label="Take an employee photo with the camera"
-                  onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
-                />
                 <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => profilePhotoInputRef.current?.click()}
-                  >
-                    Choose Photo
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => profilePhotoCameraInputRef.current?.click()}
-                  >
-                    Take Photo
-                  </Button>
+                  <label className="flex cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground">
+                    <span>Choose Photo</span>
+                    <Input
+                      ref={profilePhotoInputRef}
+                      id="profilePhoto"
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      aria-label="Choose an employee photo from the gallery"
+                      onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
+                    />
+                  </label>
+                  <label className="flex cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground">
+                    <span>Take Photo</span>
+                    <Input
+                      ref={profilePhotoCameraInputRef}
+                      id="profilePhotoCamera"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="sr-only"
+                      aria-label="Take an employee photo with the camera"
+                      onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
