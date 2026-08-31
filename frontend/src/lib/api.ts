@@ -1084,6 +1084,29 @@ export interface InventoryMovementDetail {
   reason?: string
   staff?: string
   status?: string
+  productName?: string
+  productSku?: string
+  branchName?: string
+  customerId?: string | null
+  customerName?: string
+  customerPhone?: string
+  customerBalance?: number
+  customerCreditLimit?: number
+  supplierId?: string | null
+  supplierName?: string
+  supplierPhone?: string
+  supplierBalance?: number
+  paymentMethod?: string
+  refundMethod?: string
+  lineTotal?: number
+  unitPrice?: number
+  unitCost?: number
+  saleTotal?: number
+  purchaseTotal?: number
+  returnTotal?: number
+  amountPaid?: number
+  balance?: number
+  changeGiven?: number
 }
 
 export interface ProductPriceHistory {

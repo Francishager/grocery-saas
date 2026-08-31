@@ -46,6 +46,15 @@ interface FormData {
 
 type MovementPreset = 'today' | 'yesterday' | 'week' | 'custom'
 type StockAdjustmentType = 'stock_in' | 'stock_out'
+type DailyMovement = NonNullable<InventoryItem['dailyMovement']>
+type MovementCardKind = 'products_sold' | 'units_sold' | 'receivable_units' | 'stock_received' | 'other_stock_out' | 'returns' | 'low_stock' | 'out_of_stock'
+
+interface MovementCardConfig {
+  id: MovementCardKind
+  label: string
+  value: number
+  summaryLabel: string
+}
 
 interface MovementSummary {
   productsSold: number
@@ -62,6 +71,25 @@ interface MovementModalState {
   title: string
   rows: InventoryMovementDetail[]
   total: number
+  summaryLabel: string
+  productRows: Array<{
+    id: string | number
+    name: string
+    sku: string
+    category: string
+    branch: string
+    metric: number
+    openingStock: number
+    stockIn: number
+    soldToday: number
+    receivableSold: number
+    otherStockOut: number
+    returns: number
+    closingStock: number
+    currentStock: number
+    lowStockAlert: number
+    status: string
+  }>
 }
 
 interface StockAdjustState {
@@ -132,7 +160,7 @@ const movementParamsForPreset = (preset: MovementPreset, customDate: string) => 
   return { from: formatDateInput(start), to: formatDateInput(end) }
 }
 
-const defaultMovementForItem = (item: InventoryItem) => ({
+const defaultMovementForItem = (item: InventoryItem): DailyMovement => ({
   openingStock: item.quantity || 0,
   stockIn: 0,
   soldToday: 0,
@@ -657,29 +685,111 @@ export default function InventoryPage() {
     return customMovementDate ? new Date(customMovementDate).toLocaleDateString() : 'Custom Date'
   }, [movementPreset, customMovementDate])
 
+  const movementForItem = (item: InventoryItem) => item.dailyMovement || defaultMovementForItem(item)
+
+  const statusForItem = (item: InventoryItem, movement = movementForItem(item)) => {
+    if (movement.currentStock <= 0) return 'Out of Stock'
+    if (movement.currentStock <= item.low_stock_alert) return 'Low Stock'
+    return 'In Stock'
+  }
+
+  const movementMetricForCard = (item: InventoryItem, kind: MovementCardKind) => {
+    const movement = movementForItem(item)
+    if (kind === 'products_sold') return movement.soldToday > 0 ? 1 : 0
+    if (kind === 'units_sold') return movement.soldToday
+    if (kind === 'receivable_units') return movement.receivableSold
+    if (kind === 'stock_received') return movement.stockIn
+    if (kind === 'other_stock_out') return movement.otherStockOut
+    if (kind === 'returns') return movement.returns
+    if (kind === 'low_stock') return movement.currentStock <= item.low_stock_alert ? 1 : 0
+    if (kind === 'out_of_stock') return movement.currentStock <= 0 ? 1 : 0
+    return 0
+  }
+
+  const detailRowsForCard = (item: InventoryItem, kind: MovementCardKind) => {
+    const movement = movementForItem(item)
+    const baseRows = kind === 'stock_received'
+      ? movement.stockInDetails || []
+      : kind === 'other_stock_out'
+        ? movement.otherStockOutDetails || []
+        : kind === 'returns'
+          ? movement.returnDetails || []
+          : kind === 'receivable_units'
+            ? (movement.soldDetails || []).filter((row) => String(row.type || '').toLowerCase().includes('receivable'))
+            : kind === 'products_sold' || kind === 'units_sold'
+              ? movement.soldDetails || []
+              : []
+
+    return baseRows.map((row) => ({
+      ...row,
+      productName: row.productName || item.product_name,
+      productSku: row.productSku || item.product_id || item.sku || '',
+      branchName: row.branchName || item.branch?.name || branchNameById.get(String(item.branchId || '')) || '',
+    }))
+  }
+
+  const buildMovementProductRow = (item: InventoryItem, metric: number) => {
+    const movement = movementForItem(item)
+    return {
+      id: item.id,
+      name: item.product_name,
+      sku: item.product_id || item.sku || '-',
+      category: item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-',
+      branch: item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-',
+      metric,
+      openingStock: movement.openingStock,
+      stockIn: movement.stockIn,
+      soldToday: movement.soldToday,
+      receivableSold: movement.receivableSold,
+      otherStockOut: movement.otherStockOut,
+      returns: movement.returns,
+      closingStock: movement.closingStock,
+      currentStock: movement.currentStock,
+      lowStockAlert: item.low_stock_alert,
+      status: statusForItem(item, movement),
+    }
+  }
+
   const openMovementModal = (item: InventoryItem, kind: 'sold' | 'other' | 'stock_in') => {
-    const movement = item.dailyMovement || defaultMovementForItem(item)
-    const rows = kind === 'sold'
-      ? movement.soldDetails || []
-      : kind === 'stock_in'
-        ? movement.stockInDetails || []
-        : movement.otherStockOutDetails || []
+    const cardKind: MovementCardKind = kind === 'sold' ? 'units_sold' : kind === 'stock_in' ? 'stock_received' : 'other_stock_out'
+    const movement = movementForItem(item)
+    const total = kind === 'sold' ? movement.soldToday : kind === 'stock_in' ? movement.stockIn : movement.otherStockOut
+
     setMovementModal({
-      title: `${item.product_name} - ${kind === 'sold' ? 'Sold Today' : kind === 'stock_in' ? 'Stock In' : 'Other Stock Out'}`,
-      rows,
-      total: kind === 'sold' ? movement.soldToday : kind === 'stock_in' ? movement.stockIn : movement.otherStockOut,
+      title: `${item.product_name} - ${kind === 'sold' ? 'Sold' : kind === 'stock_in' ? 'Stock In' : 'Other Stock Out'}`,
+      rows: detailRowsForCard(item, cardKind),
+      total,
+      summaryLabel: kind === 'sold' ? 'Units' : 'Quantity',
+      productRows: [buildMovementProductRow(item, total)],
     })
   }
 
-  const movementCards = [
-    { label: 'Products Sold', value: movementSummary.productsSold },
-    { label: 'Units Sold', value: movementSummary.unitsSold },
-    { label: 'Receivable Units', value: movementSummary.receivableUnitsSold },
-    { label: 'Stock Received', value: movementSummary.stockReceived },
-    { label: 'Other Stock Out', value: movementSummary.otherStockOut },
-    { label: 'Returns', value: movementSummary.returns },
-    { label: 'Low Stock', value: movementSummary.lowStockProducts },
-    { label: 'Out of Stock', value: movementSummary.outOfStockProducts },
+  const openMovementCardModal = (card: MovementCardConfig) => {
+    const productRows = filteredItems
+      .map((item) => ({ item, metric: movementMetricForCard(item, card.id) }))
+      .filter(({ metric }) => metric > 0)
+      .map(({ item, metric }) => buildMovementProductRow(item, metric))
+
+    const rows = filteredItems.flatMap((item) => detailRowsForCard(item, card.id))
+
+    setMovementModal({
+      title: `${card.label} - ${movementPeriodLabel}`,
+      rows,
+      total: card.value,
+      summaryLabel: card.summaryLabel,
+      productRows,
+    })
+  }
+
+  const movementCards: MovementCardConfig[] = [
+    { id: 'products_sold', label: 'Products Sold', value: movementSummary.productsSold, summaryLabel: 'Products' },
+    { id: 'units_sold', label: 'Units Sold', value: movementSummary.unitsSold, summaryLabel: 'Units' },
+    { id: 'receivable_units', label: 'Receivable Units', value: movementSummary.receivableUnitsSold, summaryLabel: 'Credit Units' },
+    { id: 'stock_received', label: 'Stock Received', value: movementSummary.stockReceived, summaryLabel: 'Units' },
+    { id: 'other_stock_out', label: 'Other Stock Out', value: movementSummary.otherStockOut, summaryLabel: 'Units' },
+    { id: 'returns', label: 'Returns', value: movementSummary.returns, summaryLabel: 'Units' },
+    { id: 'low_stock', label: 'Low Stock', value: movementSummary.lowStockProducts, summaryLabel: 'Products' },
+    { id: 'out_of_stock', label: 'Out of Stock', value: movementSummary.outOfStockProducts, summaryLabel: 'Products' },
   ]
 
   const stockAdjustQuantity = Number(stockAdjust?.quantity || 0)
@@ -694,6 +804,25 @@ export default function InventoryPage() {
 
   const priceHistorySource = (source?: string | null) =>
     String(source || 'manual_update').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+
+  const movementPartyName = (row: InventoryMovementDetail) =>
+    row.customerName || row.supplierName || '-'
+
+  const movementPartyMeta = (row: InventoryMovementDetail) =>
+    row.customerPhone || row.supplierPhone || ''
+
+  const movementAmount = (row: InventoryMovementDetail) => {
+    const amount = row.lineTotal ?? row.saleTotal ?? row.purchaseTotal ?? row.returnTotal
+    return amount == null ? '-' : formatCurrency(amount)
+  }
+
+  const movementBalance = (row: InventoryMovementDetail) => {
+    const balance = row.balance ?? row.customerBalance ?? row.supplierBalance
+    return balance == null ? '-' : formatCurrency(balance)
+  }
+
+  const movementContext = (row: InventoryMovementDetail) =>
+    [row.paymentMethod || row.refundMethod, row.status, row.reason].filter(Boolean).join(' / ') || '-'
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -836,11 +965,16 @@ export default function InventoryPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {movementCards.map((card) => (
-          <div key={card.label} className="rounded-lg border bg-card p-3">
+          <button
+            key={card.id}
+            type="button"
+            onClick={() => openMovementCardModal(card)}
+            className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
             <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
             <p className="mt-1 text-xl font-bold">{formatQty(card.value)}</p>
             <p className="text-[11px] text-muted-foreground">{movementPeriodLabel}</p>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -1777,52 +1911,164 @@ export default function InventoryPage() {
 
       {movementModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-lg bg-background shadow-xl">
+          <div className="flex max-h-[92vh] w-full max-w-7xl flex-col rounded-lg bg-background shadow-xl">
             <div className="flex items-center justify-between border-b px-4 py-3">
               <div>
                 <h2 className="text-lg font-semibold">{movementModal.title}</h2>
-                <p className="text-sm text-muted-foreground">{movementPeriodLabel} total: {formatQty(movementModal.total)}</p>
+                <p className="text-sm text-muted-foreground">
+                  {movementPeriodLabel} total: {formatQty(movementModal.total)} {movementModal.summaryLabel.toLowerCase()}
+                </p>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setMovementModal(null)}>
                 Close
               </Button>
             </div>
-            <div className="max-h-[70vh] overflow-auto p-4">
-              {movementModal.rows.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">No movement details for this period.</p>
-              ) : (
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="pb-2 font-medium">Time</th>
-                      <th className="pb-2 font-medium">Type</th>
-                      <th className="pb-2 font-medium">Reference</th>
-                      <th className="pb-2 text-right font-medium">Qty</th>
-                      <th className="pb-2 font-medium">Reason/Status</th>
-                      <th className="pb-2 font-medium">Staff</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {movementModal.rows.map((row, index) => (
-                      <tr key={`${row.reference || index}-${index}`} className="border-b last:border-0">
-                        <td className="py-2">{row.time ? new Date(row.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                        <td className="py-2">{row.type || '-'}</td>
-                        <td className="py-2 font-mono text-xs">{row.reference || '-'}</td>
-                        <td className="py-2 text-right font-semibold tabular-nums">{formatQty(row.quantity)}</td>
-                        <td className="py-2">{row.reason || row.status || '-'}</td>
-                        <td className="py-2">{row.staff || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t font-bold">
-                      <td className="py-2" colSpan={3}>Total</td>
-                      <td className="py-2 text-right tabular-nums">{formatQty(movementModal.total)}</td>
-                      <td className="py-2" colSpan={2}></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              )}
+            <div className="space-y-5 overflow-auto p-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Total</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatQty(movementModal.total)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Products</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatQty(movementModal.productRows.length)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Transaction Rows</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatQty(movementModal.rows.length)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Period</p>
+                  <p className="mt-1 text-lg font-semibold">{movementPeriodLabel}</p>
+                </div>
+              </div>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">Products</h3>
+                {movementModal.productRows.length === 0 ? (
+                  <p className="rounded-md border py-8 text-center text-sm text-muted-foreground">No products found for this card in the selected period.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full min-w-[1180px] text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b text-left">
+                          <th className="px-3 py-2 font-medium">Product</th>
+                          <th className="px-3 py-2 font-medium">Category</th>
+                          <th className="px-3 py-2 font-medium">Branch</th>
+                          <th className="px-3 py-2 text-right font-medium">{movementModal.summaryLabel}</th>
+                          <th className="px-3 py-2 text-right font-medium">Opening</th>
+                          <th className="px-3 py-2 text-right font-medium">Stock In</th>
+                          <th className="px-3 py-2 text-right font-medium">Sold</th>
+                          <th className="px-3 py-2 text-right font-medium">Credit Sold</th>
+                          <th className="px-3 py-2 text-right font-medium">Other Out</th>
+                          <th className="px-3 py-2 text-right font-medium">Returns</th>
+                          <th className="px-3 py-2 text-right font-medium">Closing</th>
+                          <th className="px-3 py-2 text-right font-medium">Current</th>
+                          <th className="px-3 py-2 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movementModal.productRows.map((row) => (
+                          <tr key={row.id} className="border-b last:border-0">
+                            <td className="px-3 py-2">
+                              <div className="max-w-[260px]">
+                                <p className="font-medium leading-snug">{row.name}</p>
+                                <p className="text-xs text-muted-foreground">{row.sku}</p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">{row.category}</td>
+                            <td className="px-3 py-2">{row.branch}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.metric)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.openingStock)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.stockIn)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.soldToday)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.receivableSold)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.otherStockOut)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.returns)}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.closingStock)}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.currentStock)}</td>
+                            <td className="px-3 py-2">
+                              <span className={cn(
+                                "inline-flex rounded px-2 py-0.5 text-xs font-semibold",
+                                row.status === 'Out of Stock'
+                                  ? "bg-red-100 text-red-700"
+                                  : row.status === 'Low Stock'
+                                    ? "bg-orange-100 text-orange-700"
+                                    : "bg-green-100 text-green-700"
+                              )}>
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">Transactions</h3>
+                {movementModal.rows.length === 0 ? (
+                  <p className="rounded-md border py-8 text-center text-sm text-muted-foreground">No transaction rows for this card in the selected period.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full min-w-[1120px] text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b text-left">
+                          <th className="px-3 py-2 font-medium">Date/Time</th>
+                          <th className="px-3 py-2 font-medium">Product</th>
+                          <th className="px-3 py-2 font-medium">Type</th>
+                          <th className="px-3 py-2 font-medium">Reference</th>
+                          <th className="px-3 py-2 font-medium">Customer/Supplier</th>
+                          <th className="px-3 py-2 text-right font-medium">Qty</th>
+                          <th className="px-3 py-2 text-right font-medium">Amount</th>
+                          <th className="px-3 py-2 text-right font-medium">Balance</th>
+                          <th className="px-3 py-2 font-medium">Method/Status</th>
+                          <th className="px-3 py-2 font-medium">Staff</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movementModal.rows.map((row, index) => (
+                          <tr key={`${row.reference || index}-${index}`} className="border-b last:border-0">
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {row.time ? new Date(row.time).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="max-w-[240px]">
+                                <p className="font-medium leading-snug">{row.productName || '-'}</p>
+                                <p className="text-xs text-muted-foreground">{row.productSku || row.branchName || ''}</p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">{row.type || '-'}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{row.reference || '-'}</td>
+                            <td className="px-3 py-2">
+                              <div className="max-w-[220px]">
+                                <p className="font-medium leading-snug">{movementPartyName(row)}</p>
+                                {movementPartyMeta(row) && (
+                                  <p className="text-xs text-muted-foreground">{movementPartyMeta(row)}</p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.quantity)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{movementAmount(row)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{movementBalance(row)}</td>
+                            <td className="px-3 py-2">{movementContext(row)}</td>
+                            <td className="px-3 py-2">{row.staff || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t bg-muted/30 font-bold">
+                          <td className="px-3 py-2" colSpan={5}>Total</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatQty(movementModal.total)}</td>
+                          <td className="px-3 py-2" colSpan={4}></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </section>
             </div>
           </div>
         </div>

@@ -190,27 +190,95 @@ async function buildInventoryMovementSummary(scope, products, range) {
   ] = await Promise.all([
     prisma.saleItem.findMany({
       where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
-      include: { sale: { select: { id: true, receiptNo: true, createdAt: true, user: { select: userSelect } } } },
+      include: {
+        sale: {
+          select: {
+            id: true,
+            receiptNo: true,
+            createdAt: true,
+            paymentMethod: true,
+            customerName: true,
+            total: true,
+            amountPaid: true,
+            changeGiven: true,
+            user: { select: userSelect },
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.saleRecordItem.findMany({
       where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
-      include: { sale: { select: { id: true, receiptNo: true, createdAt: true, paymentStatus: true, User: { select: userSelect } } } },
+      include: {
+        sale: {
+          select: {
+            id: true,
+            receiptNo: true,
+            createdAt: true,
+            paymentMethod: true,
+            paymentStatus: true,
+            total: true,
+            amountPaid: true,
+            balance: true,
+            customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+            User: { select: userSelect },
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.purchaseItem.findMany({
       where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: dateWhere }) },
-      include: { purchase: { select: { id: true, refNo: true, createdAt: true, user: { select: userSelect } } } },
+      include: {
+        purchase: {
+          select: {
+            id: true,
+            refNo: true,
+            createdAt: true,
+            supplier: true,
+            paymentMethod: true,
+            total: true,
+            user: { select: userSelect },
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.supplierPurchaseItem.findMany({
       where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: dateWhere }) },
-      include: { purchase: { select: { id: true, refNo: true, createdAt: true, User: { select: userSelect } } } },
+      include: {
+        purchase: {
+          select: {
+            id: true,
+            refNo: true,
+            createdAt: true,
+            total: true,
+            amountPaid: true,
+            balance: true,
+            paymentStatus: true,
+            supplier: { select: { id: true, name: true, phone: true, balance: true } },
+            User: { select: userSelect },
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.saleReturnItem.findMany({
       where: { ...productWhere, return: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
-      include: { return: { select: { id: true, returnNo: true, createdAt: true, reason: true, user: { select: userSelect } } } },
+      include: {
+        return: {
+          select: {
+            id: true,
+            returnNo: true,
+            createdAt: true,
+            reason: true,
+            refundMethod: true,
+            total: true,
+            customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+            user: { select: userSelect },
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.stockTransferItem.findMany({
@@ -252,35 +320,114 @@ async function buildInventoryMovementSummary(scope, products, range) {
     type: "SALE",
     direction: "OUT",
     quantity: itemBaseQuantity(item),
-    detail: { time: item.sale?.createdAt, type: "Sale", reference: item.sale?.receiptNo || item.saleId, referenceId: item.saleId, quantity: itemBaseQuantity(item), unit: item.unitName || "Base", staff: userDisplayName(item.sale?.user) },
+    detail: {
+      time: item.sale?.createdAt,
+      type: "Sale",
+      reference: item.sale?.receiptNo || item.saleId,
+      referenceId: item.saleId,
+      quantity: itemBaseQuantity(item),
+      unit: item.unitName || "Base",
+      customerName: item.sale?.customerName || "Walk-in Customer",
+      paymentMethod: item.sale?.paymentMethod,
+      lineTotal: Number(item.total || 0),
+      unitPrice: Number(item.price || 0),
+      saleTotal: Number(item.sale?.total || 0),
+      amountPaid: Number(item.sale?.amountPaid || 0),
+      changeGiven: Number(item.sale?.changeGiven || 0),
+      staff: userDisplayName(item.sale?.user),
+    },
   }));
 
   receivableItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
     type: "RECEIVABLE_SALE",
     direction: "OUT",
     quantity: itemBaseQuantity(item),
-    detail: { time: item.sale?.createdAt, type: "Receivable Sale", reference: item.sale?.receiptNo || item.saleId, referenceId: item.saleId, quantity: itemBaseQuantity(item), unit: item.unitName || "Base", staff: userDisplayName(item.sale?.User), status: item.sale?.paymentStatus },
+    detail: {
+      time: item.sale?.createdAt,
+      type: "Receivable Sale",
+      reference: item.sale?.receiptNo || item.saleId,
+      referenceId: item.saleId,
+      quantity: itemBaseQuantity(item),
+      unit: item.unitName || "Base",
+      customerId: item.sale?.customer?.id || null,
+      customerName: item.sale?.customer?.name || "Customer",
+      customerPhone: item.sale?.customer?.phone || "",
+      customerBalance: Number(item.sale?.customer?.balance || 0),
+      customerCreditLimit: Number(item.sale?.customer?.creditLimit || 0),
+      paymentMethod: item.sale?.paymentMethod,
+      lineTotal: Number(item.total || 0),
+      unitPrice: Number(item.price || 0),
+      saleTotal: Number(item.sale?.total || 0),
+      amountPaid: Number(item.sale?.amountPaid || 0),
+      balance: Number(item.sale?.balance || 0),
+      staff: userDisplayName(item.sale?.User),
+      status: item.sale?.paymentStatus,
+    },
   }));
 
   purchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
     type: "PURCHASE",
     direction: "IN",
     quantity: item.quantity,
-    detail: { time: item.purchase?.createdAt, type: "Purchase", reference: item.purchase?.refNo || item.purchaseId, referenceId: item.purchaseId, quantity: item.quantity, staff: userDisplayName(item.purchase?.user) },
+    detail: {
+      time: item.purchase?.createdAt,
+      type: "Purchase",
+      reference: item.purchase?.refNo || item.purchaseId,
+      referenceId: item.purchaseId,
+      quantity: item.quantity,
+      supplierName: item.purchase?.supplier || "",
+      paymentMethod: item.purchase?.paymentMethod,
+      lineTotal: Number(item.total || 0),
+      unitCost: Number(item.cost || 0),
+      purchaseTotal: Number(item.purchase?.total || 0),
+      staff: userDisplayName(item.purchase?.user),
+    },
   }));
 
   supplierPurchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
     type: "SUPPLIER_PURCHASE",
     direction: "IN",
     quantity: item.quantity,
-    detail: { time: item.purchase?.createdAt, type: "Supplier Purchase", reference: item.purchase?.refNo || item.purchaseId, referenceId: item.purchaseId, quantity: item.quantity, staff: userDisplayName(item.purchase?.User) },
+    detail: {
+      time: item.purchase?.createdAt,
+      type: "Supplier Purchase",
+      reference: item.purchase?.refNo || item.purchaseId,
+      referenceId: item.purchaseId,
+      quantity: item.quantity,
+      supplierId: item.purchase?.supplier?.id || null,
+      supplierName: item.purchase?.supplier?.name || "Supplier",
+      supplierPhone: item.purchase?.supplier?.phone || "",
+      supplierBalance: Number(item.purchase?.supplier?.balance || 0),
+      lineTotal: Number(item.total || 0),
+      unitCost: Number(item.cost || 0),
+      purchaseTotal: Number(item.purchase?.total || 0),
+      amountPaid: Number(item.purchase?.amountPaid || 0),
+      balance: Number(item.purchase?.balance || 0),
+      staff: userDisplayName(item.purchase?.User),
+      status: item.purchase?.paymentStatus,
+    },
   }));
 
   saleReturnItems.forEach((item) => addInventoryMovement(buckets, item.productId, {
     type: "SALE_RETURN",
     direction: "IN",
     quantity: item.quantity,
-    detail: { time: item.return?.createdAt, type: "Sale Return", reference: item.return?.returnNo || item.returnId, referenceId: item.returnId, quantity: item.quantity, reason: item.reason || item.return?.reason || "", staff: userDisplayName(item.return?.user) },
+    detail: {
+      time: item.return?.createdAt,
+      type: "Sale Return",
+      reference: item.return?.returnNo || item.returnId,
+      referenceId: item.returnId,
+      quantity: item.quantity,
+      customerId: item.return?.customer?.id || null,
+      customerName: item.return?.customer?.name || "",
+      customerPhone: item.return?.customer?.phone || "",
+      customerBalance: Number(item.return?.customer?.balance || 0),
+      refundMethod: item.return?.refundMethod,
+      lineTotal: Number(item.total || 0),
+      returnTotal: Number(item.return?.total || 0),
+      reason: item.reason || item.return?.reason || "",
+      staff: userDisplayName(item.return?.user),
+    },
   }));
 
   transferItems.forEach((item) => {
