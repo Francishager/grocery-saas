@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { HRFormBuilder, HRFormField } from '@/components/hr/HRFormBuilder'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/utils'
 
 interface Employee {
