@@ -120,6 +120,14 @@ const emptyMapping = {
   socialSecurityAccountId: "",
 }
 
+const mappingFromConfig = (config: any = {}) => ({
+  salaryExpenseAccountId: config?.salaryExpenseAccountId || "",
+  salaryPayableAccountId: config?.salaryPayableAccountId || "",
+  salaryAdvanceAccountId: config?.salaryAdvanceAccountId || "",
+  payeTaxAccountId: config?.payeTaxAccountId || "",
+  socialSecurityAccountId: config?.socialSecurityAccountId || "",
+})
+
 const defaultPayrollPeriod = () => new Date().toISOString().slice(0, 7)
 const today = () => new Date().toISOString().slice(0, 10)
 const money = (value: number | string | null | undefined) => formatCurrency(Number(value || 0))
@@ -247,17 +255,20 @@ function AccountSelect({
   onChange,
   accounts,
   placeholder,
+  disabled = false,
 }: {
   value: string
   onChange: (value: string) => void
   accounts: Account[]
   placeholder: string
+  disabled?: boolean
 }) {
   return (
     <select
       value={value}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
-      className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+      className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
     >
       <option value="">{placeholder}</option>
       {accounts.map((account) => (
@@ -335,6 +346,7 @@ export default function HRAccountingConfigPage() {
   const [loading, setLoading] = useState(true)
   const [payrollLoading, setPayrollLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [mappingEditable, setMappingEditable] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
@@ -427,6 +439,17 @@ export default function HRAccountingConfigPage() {
     config?.isConfigured ||
       (config?.salaryExpenseAccountId && config?.salaryPayableAccountId && config?.salaryAdvanceAccountId)
   )
+  const mappingLocked = isConfigured && !mappingEditable
+  const allRequiredMappingAccountsSelected = Boolean(
+    selectedAccounts.salaryExpenseAccountId &&
+      selectedAccounts.salaryPayableAccountId &&
+      selectedAccounts.salaryAdvanceAccountId
+  )
+  const missingManualAccountTypes = [
+    availableAccounts.expenseAccounts.length === 0 ? "expense" : "",
+    availableAccounts.liabilityAccounts.length === 0 ? "liability" : "",
+    availableAccounts.assetAccounts.length === 0 ? "asset" : "",
+  ].filter(Boolean)
   const payablePayrolls = payrolls.filter((payroll) =>
     ["posted", "partially_paid"].includes(payroll.status) && Number(payroll.netSalary || 0) > Number(payroll.paidAmount || 0)
   )
@@ -457,13 +480,8 @@ export default function HRAccountingConfigPage() {
       liabilityAccounts: accountsRes.liabilityAccounts || [],
       assetAccounts: accountsRes.assetAccounts || [],
     })
-    setSelectedAccounts({
-      salaryExpenseAccountId: configRes.config?.salaryExpenseAccountId || "",
-      salaryPayableAccountId: configRes.config?.salaryPayableAccountId || "",
-      salaryAdvanceAccountId: configRes.config?.salaryAdvanceAccountId || "",
-      payeTaxAccountId: configRes.config?.payeTaxAccountId || "",
-      socialSecurityAccountId: configRes.config?.socialSecurityAccountId || "",
-    })
+    setSelectedAccounts(mappingFromConfig(configRes.config))
+    setMappingEditable(false)
   }
 
   const loadEmployees = async () => {
@@ -571,7 +589,29 @@ export default function HRAccountingConfigPage() {
     window.setTimeout(() => setSuccess(""), 3500)
   }
 
+  const resetSelectedAccountsFromConfig = () => {
+    setSelectedAccounts(mappingFromConfig(config))
+  }
+
+  const startMappingReconfiguration = () => {
+    resetSelectedAccountsFromConfig()
+    setError("")
+    setSuccess("")
+    setMappingEditable(true)
+  }
+
+  const cancelMappingReconfiguration = () => {
+    resetSelectedAccountsFromConfig()
+    setMappingEditable(false)
+    setError("")
+  }
+
   const handleSaveMapping = async () => {
+    if (!allRequiredMappingAccountsSelected) {
+      setError("Select Salary Expense, Salary Payable, and Employee Advance / Loan accounts before saving.")
+      return
+    }
+
     try {
       setSaving(true)
       setError("")
@@ -584,7 +624,9 @@ export default function HRAccountingConfigPage() {
         }),
       })
       setConfig(response.config)
-      notifySuccess("HR account mapping updated")
+      setSelectedAccounts(mappingFromConfig(response.config))
+      setMappingEditable(false)
+      notifySuccess(isConfigured ? "HR account mapping reconfigured" : "HR account mapping updated")
       await loadConfiguration()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save mapping")
@@ -602,6 +644,8 @@ export default function HRAccountingConfigPage() {
         body: JSON.stringify({ branchId: localStorage.getItem("selectedBranchId") || undefined }),
       })
       setConfig(response.config)
+      setSelectedAccounts(mappingFromConfig(response.config))
+      setMappingEditable(false)
       notifySuccess("Default HR accounts created and mapped")
       await loadConfiguration()
     } catch (err) {
@@ -975,27 +1019,47 @@ export default function HRAccountingConfigPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <Label>Salary Expense Account *</Label>
-                <AccountSelect value={selectedAccounts.salaryExpenseAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryExpenseAccountId: value }))} accounts={availableAccounts.expenseAccounts} placeholder="Select expense account" />
+                <AccountSelect disabled={mappingLocked} value={selectedAccounts.salaryExpenseAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryExpenseAccountId: value }))} accounts={availableAccounts.expenseAccounts} placeholder={availableAccounts.expenseAccounts.length ? "Select expense account" : "No expense accounts found"} />
               </div>
               <div>
                 <Label>Salary Payable Account *</Label>
-                <AccountSelect value={selectedAccounts.salaryPayableAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryPayableAccountId: value }))} accounts={availableAccounts.liabilityAccounts} placeholder="Select liability account" />
+                <AccountSelect disabled={mappingLocked} value={selectedAccounts.salaryPayableAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryPayableAccountId: value }))} accounts={availableAccounts.liabilityAccounts} placeholder={availableAccounts.liabilityAccounts.length ? "Select liability account" : "No liability accounts found"} />
               </div>
               <div>
                 <Label>Employee Advance / Loan Account *</Label>
-                <AccountSelect value={selectedAccounts.salaryAdvanceAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryAdvanceAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder="Select asset account" />
+                <AccountSelect disabled={mappingLocked} value={selectedAccounts.salaryAdvanceAccountId} onChange={(value) => setSelectedAccounts((prev) => ({ ...prev, salaryAdvanceAccountId: value }))} accounts={availableAccounts.assetAccounts} placeholder={availableAccounts.assetAccounts.length ? "Select asset account" : "No asset accounts found"} />
               </div>
             </div>
-            {isConfigured ? (
-              <div className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" />
-                Account mappings configured
+            {!isConfigured && missingManualAccountTypes.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Manual mapping needs existing active {missingManualAccountTypes.join(", ")} account{missingManualAccountTypes.length === 1 ? "" : "s"} in Chart of Accounts. Create them there first, or use Auto-Create Default Accounts.
+              </div>
+            )}
+            {isConfigured && !mappingEditable ? (
+              <div className="flex flex-col gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 md:flex-row md:items-center md:justify-between">
+                <div className="inline-flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Account mappings configured
+                </div>
+                <Button variant="outline" onClick={startMappingReconfiguration} disabled={saving}>
+                  Reconfigure Mappings
+                </Button>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                <Button onClick={handleSaveMapping} disabled={saving}>Save Mapping</Button>
-                <Button variant="outline" onClick={handleInitializeAccounts} disabled={saving}>Auto-Create Default Accounts</Button>
+                <Button onClick={handleSaveMapping} disabled={saving || !allRequiredMappingAccountsSelected}>{isConfigured ? "Save Reconfigured Mapping" : "Save Mapping"}</Button>
+                {!isConfigured && (
+                  <Button variant="outline" onClick={handleInitializeAccounts} disabled={saving}>Auto-Create Default Accounts</Button>
+                )}
+                {isConfigured && (
+                  <Button variant="outline" onClick={cancelMappingReconfiguration} disabled={saving}>Cancel</Button>
+                )}
               </div>
+            )}
+            {isConfigured && mappingEditable && (
+              <p className="text-xs text-muted-foreground">
+                Reconfigured mappings apply to new HR accounting postings. Existing posted journal entries keep the accounts they were posted with.
+              </p>
             )}
           </CardContent>
         </Card>

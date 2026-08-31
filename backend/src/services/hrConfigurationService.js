@@ -4,8 +4,6 @@
  */
 
 import prisma from "../db.js";
-import { ensureTransactionAccounts } from "../utils/accountingSync.js";
-
 const PAYE_TAX_ACCOUNT = {
   code: "2110",
   name: "PAYE Tax Payable",
@@ -160,48 +158,61 @@ class HRConfigurationService {
   async updateHRAccountMapping(params) {
     const {
       tenantId,
-      salaryExpenseAccountId,
-      salaryPayableAccountId,
-      salaryAdvanceAccountId,
+      salaryExpenseAccountId: rawSalaryExpenseAccountId,
+      salaryPayableAccountId: rawSalaryPayableAccountId,
+      salaryAdvanceAccountId: rawSalaryAdvanceAccountId,
       userId,
     } = params;
 
     try {
       return await prisma.$transaction(async (tx) => {
-        const existingConfig = await tx.hRAccountingConfig.findUnique({ where: { tenantId } });
-        const deductions = await this.ensureDefaultDeductionAccounts({
-          tx,
-          tenantId,
-          userId,
-          existingConfig,
-        });
+        const salaryExpenseAccountId = String(rawSalaryExpenseAccountId || "").trim();
+        const salaryPayableAccountId = String(rawSalaryPayableAccountId || "").trim();
+        const salaryAdvanceAccountId = String(rawSalaryAdvanceAccountId || "").trim();
+        const requiredMappings = [
+          ["salaryExpenseAccountId", "Salary Expense Account", salaryExpenseAccountId],
+          ["salaryPayableAccountId", "Salary Payable Account", salaryPayableAccountId],
+          ["salaryAdvanceAccountId", "Employee Advance / Loan Account", salaryAdvanceAccountId],
+        ];
+        const missingMappings = requiredMappings
+          .filter(([, , accountId]) => !accountId)
+          .map(([, label]) => label);
+
+        if (missingMappings.length > 0) {
+          return {
+            success: false,
+            error: `Select all required HR accounting accounts before saving. Missing: ${missingMappings.join(", ")}`,
+            validation: missingMappings.map((label) => ({ field: label, error: "Required" })),
+          };
+        }
 
         // Validate accounts exist and are appropriate types
         const accountIds = [
           salaryExpenseAccountId,
           salaryPayableAccountId,
           salaryAdvanceAccountId,
-        ].filter(Boolean);
+        ];
+        const uniqueAccountIds = [...new Set(accountIds)];
 
-        if (accountIds.length === 0) {
+        if (uniqueAccountIds.length !== accountIds.length) {
           return {
             success: false,
-            error: "At least one account mapping is required",
+            error: "Each HR accounting mapping must use a separate Chart of Accounts account.",
           };
         }
 
         const accounts = await tx.account.findMany({
           where: {
             tenantId,
-            id: { in: accountIds },
+            id: { in: uniqueAccountIds },
             isActive: true,
           },
         });
 
-        if (accounts.length !== accountIds.length) {
+        if (accounts.length !== uniqueAccountIds.length) {
           return {
             success: false,
-            error: "One or more accounts not found or inactive",
+            error: "One or more selected accounts were not found in this tenant's Chart of Accounts or are inactive.",
           };
         }
 
@@ -220,6 +231,14 @@ class HRConfigurationService {
             validation: validation.errors,
           };
         }
+
+        const existingConfig = await tx.hRAccountingConfig.findUnique({ where: { tenantId } });
+        const deductions = await this.ensureDefaultDeductionAccounts({
+          tx,
+          tenantId,
+          userId,
+          existingConfig,
+        });
 
         // Update configuration
         const config = await tx.hRAccountingConfig.upsert({
@@ -369,8 +388,6 @@ class HRConfigurationService {
    */
   async getAvailableAccountsByType(tenantId) {
     try {
-      await ensureTransactionAccounts(prisma, tenantId);
-
       const expenseAccounts = await this.getAvailableAccountsForMapping(
         tenantId,
         "expense"
