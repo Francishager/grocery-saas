@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
@@ -222,6 +222,8 @@ export default function EmployeeManagementPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<any | null>(null)
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
+  const profilePhotoInputRef = useRef<HTMLInputElement | null>(null)
+  const profilePhotoCameraInputRef = useRef<HTMLInputElement | null>(null)
 
   const columns: HRColumn[] = [
     {
@@ -1084,25 +1086,47 @@ export default function EmployeeManagementPage() {
               </div>
               <div className="flex flex-1 flex-col gap-2">
                 <Input
+                  ref={profilePhotoInputRef}
                   id="profilePhoto"
                   type="file"
                   accept="image/*"
-                  capture="environment"
-                  aria-label="Select or take an employee photo"
+                  className="hidden"
+                  aria-label="Choose an employee photo from the gallery"
                   onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => document.getElementById('profilePhoto')?.click()}
-                >
-                  Select or Take Photo
-                </Button>
+                <Input
+                  ref={profilePhotoCameraInputRef}
+                  id="profilePhotoCamera"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  aria-label="Take an employee photo with the camera"
+                  onChange={(event) => handleProfilePhotoChange(event.target.files?.[0] || null)}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => profilePhotoInputRef.current?.click()}
+                  >
+                    Choose Photo
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => profilePhotoCameraInputRef.current?.click()}
+                  >
+                    Take Photo
+                  </Button>
+                </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">Upload a photo from the gallery or use the device camera to capture the employee’s passport photo.</p>
+            <p className="text-xs text-muted-foreground">Select a photo from your gallery or use your device camera to capture the employee’s passport photo.</p>
           </div>
           <HRFormBuilder
             fields={formFields}
