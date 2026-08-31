@@ -2,6 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { reconcileCustomerReceivableBalance } from '../src/utils/customerBalance.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -99,29 +100,27 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
 
     const noteNo = await generateNoteNo('CN', prisma.creditNote, tenantId)
 
-    const note = await prisma.creditNote.create({
-      data: {
-        noteNo,
-        tenantId,
-        branchId: branchId || scope.branchId || null,
-        customerId,
-        saleId: saleId || null,
-        amount: Number(amount),
-        reason,
-        notes: notes || null,
-        userId: req.user.id,
-        status: 'issued',
-      },
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        branch: { select: { id: true, name: true } },
-      },
-    })
-
-    // Update customer balance (credit note reduces receivable)
-    await prisma.customer.update({
-      where: { id: customerId },
-      data: { balance: { decrement: Number(amount) } },
+    const note = await prisma.$transaction(async (tx) => {
+      const createdNote = await tx.creditNote.create({
+        data: {
+          noteNo,
+          tenantId,
+          branchId: branchId || scope.branchId || null,
+          customerId,
+          saleId: saleId || null,
+          amount: Number(amount),
+          reason,
+          notes: notes || null,
+          userId: req.user.id,
+          status: 'issued',
+        },
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          branch: { select: { id: true, name: true } },
+        },
+      })
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
+      return createdNote
     })
 
     res.status(201).json(note)
@@ -142,26 +141,22 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
     const { amount, reason, notes } = req.body
     const updates = {}
     if (amount !== undefined && amount > 0) {
-      // Adjust customer balance for the difference
-      const diff = Number(amount) - existing.amount
-      if (diff !== 0) {
-        await prisma.customer.update({
-          where: { id: existing.customerId },
-          data: { balance: { decrement: diff } },
-        })
-      }
       updates.amount = Number(amount)
     }
     if (reason !== undefined) updates.reason = reason
     if (notes !== undefined) updates.notes = notes
 
-    const note = await prisma.creditNote.update({
-      where: { id: req.params.id },
-      data: updates,
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        branch: { select: { id: true, name: true } },
-      },
+    const note = await prisma.$transaction(async (tx) => {
+      const updatedNote = await tx.creditNote.update({
+        where: { id: req.params.id },
+        data: updates,
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          branch: { select: { id: true, name: true } },
+        },
+      })
+      await reconcileCustomerReceivableBalance(tx, scope, existing.customerId)
+      return updatedNote
     })
     res.json(note)
   } catch (error) {
@@ -177,19 +172,17 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
     if (!existing) return res.status(404).json({ error: 'Credit note not found' })
     if (existing.status === 'cancelled') return res.status(400).json({ error: 'Credit note is already cancelled' })
 
-    // Reverse the customer balance adjustment
-    await prisma.customer.update({
-      where: { id: existing.customerId },
-      data: { balance: { increment: existing.amount } },
-    })
-
-    const note = await prisma.creditNote.update({
-      where: { id: req.params.id },
-      data: { status: 'cancelled' },
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        branch: { select: { id: true, name: true } },
-      },
+    const note = await prisma.$transaction(async (tx) => {
+      const cancelledNote = await tx.creditNote.update({
+        where: { id: req.params.id },
+        data: { status: 'cancelled' },
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          branch: { select: { id: true, name: true } },
+        },
+      })
+      await reconcileCustomerReceivableBalance(tx, scope, existing.customerId)
+      return cancelledNote
     })
     res.json(note)
   } catch (error) {

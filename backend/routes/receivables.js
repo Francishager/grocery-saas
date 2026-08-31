@@ -7,6 +7,11 @@ import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
+import {
+  attachCustomerReceivableBalances,
+  calculateCustomerReceivableBalance,
+  reconcileCustomerReceivableBalance
+} from '../src/utils/customerBalance.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -14,14 +19,6 @@ const prisma = new PrismaClient()
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
-}
-
-const roundMoney = (value) => Math.round(toMoney(value) * 100) / 100
-
-const customerBalanceWithOpeningBalance = (customer, nextOpeningBalance) => {
-  const existingOpeningBalance = toMoney(customer?.openingBalance, 0)
-  const nonOpeningBalance = roundMoney(toMoney(customer?.balance, 0) - existingOpeningBalance)
-  return roundMoney(nonOpeningBalance + nextOpeningBalance)
 }
 
 const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
@@ -178,7 +175,8 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
       }),
       prisma.customer.count({ where })
     ])
-    const customers = await attachRepaymentTrustScores(prisma, scope, customersRaw)
+    const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
+    const customers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
 
     res.json({
       customers,
@@ -220,7 +218,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
 
-    const [outstandingSales, recentPayments, trustScore] = await Promise.all([
+    const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(scope, {
           customerId: id,
@@ -247,8 +245,10 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         orderBy: { createdAt: 'desc' },
         take: 20
       }),
-      getRepaymentTrustScore(prisma, scope, customer)
+      calculateCustomerReceivableBalance(prisma, scope, id)
     ])
+    const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
+    const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
 
     const outstandingItems = outstandingSales.flatMap((sale) =>
       sale.items.map((item) => ({
@@ -275,9 +275,9 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
     )
 
     res.json({
-      customer: { ...customer, trustScore },
+      customer: { ...reconciledCustomer, trustScore },
       summary: {
-        balance: toMoney(customer.balance),
+        balance: toMoney(reconciledCustomer.balance),
         creditLimit: toMoney(customer.creditLimit),
         trustScore,
         openingBalance: toMoney(customer.openingBalance),
@@ -347,7 +347,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       ? { customerName: { equals: customer.name, mode: 'insensitive' } }
       : { id: '__no_matching_customer_name__' }
 
-    const [receivableSales, payments, posSales, creditNotes, saleReturns, trustScore] = await Promise.all([
+    const [receivableSales, payments, posSales, creditNotes, saleReturns, balanceSnapshot] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
         include: {
@@ -394,8 +394,10 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         orderBy: { createdAt: 'asc' },
         take: limit
       }),
-      getRepaymentTrustScore(prisma, scope, customer)
+      calculateCustomerReceivableBalance(prisma, scope, id)
     ])
+    const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
+    const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
 
     const rows = []
     const paymentTotalBySale = new Map()
@@ -621,7 +623,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         address: customer.address,
         status: customer.status,
         creditLimit: toMoney(customer.creditLimit),
-        balance: toMoney(customer.balance),
+        balance: toMoney(reconciledCustomer.balance),
         openingBalance: toMoney(customer.openingBalance),
         openingBalanceDate: customer.openingBalanceDate,
         openingBalanceNote: customer.openingBalanceNote,
@@ -630,12 +632,12 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       summary: {
         ...totals,
         transactionCount: transactions.length,
-        currentBalance: toMoney(customer.balance),
-        computedBalance: runningBalance,
+        currentBalance: toMoney(reconciledCustomer.balance),
+        computedBalance: balanceSnapshot?.balance ?? runningBalance,
         openingBalance: toMoney(customer.openingBalance),
         openingBalanceDate: customer.openingBalanceDate,
         openingBalanceNote: customer.openingBalanceNote,
-        availableCredit: toMoney(customer.creditLimit) - toMoney(customer.balance),
+        availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance),
         lastTransactionDate: transactions[0]?.date || null
       },
       transactions
@@ -768,10 +770,7 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
         }
       }
 
-      const nextBalance = customerBalanceWithOpeningBalance(existingCustomer, openingBalance)
-
       openingBalanceData.openingBalance = openingBalance
-      openingBalanceData.balance = nextBalance
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceDate')) {
@@ -815,12 +814,20 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
       data.branchId = targetScope.branchId
     }
 
-    const customerRaw = await prisma.customer.update({
-      where: { id },
-      data
+    const customerRaw = await prisma.$transaction(async (tx) => {
+      const updatedCustomer = await tx.customer.update({
+        where: { id },
+        data
+      })
+      if (Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')) {
+        const reconciled = await reconcileCustomerReceivableBalance(tx, scope, id)
+        return reconciled?.customer || updatedCustomer
+      }
+      return updatedCustomer
     })
 
-    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
+    const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
+    const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
     res.json(customer)
   } catch (error) {
     console.error('Update customer error:', error)
@@ -986,7 +993,9 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     const receiptNo = `SALE-${Date.now()}`
 
     if (balance > 0) {
-      const creditLimitCheck = validateCreditSaleLimit(customer, balance)
+      const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, customerId)
+      const customerForCreditLimit = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance }
+      const creditLimitCheck = validateCreditSaleLimit(customerForCreditLimit, balance)
       if (!creditLimitCheck.valid) {
         return res.status(creditLimitCheck.statusCode || 400).json({
           error: creditLimitCheck.message,
@@ -996,13 +1005,6 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     }
 
     const sale = await prisma.$transaction(async (tx) => {
-      if (balance > 0) {
-        await tx.customer.update({
-          where: { id: customerId },
-          data: { balance: { increment: balance } }
-        })
-      }
-
       const createdSale = await tx.saleRecord.create({
         data: {
           receiptNo,
@@ -1094,6 +1096,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         await syncLinkedTransactionAccountBalance(tx, scope.tenantId, receiptAccount.id)
       }
 
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
       return createdSale
     })
 
@@ -1266,11 +1269,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
         remaining = Math.round((remaining - allocateToSale) * 100) / 100
       }
 
-      const newBalance = Math.round(((customer.balance || 0) - paidAmount) * 100) / 100
-      await tx.customer.update({
-        where: { id: customerId },
-        data: { balance: newBalance }
-      })
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
 
       return createdPayment
     })
@@ -1534,7 +1533,8 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
       where,
       orderBy: { balance: 'desc' }
     })
-    const accounts = await attachRepaymentTrustScores(prisma, scope, accountsRaw)
+    const balancedAccounts = await attachCustomerReceivableBalances(prisma, scope, accountsRaw)
+    const accounts = await attachRepaymentTrustScores(prisma, scope, balancedAccounts)
 
     res.json({ accounts })
   } catch (error) {
@@ -1571,7 +1571,8 @@ router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEdit
       }
     })
 
-    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
+    const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
+    const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
     res.json(customer)
   } catch (error) {
     console.error('Update credit account error:', error)

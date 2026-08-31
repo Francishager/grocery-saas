@@ -5,6 +5,7 @@ import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/bra
 import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
 import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
+import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
 
 const router = Router();
 
@@ -154,7 +155,7 @@ async function getCustomerCreditInfo(scope, customerId) {
 
   if (!customer) return null;
 
-  const [outstandingSales, recentPayments, trustScore] = await Promise.all([
+  const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
     prisma.saleRecord.findMany({
       where: scopedWhere(scope, {
         customerId,
@@ -181,8 +182,10 @@ async function getCustomerCreditInfo(scope, customerId) {
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
-    getRepaymentTrustScore(prisma, scope, customer),
+    calculateCustomerReceivableBalance(prisma, scope, customerId),
   ]);
+  const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance };
+  const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer);
 
   const saleItems = (sale) =>
     sale.items.map((item) => ({
@@ -214,9 +217,9 @@ async function getCustomerCreditInfo(scope, customerId) {
   );
 
   return {
-    customer: { ...customer, trustScore },
+    customer: { ...reconciledCustomer, trustScore },
     summary: {
-      balance: toMoney(customer.balance),
+      balance: toMoney(reconciledCustomer.balance),
       creditLimit: toMoney(customer.creditLimit),
       trustScore,
       openingBalance: toMoney(customer.openingBalance),
@@ -271,12 +274,22 @@ router.get("/customers/credit-options", authenticateToken, requirePermission("ca
           }
         : {}),
     });
-    const customers = await prisma.customer.findMany({
+    const customersRaw = await prisma.customer.findMany({
       where,
-      select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        balance: true,
+        creditLimit: true,
+        openingBalance: true,
+        openingBalanceDate: true,
+        openingBalanceNote: true,
+      },
       orderBy: { name: "asc" },
       take: limit,
     });
+    const customers = await attachCustomerReceivableBalances(prisma, scope, customersRaw);
     res.json({ customers });
   } catch (err) {
     console.error("Sales customer credit options error:", err);

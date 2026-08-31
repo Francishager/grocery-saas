@@ -3,6 +3,7 @@ import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
+import { reconcileCustomerReceivableBalance } from "../src/utils/customerBalance.js";
 
 const router = Router();
 
@@ -113,6 +114,10 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
         customer: { select: { id: true, name: true } },
       },
     });
+
+    if (customerId && refundMethod === "credit") {
+      await reconcileCustomerReceivableBalance(prisma, scope, customerId);
+    }
 
     res.status(201).json(ret);
   } catch (err) {
