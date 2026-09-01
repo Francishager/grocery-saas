@@ -84,6 +84,16 @@ const JOURNAL_ACTIONS = [
   { value: 'clear_payable', label: 'Clear Payable' },
   { value: 'collect_receivable', label: 'Collect Receivable' },
 ]
+const DEFAULT_JOURNAL_ACTION = JOURNAL_ACTIONS[0].value
+const JOURNAL_ACTION_ACCOUNT_TYPES: Record<string, string[]> = {
+  register_income: ['income', 'revenue'],
+  register_expense: ['expense', 'expenses'],
+  register_capital: ['equity'],
+  register_liability: ['liability'],
+  register_asset: ['asset'],
+  clear_payable: ['liability'],
+  collect_receivable: ['asset'],
+}
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: 'Cash Account',
   bank: 'Bank Account',
@@ -169,6 +179,11 @@ const getTransactionAccountType = (account: Account) => {
 
 const isTransactionAccount = (account: Account) => Boolean(getTransactionAccountType(account))
 
+const linkedCashAccountId = (account: Account) => {
+  const match = String(account.description || '').match(/cashAccount:([^\s]+)/)
+  return match?.[1] || null
+}
+
 const paymentPermissionKey = (paymentMethod?: string | null) => PAYMENT_METHOD_PERMISSION_KEYS[normalizeValue(paymentMethod || '')]
 
 const accountBalanceLabel = (account: Account) => `Balance: ${Number(account.balance || 0).toFixed(2)}`
@@ -185,26 +200,38 @@ const transactionAccountMatchesMethod = (account: Account, paymentMethod?: strin
   return type === paymentMethod
 }
 
-const buildAccountOptions = (accounts: Account[], typeFilter?: string): AccountOption[] => {
+const accountMatchesTypeFilter = (account: Account, typeFilter?: string) => {
+  if (!typeFilter) return true
+  if (typeFilter === 'income') return account.type === 'income' || account.type === 'revenue'
+  if (typeFilter === 'expenses') return account.type === 'expenses' || account.type === 'expense'
+  return account.type === typeFilter
+}
+
+const accountMatchesJournalAction = (account: Account, action: string) => {
+  if (isTransactionAccount(account)) return false
+  const allowedTypes = JOURNAL_ACTION_ACCOUNT_TYPES[action] || []
+  if (allowedTypes.length === 0) return true
+  return allowedTypes.includes(normalizeValue(account.type))
+}
+
+const buildAccountOptions = (
+  accounts: Account[],
+  typeFilter?: string,
+  predicate: (account: Account) => boolean = () => true
+): AccountOption[] => {
   const matchesType = (account: Account) => {
-    if (!typeFilter) return true
-    if (typeFilter === 'income') return account.type === 'income' || account.type === 'revenue'
-    if (typeFilter === 'expenses') return account.type === 'expenses' || account.type === 'expense'
-    return account.type === typeFilter
+    return accountMatchesTypeFilter(account, typeFilter)
   }
 
   const flatten = (account: Account, depth = 0): AccountOption[] => {
-    if (!matchesType(account)) return []
-
+    const childItems = (account.children || []).flatMap(child => flatten(child, depth + 1))
+    if (!matchesType(account) || !predicate(account)) return childItems
     const prefix = '-- '.repeat(depth)
     const label = isTransactionAccount(account)
       ? `${prefix}${account.name} - ${accountBalanceLabel(account)}`
       : `${prefix}${account.code} - ${account.name}`
     const items = [{ value: account.id, label, account }]
-    for (const child of account.children || []) {
-      items.push(...flatten(child, depth + 1))
-    }
-    return items
+    return [...items, ...childItems]
   }
 
   const rootAccounts = accounts.filter(a => !a.parentId)
@@ -280,7 +307,7 @@ export default function AccountingPage() {
 
   // Journal entry form
   const [jeBranch, setJeBranch] = useState('')
-  const [jeAction, setJeAction] = useState('create')
+  const [jeAction, setJeAction] = useState(DEFAULT_JOURNAL_ACTION)
   const [jeDate, setJeDate] = useState(new Date().toISOString().split('T')[0])
   const [jeAccount, setJeAccount] = useState('')
   const [jeDescription, setJeDescription] = useState('')
@@ -387,6 +414,15 @@ export default function AccountingPage() {
     return !permissionKey || hasPermission(permissionKey)
   }
 
+  const canChooseOtherTransactionAccounts = useMemo(() => {
+    const role = normalizeValue(user?.role)
+    return ['owner', 'admin', 'manager', 'accountant', 'saas_admin', 'platform_admin', 'super_admin'].includes(role) ||
+      hasPermission('canEditAccounting') ||
+      hasPermission('canDeleteAccounting')
+  }, [user?.role, hasPermission])
+
+  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
+
   const visibleAccounts = useMemo(() => (
     accounts.filter(account => {
       if (!account.isActive) return false
@@ -400,6 +436,13 @@ export default function AccountingPage() {
   const transactionAccounts = useMemo(() => (
     visibleAccounts.filter(account => isTransactionAccount(account))
   ), [visibleAccounts])
+  const journalActionAccountOptions = useMemo(() => (
+    buildAccountOptions(
+      visibleAccounts,
+      undefined,
+      (account) => accountMatchesJournalAction(account, jeAction)
+    ).filter(option => option.value !== jePaymentAccount)
+  ), [visibleAccounts, jeAction, jePaymentAccount])
   const allowedPaymentMethods = useMemo(() => (
     PAYMENT_METHODS.filter(method => canUsePaymentMethod(method))
   ), [hasPermission])
@@ -407,8 +450,9 @@ export default function AccountingPage() {
     transactionAccounts
       .filter(account => account.id !== jeAccount)
       .filter(account => transactionAccountMatchesMethod(account, jePaymentMethod))
+      .filter(account => canChooseOtherTransactionAccounts || linkedCashAccountId(account) === assignedCashAccountId)
       .map(account => ({ value: account.id, label: `${account.name} - ${accountBalanceLabel(account)}`, account }))
-  ), [transactionAccounts, jeAccount, jePaymentMethod])
+  ), [transactionAccounts, jeAccount, jePaymentMethod, canChooseOtherTransactionAccounts, assignedCashAccountId])
   const flatAccounts = useMemo(() => flattenAccountTree(accounts), [accounts])
   const accountById = useMemo(() => new Map(flatAccounts.map(account => [account.id, account])), [flatAccounts])
   const selectedHistoryAccountIds = useMemo(() => collectAccountIds(selectedHistoryAccount), [selectedHistoryAccount])
@@ -513,10 +557,30 @@ export default function AccountingPage() {
   }, [allowedPaymentMethods, jePaymentMethod])
 
   useEffect(() => {
-    if (jePaymentAccount && !paymentAccountOptions.some(option => option.value === jePaymentAccount)) {
+    if (jeAccount && !journalActionAccountOptions.some(option => option.value === jeAccount)) {
+      setJeAccount('')
+    }
+  }, [jeAccount, journalActionAccountOptions])
+
+  useEffect(() => {
+    if (!jePaymentMethod || paymentAccountOptions.length === 0) {
+      if (jePaymentAccount) setJePaymentAccount('')
+      return
+    }
+
+    if (jePaymentAccount && paymentAccountOptions.some(option => option.value === jePaymentAccount)) {
+      return
+    }
+
+    const preferredOwnAccount = paymentAccountOptions.find(option => linkedCashAccountId(option.account) === assignedCashAccountId)
+    const fallbackAccount = canChooseOtherTransactionAccounts ? paymentAccountOptions[0] : undefined
+    const nextAccount = preferredOwnAccount || fallbackAccount
+    if (nextAccount?.value && nextAccount.value !== jePaymentAccount) {
+      setJePaymentAccount(nextAccount.value)
+    } else if (!nextAccount && jePaymentAccount) {
       setJePaymentAccount('')
     }
-  }, [jePaymentAccount, paymentAccountOptions])
+  }, [assignedCashAccountId, canChooseOtherTransactionAccounts, jePaymentAccount, jePaymentMethod, paymentAccountOptions])
 
   const handleCreateAccount = async () => {
     if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
@@ -626,6 +690,7 @@ export default function AccountingPage() {
     }
     if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
     if (jeAccount === jePaymentAccount) return toast({ variant: 'destructive', title: 'Choose different debit and credit accounts' })
+    if (!journalActionAccountOptions.some(option => option.value === jeAccount)) return toast({ variant: 'destructive', title: 'Choose an account that matches the selected action' })
     if (!jePaymentMethod || !canUsePaymentMethod(jePaymentMethod)) return toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
     if (!paymentAccountOptions.some(option => option.value === jePaymentAccount)) return toast({ variant: 'destructive', title: 'Choose a permitted transaction account' })
     try {
