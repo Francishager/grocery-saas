@@ -309,12 +309,17 @@ export default function AccountingPage() {
   const [jeBranch, setJeBranch] = useState('')
   const [jeAction, setJeAction] = useState(DEFAULT_JOURNAL_ACTION)
   const [jeDate, setJeDate] = useState(new Date().toISOString().split('T')[0])
-  const [jeAccount, setJeAccount] = useState('')
+  const [jeAccount, setJeAccount] = useState(() => {
+    const role = normalizeValue(user?.role)
+    const canChooseOthers = ['owner', 'admin', 'manager', 'accountant', 'saas_admin', 'platform_admin', 'super_admin'].includes(role) ||
+      hasPermission('canEditAccounting') || hasPermission('canDeleteAccounting')
+    return canChooseOthers ? '' : (assignedCashAccountId || '')
+  })
   const [jeDescription, setJeDescription] = useState('')
   const [jeAmount, setJeAmount] = useState('')
   const [jeCurrency, setJeCurrency] = useState(tenantCurrency)
   const [jeVoucher, setJeVoucher] = useState('')
-  const [jePaymentMethod, setJePaymentMethod] = useState('cash')
+  const [jePaymentMethod, setJePaymentMethod] = useState('')
   const [jePaymentAccount, setJePaymentAccount] = useState('')
   const [jeComment, setJeComment] = useState('')
   const [jeSubForm, setJeSubForm] = useState<'single' | 'multiple'>('single')
@@ -1425,7 +1430,7 @@ export default function AccountingPage() {
                   }}>
                     <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
                     <SelectContent>
-                      {accountOptions.filter(option => option.value !== jePaymentAccount).map(option => (
+                      {journalActionAccountOptions.filter(option => option.value !== jePaymentAccount).map(option => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
                     </SelectContent>
