@@ -1396,79 +1396,94 @@ export default function AccountingPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Action</Label>
-                  <Select value={jeAction} onValueChange={setJeAction}>
-                    <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
-                    <SelectContent>
-                      {JOURNAL_ACTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Record Date</Label>
-                  <Input type="date" value={jeDate} onChange={(e) => setJeDate(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Entry Description</Label>
-                  <Input value={jeDescription} onChange={(e) => setJeDescription(e.target.value)} placeholder="Description" />
-                </div>
-                <div>
-                  <Label>Currency</Label>
-                  <Select value={jeCurrency} onValueChange={setJeCurrency}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Account</Label>
-                  <Select value={jeAccount} onValueChange={(value) => {
-                    setJeAccount(value)
-                    if (value === jePaymentAccount) setJePaymentAccount('')
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
-                    <SelectContent>
-                      {journalActionAccountOptions.filter(option => option.value !== jePaymentAccount).map(option => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Entry Amount</Label>
-                  <Input type="number" value={jeAmount} onChange={(e) => setJeAmount(e.target.value)} placeholder="0.00" />
-                </div>
-                <div>
-                  <Label>Voucher Number</Label>
-                  <Input value={jeVoucher} onChange={(e) => setJeVoucher(e.target.value)} placeholder="Voucher #" />
-                </div>
-                <div>
-                  <Label>Payment Method</Label>
-                  <Select value={jePaymentMethod} onValueChange={(v) => { setJePaymentMethod(v); setJePaymentAccount('') }}>
-                    <SelectTrigger><SelectValue placeholder="Select payment method" /></SelectTrigger>
-                    <SelectContent>
-                      {allowedPaymentMethods.length > 0
-                        ? allowedPaymentMethods.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)
-                        : <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {jePaymentMethod && (
-                <div>
-                  <Label>{PAYMENT_METHOD_LABELS[jePaymentMethod] || 'Select Account'}</Label>
-                  <Select value={jePaymentAccount} onValueChange={setJePaymentAccount}>
-                    <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
-                    <SelectContent>
-                      {paymentAccountOptions.length > 0
-                        ? paymentAccountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)
-                        : <SelectItem value="no-transaction-accounts" disabled>No permitted transaction accounts</SelectItem>}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+                {jeBranch && (
+                  <div>
+                    <Label>Action</Label>
+                    <Select value={jeAction} onValueChange={setJeAction}>
+                      <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
+                      <SelectContent>
+                        {JOURNAL_ACTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {jeBranch && (
+                  <>
+                    <div>
+                      <Label>Record Date</Label>
+                      <Input type="date" value={jeDate} onChange={(e) => setJeDate(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Entry Description</Label>
+                      <Input value={jeDescription} onChange={(e) => setJeDescription(e.target.value)} placeholder="Description" />
+                    </div>
+                    <div>
+                      <Label>Currency</Label>
+                      <Select value={jeCurrency} onValueChange={setJeCurrency}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+                {jeAction && (
+                  <div>
+                    <Label>Account</Label>
+                    <Select value={jeAccount} onValueChange={(value) => {
+                      setJeAccount(value)
+                      if (value === jePaymentAccount) setJePaymentAccount('')
+                    }}>
+                      <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
+                      <SelectContent>
+                        {journalActionAccountOptions.filter(option => option.value !== jePaymentAccount).map(option => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {jeAction && (
+                  <div>
+                    <Label>Entry Amount</Label>
+                    <Input type="number" value={jeAmount} onChange={(e) => setJeAmount(e.target.value)} placeholder="0.00" />
+                  </div>
+                )}
+                {jeAction && (
+                  <div>
+                    <Label>Voucher Number</Label>
+                    <Input value={jeVoucher} onChange={(e) => setJeVoucher(e.target.value)} placeholder="Voucher #" />
+                  </div>
+                )}
+                {jeAction && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Payment Method</Label>
+                      <Select value={jePaymentMethod} onValueChange={(v) => { setJePaymentMethod(v); setJePaymentAccount('') }}>
+                        <SelectTrigger><SelectValue placeholder="Select payment method" /></SelectTrigger>
+                        <SelectContent>
+                          {allowedPaymentMethods.length > 0
+                            ? allowedPaymentMethods.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)
+                            : <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {jePaymentMethod && (
+                      <div>
+                        <Label>{PAYMENT_METHOD_LABELS[jePaymentMethod] || 'Select Account'}</Label>
+                        <Select value={jePaymentAccount} onValueChange={setJePaymentAccount}>
+                          <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
+                          <SelectContent>
+                            {paymentAccountOptions.length > 0
+                              ? paymentAccountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)
+                              : <SelectItem value="no-transaction-accounts" disabled>No permitted transaction accounts</SelectItem>}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
               <div>
                 <Label>Comment</Label>
                 <textarea
