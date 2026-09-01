@@ -87,6 +87,36 @@ async function getScope(req) {
   return resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
 }
 
+function dateRangeFromQuery(req) {
+  return df(req, "date").date || null;
+}
+
+function expenseDateWhere(dateRange) {
+  if (!dateRange || !Object.keys(dateRange).length) return {};
+  return { OR: [{ date: dateRange }, { createdAt: dateRange }] };
+}
+
+function scopedExpenseWhere(scope, extra = {}) {
+  const { branchId, ...rest } = extra;
+  const branchScope = branchId || scope.branchId;
+  const clauses = [];
+
+  if (Object.keys(rest).length) clauses.push(rest);
+  if (branchScope) {
+    clauses.push({
+      OR: [
+        { branchId: branchScope },
+        { branchId: null },
+      ],
+    });
+  }
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {}),
+  };
+}
+
 function positiveOpeningBalance(entity) {
   return Math.max(0, Number(entity?.openingBalance || 0));
 }
@@ -149,10 +179,10 @@ function saleStatus(sale) {
 }
 
 function normalizedPaymentMethod(value) {
-  const method = String(value || "cash").trim().toLowerCase();
-  if (["mobile_money", "mobile money", "momo", "mtn", "airtel"].includes(method)) return "mobile_money";
-  if (["bank_transfer", "bank transfer", "bank", "cheque", "check"].includes(method)) return "bank";
-  if (method === "card") return "card";
+  const method = String(value || "cash").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["mobile_money", "mobilemoney", "momo", "mtn", "mtn_momo", "airtel", "airtel_money"].includes(method)) return "mobile_money";
+  if (["bank_transfer", "banktransfer", "wire_transfer", "bank", "cheque", "check"].includes(method)) return "bank";
+  if (["card", "debit_card", "credit_card"].includes(method)) return "card";
   if (method === "credit" || method === "on_credit") return "credit";
   return "cash";
 }
@@ -168,6 +198,35 @@ function saleCogsForItems(items = []) {
 function addPaymentBreakdown(target, method, amount) {
   const key = normalizedPaymentMethod(method);
   target[key] = (target[key] || 0) + Number(amount || 0);
+}
+
+function addMoneyBreakdown(target, key, amount) {
+  const label = key || "Uncategorized";
+  target[label] = (target[label] || 0) + Number(amount || 0);
+}
+
+function expenseReportRow(expense) {
+  const amount = Number(expense?.amount || 0);
+  const method = normalizedPaymentMethod(expense?.paymentMethod);
+  return {
+    id: expense?.id,
+    kind: "expense",
+    date: expense?.date || expense?.createdAt,
+    reference: expense?.reference || expense?.id,
+    category: expense?.category || "Uncategorized",
+    description: expense?.description || expense?.category || "Expense",
+    paymentMethod: method,
+    account: expense?.cashAccount?.name || "",
+    accountType: expense?.cashAccount?.type || method,
+    branch: expense?.branch?.name || "",
+    staff: userLabel(expense?.User),
+    staffId: expense?.User?.id || null,
+    amount,
+    debit: 0,
+    credit: amount,
+    cashAmount: method === "cash" ? amount : 0,
+    creditAmount: amount,
+  };
 }
 
 function paymentMethodMatches(value, requestedMethod) {
@@ -273,7 +332,7 @@ router.get("/purchases", authenticateToken, async (req, res) => {
 router.get("/expenses", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const where = scopedWhere(s, df(req, "date"));
+    const where = scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req)));
     const expenses = await prisma.expense.findMany({ where, orderBy: { date: "desc" } });
     const byCategory = {};
     expenses.forEach((e) => { byCategory[e.category] = (byCategory[e.category] || 0) + e.amount; });
@@ -287,7 +346,7 @@ router.get("/profit", authenticateToken, async (req, res) => {
     const [salesAgg, saleRecordAgg, expensesAgg, salesWithItems, saleRecordsWithItems] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
       prisma.saleRecord.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
-      prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
+      prisma.expense.aggregate({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), _sum: { amount: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
@@ -343,7 +402,10 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ...(customerId ? { customerId } : {}),
     });
     const paymentWhere = scopedWhere(scope, { createdAt: dateWhere, ...(customerId ? { customerId } : {}) });
-    const expenseWhere = scopedWhere(scope, { date: dateWhere, ...(userId ? { userId } : {}) });
+    const expenseWhere = scopedExpenseWhere(scope, {
+      ...expenseDateWhere(dateWhere),
+      ...(userId ? { userId } : {}),
+    });
 
     const [sales, creditSales, payments, expenses, branches, cashAccounts, cashTransactions, openingRows, customersForLookup] = await Promise.all([
       prisma.sale.findMany({
@@ -627,26 +689,31 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     let cashExpenses = 0;
     const filteredExpenses = [];
+    const expenseMethodFilter = requestedMethod === "credit" ? null : requestedMethod;
     for (const expense of expenses) {
       const method = normalizedPaymentMethod(expense.paymentMethod);
-      if (!paymentMethodMatches(method, requestedMethod)) continue;
+      if (!paymentMethodMatches(method, expenseMethodFilter)) continue;
       filteredExpenses.push(expense);
       if (method === "cash") cashExpenses += Number(expense.amount || 0);
       addStaff(expense.User, { expenses: expense.amount });
       transactionRows.push({
         id: expense.id,
         kind: "expense",
-        date: expense.date,
+        date: expense.date || expense.createdAt,
         reference: expense.reference || expense.id,
         category: expense.category,
         description: expense.description,
         paymentMethod: method,
         account: expense.cashAccount?.name || "",
+        accountType: expense.cashAccount?.type || method,
+        branch: expense.branch?.name || "",
         staff: userLabel(expense.User),
         staffId: expense.User?.id,
         amount: expense.amount,
         debit: 0,
-        credit: method === "cash" ? expense.amount : 0,
+        credit: expense.amount,
+        cashAmount: method === "cash" ? expense.amount : 0,
+        creditAmount: expense.amount,
       });
     }
 
@@ -828,7 +895,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),
       staffActivity: [...staffMap.values()].sort((a, b) => b.sales - a.sales),
       productActivity: [...productMap.values()].sort((a, b) => b.salesValue - a.salesValue),
-      expenses: filteredExpenses.map((expense) => ({ id: expense.id, date: expense.date, reference: expense.reference || expense.id, category: expense.category, description: expense.description, paymentMethod: normalizedPaymentMethod(expense.paymentMethod), account: expense.cashAccount?.name || "", staff: userLabel(expense.User), amount: expense.amount })),
+      expenses: filteredExpenses.map(expenseReportRow),
       transactions: transactionRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
       staffTills,
       branches,
@@ -1654,8 +1721,8 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
 
     const curWhere = scopedWhere(s, { createdAt: { gte: curStart, lt: curEnd } });
     const prevWhere = scopedWhere(s, { createdAt: { gte: prevStart, lt: prevEnd } });
-    const curExpWhere = scopedWhere(s, { date: { gte: curStart, lt: curEnd } });
-    const prevExpWhere = scopedWhere(s, { date: { gte: prevStart, lt: prevEnd } });
+    const curExpWhere = scopedExpenseWhere(s, expenseDateWhere({ gte: curStart, lt: curEnd }));
+    const prevExpWhere = scopedExpenseWhere(s, expenseDateWhere({ gte: prevStart, lt: prevEnd }));
 
     const [salesAgg, saleRecordAgg, expensesAgg, salesCount, saleRecordCount, salesWithItems, saleRecordsWithItems,
            prevSalesAgg, prevSaleRecordAgg, prevExpensesAgg, prevSalesCount, prevSaleRecordCount, prevSalesWithItems, prevSaleRecordsWithItems] = await Promise.all([
@@ -1783,7 +1850,7 @@ router.get("/financial/income", authenticateToken, async (req, res) => {
 router.get("/financial/expense", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const expenses = await prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), include: { User: { select: { fname: true, lname: true, name: true } }, branch: { select: { name: true } }, cashAccount: { select: { name: true, type: true } } }, orderBy: { date: "asc" } });
+    const expenses = await prisma.expense.findMany({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), include: { User: { select: { fname: true, lname: true, name: true } }, branch: { select: { name: true } }, cashAccount: { select: { name: true, type: true } } }, orderBy: { date: "asc" } });
     const enriched = transformExpenseData(expenses.map((expense) => ({
       ...expense,
       user: expense.User,
@@ -1831,7 +1898,7 @@ router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
     const [salesAgg, saleRecordAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts, salesWithItems, saleRecordsWithItems, taxPaymentsAgg] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
       prisma.saleRecord.aggregate({ where: scopedWhere(s, df(req)), _sum: { total: true, tax: true } }),
-      prisma.expense.aggregate({ where: scopedWhere(s, df(req, "date")), _sum: { amount: true } }),
+      prisma.expense.aggregate({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), _sum: { amount: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
       prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
       prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
@@ -1876,7 +1943,7 @@ router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
       prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
       prisma.sale.aggregate({ where: scopedWhere(s), _sum: { total: true, tax: true } }),
       prisma.saleRecord.aggregate({ where: scopedWhere(s), _sum: { total: true, tax: true } }),
-      prisma.expense.aggregate({ where: scopedWhere(s), _sum: { amount: true } }),
+      prisma.expense.aggregate({ where: scopedExpenseWhere(s), _sum: { amount: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s),
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
@@ -1919,7 +1986,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       // Credit purchases (SupplierPurchase)
       prisma.supplierPurchase.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, refNo: true, total: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Expenses
-      prisma.expense.findMany({ where: scopedWhere(s, { ...df(req, "date"), ...branchFilter }), select: { id: true, category: true, amount: true, date: true }, orderBy: { date: "desc" } }),
+      prisma.expense.findMany({ where: scopedExpenseWhere(s, { ...expenseDateWhere(dateRangeFromQuery(req)), ...branchFilter }), select: { id: true, category: true, amount: true, date: true, createdAt: true }, orderBy: { date: "desc" } }),
       // Customer payments
       prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Supplier payments
@@ -3291,7 +3358,7 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
       prisma.saleRecord.findMany({ where: scopedWhere(s, df(req)), select: { total: true, tax: true } }),
       prisma.supplierPurchase.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, minStock: true, expiryDate: true } }),
-      prisma.expense.findMany({ where: scopedWhere(s, df(req, "date")), select: { amount: true } }),
+      prisma.expense.findMany({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), select: { amount: true } }),
       prisma.supplier.findMany({ where: scopedWhere(s), select: { balance: true } }),
       prisma.sale.findMany({
         where: scopedWhere(s, df(req)),
@@ -4376,8 +4443,8 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
 
     const curWhere = scopedWhere(s, { createdAt: { gte: curStart, lt: curEnd } });
     const prevWhere = scopedWhere(s, { createdAt: { gte: prevStart, lt: prevEnd } });
-    const curExpWhere = scopedWhere(s, { date: { gte: curStart, lt: curEnd } });
-    const prevExpWhere = scopedWhere(s, { date: { gte: prevStart, lt: prevEnd } });
+    const curExpWhere = scopedExpenseWhere(s, expenseDateWhere({ gte: curStart, lt: curEnd }));
+    const prevExpWhere = scopedExpenseWhere(s, expenseDateWhere({ gte: prevStart, lt: prevEnd }));
 
     const [
       curSalesAgg, curSaleRecordsAgg, prevSalesAgg, prevSaleRecordsAgg, curExpAgg, prevExpAgg,

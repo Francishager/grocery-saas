@@ -117,7 +117,8 @@ export default function ExpensesPage() {
         const params = new URLSearchParams({
           ...(searchTerm && { search: searchTerm }),
           ...(categoryFilter && { category: categoryFilter }),
-          ...(startDate && endDate && { startDate, endDate })
+          ...(startDate && { startDate }),
+          ...(endDate && { endDate })
         })
         const response = await apiFetch(`/api/expenses/expenses?${params}`)
         if (response.ok) {
@@ -162,7 +163,8 @@ export default function ExpensesPage() {
       if (online) {
         const params = new URLSearchParams({
           ...(searchTerm && { search: searchTerm }),
-          ...(startDate && endDate && { startDate, endDate })
+          ...(startDate && { startDate }),
+          ...(endDate && { endDate })
         })
         const response = await apiFetch(`/api/expenses/cash-transactions?${params}`)
         if (response.ok) {
@@ -182,10 +184,8 @@ export default function ExpensesPage() {
     try {
       if (online) {
         const params = new URLSearchParams({
-          ...(startDate && endDate && { 
-            startDate,
-            endDate
-          })
+          ...(startDate && { startDate }),
+          ...(endDate && { endDate })
         })
         
         const response = await apiFetch(`/api/expenses/cash-flow/summary?${params}`)

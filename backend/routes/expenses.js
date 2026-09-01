@@ -93,6 +93,40 @@ const withUser = (record) => {
   return { ...rest, user: User || record.user || null }
 }
 
+function queryDateRange(query) {
+  const from = query.startDate || query.from
+  const to = query.endDate || query.to
+  const range = {}
+
+  if (from) range.gte = new Date(from)
+  if (to) {
+    const end = new Date(to)
+    if (!Number.isNaN(end.getTime()) && String(to).length <= 10) {
+      end.setHours(23, 59, 59, 999)
+    }
+    range.lte = end
+  }
+
+  return Object.keys(range).length ? range : null
+}
+
+function expenseDateWhere(dateRange) {
+  if (!dateRange) return null
+  return { OR: [{ date: dateRange }, { createdAt: dateRange }] }
+}
+
+function scopedExpenseWhere(scope, filters = []) {
+  const clauses = [...filters.filter(Boolean)]
+  if (scope.branchId) {
+    clauses.push({ OR: [{ branchId: scope.branchId }, { branchId: null }] })
+  }
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {})
+  }
+}
+
 async function paymentMethodPermissionsForRequest(req) {
   if (req.userPermissions !== undefined) {
     return getPaymentMethodPermissions(req)
@@ -129,18 +163,23 @@ async function canUsePaymentMethod(req, paymentMethod) {
 router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
-    const { page = 1, limit = 50, category, startDate, endDate } = req.query
+    const { page = 1, limit = 50, category, search } = req.query
     const skip = (Number(page) - 1) * Number(limit)
+    const dateRange = queryDateRange(req.query)
+    const filters = [
+      category ? { category } : null,
+      expenseDateWhere(dateRange),
+      search ? {
+        OR: [
+          { description: { contains: String(search), mode: 'insensitive' } },
+          { category: { contains: String(search), mode: 'insensitive' } },
+          { reference: { contains: String(search), mode: 'insensitive' } },
+          { notes: { contains: String(search), mode: 'insensitive' } }
+        ]
+      } : null
+    ]
 
-    const where = scopedWhere(scope, {
-      ...(category && { category }),
-      ...(startDate && endDate && {
-        date: {
-          gte: new Date(startDate),
-          lte: new Date(endDate)
-        }
-      })
-    })
+    const where = scopedExpenseWhere(scope, filters)
 
     const [expenses, total] = await Promise.all([
       prisma.expense.findMany({
@@ -673,18 +712,21 @@ router.put('/cash-accounts/:id', authenticateToken, requireAnyPermission(['canEd
 // Get cash transactions
 router.get('/cash-transactions', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
-    const { page = 1, limit = 50, accountId, type, startDate, endDate } = req.query
+    const { page = 1, limit = 50, accountId, type, search } = req.query
     const skip = (Number(page) - 1) * Number(limit)
+    const dateRange = queryDateRange(req.query)
 
     const where = {
       tenantId: req.tenant.id,
       ...(accountId && { accountId }),
       ...(type && { type }),
-      ...(startDate && endDate && {
-        createdAt: {
-          gte: new Date(startDate),
-          lte: new Date(endDate)
-        }
+      ...(dateRange && { createdAt: dateRange }),
+      ...(search && {
+        OR: [
+          { description: { contains: String(search), mode: 'insensitive' } },
+          { reference: { contains: String(search), mode: 'insensitive' } },
+          { type: { contains: String(search), mode: 'insensitive' } }
+        ]
       })
     }
 
@@ -723,17 +765,13 @@ router.get('/cash-transactions', authenticateToken, requireAnyPermission(['canVi
 router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
-    const { startDate, endDate } = req.query
+    const dateRange = queryDateRange(req.query)
 
-    const dateFilter = startDate && endDate ? {
-      createdAt: {
-        gte: new Date(startDate),
-        lte: new Date(endDate)
-      }
-    } : {}
+    const createdAtFilter = dateRange ? { createdAt: dateRange } : {}
 
     const [
       totalIncome,
+      creditSalesIncome,
       totalExpenses,
       cashAccounts,
       receivablesSummary,
@@ -741,17 +779,18 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
     ] = await Promise.all([
       // Total income
       prisma.sale.aggregate({
-        where: scopedWhere(scope, {
-          ...(Object.keys(dateFilter).length ? { createdAt: dateFilter.createdAt } : {})
-        }),
+        where: scopedWhere(scope, createdAtFilter),
+        _sum: { total: true }
+      }),
+
+      prisma.saleRecord.aggregate({
+        where: scopedWhere(scope, createdAtFilter),
         _sum: { total: true }
       }),
 
       // Total expenses
       prisma.expense.aggregate({
-        where: scopedWhere(scope, {
-          ...(Object.keys(dateFilter).length ? { date: dateFilter.createdAt } : {})
-        }),
+        where: scopedExpenseWhere(scope, [expenseDateWhere(dateRange)]),
         _sum: { amount: true }
       }),
 
@@ -783,7 +822,7 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
       })
     ])
 
-    const incomeAmount = totalIncome._sum.total || 0
+    const incomeAmount = (totalIncome._sum.total || 0) + (creditSalesIncome._sum.total || 0)
     const expenseAmount = totalExpenses._sum.amount || 0
     const netCashFlow = incomeAmount - expenseAmount
 

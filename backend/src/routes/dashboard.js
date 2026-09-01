@@ -32,6 +32,25 @@ const saleItemCostSelect = {
 const aggregateTotal = (aggregate, field = "total") => Number(aggregate?._sum?.[field] || 0);
 const aggregateCount = (aggregate) => Number(aggregate?._count || 0);
 
+function expenseDateWhere(dateRange) {
+  if (!dateRange || !Object.keys(dateRange).length) return {};
+  return { OR: [{ date: dateRange }, { createdAt: dateRange }] };
+}
+
+function scopedExpenseWhere(scope, extra = {}) {
+  const { branchId, ...rest } = extra;
+  const branchScope = branchId || scope.branchId;
+  const clauses = [];
+
+  if (Object.keys(rest).length) clauses.push(rest);
+  if (branchScope) clauses.push({ OR: [{ branchId: branchScope }, { branchId: null }] });
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {}),
+  };
+}
+
 function mergeGroupedTotals(groups) {
   const map = new Map();
   groups.flat().forEach((group) => {
@@ -87,7 +106,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
       prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
-      prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: startOfMonth } }), _sum: { amount: true } }),
+      prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth })), _sum: { amount: true } }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, expiryDate: { not: null, lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000) } }) }),
@@ -154,7 +173,7 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
       const [saleAgg, saleRecordAgg, expAgg] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
-        prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: start, lt: end } }), _sum: { amount: true } }),
+        prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
       ]);
       revenue.push(aggregateTotal(saleAgg) + aggregateTotal(saleRecordAgg));
       expenses.push(aggregateTotal(expAgg, "amount"));
@@ -183,7 +202,7 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
       const [saleAgg, saleRecordAgg, expAgg, salesWithItems, saleRecordsWithItems] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
-        prisma.expense.aggregate({ where: scopedWhere(scope, { date: { gte: start, lt: end } }), _sum: { amount: true } }),
+        prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
         prisma.sale.findMany({
           where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
           select: { items: { select: saleItemCostSelect } },
@@ -227,8 +246,8 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
         orderBy: { createdAt: "asc" },
       }),
       prisma.expense.findMany({
-        where: scopedWhere(scope, { date: { gte: startOfMonth, lt: endOfMonth } }),
-        select: { amount: true, date: true },
+        where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth, lt: endOfMonth })),
+        select: { amount: true, date: true, createdAt: true },
         orderBy: { date: "asc" },
       }),
     ]);
@@ -252,7 +271,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
 
     // Aggregate expenses by day
     expenses.forEach((exp) => {
-      const day = new Date(exp.date).getDate();
+      const day = new Date(exp.date || exp.createdAt).getDate();
       if (dayMap[day]) {
         dayMap[day].expenses += exp.amount || 0;
       }

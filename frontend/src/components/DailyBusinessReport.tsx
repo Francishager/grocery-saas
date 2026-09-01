@@ -32,9 +32,26 @@ type Drilldown = { title: string; rows: any[] } | null
 type SummaryCard = { label: string; value: number; kinds: string[]; methods?: string[]; icon: typeof BarChart3 }
 
 const today = () => new Date().toISOString().slice(0, 10)
-const numberValue = (value: unknown) => Number(value || 0)
-const money = (value: unknown) => formatCurrency(Number(value || 0))
+const numberValue = (value: unknown) => {
+  const number = Number(value ?? 0)
+  return Number.isFinite(number) ? number : 0
+}
+const money = (value: unknown) => formatCurrency(numberValue(value))
 const text = (value: unknown) => String(value || '-').replace(/_/g, ' ')
+const normalizePaymentMethod = (value: unknown) => {
+  const method = String(value || 'cash').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (['mobile_money', 'mobilemoney', 'momo', 'mtn', 'mtn_momo', 'airtel', 'airtel_money'].includes(method)) return 'mobile_money'
+  if (['bank_transfer', 'banktransfer', 'wire_transfer', 'bank', 'cheque', 'check'].includes(method)) return 'bank'
+  if (['card', 'debit_card', 'credit_card'].includes(method)) return 'card'
+  if (method === 'credit' || method === 'on_credit') return 'credit'
+  return 'cash'
+}
+const rowKey = (row: any) => row?.id || `${row?.kind || 'row'}-${row?.reference || ''}-${row?.date || ''}`
+const metricValue = (value: unknown, fallback = 0) => {
+  if (value === undefined || value === null || value === '') return fallback
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
+}
 const customerIdOf = (row: any) => {
   const id = row?.customerId || row?.id || ''
   if (!id || id === 'walk-in' || String(id).startsWith('cash-name:')) return ''
@@ -277,7 +294,15 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
   const [transaction, setTransaction] = useState<any>(null)
   const [customer, setCustomer] = useState<any>(null)
   const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
-  const transactions = data.transactions || []
+  const transactions = useMemo(() => (data.transactions || []).map((row: any) => ({
+    ...row,
+    paymentMethod: normalizePaymentMethod(row.paymentMethod || row.method),
+    debit: numberValue(row.debit),
+    credit: numberValue(row.credit),
+    cashAmount: row.cashAmount === undefined || row.cashAmount === null ? row.cashAmount : numberValue(row.cashAmount),
+    creditAmount: row.creditAmount === undefined || row.creditAmount === null ? row.creditAmount : numberValue(row.creditAmount),
+    amount: numberValue(row.amount),
+  })), [data.transactions])
   const summary = data.summary || {}
   const cash = data.cashMovement || {}
   const profitability = data.profitability || {}
@@ -288,7 +313,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       kind: 'expense',
       category: row.category || 'Uncategorized',
       description: row.description || row.category || 'Expense',
-      paymentMethod: row.paymentMethod || 'cash',
+      paymentMethod: normalizePaymentMethod(row.paymentMethod || row.method),
       account: row.account || row.cashAccount?.name || '',
       staff: row.staff || row.User?.name || '',
       amount: numberValue(row.amount),
@@ -306,8 +331,22 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     [expenseRows]
   )
 
+  const rowsForKinds = (kinds: string[], methods?: string[]) => {
+    const rows = new Map<string, any>()
+    transactions.forEach((row) => {
+      if (kinds.includes(row.kind) && (!methods?.length || methods.includes(row.paymentMethod))) {
+        rows.set(rowKey(row), row)
+      }
+    })
+    if (kinds.includes('expense')) {
+      expenseRows.forEach((row) => {
+        if (!methods?.length || methods.includes(row.paymentMethod)) rows.set(rowKey(row), row)
+      })
+    }
+    return [...rows.values()]
+  }
   const openKind = (title: string, kinds: string[], methods?: string[]) => {
-    setDrilldown({ title, rows: transactions.filter((row) => kinds.includes(row.kind) && (!methods?.length || methods.includes(row.paymentMethod))) })
+    setDrilldown({ title, rows: rowsForKinds(kinds, methods) })
   }
   const openRows = (title: string, rows: any[]) => setDrilldown({ title, rows })
   const customerTransactions = useMemo(() => customer ? (customer.transactions || transactions.filter((row) => row.customerId === customerIdOf(customer) || row.customer === customer.name)) : [], [customer, transactions])
@@ -317,50 +356,121 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     if (!customerId) return
     setHistoryCustomer({ id: customerId, name: row.name || row.customer || 'Customer', phone: row.phone })
   }
+  const cardTotals = useMemo(() => {
+    const saleRows = transactions.filter((row) => row.kind === 'sale' || row.kind === 'credit-sale')
+    const sum = (rows: any[], getValue: (row: any) => number) => rows.reduce((total, row) => total + getValue(row), 0)
+    const paidPortion = (row: any) => {
+      if (row.cashAmount !== undefined && row.cashAmount !== null) return numberValue(row.cashAmount)
+      if (row.debit !== undefined && row.debit !== null) return numberValue(row.debit)
+      return numberValue(row.amount)
+    }
+    const creditPortion = (row: any) => {
+      if (row.creditAmount !== undefined && row.creditAmount !== null) return numberValue(row.creditAmount)
+      return row.kind === 'credit-sale' ? numberValue(row.amount) : 0
+    }
+    const fromSummary = (value: unknown, derived: number) => {
+      const summaryValue = metricValue(value, derived)
+      return summaryValue === 0 && derived !== 0 ? derived : summaryValue
+    }
+    const methodTotal = (method: string) => sum(saleRows.filter((row) => row.paymentMethod === method), paidPortion)
+    const expenseTotal = sum(expenseRows, (row) => numberValue(row.amount))
+    const transactionTotal = sum(saleRows, (row) => numberValue(row.amount))
+    const collectionTotal = sum(transactions.filter((row) => row.kind === 'collection'), (row) => numberValue(row.amount))
+    const cashCollectionTotal = sum(transactions.filter((row) => row.kind === 'collection' && row.paymentMethod === 'cash'), (row) => numberValue(row.amount))
+    const cashExpenseTotal = sum(expenseRows.filter((row) => row.paymentMethod === 'cash'), (row) => numberValue(row.amount))
+    const otherPhysicalCashIn = metricValue(cash.otherPhysicalCashIn ?? cash.otherCashIn, 0)
+    const otherPhysicalCashOut = metricValue(cash.otherPhysicalCashOut ?? cash.otherCashOut, 0)
+    const derivedCashAtHand =
+      numberValue(cash.openingCash) +
+      methodTotal('cash') +
+      metricValue(cash.cashCollections, cashCollectionTotal) +
+      otherPhysicalCashIn +
+      numberValue(cash.cashTransfersIn) -
+      cashExpenseTotal -
+      otherPhysicalCashOut -
+      numberValue(cash.cashTransfersOut) -
+      numberValue(cash.cashToSafe) -
+      numberValue(cash.cashToBank) -
+      numberValue(cash.cashToMobileMoney)
+    const derivedNetCashMovement =
+      methodTotal('cash') +
+      metricValue(cash.cashCollections, cashCollectionTotal) +
+      numberValue(cash.otherCashIn) +
+      numberValue(cash.cashTransfersIn) -
+      cashExpenseTotal -
+      numberValue(cash.otherCashOut) -
+      numberValue(cash.cashTransfersOut) -
+      numberValue(cash.cashToSafe) -
+      numberValue(cash.cashToBank) -
+      numberValue(cash.cashToMobileMoney)
+    const cogsTotal = sum(saleRows, (row) => Array.isArray(row.items)
+      ? row.items.reduce((total: number, item: any) => total + numberValue(item.cost ?? item.cogs), 0)
+      : numberValue(row.cogs ?? row.cost)
+    )
+    const revenueTotal = metricValue(profitability.revenue ?? summary.revenue, transactionTotal - numberValue(summary.taxCollected))
+    const grossProfitTotal = metricValue(profitability.grossProfit ?? summary.grossProfit, revenueTotal - cogsTotal)
+
+    return {
+      totalSales: fromSummary(summary.totalSales ?? summary.grossSales, transactionTotal),
+      revenue: revenueTotal,
+      cogs: metricValue(profitability.cogs ?? summary.cogs, cogsTotal),
+      cashSales: fromSummary(summary.cashSales, methodTotal('cash')),
+      creditSales: fromSummary(summary.creditSales, sum(saleRows, creditPortion)),
+      mobileMoneySales: fromSummary(summary.mobileMoneySales, methodTotal('mobile_money')),
+      bankSales: fromSummary(summary.bankSales, methodTotal('bank')),
+      cardSales: fromSummary(summary.cardSales, methodTotal('card')),
+      debtCollections: fromSummary(summary.debtCollections, collectionTotal),
+      expenses: fromSummary(summary.expenses, expenseTotal),
+      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand),
+      netCashMovement: fromSummary(cash.netCashMovement ?? summary.netCashMovement, derivedNetCashMovement),
+      grossProfit: grossProfitTotal,
+      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal),
+    }
+  }, [cash.cashAtHand, cash.netCashMovement, expenseRows, profitability, summary, transactions])
 
   const cards: SummaryCard[] = [
-    { label: 'Total Sales', value: Number(summary.totalSales || 0), kinds: ['sale', 'credit-sale'], icon: BarChart3 },
-    { label: 'Cash Sales', value: Number(summary.cashSales || 0), kinds: ['sale', 'credit-sale'], methods: ['cash'], icon: Banknote },
-    { label: 'Credit Sales', value: Number(summary.creditSales || 0), kinds: ['credit-sale'], icon: CreditCard },
-    { label: 'Mobile Money Sales', value: Number(summary.mobileMoneySales || 0), kinds: ['sale', 'credit-sale'], methods: ['mobile_money'], icon: Smartphone },
-    { label: 'Bank / Card Sales', value: Number(summary.bankSales || 0) + Number(summary.cardSales || 0), kinds: ['sale', 'credit-sale'], methods: ['bank', 'card'], icon: ArrowUpFromLine },
-    { label: 'Debt Collections', value: Number(summary.debtCollections || 0), kinds: ['collection'], icon: ReceiptText },
-    { label: 'Expenses', value: Number(summary.expenses || 0), kinds: ['expense'], icon: ArrowDownToLine },
+    { label: 'Total Sales', value: cardTotals.totalSales, kinds: ['sale', 'credit-sale'], icon: BarChart3 },
+    { label: 'Cash Sales', value: cardTotals.cashSales, kinds: ['sale', 'credit-sale'], methods: ['cash'], icon: Banknote },
+    { label: 'Credit Sales', value: cardTotals.creditSales, kinds: ['credit-sale'], icon: CreditCard },
+    { label: 'Mobile Money Sales', value: cardTotals.mobileMoneySales, kinds: ['sale', 'credit-sale'], methods: ['mobile_money'], icon: Smartphone },
+    { label: 'Bank / Card Sales', value: cardTotals.bankSales + cardTotals.cardSales, kinds: ['sale', 'credit-sale'], methods: ['bank', 'card'], icon: ArrowUpFromLine },
+    { label: 'Debt Collections', value: cardTotals.debtCollections, kinds: ['collection'], icon: ReceiptText },
+    { label: 'Expenses', value: cardTotals.expenses, kinds: ['expense'], icon: ArrowDownToLine },
   ]
 
   const cashRows = [
-    ['Cash at Hand', cash.cashAtHand],
+    ['Cash at Hand', cardTotals.cashAtHand],
     ['Opening Physical Cash', cash.openingCash],
-    ['Cash Sales', cash.cashSales],
-    ['Cash Debt Collections', cash.cashCollections],
+    ['Cash Sales', metricValue(cash.cashSales, cardTotals.cashSales)],
+    ['Cash Debt Collections', metricValue(cash.cashCollections, cardTotals.debtCollections)],
     ['Other Cash In', cash.otherCashIn],
     ['Cash Transfers In', cash.cashTransfersIn],
-    ['Cash Expenses', cash.cashExpenses],
+    ['Cash Expenses', metricValue(cash.cashExpenses, expenseRows.filter((row) => row.paymentMethod === 'cash').reduce((total, row) => total + numberValue(row.amount), 0))],
     ['Other Cash Out', cash.otherCashOut],
     ['Cash Transfers Out', cash.cashTransfersOut],
     ['Moved to Safe', cash.cashToSafe],
     ['Moved to Bank', cash.cashToBank],
     ['Moved to Mobile Money', cash.cashToMobileMoney],
-    ['Net Cash Movement', cash.netCashMovement],
+    ['Net Cash Movement', cardTotals.netCashMovement],
     ['Cash Retained / Float', cash.cashRetained],
   ]
   const balancingTotals = [
-    { label: 'Cash at Hand', value: cash.cashAtHand, note: 'Physical cash after credit, expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
-    { label: 'Cash Sales', value: summary.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
-    { label: 'Credit Sales', value: summary.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
-    { label: 'Debt Collections', value: summary.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
-    { label: 'Expenses', value: summary.expenses, note: 'Money spent today', kinds: ['expense'] },
-    { label: 'Net Cash Movement', value: cash.netCashMovement, note: 'Cash in minus expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
-    { label: 'Gross Profit', value: profitability.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
-    { label: 'Net Profit', value: profitability.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
+    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Physical cash after credit, expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Cash Sales', value: cardTotals.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
+    { label: 'Credit Sales', value: cardTotals.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
+    { label: 'Debt Collections', value: cardTotals.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
+    { label: 'Expenses', value: cardTotals.expenses, note: 'Money spent today', kinds: ['expense'] },
+    { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash in minus expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Gross Profit', value: cardTotals.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
+    { label: 'Net Profit', value: cardTotals.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
   ]
   const cashFormulaRows = [
     { label: 'Opening Physical Cash', inflow: cash.openingCash, outflow: 0 },
-    { label: 'Cash Sales', inflow: cash.cashSales, outflow: 0 },
-    { label: 'Cash Debt Collections', inflow: cash.cashCollections || cash.debtCollections, outflow: 0 },
+    { label: 'Cash Sales', inflow: metricValue(cash.cashSales, cardTotals.cashSales), outflow: 0 },
+    { label: 'Cash Debt Collections', inflow: metricValue(cash.cashCollections ?? cash.debtCollections, cardTotals.debtCollections), outflow: 0 },
     { label: 'Other Cash In', inflow: cash.otherPhysicalCashIn ?? cash.otherCashIn, outflow: 0 },
     { label: 'Cash Transfers In', inflow: cash.cashTransfersIn, outflow: 0 },
-    { label: 'Cash Expenses', inflow: 0, outflow: cash.cashExpenses },
+    { label: 'Cash Expenses', inflow: 0, outflow: metricValue(cash.cashExpenses, expenseRows.filter((row) => row.paymentMethod === 'cash').reduce((total, row) => total + numberValue(row.amount), 0)) },
     { label: 'Other Cash Out', inflow: 0, outflow: cash.otherPhysicalCashOut ?? cash.otherCashOut },
     { label: 'Cash Transfers Out', inflow: 0, outflow: cash.cashTransfersOut },
     { label: 'Moved to Safe', inflow: 0, outflow: cash.cashToSafe },
@@ -433,10 +543,10 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><BriefcaseBusiness className="h-4 w-4" />Profitability</CardTitle></CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
             {[
-              ['Revenue', profitability.revenue],
-              ['COGS', profitability.cogs],
-              ['Gross Profit', profitability.grossProfit],
-              ['Net Profit', profitability.netProfit],
+              ['Revenue', cardTotals.revenue],
+              ['COGS', cardTotals.cogs],
+              ['Gross Profit', cardTotals.grossProfit],
+              ['Net Profit', cardTotals.netProfit],
             ].map(([label, value]) => <button key={label} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openKind(`${label} Support`, ['sale', 'credit-sale'])}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 break-words font-semibold">{money(value)}</p></button>)}
           </CardContent>
         </Card>
@@ -467,7 +577,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                     <td className="px-3 py-2 font-bold">Cash at Hand</td>
                     <td className="px-3 py-2 text-right">-</td>
                     <td className="px-3 py-2 text-right">-</td>
-                    <td className="px-3 py-2 text-right font-bold">{money(cash.cashAtHand)}</td>
+                    <td className="px-3 py-2 text-right font-bold">{money(cardTotals.cashAtHand)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -478,7 +588,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
               <span className="flex items-center gap-2"><ArrowDownToLine className="h-4 w-4" />Expense Breakdown</span>
-              <Badge variant="outline">{money(summary.expenses)}</Badge>
+              <Badge variant="outline">{money(cardTotals.expenses)}</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
