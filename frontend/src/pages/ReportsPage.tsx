@@ -1876,10 +1876,21 @@ export default function ReportsPage() {
     Object.entries(data?.summary || {}).forEach(([key, value]) => pushAmount('Summary', key.replace(/([A-Z])/g, ' $1'), value))
     Object.entries(data?.cashMovement || {}).forEach(([key, value]) => pushAmount('Cash Status', key.replace(/([A-Z])/g, ' $1'), value))
     Object.entries(data?.profitability || {}).forEach(([key, value]) => pushAmount('Profitability', key.replace(/([A-Z])/g, ' $1'), value))
+    const expenseRows = Array.isArray(data?.expenses) ? data.expenses : []
+    const expenseCategoryTotals = expenseRows.reduce((acc: Record<string, { total: number; count: number }>, row: any) => {
+      const key = row.category || 'Uncategorized'
+      acc[key] = acc[key] || { total: 0, count: 0 }
+      acc[key].total += Number(row.amount || 0)
+      acc[key].count += 1
+      return acc
+    }, {})
+    Object.entries(expenseCategoryTotals).forEach(([category, value]) => rows.push({ section: 'Expense Breakdown', item: category, details: `${value.count} transaction${value.count === 1 ? '' : 's'}`, amount: value.total, cashAmount: null, creditAmount: null, balance: null }))
+    expenseRows.forEach((row: any) => rows.push({ section: 'Expenses Paid Today', item: row.description || row.category || row.reference || row.id, details: `${row.category || 'Uncategorized'} - ${String(row.paymentMethod || 'cash').replace(/_/g, ' ')} - ${row.account || 'No account'} - ${row.staff || 'Unknown'}`, amount: row.amount || 0, cashAmount: 0, creditAmount: row.amount || 0, balance: null }))
     ;(data?.customerActivity || []).forEach((row: any) => rows.push({ section: 'Customer Activity', item: row.name, details: row.phone || '', amount: Number(row.cashSales || 0) + Number(row.creditSales || 0), cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.currentBalance || 0 }))
     ;(data?.staffActivity || []).forEach((row: any) => rows.push({ section: 'Staff Activity', item: row.name, details: `Collections ${formatCurrency(row.collections || 0)}`, amount: row.sales || 0, cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.cashHeld || 0 }))
     ;(data?.productActivity || []).forEach((row: any) => rows.push({ section: 'Product Activity', item: row.name, details: `Qty ${row.quantitySold || 0}, Stock ${row.currentStock ?? ''}`, amount: row.salesValue || 0, cashAmount: row.cogs || 0, creditAmount: row.grossProfit || 0, balance: null }))
     ;(data?.staffTills || []).forEach((row: any) => rows.push({ section: 'Cash Accounts', item: row.name, details: `${String(row.type || '').replace(/_/g, ' ')} - ${row.staff || 'Unassigned'}`, amount: row.expectedClosing ?? row.balance ?? 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.openingCash || 0 }))
+    ;(data?.transactions || []).filter((row: any) => row.kind === 'cash-movement' || row.kind === 'transfer').forEach((row: any) => rows.push({ section: 'Cash and Account Movements', item: row.reference || row.id, details: `${row.account || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.direction ? `- ${String(row.direction).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.balanceAfter || null }))
     ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: row.reference || row.id, details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || row.cashAmount || 0, creditAmount: row.credit || row.creditAmount || 0, balance: row.customerBalance || 0 }))
     return rows
   }

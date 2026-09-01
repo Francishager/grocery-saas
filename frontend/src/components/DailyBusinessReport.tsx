@@ -22,6 +22,7 @@ export interface DailyBusinessData {
   customerActivity: any[]
   staffActivity: any[]
   productActivity: any[]
+  expenses: any[]
   transactions: any[]
   staffTills: any[]
   generatedAt: string
@@ -57,6 +58,7 @@ function normalizeDailyBusinessData(input: any): DailyBusinessData {
     customerActivity: [],
     staffActivity: [],
     productActivity: [],
+    expenses: [],
     transactions: [],
     staffTills: [],
     generatedAt: new Date().toISOString(),
@@ -94,6 +96,7 @@ function normalizeDailyBusinessData(input: any): DailyBusinessData {
         expenses: 0,
         netProfit: totalProfit || totalSales - totalCost,
       },
+      expenses: [],
       transactions: input.map((row, index) => ({
         id: row.id || `${row.date || fallbackDate}-${index}`,
         kind: 'sale',
@@ -128,10 +131,26 @@ function normalizeDailyBusinessData(input: any): DailyBusinessData {
     customerActivity: Array.isArray(input.customerActivity) ? input.customerActivity : [],
     staffActivity: Array.isArray(input.staffActivity) ? input.staffActivity : [],
     productActivity: Array.isArray(input.productActivity) ? input.productActivity : [],
+    expenses: Array.isArray(input.expenses) ? input.expenses : [],
     transactions: Array.isArray(input.transactions) ? input.transactions : [],
     staffTills: Array.isArray(input.staffTills) ? input.staffTills : [],
     generatedAt: input.generatedAt || new Date().toISOString(),
   }
+}
+
+function groupMoneyRows<T extends { key: string; label: string }>(
+  rows: any[],
+  getKey: (row: any) => T,
+) {
+  const map = new Map<string, T & { amount: number; count: number }>()
+  rows.forEach((row) => {
+    const keyInfo = getKey(row)
+    const current = map.get(keyInfo.key) || { ...keyInfo, amount: 0, count: 0 }
+    current.amount += numberValue(row.amount)
+    current.count += 1
+    map.set(keyInfo.key, current)
+  })
+  return [...map.values()].sort((a, b) => b.amount - a.amount)
 }
 
 function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldown; onClose: () => void; onTransaction: (row: any) => void }) {
@@ -262,6 +281,30 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
   const summary = data.summary || {}
   const cash = data.cashMovement || {}
   const profitability = data.profitability || {}
+  const expenseRows = useMemo(() => {
+    const source = data.expenses.length ? data.expenses : transactions.filter((row) => row.kind === 'expense')
+    return source.map((row: any) => ({
+      ...row,
+      kind: 'expense',
+      category: row.category || 'Uncategorized',
+      description: row.description || row.category || 'Expense',
+      paymentMethod: row.paymentMethod || 'cash',
+      account: row.account || row.cashAccount?.name || '',
+      staff: row.staff || row.User?.name || '',
+      amount: numberValue(row.amount),
+      debit: numberValue(row.debit),
+      credit: numberValue(row.credit || row.amount),
+    }))
+  }, [data.expenses, transactions])
+  const cashMovementRows = useMemo(() => transactions.filter((row) => row.kind === 'cash-movement' || row.kind === 'transfer'), [transactions])
+  const expenseByCategory = useMemo(
+    () => groupMoneyRows(expenseRows, (row) => ({ key: row.category || 'Uncategorized', label: row.category || 'Uncategorized' })),
+    [expenseRows]
+  )
+  const expenseByMethod = useMemo(
+    () => groupMoneyRows(expenseRows, (row) => ({ key: row.paymentMethod || 'cash', label: text(row.paymentMethod || 'cash') })),
+    [expenseRows]
+  )
 
   const openKind = (title: string, kinds: string[], methods?: string[]) => {
     setDrilldown({ title, rows: transactions.filter((row) => kinds.includes(row.kind) && (!methods?.length || methods.includes(row.paymentMethod))) })
@@ -302,7 +345,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     ['Cash Retained / Float', cash.cashRetained],
   ]
   const balancingTotals = [
-    { label: 'Cash at Hand', value: cash.cashAtHand, note: 'Physical cash after credit, expenses, safe and bank movements', kinds: ['sale', 'collection', 'cash-movement', 'transfer'] },
+    { label: 'Cash at Hand', value: cash.cashAtHand, note: 'Physical cash after credit, expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Cash Sales', value: summary.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
     { label: 'Credit Sales', value: summary.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
     { label: 'Debt Collections', value: summary.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
@@ -311,6 +354,19 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Gross Profit', value: profitability.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
     { label: 'Net Profit', value: profitability.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
   ]
+  const cashFormulaRows = [
+    { label: 'Opening Physical Cash', inflow: cash.openingCash, outflow: 0 },
+    { label: 'Cash Sales', inflow: cash.cashSales, outflow: 0 },
+    { label: 'Cash Debt Collections', inflow: cash.cashCollections || cash.debtCollections, outflow: 0 },
+    { label: 'Other Cash In', inflow: cash.otherPhysicalCashIn ?? cash.otherCashIn, outflow: 0 },
+    { label: 'Cash Transfers In', inflow: cash.cashTransfersIn, outflow: 0 },
+    { label: 'Cash Expenses', inflow: 0, outflow: cash.cashExpenses },
+    { label: 'Other Cash Out', inflow: 0, outflow: cash.otherPhysicalCashOut ?? cash.otherCashOut },
+    { label: 'Cash Transfers Out', inflow: 0, outflow: cash.cashTransfersOut },
+    { label: 'Moved to Safe', inflow: 0, outflow: cash.cashToSafe },
+    { label: 'Moved to Bank', inflow: 0, outflow: cash.cashToBank },
+    { label: 'Moved to Mobile Money', inflow: 0, outflow: cash.cashToMobileMoney },
+  ].filter((row) => numberValue(row.inflow) || numberValue(row.outflow) || row.label === 'Opening Physical Cash')
 
   return (
     <div className="space-y-6 print:space-y-3">
@@ -386,6 +442,147 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         </Card>
       </section>
 
+      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><WalletCards className="h-4 w-4" />Cash Position Breakdown</CardTitle></CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-md border">
+              <table className="min-w-[640px] w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr><th className="px-3 py-2">Line</th><th className="px-3 py-2 text-right">Cash In</th><th className="px-3 py-2 text-right">Cash Out</th><th className="px-3 py-2 text-right">Effect</th></tr>
+                </thead>
+                <tbody>
+                  {cashFormulaRows.map((row) => {
+                    const effect = numberValue(row.inflow) - numberValue(row.outflow)
+                    return (
+                      <tr key={row.label} className="border-t">
+                        <td className="px-3 py-2 font-medium">{row.label}</td>
+                        <td className="px-3 py-2 text-right">{numberValue(row.inflow) ? money(row.inflow) : '-'}</td>
+                        <td className="px-3 py-2 text-right">{numberValue(row.outflow) ? money(row.outflow) : '-'}</td>
+                        <td className={effect < 0 ? 'px-3 py-2 text-right font-semibold text-red-600' : 'px-3 py-2 text-right font-semibold'}>{money(effect)}</td>
+                      </tr>
+                    )
+                  })}
+                  <tr className="border-t bg-primary/5">
+                    <td className="px-3 py-2 font-bold">Cash at Hand</td>
+                    <td className="px-3 py-2 text-right">-</td>
+                    <td className="px-3 py-2 text-right">-</td>
+                    <td className="px-3 py-2 text-right font-bold">{money(cash.cashAtHand)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+              <span className="flex items-center gap-2"><ArrowDownToLine className="h-4 w-4" />Expense Breakdown</span>
+              <Badge variant="outline">{money(summary.expenses)}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border">
+                <div className="border-b px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">By Category</div>
+                <div className="divide-y">
+                  {expenseByCategory.length ? expenseByCategory.map((row) => (
+                    <button key={row.key} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/40" onClick={() => openRows(`Expenses - ${row.label}`, expenseRows.filter((expense) => (expense.category || 'Uncategorized') === row.key))}>
+                      <span className="min-w-0"><span className="block break-words font-medium">{row.label}</span><span className="text-xs text-muted-foreground">{row.count} transaction{row.count === 1 ? '' : 's'}</span></span>
+                      <span className="shrink-0 font-semibold">{money(row.amount)}</span>
+                    </button>
+                  )) : <p className="px-3 py-6 text-sm text-muted-foreground">No expenses recorded.</p>}
+                </div>
+              </div>
+              <div className="rounded-md border">
+                <div className="border-b px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">By Payment Method</div>
+                <div className="divide-y">
+                  {expenseByMethod.length ? expenseByMethod.map((row) => (
+                    <button key={row.key} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left capitalize hover:bg-muted/40" onClick={() => openRows(`Expenses - ${row.label}`, expenseRows.filter((expense) => (expense.paymentMethod || 'cash') === row.key))}>
+                      <span className="min-w-0"><span className="block break-words font-medium">{row.label}</span><span className="text-xs text-muted-foreground">{row.count} transaction{row.count === 1 ? '' : 's'}</span></span>
+                      <span className="shrink-0 font-semibold">{money(row.amount)}</span>
+                    </button>
+                  )) : <p className="px-3 py-6 text-sm text-muted-foreground">No expense payments recorded.</p>}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ArrowDownToLine className="h-4 w-4" />Expenses Paid Today</CardTitle></CardHeader>
+        <CardContent>
+          {expenseRows.length ? (
+            <>
+              <div className="grid gap-3 md:hidden">
+                {expenseRows.map((row: any, index: number) => (
+                  <button key={row.id || index} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => setTransaction(row)}>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="block break-words font-medium">{row.description}</span>
+                        <span className="text-xs text-muted-foreground">{row.category} - {text(row.paymentMethod)} - {row.account || 'No account'}</span>
+                      </span>
+                      <span className="shrink-0 font-semibold">{money(row.amount)}</span>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">{row.staff || 'Unknown'} - {row.reference || row.id}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto rounded-md border md:block">
+                <table className="min-w-[1120px] w-full text-sm">
+                  <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                    <tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Category</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Paid From</th><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Outflow</th></tr>
+                  </thead>
+                  <tbody>
+                    {expenseRows.map((row: any, index: number) => (
+                      <tr key={row.id || index} className="border-t hover:bg-muted/30">
+                        <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{row.reference || row.id}</button></td>
+                        <td className="px-3 py-2">{row.category || 'Uncategorized'}</td>
+                        <td className="max-w-[320px] px-3 py-2"><span className="block break-words">{row.description || '-'}</span></td>
+                        <td className="px-3 py-2">{row.account || '-'}</td>
+                        <td className="px-3 py-2">{row.staff || '-'}</td>
+                        <td className="px-3 py-2 capitalize">{text(row.paymentMethod)}</td>
+                        <td className="px-3 py-2 text-right font-semibold">{money(row.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : <p className="rounded-md border p-6 text-center text-sm text-muted-foreground">No expenses recorded for this day.</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><WalletCards className="h-4 w-4" />Cash and Account Movement Details</CardTitle></CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto rounded-md border">
+            <table className="min-w-[1080px] w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                <tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Account</th><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Direction</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Amount</th></tr>
+              </thead>
+              <tbody>
+                {cashMovementRows.length ? cashMovementRows.map((row: any, index: number) => (
+                  <tr key={row.id || index} className="border-t hover:bg-muted/30">
+                    <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                    <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{row.reference || row.id}</button></td>
+                    <td className="px-3 py-2 capitalize">{text(row.kind)}</td>
+                    <td className="px-3 py-2">{row.account || '-'}</td>
+                    <td className="px-3 py-2">{row.staff || '-'}</td>
+                    <td className="px-3 py-2 capitalize">{text(row.direction || row.paymentMethod)}</td>
+                    <td className="px-3 py-2 text-right">{money(row.debit)}</td>
+                    <td className="px-3 py-2 text-right">{money(row.credit)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{money(row.amount)}</td>
+                  </tr>
+                )) : <tr><td className="px-3 py-6 text-center text-muted-foreground" colSpan={9}>No separate cash or account movements for this day.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UsersRound className="h-4 w-4" />Customer Activity</CardTitle></CardHeader>
@@ -396,7 +593,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UserRound className="h-4 w-4" />Staff Activity</CardTitle></CardHeader>
           <CardContent className="max-h-[520px] space-y-2 overflow-auto">
-            {data.staffActivity?.length ? data.staffActivity.map((row: any) => <button key={row.id} className="flex w-full items-center justify-between gap-3 rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openRows(`${row.name} Activity`, transactions.filter((tx) => tx.staffId === row.id))}><span className="min-w-0 font-medium">{row.name}</span><span className="shrink-0 text-right text-sm"><span className="block font-semibold">{money(row.sales)}</span><span className="text-xs text-muted-foreground">Collections {money(row.collections)}</span></span></button>) : <p className="text-sm text-muted-foreground">No staff activity.</p>}
+            {data.staffActivity?.length ? data.staffActivity.map((row: any) => <button key={row.id} className="flex w-full items-center justify-between gap-3 rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openRows(`${row.name} Activity`, transactions.filter((tx) => tx.staffId === row.id))}><span className="min-w-0 font-medium">{row.name}</span><span className="shrink-0 text-right text-sm"><span className="block font-semibold">{money(row.sales)}</span><span className="text-xs text-muted-foreground">Collections {money(row.collections)} - Expenses {money(row.expenses)}</span></span></button>) : <p className="text-sm text-muted-foreground">No staff activity.</p>}
           </CardContent>
         </Card>
         <Card>
