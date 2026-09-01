@@ -1435,11 +1435,13 @@ export default function AccountingPage() {
                       setJeAccount(value)
                       if (value === jePaymentAccount) setJePaymentAccount('')
                     }}>
-                      <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Select account for this action" /></SelectTrigger>
                       <SelectContent>
-                        {journalActionAccountOptions.filter(option => option.value !== jePaymentAccount).map(option => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
+                        {journalActionAccountOptions.length > 0
+                          ? journalActionAccountOptions.map(option => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))
+                          : <SelectItem value="no-action-accounts" disabled>No matching accounts for this action</SelectItem>}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1472,7 +1474,7 @@ export default function AccountingPage() {
                     {jePaymentMethod && (
                       <div>
                         <Label>{PAYMENT_METHOD_LABELS[jePaymentMethod] || 'Select Account'}</Label>
-                        <Select value={jePaymentAccount} onValueChange={setJePaymentAccount}>
+                        <Select value={jePaymentAccount} onValueChange={setJePaymentAccount} disabled={!canChooseOtherTransactionAccounts && paymentAccountOptions.length <= 1}>
                           <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
                           <SelectContent>
                             {paymentAccountOptions.length > 0

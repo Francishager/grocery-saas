@@ -51,6 +51,60 @@ function scopedExpenseWhere(scope, extra = {}) {
   };
 }
 
+function scopedJournalWhere(scope, extra = {}) {
+  const { branchId, ...rest } = extra;
+  const branchScope = branchId || scope.branchId;
+  const clauses = [];
+
+  if (Object.keys(rest).length) clauses.push(rest);
+  if (branchScope) clauses.push({ OR: [{ branchId: branchScope }, { branchId: null }] });
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {}),
+  };
+}
+
+function isExpenseAccount(account) {
+  return ["expense", "expenses"].includes(String(account?.type || "").trim().toLowerCase());
+}
+
+async function journalExpenseRows(scope, dateRange) {
+  const entries = await prisma.journalEntry.findMany({
+    where: scopedJournalWhere(scope, {
+      date: dateRange,
+      status: { not: "reversed" },
+      lines: {
+        some: {
+          debit: { gt: 0 },
+          account: { type: { in: ["expense", "expenses"] } },
+        },
+      },
+    }),
+    select: {
+      date: true,
+      createdAt: true,
+      lines: {
+        select: {
+          debit: true,
+          account: { select: { type: true } },
+        },
+      },
+    },
+  });
+
+  return entries.flatMap((entry) => (
+    entry.lines
+      .filter((line) => isExpenseAccount(line.account) && Number(line.debit || 0) > 0)
+      .map((line) => ({ amount: Number(line.debit || 0), date: entry.date || entry.createdAt }))
+  ));
+}
+
+async function journalExpenseTotal(scope, dateRange) {
+  const rows = await journalExpenseRows(scope, dateRange);
+  return rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+}
+
 function mergeGroupedTotals(groups) {
   const map = new Map();
   groups.flat().forEach((group) => {
@@ -92,6 +146,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       purchasesThisMonth,
       supplierPurchasesThisMonth,
       expensesThisMonth,
+      journalExpensesThisMonth,
       products,
       lowStockProducts,
       expiringProducts,
@@ -107,6 +162,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth })), _sum: { amount: true } }),
+      journalExpenseTotal(scope, { gte: startOfMonth }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, expiryDate: { not: null, lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000) } }) }),
@@ -125,7 +181,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const revenueThisMonth = aggregateTotal(salesThisMonth) + aggregateTotal(saleRecordsThisMonth);
     const revenueLastMonth = aggregateTotal(salesLastMonth) + aggregateTotal(saleRecordsLastMonth);
     const revenueChange = revenueLastMonth ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1) : 0;
-    const totalExpenses = aggregateTotal(expensesThisMonth, "amount");
+    const totalExpenses = aggregateTotal(expensesThisMonth, "amount") + Number(journalExpensesThisMonth || 0);
     const totalPurchases = aggregateTotal(purchasesThisMonth) + aggregateTotal(supplierPurchasesThisMonth);
     const cogs = [...salesWithItemsThisMonth, ...saleRecordsWithItemsThisMonth].reduce((sum, sale) => sum + saleCogs(sale), 0);
     const grossProfit = revenueThisMonth - cogs;
@@ -170,13 +226,14 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
       const label = start.toLocaleString("default", { month: "short" });
       labels.push(label);
 
-      const [saleAgg, saleRecordAgg, expAgg] = await Promise.all([
+      const [saleAgg, saleRecordAgg, expAgg, journalExp] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
+        journalExpenseTotal(scope, { gte: start, lt: end }),
       ]);
       revenue.push(aggregateTotal(saleAgg) + aggregateTotal(saleRecordAgg));
-      expenses.push(aggregateTotal(expAgg, "amount"));
+      expenses.push(aggregateTotal(expAgg, "amount") + Number(journalExp || 0));
     }
 
     res.json({ labels, revenue, expenses });
@@ -199,10 +256,11 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       labels.push(start.toLocaleString("default", { month: "short" }));
 
-      const [saleAgg, saleRecordAgg, expAgg, salesWithItems, saleRecordsWithItems] = await Promise.all([
+      const [saleAgg, saleRecordAgg, expAgg, journalExp, salesWithItems, saleRecordsWithItems] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
+        journalExpenseTotal(scope, { gte: start, lt: end }),
         prisma.sale.findMany({
           where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
           select: { items: { select: saleItemCostSelect } },
@@ -214,7 +272,7 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
       ]);
       const rev = aggregateTotal(saleAgg) + aggregateTotal(saleRecordAgg);
       const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
-      const exp = aggregateTotal(expAgg, "amount");
+      const exp = aggregateTotal(expAgg, "amount") + Number(journalExp || 0);
       grossProfit.push(rev - cogs);
       netProfit.push(rev - cogs - exp);
     }
@@ -234,7 +292,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    const [sales, saleRecords, expenses] = await Promise.all([
+    const [sales, saleRecords, expenses, journalExpenses] = await Promise.all([
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
         select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
@@ -250,6 +308,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
         select: { amount: true, date: true, createdAt: true },
         orderBy: { date: "asc" },
       }),
+      journalExpenseRows(scope, { gte: startOfMonth, lt: endOfMonth }),
     ]);
 
     // Build a map of day -> data
@@ -270,7 +329,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     });
 
     // Aggregate expenses by day
-    expenses.forEach((exp) => {
+    [...expenses, ...journalExpenses].forEach((exp) => {
       const day = new Date(exp.date || exp.createdAt).getDate();
       if (dayMap[day]) {
         dayMap[day].expenses += exp.amount || 0;

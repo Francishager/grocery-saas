@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission, getPaymentMethodPermissions, hasAccountingPermission } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, getPaymentMethodPermissions } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
@@ -24,6 +24,16 @@ const PAYMENT_METHOD_PERMISSION_SELECT = {
   canUseMobileMoney: true,
   canUseBank: true,
   canUseCard: true,
+};
+const BROAD_TRANSACTION_ACCOUNT_ROLES = new Set(["owner", "admin", "manager", "accountant", "saas_admin", "platform_admin", "super_admin"]);
+const JOURNAL_ACTION_ACCOUNT_TYPES = {
+  register_income: ["income", "revenue"],
+  register_expense: ["expense", "expenses"],
+  register_capital: ["equity"],
+  register_liability: ["liability"],
+  register_asset: ["asset"],
+  clear_payable: ["liability"],
+  collect_receivable: ["asset"],
 };
 
 const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
@@ -63,6 +73,37 @@ const transactionAccountPermissionKey = (cashAccountType) => {
   return TRANSACTION_ACCOUNT_PERMISSION_KEYS[normalizeValue(cashAccountType)];
 };
 
+const transactionAccountMatchesPaymentMethod = (cashAccountType, paymentMethod) => {
+  const type = normalizeValue(cashAccountType);
+  const method = normalizeValue(paymentMethod);
+  if (!method) return true;
+  if (method === "cash") return type === "cash";
+  if (method === "safe") return type === "safe" || type === "cash";
+  if (["bank", "bank_transfer", "cheque"].includes(method)) return type === "bank";
+  if (method === "mobile_money") return type === "mobile_money";
+  if (method === "card") return type === "card";
+  return type === method;
+};
+
+const hasBroadTransactionAccountAccess = (req) => {
+  const role = normalizeValue(req.user?.role);
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  return BROAD_TRANSACTION_ACCOUNT_ROLES.has(role) ||
+    permissions.includes("*") ||
+    permissions.includes("canEditAccounting") ||
+    permissions.includes("canDeleteAccounting");
+};
+
+async function requestUserCashAccountId(req) {
+  if (req.userCashAccountId) return req.userCashAccountId;
+  if (req.user?.cashAccountId) return req.user.cashAccountId;
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { cashAccountId: true },
+  });
+  return user?.cashAccountId || null;
+}
+
 async function paymentMethodPermissionsForRequest(req) {
   const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
   if (permissions.includes("*")) return getPaymentMethodPermissions(req);
@@ -84,15 +125,15 @@ async function paymentMethodPermissionsForRequest(req) {
   return getPaymentMethodPermissions(req, user?.permissions);
 }
 
-const canUseTransactionAccount = async (req, cashAccountType) => {
-  if (hasAccountingPermission(req)) {
-    return true;
-  }
-
-  const permissionKey = transactionAccountPermissionKey(cashAccountType);
+const canUseTransactionAccount = async (req, cashAccount) => {
+  const permissionKey = transactionAccountPermissionKey(cashAccount?.type);
   if (!permissionKey) return false;
   const permissions = await paymentMethodPermissionsForRequest(req);
-  return Boolean(permissions[permissionKey]);
+  if (!permissions[permissionKey]) return false;
+  if (hasBroadTransactionAccountAccess(req)) return true;
+
+  const ownCashAccountId = await requestUserCashAccountId(req);
+  return Boolean(ownCashAccountId && ownCashAccountId === cashAccount?.id);
 };
 
 const normalizeJournalLines = (lines) => {
@@ -303,7 +344,9 @@ router.get("/journal", authenticateToken, requirePermission("canViewAccounting")
 router.post("/journal", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { date, description, reference, lines = [], branchId } = req.body;
+    const { date, description, reference, lines = [], branchId, action, paymentMethod, paymentAccountId } = req.body;
+    const normalizedAction = normalizeValue(action);
+    const requestedPaymentMethod = normalizeValue(paymentMethod);
 
     const normalizedLines = normalizeJournalLines(lines);
     const uniqueLineAccountIds = new Set(normalizedLines.map((line) => line.accountId));
@@ -332,6 +375,37 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
       ? await prisma.cashAccount.findMany({ where: { tenantId, id: { in: linkedCashAccountIds }, isActive: true } })
       : [];
     const cashAccountsById = new Map(cashAccounts.map((account) => [account.id, account]));
+
+    if (normalizedAction) {
+      const allowedTypes = JOURNAL_ACTION_ACCOUNT_TYPES[normalizedAction];
+      if (!allowedTypes) {
+        return res.status(400).json({ error: "Select a valid journal action" });
+      }
+      if (!paymentAccountId || !uniqueLineAccountIds.has(paymentAccountId)) {
+        return res.status(400).json({ error: "Select the transaction account used for this journal action" });
+      }
+
+      const paymentAccount = accountsById.get(paymentAccountId);
+      const paymentCashAccountId = linkedCashAccountId(paymentAccount);
+      const paymentCashAccount = paymentCashAccountId ? cashAccountsById.get(paymentCashAccountId) : null;
+      if (!paymentCashAccount) {
+        return res.status(400).json({ error: "The selected transaction account was not found or is inactive" });
+      }
+      if (requestedPaymentMethod && !transactionAccountMatchesPaymentMethod(paymentCashAccount.type, requestedPaymentMethod)) {
+        return res.status(400).json({ error: `The selected transaction account does not match ${paymentMethod} payments` });
+      }
+
+      for (const account of accounts) {
+        if (account.id === paymentAccountId) continue;
+        if (linkedCashAccountId(account)) {
+          return res.status(400).json({ error: "Choose a normal chart account for the selected action. Cash, safe, bank, and mobile money accounts belong in the transaction account field." });
+        }
+        if (!allowedTypes.includes(normalizeValue(account.type))) {
+          return res.status(400).json({ error: `${account.name} does not match the selected journal action` });
+        }
+      }
+    }
+
     const accountDeltas = new Map();
 
     for (const line of normalizedLines) {
@@ -356,9 +430,9 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
       if (!cashAccount) {
         return res.status(400).json({ error: `Linked transaction account for ${account.name} was not found or is inactive` });
       }
-      if (!(await canUseTransactionAccount(req, cashAccount.type))) {
+      if (!(await canUseTransactionAccount(req, cashAccount))) {
         return res.status(403).json({
-          error: `You do not have permission to use ${cashAccount.type} as a transaction account. Please contact your administrator.`,
+          error: `You do not have permission to use ${cashAccount.name} as a transaction account. Please contact your administrator.`,
         });
       }
 

@@ -183,6 +183,7 @@ function normalizedPaymentMethod(value) {
   if (["mobile_money", "mobilemoney", "momo", "mtn", "mtn_momo", "airtel", "airtel_money"].includes(method)) return "mobile_money";
   if (["bank_transfer", "banktransfer", "wire_transfer", "bank", "cheque", "check"].includes(method)) return "bank";
   if (["card", "debit_card", "credit_card"].includes(method)) return "card";
+  if (method === "safe") return "safe";
   if (method === "credit" || method === "on_credit") return "credit";
   return "cash";
 }
@@ -227,6 +228,93 @@ function expenseReportRow(expense) {
     cashAmount: method === "cash" ? amount : 0,
     creditAmount: amount,
   };
+}
+
+function isExpenseAccount(account) {
+  return ["expense", "expenses"].includes(String(account?.type || "").trim().toLowerCase());
+}
+
+function isLinkedTransactionAccount(account) {
+  const subType = String(account?.subType || "").trim().toLowerCase();
+  return subType.startsWith("transaction_") || String(account?.description || "").includes("cashAccount:");
+}
+
+function transactionAccountMethod(account) {
+  const subType = String(account?.subType || "").trim().toLowerCase();
+  if (subType.startsWith("transaction_")) return normalizedPaymentMethod(subType.replace("transaction_", ""));
+  if (String(account?.description || "").includes("cashAccount:")) return "cash";
+  return normalizedPaymentMethod(account?.type || "cash");
+}
+
+function scopedJournalWhere(scope, extra = {}) {
+  const { branchId, ...rest } = extra;
+  const branchScope = branchId || scope.branchId;
+  const clauses = [];
+
+  if (Object.keys(rest).length) clauses.push(rest);
+  if (branchScope) clauses.push({ OR: [{ branchId: branchScope }, { branchId: null }] });
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {}),
+  };
+}
+
+async function journalExpenseRows(scope, dateWhere, { userId = null, requestedMethod = null, take = 1000 } = {}) {
+  const entries = await prisma.journalEntry.findMany({
+    where: scopedJournalWhere(scope, {
+      date: dateWhere,
+      status: { not: "reversed" },
+      ...(userId ? { userId } : {}),
+      lines: {
+        some: {
+          debit: { gt: 0 },
+          account: { type: { in: ["expense", "expenses"] } },
+        },
+      },
+    }),
+    include: {
+      user: { select: { id: true, fname: true, lname: true, email: true } },
+      branch: { select: { id: true, name: true } },
+      lines: {
+        include: {
+          account: { select: { id: true, code: true, name: true, type: true, subType: true, description: true } },
+        },
+      },
+    },
+    orderBy: { date: "asc" },
+    take,
+  });
+
+  const rows = [];
+  for (const entry of entries) {
+    const paymentLine = entry.lines.find((line) => isLinkedTransactionAccount(line.account) && Number(line.credit || 0) > 0) ||
+      entry.lines.find((line) => isLinkedTransactionAccount(line.account));
+    const method = transactionAccountMethod(paymentLine?.account);
+    if (!paymentMethodMatches(method, requestedMethod)) continue;
+
+    for (const line of entry.lines) {
+      if (!isExpenseAccount(line.account) || Number(line.debit || 0) <= 0) continue;
+      const amount = Number(line.debit || 0);
+      rows.push({
+        id: `journal-expense-${entry.id}-${line.id}`,
+        journalEntryId: entry.id,
+        source: "journal",
+        date: entry.date || entry.createdAt,
+        createdAt: entry.createdAt,
+        reference: entry.reference || entry.entryNo,
+        category: line.account?.name || "Accounting Expense",
+        description: line.description || entry.description || line.account?.name || "Accounting expense",
+        paymentMethod: method,
+        cashAccount: paymentLine?.account ? { name: paymentLine.account.name, type: method } : null,
+        branch: entry.branch,
+        User: entry.user,
+        amount,
+      });
+    }
+  }
+
+  return rows;
 }
 
 function paymentMethodMatches(value, requestedMethod) {
@@ -483,6 +571,18 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         take: 5000,
       }),
     ]);
+    const directExpenseReferences = new Set(
+      expenses.flatMap((expense) => [expense.id, expense.reference].filter(Boolean))
+    );
+    const accountingExpenses = (await journalExpenseRows(scope, dateWhere, {
+      userId,
+      requestedMethod: requestedMethod === "credit" ? null : requestedMethod,
+      take,
+    })).filter((expense) => (
+      !directExpenseReferences.has(expense.reference) &&
+      !directExpenseReferences.has(expense.journalEntryId)
+    ));
+    const allExpenses = [...expenses, ...accountingExpenses];
 
     const transactionRows = [];
     const salesBreakdown = { cash: 0, credit: 0, mobile_money: 0, bank: 0, card: 0 };
@@ -690,7 +790,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     let cashExpenses = 0;
     const filteredExpenses = [];
     const expenseMethodFilter = requestedMethod === "credit" ? null : requestedMethod;
-    for (const expense of expenses) {
+    for (const expense of allExpenses) {
       const method = normalizedPaymentMethod(expense.paymentMethod);
       if (!paymentMethodMatches(method, expenseMethodFilter)) continue;
       filteredExpenses.push(expense);
@@ -721,7 +821,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ...sales.flatMap((sale) => [sale.id, sale.receiptNo].filter(Boolean)),
       ...creditSales.flatMap((sale) => [sale.id, sale.receiptNo].filter(Boolean)),
       ...payments.flatMap((payment) => [payment.id, payment.reference, payment.transactionId, payment.sale?.receiptNo].filter(Boolean)),
-      ...filteredExpenses.flatMap((expense) => [expense.id, expense.reference].filter(Boolean)),
+      ...filteredExpenses.flatMap((expense) => [expense.id, expense.reference, expense.journalEntryId].filter(Boolean)),
     ]);
     const physicalCashOutReferences = new Set();
     cashTransactions.forEach((movement) => {
