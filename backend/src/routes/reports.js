@@ -945,9 +945,9 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         take,
       }),
       prisma.expense.findMany({
-        where: scopedWhere(scope, { date: dateWhere, ...(userId ? { userId } : {}) }),
+        where: scopedWhere(scope, { createdAt: dateWhere, ...(userId ? { userId } : {}) }),
         include: { User: { select: { id: true, fname: true, lname: true, email: true } }, cashAccount: { select: { id: true, name: true, type: true } }, branch: { select: { id: true, name: true } } },
-        orderBy: { date: "asc" },
+        orderBy: { createdAt: "asc" },
         take,
       }),
       prisma.saleItem.findMany({
