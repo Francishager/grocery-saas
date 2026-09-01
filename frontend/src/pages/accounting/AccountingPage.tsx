@@ -1484,6 +1484,7 @@ export default function AccountingPage() {
                     )}
                   </div>
                 )}
+              </div>
               <div>
                 <Label>Comment</Label>
                 <textarea
