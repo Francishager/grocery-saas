@@ -15,6 +15,7 @@ const router = Router();
 
 // ==================== HELPERS ====================
 const reportRoles = ["owner", "manager", "accountant"];
+const stockLedgerSaleReturnStatuses = ["completed", "stock_adjusted"];
 
 // Map report path prefixes to granular permissions
 const reportPermMap = {
@@ -3307,18 +3308,22 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }),
       // Stock adjustments
       prisma.auditLog.findMany({
-        where: productId ? { tenantId: s.tenantId, model: "Product", entityId: productId, ...df(req, "createdAt") } : { tenantId: s.tenantId, model: "Product", ...df(req, "createdAt") },
+        where: productId ? { tenantId: s.tenantId, model: "Product", recordId: productId, ...df(req, "createdAt") } : { tenantId: s.tenantId, model: "Product", ...df(req, "createdAt") },
         orderBy: { createdAt: "asc" },
       }),
       // Sale returns (stock comes back in)
       prisma.saleReturn.findMany({
-        where: scopedWhere(s, { ...df(req), status: "completed" }),
+        where: scopedWhere(s, { ...df(req), status: { in: stockLedgerSaleReturnStatuses } }),
         select: { id: true, returnNo: true, createdAt: true, items: itemQuery },
         orderBy: { createdAt: "asc" },
       }),
     ]);
 
-    const [allSales, allSaleRecords, allPurchases, allSupplierPurchases, allSaleReturns] = await Promise.all([
+    const allAdjustmentWhere = productId
+      ? { tenantId: s.tenantId, model: "Product", recordId: productId }
+      : { tenantId: s.tenantId, model: "Product" };
+
+    const [allSales, allSaleRecords, allPurchases, allSupplierPurchases, allSaleReturns, allAdjustments] = await Promise.all([
       prisma.sale.findMany({
         where: scopedWhere(s),
         select: { createdAt: true, items: itemQuery },
@@ -3336,8 +3341,12 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         select: { createdAt: true, items: itemQuery },
       }),
       prisma.saleReturn.findMany({
-        where: scopedWhere(s, { status: "completed" }),
+        where: scopedWhere(s, { status: { in: stockLedgerSaleReturnStatuses } }),
         select: { createdAt: true, items: itemQuery },
+      }),
+      prisma.auditLog.findMany({
+        where: allAdjustmentWhere,
+        select: { createdAt: true, changes: true },
       }),
     ]);
 
@@ -3345,9 +3354,17 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
     const fromDate = from ? new Date(from) : null;
     const sumQtyBefore = (records, dateField = "createdAt") =>
       records.reduce((a, r) => a + (new Date(r[dateField]) < fromDate ? r.items.reduce((s, i) => s + i.quantity, 0) : 0), 0);
+    const sumAdjustmentBefore = (logs) =>
+      logs.reduce((sum, log) => {
+        const beforeQty = Number(log.changes?.before?.quantity);
+        const afterQty = Number(log.changes?.after?.quantity);
+        if (!Number.isFinite(beforeQty) || !Number.isFinite(afterQty) || new Date(log.createdAt) >= fromDate) return sum;
+        return sum + (afterQty - beforeQty);
+      }, 0);
     const openingStock = fromDate
       ? (sumQtyBefore(allPurchases) + sumQtyBefore(allSupplierPurchases) + sumQtyBefore(allSaleReturns)) -
-        (sumQtyBefore(allSales) + sumQtyBefore(allSaleRecords))
+        (sumQtyBefore(allSales) + sumQtyBefore(allSaleRecords)) +
+        sumAdjustmentBefore(allAdjustments)
       : 0;
 
     const entries = [];
@@ -3405,12 +3422,17 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }
     }
     for (const adj of adjustments) {
+      const beforeQty = Number(adj.changes?.before?.quantity);
+      const afterQty = Number(adj.changes?.after?.quantity);
+      const quantityDelta = Number.isFinite(beforeQty) && Number.isFinite(afterQty) ? afterQty - beforeQty : 0;
+      const stockMovement = adj.changes?.stockMovement || {};
+      const movementLabel = stockMovement.reason || stockMovement.reference || adj.action;
       entries.push({
         date: adj.createdAt,
-        refNo: adj.id.slice(-6),
-        description: `Adjustment: ${adj.action}`,
-        inQty: 0,
-        outQty: 0,
+        refNo: stockMovement.reference || adj.id.slice(-6),
+        description: `Adjustment: ${movementLabel}`,
+        inQty: quantityDelta > 0 ? quantityDelta : 0,
+        outQty: quantityDelta < 0 ? Math.abs(quantityDelta) : 0,
         balance: 0,
       });
     }

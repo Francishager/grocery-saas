@@ -47,6 +47,7 @@ const movementTypes = {
   otherOut: new Set(["TRANSFER_OUT", "STOCK_OUT", "ADJUSTMENT_OUT", "PRODUCTION_OUT", "DAMAGE", "EXPIRY", "RENTAL_OUT"]),
   returns: new Set(["SALE_RETURN", "RENTAL_RETURN"]),
 };
+const inventorySaleReturnStatuses = ["completed", "stock_adjusted"];
 
 function parseDateOnly(value) {
   if (!value) return null;
@@ -264,7 +265,7 @@ async function buildInventoryMovementSummary(scope, products, range) {
       orderBy: { createdAt: "asc" },
     }),
     prisma.saleReturnItem.findMany({
-      where: { ...productWhere, return: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
+      where: { ...productWhere, return: scopedWhere(scope, { createdAt: dateWhere, status: { in: inventorySaleReturnStatuses } }) },
       include: {
         return: {
           select: {
@@ -304,7 +305,7 @@ async function buildInventoryMovementSummary(scope, products, range) {
     prisma.saleRecordItem.findMany({ where: { ...productWhere, sale: scopedWhere(scope, { createdAt: afterWhere, status: "completed" }) }, select: { productId: true, quantity: true, conversionFactor: true } }),
     prisma.purchaseItem.findMany({ where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: afterWhere }) }, select: { productId: true, quantity: true } }),
     prisma.supplierPurchaseItem.findMany({ where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: afterWhere }) }, select: { productId: true, quantity: true } }),
-    prisma.saleReturnItem.findMany({ where: { ...productWhere, return: scopedWhere(scope, { createdAt: afterWhere, status: "completed" }) }, select: { productId: true, quantity: true } }),
+    prisma.saleReturnItem.findMany({ where: { ...productWhere, return: scopedWhere(scope, { createdAt: afterWhere, status: { in: inventorySaleReturnStatuses } }) }, select: { productId: true, quantity: true } }),
     prisma.stockTransferItem.findMany({
       where: { ...productWhere, transfer: { tenantId: scope.tenantId, createdAt: afterWhere, status: { not: "cancelled" }, ...(scope.branchId ? { OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] } : {}) } },
       include: { transfer: { select: { fromBranchId: true, toBranchId: true } } },

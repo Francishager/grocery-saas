@@ -31,8 +31,41 @@ interface Entity {
   name: string
 }
 
+interface LinkedDocItem {
+  productId: string
+  productName: string
+  quantity: number
+  maxQuantity: number
+  unitAmount: number
+  total: number
+}
+
+interface LinkedDoc {
+  id: string
+  refNo: string
+  total: number
+  createdAt?: string
+  items: LinkedDocItem[]
+}
+
 const CREDIT_REASONS = ['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other']
 const DEBIT_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'price_adjustment', 'other']
+
+const isStockReturnReason = (tab: NoteType, value: string) => (
+  (tab === 'credit' && value === 'sales_return') ||
+  (tab === 'debit' && value === 'purchase_return')
+)
+
+const money = (value: unknown) => {
+  const amount = Number(value || 0)
+  return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0
+}
+
+const lineUnitAmount = (item: any, field: 'price' | 'cost') => {
+  const quantity = Number(item.quantity || 0)
+  if (quantity > 0 && item.total !== undefined) return money(item.total) / quantity
+  return money(item[field])
+}
 
 export default function CreditDebitNotesPage({ initialTab }: { initialTab?: NoteType }) {
   const { toast } = useToast()
@@ -53,6 +86,11 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   const [reason, setReason] = useState('')
   const [notesField, setNotesField] = useState('')
   const [branchId, setBranchId] = useState('')
+  const [linkedDocs, setLinkedDocs] = useState<LinkedDoc[]>([])
+  const [linkedDocId, setLinkedDocId] = useState('')
+  const [returnItems, setReturnItems] = useState<LinkedDocItem[]>([])
+  const [loadingLinkedDocs, setLoadingLinkedDocs] = useState(false)
+  const stockReturnMode = isStockReturnReason(activeTab, reason)
 
   const fetchEntities = useCallback(async () => {
     try {
@@ -107,12 +145,76 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
     branchesApi.active().then(setBranches).catch(() => {})
   }, [])
 
+  const fetchLinkedDocs = useCallback(async () => {
+    if (!showModal || editNote || !entityId || !stockReturnMode) {
+      setLinkedDocs([])
+      setLinkedDocId('')
+      setReturnItems([])
+      return
+    }
+
+    setLoadingLinkedDocs(true)
+    try {
+      const endpoint = activeTab === 'credit'
+        ? `/api/receivables/sales?customerId=${entityId}&limit=100`
+        : `/api/payables/purchases?supplierId=${entityId}&limit=100`
+      const response = await apiFetch(endpoint)
+      if (!response.ok) throw new Error('Failed to load original transactions')
+      const data = await response.json()
+      const responseRows = activeTab === 'credit' ? data.sales : data.purchases
+      const sourceRows = Array.isArray(responseRows) ? responseRows : Array.isArray(data) ? data : []
+      const docs: LinkedDoc[] = sourceRows
+        .filter((row: any) => row?.id && Array.isArray(row.items) && row.items.length > 0 && row.status !== 'cancelled')
+        .map((row: any) => ({
+          id: row.id,
+          refNo: row.receiptNo || row.refNo || row.id.slice(-8),
+          total: money(row.total),
+          createdAt: row.createdAt,
+          items: (row.items || [])
+            .map((item: any) => {
+              const productId = item.productId || item.product?.id
+              const quantity = Math.max(0, Number(item.quantity || 0))
+              const unitAmount = lineUnitAmount(item, activeTab === 'credit' ? 'price' : 'cost')
+              return {
+                productId,
+                productName: item.product?.name || item.productName || 'Product',
+                quantity,
+                maxQuantity: quantity,
+                unitAmount,
+                total: money(unitAmount * quantity),
+              }
+            })
+            .filter((item: LinkedDocItem) => item.productId && item.maxQuantity > 0),
+        }))
+        .filter((row: LinkedDoc) => row.items.length > 0)
+      setLinkedDocs(docs)
+    } catch (err: any) {
+      setLinkedDocs([])
+      toast({ variant: 'destructive', title: 'Failed to load original transactions', description: err.message })
+    } finally {
+      setLoadingLinkedDocs(false)
+    }
+  }, [activeTab, editNote, entityId, showModal, stockReturnMode, toast])
+
+  useEffect(() => {
+    fetchLinkedDocs()
+  }, [fetchLinkedDocs])
+
+  useEffect(() => {
+    if (!stockReturnMode || editNote) return
+    const total = returnItems.reduce((sum, item) => sum + money(item.unitAmount * Number(item.quantity || 0)), 0)
+    setAmount(total > 0 ? String(total) : '')
+  }, [editNote, returnItems, stockReturnMode])
+
   const resetForm = () => {
     setEntityId('')
     setAmount('')
     setReason('')
     setNotesField('')
     setBranchId('')
+    setLinkedDocId('')
+    setLinkedDocs([])
+    setReturnItems([])
     setEditNote(null)
   }
 
@@ -128,7 +230,29 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
     setReason(note.reason)
     setNotesField(note.notes || '')
     setBranchId(note.branch?.id || '')
+    setLinkedDocId('')
+    setLinkedDocs([])
+    setReturnItems([])
     setShowModal(true)
+  }
+
+  const selectLinkedDoc = (docId: string) => {
+    setLinkedDocId(docId)
+    const doc = linkedDocs.find(row => row.id === docId)
+    const items = doc?.items.map(item => ({ ...item })) || []
+    setReturnItems(items)
+  }
+
+  const updateReturnQuantity = (productId: string, value: string) => {
+    const quantity = Math.min(
+      returnItems.find(item => item.productId === productId)?.maxQuantity || 0,
+      Math.max(0, Number.parseInt(value || '0', 10) || 0)
+    )
+    setReturnItems(current => current.map(item => (
+      item.productId === productId
+        ? { ...item, quantity, total: money(item.unitAmount * quantity) }
+        : item
+    )))
   }
 
   const handleSubmit = async () => {
@@ -144,6 +268,16 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       toast({ variant: 'destructive', title: 'Please select a reason' })
       return
     }
+    if (!editNote && stockReturnMode) {
+      if (!linkedDocId) {
+        toast({ variant: 'destructive', title: `Select the original ${activeTab === 'credit' ? 'sale' : 'purchase'}` })
+        return
+      }
+      if (!returnItems.some(item => Number(item.quantity || 0) > 0)) {
+        toast({ variant: 'destructive', title: 'Select at least one product quantity to return' })
+        return
+      }
+    }
 
     setSubmitting(true)
     try {
@@ -154,8 +288,18 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       } else {
         const payload: any = { amount: Number(amount), reason, notes: notesField }
         if (branchId) payload.branchId = branchId
-        if (activeTab === 'credit') payload.customerId = entityId
-        else payload.supplierId = entityId
+        if (stockReturnMode) {
+          payload.items = returnItems
+            .filter(item => Number(item.quantity || 0) > 0)
+            .map(item => ({ productId: item.productId, quantity: Number(item.quantity) }))
+        }
+        if (activeTab === 'credit') {
+          payload.customerId = entityId
+          if (stockReturnMode) payload.saleId = linkedDocId
+        } else {
+          payload.supplierId = entityId
+          if (stockReturnMode) payload.purchaseId = linkedDocId
+        }
         await api.create(payload)
         toast({ title: `${activeTab === 'credit' ? 'Credit' : 'Debit'} note created` })
       }
@@ -316,7 +460,11 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
             {!editNote && (
               <div>
                 <Label>{entityLabel} <span className="text-red-500">*</span></Label>
-                <Select value={entityId} onValueChange={setEntityId}>
+                <Select value={entityId} onValueChange={(value) => {
+                  setEntityId(value)
+                  setLinkedDocId('')
+                  setReturnItems([])
+                }}>
                   <SelectTrigger><SelectValue placeholder={`Select ${entityLabel}...`} /></SelectTrigger>
                   <SelectContent>
                     {entities.length === 0 ? (
@@ -337,17 +485,71 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0.00"
+                readOnly={stockReturnMode && !editNote}
               />
             </div>
             <div>
               <Label>Reason <span className="text-red-500">*</span></Label>
-              <Select value={reason} onValueChange={setReason}>
+              <Select value={reason} onValueChange={(value) => {
+                setReason(value)
+                setLinkedDocId('')
+                setReturnItems([])
+                if (!isStockReturnReason(activeTab, value)) setAmount('')
+              }}>
                 <SelectTrigger><SelectValue placeholder="Select reason..." /></SelectTrigger>
                 <SelectContent>
                   {reasons.map(r => <SelectItem key={r} value={r}>{r.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
+            {!editNote && stockReturnMode && (
+              <div className="space-y-3 rounded-md border p-3">
+                <div>
+                  <Label>Original {activeTab === 'credit' ? 'Sale' : 'Purchase'} <span className="text-red-500">*</span></Label>
+                  <Select value={linkedDocId} onValueChange={selectLinkedDoc} disabled={!entityId || loadingLinkedDocs}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingLinkedDocs ? 'Loading...' : `Select original ${activeTab === 'credit' ? 'sale' : 'purchase'}...`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {linkedDocs.length === 0 ? (
+                        <SelectItem value="_none" disabled>No original transactions found</SelectItem>
+                      ) : (
+                        linkedDocs.map(doc => (
+                          <SelectItem key={doc.id} value={doc.id}>
+                            {doc.refNo} - {formatCurrency(doc.total)}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {returnItems.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[1fr_88px_96px] gap-2 text-xs font-medium text-muted-foreground">
+                      <span>Product</span>
+                      <span>Qty</span>
+                      <span className="text-right">Amount</span>
+                    </div>
+                    {returnItems.map(item => (
+                      <div key={item.productId} className="grid grid-cols-[1fr_88px_96px] items-center gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{item.productName}</p>
+                          <p className="text-xs text-muted-foreground">Max {item.maxQuantity}</p>
+                        </div>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={item.maxQuantity}
+                          value={item.quantity}
+                          onChange={event => updateReturnQuantity(item.productId, event.target.value)}
+                        />
+                        <div className="text-right text-sm font-medium">{formatCurrency(item.total)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {!editNote && (
               <div>
                 <Label>Branch <span className="text-red-500">*</span></Label>
@@ -377,7 +579,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
             <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button 
               onClick={handleSubmit} 
-              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId)) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
+              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId || (stockReturnMode && (!linkedDocId || !returnItems.some(item => Number(item.quantity || 0) > 0))))) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editNote ? 'Update' : 'Create'}

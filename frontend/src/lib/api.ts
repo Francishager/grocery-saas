@@ -1489,7 +1489,7 @@ export const creditNotesApi = {
     api.get<{ data: any[]; pagination: any }>('/api/credit-debit-notes/credit-notes', { params }),
   get: (id: string) =>
     api.get<any>(`/api/credit-debit-notes/credit-notes/${id}`),
-  create: (data: { customerId: string; saleId?: string; amount: number; reason: string; notes?: string; branchId?: string }) =>
+  create: (data: { customerId: string; saleId?: string; amount: number; reason: string; notes?: string; branchId?: string; items?: Array<{ productId: string; quantity: number }> }) =>
     api.post<any>('/api/credit-debit-notes/credit-notes', { body: data }),
   update: (id: string, data: { amount?: number; reason?: string; notes?: string }) =>
     api.put<any>(`/api/credit-debit-notes/credit-notes/${id}`, { body: data }),
@@ -1502,7 +1502,7 @@ export const debitNotesApi = {
     api.get<{ data: any[]; pagination: any }>('/api/credit-debit-notes/debit-notes', { params }),
   get: (id: string) =>
     api.get<any>(`/api/credit-debit-notes/debit-notes/${id}`),
-  create: (data: { supplierId: string; purchaseId?: string; amount: number; reason: string; notes?: string; branchId?: string }) =>
+  create: (data: { supplierId: string; purchaseId?: string; amount: number; reason: string; notes?: string; branchId?: string; items?: Array<{ productId: string; quantity: number }> }) =>
     api.post<any>('/api/credit-debit-notes/debit-notes', { body: data }),
   update: (id: string, data: { amount?: number; reason?: string; notes?: string }) =>
     api.put<any>(`/api/credit-debit-notes/debit-notes/${id}`, { body: data }),
