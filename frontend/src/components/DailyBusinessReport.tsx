@@ -43,8 +43,17 @@ const normalizePaymentMethod = (value: unknown) => {
   if (['mobile_money', 'mobilemoney', 'momo', 'mtn', 'mtn_momo', 'airtel', 'airtel_money'].includes(method)) return 'mobile_money'
   if (['bank_transfer', 'banktransfer', 'wire_transfer', 'bank', 'cheque', 'check'].includes(method)) return 'bank'
   if (['card', 'debit_card', 'credit_card'].includes(method)) return 'card'
+  if (method === 'safe') return 'safe'
   if (method === 'credit' || method === 'on_credit') return 'credit'
   return 'cash'
+}
+const normalizeMovementDirection = (value: unknown) => {
+  const direction = String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '-')
+  if (direction === 'transfer-in' || direction === 'handover-in') return 'transfer-in'
+  if (direction === 'transfer-out' || direction === 'handover-out') return 'transfer-out'
+  if (direction === 'in' || direction === 'debit' || direction === 'income' || direction === 'receipt' || direction === 'deposit') return 'in'
+  if (direction === 'out' || direction === 'credit' || direction === 'expense' || direction === 'payment' || direction === 'withdrawal') return 'out'
+  return direction.includes('out') ? 'out' : 'in'
 }
 const rowKey = (row: any) => row?.id || `${row?.kind || 'row'}-${row?.reference || ''}-${row?.date || ''}`
 const metricValue = (value: unknown, fallback = 0) => {
@@ -378,31 +387,63 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     const collectionTotal = sum(transactions.filter((row) => row.kind === 'collection'), (row) => numberValue(row.amount))
     const cashCollectionTotal = sum(transactions.filter((row) => row.kind === 'collection' && row.paymentMethod === 'cash'), (row) => numberValue(row.amount))
     const cashExpenseTotal = sum(expenseRows.filter((row) => row.paymentMethod === 'cash'), (row) => numberValue(row.amount))
-    const otherPhysicalCashIn = metricValue(cash.otherPhysicalCashIn ?? cash.otherCashIn, 0)
-    const otherPhysicalCashOut = metricValue(cash.otherPhysicalCashOut ?? cash.otherCashOut, 0)
+    const movementAccountType = (row: any) => normalizePaymentMethod(row.accountType || row.paymentMethod || row.method)
+    const physicalCashRows = cashMovementRows.filter((row) => movementAccountType(row) === 'cash')
+    const movementGroups = new Map<string, { outgoingTypes: Set<string> }>()
+    cashMovementRows.forEach((row) => {
+      const reference = String(row.reference || '').trim()
+      if (!reference) return
+      const direction = normalizeMovementDirection(row.direction)
+      const group = movementGroups.get(reference) || { outgoingTypes: new Set<string>() }
+      if (direction === 'out' || direction === 'transfer-out') group.outgoingTypes.add(movementAccountType(row))
+      movementGroups.set(reference, group)
+    })
+    const physicalCashMovementTotal = (directions: string[]) => sum(
+      physicalCashRows.filter((row) => directions.includes(normalizeMovementDirection(row.direction))),
+      (row) => numberValue(row.amount)
+    )
+    const unpairedNonCashInflowTotal = (accountType: string) => sum(
+      cashMovementRows.filter((row) => {
+        if (movementAccountType(row) !== accountType) return false
+        const direction = normalizeMovementDirection(row.direction)
+        if (direction !== 'in' && direction !== 'transfer-in') return false
+        const reference = String(row.reference || '').trim()
+        if (!reference) return true
+        const group = movementGroups.get(reference)
+        return !group || group.outgoingTypes.size === 0
+      }),
+      (row) => numberValue(row.amount)
+    )
+    const otherPhysicalCashIn = metricValue(cash.otherPhysicalCashIn ?? cash.otherCashIn, physicalCashMovementTotal(['in']))
+    const otherPhysicalCashOut = metricValue(cash.otherPhysicalCashOut ?? cash.otherCashOut, physicalCashMovementTotal(['out']))
+    const cashTransfersInTotal = metricValue(cash.cashTransfersIn, physicalCashMovementTotal(['transfer-in']))
+    const cashTransfersOutTotal = metricValue(cash.cashTransfersOut, physicalCashMovementTotal(['transfer-out']))
+    const cashToSafeTotal = metricValue(cash.cashToSafe, unpairedNonCashInflowTotal('safe'))
+    const cashToBankTotal = metricValue(cash.cashToBank, unpairedNonCashInflowTotal('bank'))
+    const cashToMobileMoneyTotal = metricValue(cash.cashToMobileMoney, unpairedNonCashInflowTotal('mobile_money'))
     const derivedCashAtHand =
       numberValue(cash.openingCash) +
       methodTotal('cash') +
       metricValue(cash.cashCollections, cashCollectionTotal) +
       otherPhysicalCashIn +
-      numberValue(cash.cashTransfersIn) -
+      cashTransfersInTotal -
       cashExpenseTotal -
       otherPhysicalCashOut -
-      numberValue(cash.cashTransfersOut) -
-      numberValue(cash.cashToSafe) -
-      numberValue(cash.cashToBank) -
-      numberValue(cash.cashToMobileMoney)
+      cashTransfersOutTotal -
+      cashToSafeTotal -
+      cashToBankTotal -
+      cashToMobileMoneyTotal
     const derivedNetCashMovement =
       methodTotal('cash') +
       metricValue(cash.cashCollections, cashCollectionTotal) +
       numberValue(cash.otherCashIn) +
-      numberValue(cash.cashTransfersIn) -
+      cashTransfersInTotal -
       cashExpenseTotal -
       numberValue(cash.otherCashOut) -
-      numberValue(cash.cashTransfersOut) -
-      numberValue(cash.cashToSafe) -
-      numberValue(cash.cashToBank) -
-      numberValue(cash.cashToMobileMoney)
+      cashTransfersOutTotal -
+      cashToSafeTotal -
+      cashToBankTotal -
+      cashToMobileMoneyTotal
     const cogsTotal = sum(saleRows, (row) => Array.isArray(row.items)
       ? row.items.reduce((total: number, item: any) => total + numberValue(item.cost ?? item.cogs), 0)
       : numberValue(row.cogs ?? row.cost)
@@ -426,7 +467,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       grossProfit: grossProfitTotal,
       netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal),
     }
-  }, [cash.cashAtHand, cash.netCashMovement, expenseRows, profitability, summary, transactions])
+  }, [cash, cashMovementRows, expenseRows, profitability, summary, transactions])
 
   const cards: SummaryCard[] = [
     { label: 'Total Sales', value: cardTotals.totalSales, kinds: ['sale', 'credit-sale'], icon: BarChart3 },
@@ -455,12 +496,12 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     ['Cash Retained / Float', cash.cashRetained],
   ]
   const balancingTotals = [
-    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Physical cash after credit, expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Cash sales plus cash credit repayments, after real cash expenses and till transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Cash Sales', value: cardTotals.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
     { label: 'Credit Sales', value: cardTotals.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
     { label: 'Debt Collections', value: cardTotals.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
     { label: 'Expenses', value: cardTotals.expenses, note: 'Money spent today', kinds: ['expense'] },
-    { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash in minus expenses, safe and bank movements', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash in minus real cash expenses and till transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Gross Profit', value: cardTotals.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
     { label: 'Net Profit', value: cardTotals.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
   ]

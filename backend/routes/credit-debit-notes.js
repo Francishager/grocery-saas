@@ -8,7 +8,7 @@ const router = express.Router()
 const prisma = new PrismaClient()
 
 const tenantIdOf = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id
-const CREDIT_STOCK_REASONS = new Set(['sales_return'])
+const CREDIT_STOCK_REASONS = new Set(['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other'])
 const DEBIT_STOCK_REASONS = new Set(['purchase_return'])
 const CREDIT_NOTE_STOCK_RETURN_STATUS = 'stock_adjusted'
 const CREDIT_NOTE_STOCK_RETURN_METHOD = 'credit_note_stock'

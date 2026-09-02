@@ -1864,12 +1864,12 @@ export default function ReportsPage() {
     const cash = data?.cashMovement || {}
     const profitability = data?.profitability || {}
     ;[
-      ['Cash at Hand', cash.cashAtHand, 'Physical cash after credit, expenses, safe and bank movements'],
+      ['Cash at Hand', cash.cashAtHand, 'Cash sales plus cash credit repayments, after real cash expenses and till transfers'],
       ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
       ['Credit Sales', summary.creditSales, 'Customer balances created'],
       ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
       ['Expenses', summary.expenses, 'Money spent today'],
-      ['Net Cash Movement', cash.netCashMovement, 'Cash in minus expenses, safe and bank movements'],
+      ['Net Cash Movement', cash.netCashMovement, 'Cash in minus real cash expenses and till transfers'],
       ['Gross Profit', profitability.grossProfit, 'Sales minus COGS'],
       ['Net Profit', profitability.netProfit, 'Gross profit minus expenses'],
     ].forEach(([item, amount, details]) => pushAmount('Day Balancing Totals', String(item), amount, String(details)))

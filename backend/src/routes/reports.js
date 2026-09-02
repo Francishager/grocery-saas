@@ -352,6 +352,10 @@ function cashMovementDirection(type) {
   return normalized.includes("out") ? "out" : "in";
 }
 
+function isPaidAtSaleCustomerPayment(payment) {
+  return Boolean(payment?.saleId && String(payment?.notes || "").trim().toLowerCase().startsWith("paid at sale"));
+}
+
 function dayRange(from, to) {
   const start = from ? new Date(from) : new Date();
   if (!from) start.setHours(0, 0, 0, 0);
@@ -596,6 +600,15 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     const transactionRows = [];
     const salesBreakdown = { cash: 0, credit: 0, mobile_money: 0, bank: 0, card: 0 };
+    const paidAtSaleBySaleId = new Map();
+    payments.forEach((payment) => {
+      if (!isPaidAtSaleCustomerPayment(payment)) return;
+      const method = normalizedPaymentMethod(payment.paymentMethod);
+      const row = paidAtSaleBySaleId.get(payment.saleId) || { total: 0, byMethod: { cash: 0, mobile_money: 0, bank: 0, card: 0 } };
+      row.total += Number(payment.amount || 0);
+      if (row.byMethod[method] !== undefined) row.byMethod[method] += Number(payment.amount || 0);
+      paidAtSaleBySaleId.set(payment.saleId, row);
+    });
     const staffMap = new Map();
     const customerMap = new Map();
     const productMap = new Map();
@@ -723,8 +736,9 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     }
 
     for (const sale of creditSales) {
-      const paid = Number(sale.amountPaid || 0);
       const grossAmount = Number(sale.total || 0);
+      const paidAtSale = paidAtSaleBySaleId.get(sale.id) || { total: 0, byMethod: { cash: 0, mobile_money: 0, bank: 0, card: 0 } };
+      const paid = Math.min(grossAmount, Number(paidAtSale.total || 0));
       const creditAmount = Math.max(0, grossAmount - paid);
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (!paymentMethodMatches(method, requestedMethod)) continue;
@@ -732,9 +746,13 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       netRevenue += saleNetRevenue(sale);
       taxCollected += Number(sale.tax || 0);
       salesBreakdown.credit += creditAmount;
-      if (paid > 0 && method !== "credit") addPaymentBreakdown(salesBreakdown, method, paid);
+      Object.entries(paidAtSale.byMethod || {}).forEach(([paidMethod, amount]) => addPaymentBreakdown(salesBreakdown, paidMethod, amount));
       cogs += saleCogsForItems(sale.items);
-      addStaff(sale.User, { sales: sale.total, creditSales: creditAmount, ...(paid > 0 && method !== "credit" ? staffSalesValues(method, paid) : {}) });
+      addStaff(sale.User, {
+        sales: sale.total,
+        creditSales: creditAmount,
+        ...Object.entries(paidAtSale.byMethod || {}).reduce((values, [paidMethod, amount]) => ({ ...values, ...staffSalesValues(paidMethod, amount) }), {}),
+      });
       const customer = addCustomer(sale.customer);
       customer.creditSales += creditAmount;
       if (paid > 0 && method !== "credit") customer.cashSales += paid;
@@ -766,7 +784,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     let debtCollections = 0;
     for (const payment of payments) {
-      if (payment.saleId) continue;
+      if (isPaidAtSaleCustomerPayment(payment)) continue;
       const method = normalizedPaymentMethod(payment.paymentMethod);
       if (!paymentMethodMatches(method, requestedMethod)) continue;
       const paymentMovement = findMatchingMovement(payment.reference, payment.id, payment.transactionId);
@@ -833,15 +851,22 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ...payments.flatMap((payment) => [payment.id, payment.reference, payment.transactionId, payment.sale?.receiptNo].filter(Boolean)),
       ...filteredExpenses.flatMap((expense) => [expense.id, expense.reference, expense.journalEntryId].filter(Boolean)),
     ]);
-    const physicalCashOutReferences = new Set();
+    const cashMovementReferenceGroups = new Map();
     cashTransactions.forEach((movement) => {
       if (!movement.reference || knownReferences.has(movement.reference)) return;
       const accountType = String(movement.account?.type || "").toLowerCase();
       const direction = cashMovementDirection(movement.type);
-      if (accountType === "cash" && (direction === "out" || direction === "transfer-out")) {
-        physicalCashOutReferences.add(movement.reference);
-      }
+      const group = cashMovementReferenceGroups.get(movement.reference) || { incomingTypes: new Set(), outgoingTypes: new Set() };
+      if (direction === "in" || direction === "transfer-in") group.incomingTypes.add(accountType);
+      if (direction === "out" || direction === "transfer-out") group.outgoingTypes.add(accountType);
+      cashMovementReferenceGroups.set(movement.reference, group);
     });
+    const isUnpairedNonCashInflow = (movement, direction) => {
+      if (!(direction === "in" || direction === "transfer-in")) return false;
+      if (!movement.reference) return true;
+      const group = cashMovementReferenceGroups.get(movement.reference);
+      return !group || group.outgoingTypes.size === 0;
+    };
     const accountMovementMap = new Map();
     let otherCashIn = 0;
     let otherCashOut = 0;
@@ -878,11 +903,11 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
             otherCashOut += amount;
             otherPhysicalCashOut += amount;
           }
-        } else if (accountType === "safe" && isDebit && !physicalCashOutReferences.has(movement.reference)) {
+        } else if (accountType === "safe" && isDebit && isUnpairedNonCashInflow(movement, direction)) {
           cashToSafe += amount;
-        } else if (accountType === "bank" && isDebit && !physicalCashOutReferences.has(movement.reference)) {
+        } else if (accountType === "bank" && isDebit && isUnpairedNonCashInflow(movement, direction)) {
           cashToBank += amount;
-        } else if (accountType === "mobile_money" && isDebit && !physicalCashOutReferences.has(movement.reference)) {
+        } else if (accountType === "mobile_money" && isDebit && isUnpairedNonCashInflow(movement, direction)) {
           cashToMobileMoney += amount;
         }
       }
@@ -895,11 +920,13 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         reference: movement.reference || movement.id,
         description: movement.description,
         account: movement.account?.name,
+        accountType,
         staff: userLabel(movement.User),
         staffId: movement.User?.id,
         amount: movement.amount,
         debit: isDebit ? movement.amount : 0,
         credit: isDebit ? 0 : movement.amount,
+        balanceAfter: movement.balanceAfter,
         direction,
         paymentMethod: normalizedPaymentMethod(movement.account?.type || "cash"),
       });
@@ -907,7 +934,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     const cashSales = salesBreakdown.cash;
     const cashCollections = payments
-      .filter((payment) => !payment.saleId && paymentMethodMatches(payment.paymentMethod, requestedMethod) && normalizedPaymentMethod(payment.paymentMethod) === "cash")
+      .filter((payment) => !isPaidAtSaleCustomerPayment(payment) && paymentMethodMatches(payment.paymentMethod, requestedMethod) && normalizedPaymentMethod(payment.paymentMethod) === "cash")
       .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     const openingByAccount = new Map(openingRows.map((row) => [row.accountId, Number(row.balanceAfter || 0)]));
     const openingCashAtHand = openingRows.filter((row) => String(row.account?.type || "").toLowerCase() === "cash").reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
@@ -1076,6 +1103,15 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     const transactionRows = [];
     const salesBreakdown = { cash: 0, credit: 0, mobile_money: 0, bank: 0, card: 0 };
+    const paidAtSaleBySaleId = new Map();
+    payments.forEach((payment) => {
+      if (!isPaidAtSaleCustomerPayment(payment)) return;
+      const method = normalizedPaymentMethod(payment.paymentMethod);
+      const row = paidAtSaleBySaleId.get(payment.saleId) || { total: 0, byMethod: { cash: 0, mobile_money: 0, bank: 0, card: 0 } };
+      row.total += Number(payment.amount || 0);
+      if (row.byMethod[method] !== undefined) row.byMethod[method] += Number(payment.amount || 0);
+      paidAtSaleBySaleId.set(payment.saleId, row);
+    });
     const staffMap = new Map();
     const customerMap = new Map();
     const productMap = new Map();
@@ -1117,8 +1153,9 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     }
 
     for (const sale of creditSales) {
-      const paid = Number(sale.amountPaid || 0);
       const grossAmount = Number(sale.total || 0);
+      const paidAtSale = paidAtSaleBySaleId.get(sale.id) || { total: 0, byMethod: { cash: 0, mobile_money: 0, bank: 0, card: 0 } };
+      const paid = Math.min(grossAmount, Number(paidAtSale.total || 0));
       const credit = Math.max(0, grossAmount - paid);
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (requestedMethod && method !== requestedMethod) continue;
@@ -1126,9 +1163,13 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       netRevenue += saleNetRevenue(sale);
       taxCollected += Number(sale.tax || 0);
       salesBreakdown.credit += credit;
-      if (paid > 0 && method !== "credit") addPaymentBreakdown(salesBreakdown, method, paid);
+      Object.entries(paidAtSale.byMethod || {}).forEach(([paidMethod, amount]) => addPaymentBreakdown(salesBreakdown, paidMethod, amount));
       cogs += saleCogsForItems(sale.items);
-      addStaff(sale.User, { sales: sale.total, creditSales: credit, ...(paid > 0 && method !== "credit" ? { [`${method}Sales`]: paid } : {}) });
+      addStaff(sale.User, {
+        sales: sale.total,
+        creditSales: credit,
+        ...Object.entries(paidAtSale.byMethod || {}).reduce((values, [paidMethod, amount]) => ({ ...values, ...staffSalesValues(paidMethod, amount) }), {}),
+      });
       const customer = addCustomer(sale.customer);
       customer.creditSales += credit;
       if (paid > 0 && method !== "credit") customer.cashSales += paid;
@@ -1140,9 +1181,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const saleReferences = new Set([...sales, ...creditSales].map((sale) => sale.receiptNo));
     let debtCollections = 0;
     for (const payment of payments) {
-      // Payments attached to a sale are the amount paid at sale time. Only
-      // unlinked payments are collections against an existing receivable.
-      if (payment.saleId) continue;
+      if (isPaidAtSaleCustomerPayment(payment)) continue;
       const method = normalizedPaymentMethod(payment.paymentMethod);
       if (requestedMethod && method !== requestedMethod) continue;
       debtCollections += Number(payment.amount || 0);
@@ -1168,7 +1207,11 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       orderBy: { createdAt: "asc" },
       take,
     });
-    const knownReferences = new Set([...saleReferences, ...expenses.map((expense) => expense.reference || expense.id)]);
+    const knownReferences = new Set([
+      ...saleReferences,
+      ...payments.flatMap((payment) => [payment.id, payment.reference, payment.transactionId, payment.sale?.receiptNo].filter(Boolean)),
+      ...expenses.map((expense) => expense.reference || expense.id),
+    ]);
     for (const movement of cashTransactions) {
       if (knownReferences.has(movement.reference)) continue;
       const type = String(movement.type || "").toLowerCase();
@@ -1186,7 +1229,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     }
 
     const cashSales = salesBreakdown.cash;
-    const cashCollections = payments.filter((payment) => !payment.saleId && normalizedPaymentMethod(payment.paymentMethod) === "cash").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const cashCollections = payments.filter((payment) => !isPaidAtSaleCustomerPayment(payment) && normalizedPaymentMethod(payment.paymentMethod) === "cash").reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     const openingRows = await prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, createdAt: { lt: start }, account: { type: { in: ["cash", "safe"] }, ...(allowedCashAccountId ? { id: allowedCashAccountId } : {}) } }, orderBy: { createdAt: "desc" }, distinct: ["accountId"], select: { accountId: true, balanceAfter: true } });
     const openingCash = openingRows.reduce((sum, row) => sum + Number(row.balanceAfter || 0), 0);
     const expectedCash = openingCash + cashSales + cashCollections + otherCashIn - cashExpenses - otherCashOut;

@@ -52,7 +52,7 @@ const CREDIT_REASONS = ['sales_return', 'price_adjustment', 'overcharge', 'cance
 const DEBIT_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'price_adjustment', 'other']
 
 const isStockReturnReason = (tab: NoteType, value: string) => (
-  (tab === 'credit' && value === 'sales_return') ||
+  (tab === 'credit' && CREDIT_REASONS.includes(value)) ||
   (tab === 'debit' && value === 'purchase_return')
 )
 
