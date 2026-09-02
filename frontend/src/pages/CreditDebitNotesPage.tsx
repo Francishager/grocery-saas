@@ -56,6 +56,8 @@ const isStockReturnReason = (tab: NoteType, value: string) => (
   (tab === 'debit' && value === 'purchase_return')
 )
 
+const defaultStockReturnReason = (tab: NoteType) => tab === 'credit' ? 'sales_return' : 'purchase_return'
+
 const money = (value: unknown) => {
   const amount = Number(value || 0)
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0
@@ -206,10 +208,10 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
     setAmount(total > 0 ? String(total) : '')
   }, [editNote, returnItems, stockReturnMode])
 
-  const resetForm = () => {
+  const resetForm = (nextReason = '') => {
     setEntityId('')
     setAmount('')
-    setReason('')
+    setReason(nextReason)
     setNotesField('')
     setBranchId('')
     setLinkedDocId('')
@@ -219,7 +221,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   }
 
   const openCreate = () => {
-    resetForm()
+    resetForm(defaultStockReturnReason(activeTab))
     setShowModal(true)
   }
 
@@ -450,7 +452,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
 
       {/* Create/Edit Dialog */}
       <Dialog open={showModal} onOpenChange={setShowModal}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
               {editNote ? 'Edit' : 'New'} {activeTab === 'credit' ? 'Credit' : 'Debit'} Note
@@ -477,18 +479,6 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
               </div>
             )}
             <div>
-              <Label htmlFor="amount">Amount <span className="text-red-500">*</span></Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                placeholder="0.00"
-                readOnly={stockReturnMode && !editNote}
-              />
-            </div>
-            <div>
               <Label>Reason <span className="text-red-500">*</span></Label>
               <Select value={reason} onValueChange={(value) => {
                 setReason(value)
@@ -501,6 +491,18 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                   {reasons.map(r => <SelectItem key={r} value={r}>{r.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label htmlFor="amount">Amount <span className="text-red-500">*</span></Label>
+              <Input
+                id="amount"
+                type="number"
+                step="0.01"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="0.00"
+                readOnly={stockReturnMode && !editNote}
+              />
             </div>
             {!editNote && stockReturnMode && (
               <div className="space-y-3 rounded-md border p-3">
@@ -525,15 +527,15 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                 </div>
                 {returnItems.length > 0 && (
                   <div className="space-y-2">
-                    <div className="grid grid-cols-[1fr_88px_96px] gap-2 text-xs font-medium text-muted-foreground">
+                    <div className="hidden grid-cols-[minmax(0,1fr)_96px_112px] gap-3 text-xs font-medium text-muted-foreground sm:grid">
                       <span>Product</span>
                       <span>Qty</span>
                       <span className="text-right">Amount</span>
                     </div>
                     {returnItems.map(item => (
-                      <div key={item.productId} className="grid grid-cols-[1fr_88px_96px] items-center gap-2">
+                      <div key={item.productId} className="grid grid-cols-[minmax(0,1fr)_88px] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_96px_112px] sm:gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{item.productName}</p>
+                          <p className="break-words text-sm font-medium leading-snug">{item.productName}</p>
                           <p className="text-xs text-muted-foreground">Max {item.maxQuantity}</p>
                         </div>
                         <Input
@@ -543,7 +545,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                           value={item.quantity}
                           onChange={event => updateReturnQuantity(item.productId, event.target.value)}
                         />
-                        <div className="text-right text-sm font-medium">{formatCurrency(item.total)}</div>
+                        <div className="col-span-2 text-right text-sm font-medium sm:col-span-1">{formatCurrency(item.total)}</div>
                       </div>
                     ))}
                   </div>

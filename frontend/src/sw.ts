@@ -8,8 +8,9 @@ import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 
 declare let self: ServiceWorkerGlobalScope
 
-precacheAndRoute(self.__WB_MANIFEST || [])
+self.skipWaiting()
 clientsClaim()
+precacheAndRoute(self.__WB_MANIFEST || [])
 
 // Runtime caching for Google Fonts
 registerRoute(

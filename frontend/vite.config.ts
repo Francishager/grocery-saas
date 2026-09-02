@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         strategies: 'injectManifest',
         registerType: 'autoUpdate',
+        cleanupOutdatedCaches: true,
         srcDir: 'src',
         filename: 'sw.ts',
         includeAssets: ['favicon.ico', 'img/jibusales_logo.png'],
@@ -81,4 +82,3 @@ export default defineConfig(({ mode }) => {
     },
   }
 })
-
