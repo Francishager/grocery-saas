@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission, requireCashAccount, checkPaymentMethodPermission } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
@@ -243,7 +243,7 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
       if (requestedRefundMethod !== originalPaymentMethod) {
         throw httpError(400, `Refund method must match the original sale payment method: ${originalPaymentMethod}`);
       }
-      if (!checkPaymentMethodPermission(req, requestedRefundMethod)) {
+      if (!canUsePaymentMethodOrAssignedCash(req, requestedRefundMethod, req.userCashAccountId)) {
         throw httpError(403, `You do not have permission to use ${requestedRefundMethod} as a payment method. Please contact your administrator.`);
       }
 

@@ -157,12 +157,14 @@ export default function ReceivablesPage() {
   const [showSaleModal, setShowSaleModal] = useState(false)
   const [savingSale, setSavingSale] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [showWithdrawalModal, setShowWithdrawalModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<Customer | null>(null)
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
   const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
+  const [withdrawalAmount, setWithdrawalAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -1350,7 +1352,7 @@ export default function ReceivablesPage() {
                   </div>
                   
                   <div className="mt-4 flex gap-2">
-                    <Button 
+                    <Button
                       size="sm"
                       onClick={() => {
                         setSelectedCustomer(customer)
@@ -1360,6 +1362,18 @@ export default function ReceivablesPage() {
                     >
                       <DollarSign className="h-4 w-4 mr-1" />
                       Record Payment
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedCustomer(customer)
+                        setWithdrawalAmount('')
+                        setShowWithdrawalModal(true)
+                      }}
+                    >
+                      <ArrowDownCircle className="h-4 w-4 mr-1" />
+                      Withdrawal
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setSelectedCustomerDetail(customer)}>
                       <Eye className="h-4 w-4 mr-1" />
@@ -1382,6 +1396,9 @@ export default function ReceivablesPage() {
 
       {activeTab === 'sales' && (
         <div className="grid gap-4">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Credit notes and debit notes are adjustments, not credit sales. They stay on the Credit & Debit Notes page and do not appear in this list.
+          </div>
           {sales.length === 0 ? (
             <Card>
               <CardContent className="p-6 text-sm text-muted-foreground">No credit sales found.</CardContent>

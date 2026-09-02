@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, checkPaymentMethodPermission, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
@@ -32,6 +32,9 @@ async function resolvePaymentCashAccount(client, scope, req, paymentMethod, cash
     })
     if (!account) {
       throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
+    }
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)) {
+      throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} payments from this account`), { statusCode: 403 })
     }
     if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
       throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} payments`), { statusCode: 400 })
@@ -444,7 +447,7 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
     const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
     const resolvedPaymentMethod = paymentMethod || 'cash'
 
-    if (paid > 0 && !checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+    if (paid > 0 && !canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, req.body.cashAccountId || req.userCashAccountId)) {
       return res.status(403).json({
         error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
         code: 'NO_PAYMENT_METHOD_PERMISSION'
@@ -640,7 +643,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
     const resolvedPaymentMethod = paymentMethod || 'mobile_money'
 
     // Gate payment method by permission
-    if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
       return res.status(403).json({
         error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
         code: 'NO_PAYMENT_METHOD_PERMISSION'

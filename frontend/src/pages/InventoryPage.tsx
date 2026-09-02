@@ -213,6 +213,7 @@ export default function InventoryPage() {
   const { user, hasPermission } = useJWTAuth()
   const online = useOnlineStatus()
   const canCreateProduct = hasPermission('canCreateProduct')
+  const canViewPriceHistory = hasPermission('canViewPriceHistory')
   const canEditProduct = hasPermission('canEditProduct')
   const canDeleteProduct = hasPermission('canDeleteProduct')
   const canAdjustStock = hasPermission('canAdjustStock')
@@ -1541,7 +1542,7 @@ export default function InventoryPage() {
                                   Stock In
                                 </button>
                               )}
-                              <button
+                              {canViewPriceHistory && <button
                                 type="button"
                                 className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
                                 onClick={() => {
@@ -1551,7 +1552,7 @@ export default function InventoryPage() {
                               >
                                 <History className="h-4 w-4" />
                                 Price History
-                              </button>
+                              </button>}
                               {canEditCurrent && (
                                 <button
                                   type="button"
@@ -1629,7 +1630,7 @@ export default function InventoryPage() {
                                 Stock In
                               </button>
                             )}
-                            <button
+                            {canViewPriceHistory && <button
                               type="button"
                               className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
                               onClick={() => {
@@ -1639,7 +1640,7 @@ export default function InventoryPage() {
                             >
                               <History className="h-4 w-4" />
                               Price History
-                            </button>
+                            </button>}
                             {canEditCurrent && (
                               <button
                                 type="button"

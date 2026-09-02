@@ -1,7 +1,7 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
-import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
 
@@ -137,6 +137,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const visibleSales = salesUserWhere(req);
 
     const [
       salesThisMonth,
@@ -155,10 +156,10 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       salesWithItemsThisMonth,
       saleRecordsWithItemsThisMonth,
     ] = await Promise.all([
-      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true, tax: true, discount: true }, _count: true }),
-      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true, tax: true, discount: true }, _count: true }),
-      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
-      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth } }), _sum: { total: true } }),
+      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
+      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true } }),
+      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true } }),
       prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth })), _sum: { amount: true } }),
@@ -169,11 +170,11 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.customer.count({ where: scopedWhere(scope) }),
       prisma.customer.aggregate({ where: scopedWhere(scope, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
       prisma.sale.findMany({
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         select: { items: { select: saleItemCostSelect } },
       }),
       prisma.saleRecord.findMany({
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         select: { items: { select: saleItemCostSelect } },
       }),
     ]);
@@ -219,6 +220,7 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
     const labels = [];
     const revenue = [];
     const expenses = [];
+    const visibleSales = salesUserWhere(req);
 
     for (let i = 11; i >= 0; i--) {
       const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -227,8 +229,8 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
       labels.push(label);
 
       const [saleAgg, saleRecordAgg, expAgg, journalExp] = await Promise.all([
-        prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
-        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
+        prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
+        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
         journalExpenseTotal(scope, { gte: start, lt: end }),
       ]);
@@ -250,6 +252,7 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
     const labels = [];
     const grossProfit = [];
     const netProfit = [];
+    const visibleSales = salesUserWhere(req);
 
     for (let i = 5; i >= 0; i--) {
       const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -257,16 +260,16 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
       labels.push(start.toLocaleString("default", { month: "short" }));
 
       const [saleAgg, saleRecordAgg, expAgg, journalExp, salesWithItems, saleRecordsWithItems] = await Promise.all([
-        prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
-        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }), _sum: { total: true } }),
+        prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
+        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
         journalExpenseTotal(scope, { gte: start, lt: end }),
         prisma.sale.findMany({
-          where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
+          where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }),
           select: { items: { select: saleItemCostSelect } },
         }),
         prisma.saleRecord.findMany({
-          where: scopedWhere(scope, { createdAt: { gte: start, lt: end } }),
+          where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }),
           select: { items: { select: saleItemCostSelect } },
         }),
       ]);
@@ -291,15 +294,16 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const visibleSales = salesUserWhere(req);
 
     const [sales, saleRecords, expenses, journalExpenses] = await Promise.all([
       prisma.sale.findMany({
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth }, ...visibleSales }),
         select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
         orderBy: { createdAt: "asc" },
       }),
       prisma.saleRecord.findMany({
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth } }),
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth }, ...visibleSales }),
         select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
         orderBy: { createdAt: "asc" },
       }),
@@ -371,17 +375,18 @@ router.get("/top-products", authenticateToken, requirePermission("canViewDashboa
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const visibleSales = salesUserWhere(req);
 
     const [saleItems, saleRecordItems] = await Promise.all([
       prisma.saleItem.groupBy({
         by: ["productId"],
-        where: { sale: { createdAt: { gte: startOfMonth }, ...scopedWhere(scope, {}) } },
+        where: { sale: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }) },
         _sum: { quantity: true, total: true },
         _count: true,
       }),
       prisma.saleRecordItem.groupBy({
         by: ["productId"],
-        where: { sale: { createdAt: { gte: startOfMonth }, ...scopedWhere(scope, {}) } },
+        where: { sale: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }) },
         _sum: { quantity: true, total: true },
         _count: true,
       }),
@@ -410,17 +415,18 @@ router.get("/payment-methods", authenticateToken, requirePermission("canViewDash
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const visibleSales = salesUserWhere(req);
 
     const [saleMethods, saleRecordMethods] = await Promise.all([
       prisma.sale.groupBy({
         by: ["paymentMethod"],
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         _sum: { total: true },
         _count: true,
       }),
       prisma.saleRecord.groupBy({
         by: ["paymentMethod"],
-        where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }),
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         _sum: { total: true },
         _count: true,
       }),

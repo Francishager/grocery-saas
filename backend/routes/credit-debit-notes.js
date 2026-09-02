@@ -385,7 +385,13 @@ router.get('/credit-notes', authenticateToken, requirePermission('canViewReceiva
     ])
 
     res.json({
-      data: notes,
+      data: notes.map((note) => ({
+        ...note,
+        documentType: 'Credit Note Adjustment',
+        affectsCreditSales: false,
+        statementNote: 'Credit notes reduce receivables and may return stock, but they are not credit sales.',
+      })),
+      note: 'Credit notes are adjustment documents. They do not appear in the credit sales list.',
       pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
     })
   } catch (error) {
@@ -405,7 +411,12 @@ router.get('/credit-notes/:id', authenticateToken, requirePermission('canViewRec
       },
     })
     if (!note) return res.status(404).json({ error: 'Credit note not found' })
-    res.json(note)
+    res.json({
+      ...note,
+      documentType: 'Credit Note Adjustment',
+      affectsCreditSales: false,
+      statementNote: 'Credit notes reduce receivables and may return stock, but they are not credit sales.',
+    })
   } catch (error) {
     handleBranchError(res, error, 'Failed to fetch credit note')
   }
@@ -567,7 +578,13 @@ router.get('/debit-notes', authenticateToken, requirePermission('canViewPayable'
     ])
 
     res.json({
-      data: notes,
+      data: notes.map((note) => ({
+        ...note,
+        documentType: 'Debit Note Adjustment',
+        affectsPurchases: false,
+        statementNote: 'Debit notes reduce payables and may return stock, but they are not purchases.',
+      })),
+      note: 'Debit notes are adjustment documents. They do not appear in purchase or credit-sale lists.',
       pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
     })
   } catch (error) {
@@ -587,7 +604,12 @@ router.get('/debit-notes/:id', authenticateToken, requirePermission('canViewPaya
       },
     })
     if (!note) return res.status(404).json({ error: 'Debit note not found' })
-    res.json(note)
+    res.json({
+      ...note,
+      documentType: 'Debit Note Adjustment',
+      affectsPurchases: false,
+      statementNote: 'Debit notes reduce payables and may return stock, but they are not purchases.',
+    })
   } catch (error) {
     handleBranchError(res, error, 'Failed to fetch debit note')
   }

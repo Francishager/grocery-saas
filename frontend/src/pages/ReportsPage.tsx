@@ -1866,7 +1866,7 @@ export default function ReportsPage() {
     ;[
       ['Cash at Hand', cash.cashAtHand, 'Cash sales plus cash credit repayments, after real cash expenses and till transfers'],
       ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
-      ['Credit Sales', summary.creditSales, 'Customer balances created'],
+      ['Credit Sales', summary.creditSales, 'Customer balances created by credit invoices; credit/debit notes are adjustments listed separately'],
       ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
       ['Expenses', summary.expenses, 'Money spent today'],
       ['Net Cash Movement', cash.netCashMovement, 'Cash in minus real cash expenses and till transfers'],

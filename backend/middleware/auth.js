@@ -451,14 +451,19 @@ export const resolveReqPermissions = async (req) => {
  * Must be called after requireCashAccount or loadUserPermissions.
  */
 export const checkPaymentMethodPermission = (req, paymentMethod) => {
-  const permKey = PAYMENT_METHOD_PERMISSION_MAP[paymentMethod];
+  const permKey = PAYMENT_METHOD_PERMISSION_MAP[String(paymentMethod || '').trim().toLowerCase()];
   if (!permKey) return false;
 
-  if (hasAccountingPermission(req)) {
-    return true;
-  }
-
   return Boolean(getPaymentMethodPermissions(req)[permKey]);
+};
+
+export const canUsePaymentMethodOrAssignedCash = (req, paymentMethod, cashAccountId = null) => {
+  const normalizedMethod = String(paymentMethod || '').trim().toLowerCase();
+  const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId;
+  const isOwnCashAccount = normalizedMethod === 'cash' && cashAccountId && assignedCashAccountId &&
+    String(cashAccountId) === String(assignedCashAccountId);
+
+  return Boolean(isOwnCashAccount || checkPaymentMethodPermission(req, normalizedMethod));
 };
 
 /**
@@ -510,6 +515,7 @@ export default {
   requireCashAccount,
   loadUserPermissions,
   checkPaymentMethodPermission,
+  canUsePaymentMethodOrAssignedCash,
   getPaymentMethodPermissions,
   canUseCashTransactions,
 };

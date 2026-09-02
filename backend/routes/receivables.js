@@ -2,8 +2,8 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, checkPaymentMethodPermission, loadUserPermissions } from '../middleware/auth.js'
-import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { authenticateToken, requirePermission, requireTenant, canUsePaymentMethodOrAssignedCash, loadUserPermissions } from '../middleware/auth.js'
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
@@ -37,6 +37,9 @@ async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cash
     })
     if (!account) {
       throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
+    }
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)) {
+      throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} payments from this account`), { statusCode: 403 })
     }
     if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
       throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} payments`), { statusCode: 400 })
@@ -841,10 +844,11 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
 router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
-    const { page = 1, limit = 50, customerId, paymentStatus, startDate, endDate } = req.query
+    const { page = 1, limit = 50, customerId, paymentStatus, startDate, endDate, userId, staffId } = req.query
     const skip = (Number(page) - 1) * Number(limit)
 
     const where = scopedWhere(scope, {
+      ...salesUserWhere(req, userId || staffId),
       ...(customerId && { customerId }),
       ...(paymentStatus && { paymentStatus }),
       ...(startDate && endDate && {
@@ -982,7 +986,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       return res.status(400).json({ error: 'Select cash, mobile money, bank transfer, or card for the paid amount on this sale' })
     }
 
-    if (paid > 0 && !checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+    if (paid > 0 && !canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, req.body.cashAccountId || req.userCashAccountId)) {
       return res.status(403).json({
         error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
         code: 'NO_PAYMENT_METHOD_PERMISSION'
@@ -1186,7 +1190,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
     const resolvedPaymentMethod = paymentMethod || 'cash'
 
     // Gate payment method by permission
-    if (!checkPaymentMethodPermission(req, resolvedPaymentMethod)) {
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
       return res.status(403).json({
         error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
         code: 'NO_PAYMENT_METHOD_PERMISSION'

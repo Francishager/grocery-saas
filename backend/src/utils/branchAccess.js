@@ -2,9 +2,42 @@ export const tenantIdFromUser = (user) =>
   user?.tenantId || user?.tenant_id || user?.business_id || null;
 
 const ownerRoles = new Set(["owner"]);
+const teamSalesRoles = new Set(["owner", "admin", "manager", "accountant", "saas_admin", "platform_admin", "super_admin"]);
+const teamSalesPermissions = new Set([
+  "*",
+  "canViewStaff",
+  "canCreateStaff",
+  "canEditStaff",
+  "canDeleteStaff",
+  "canViewStaffTillSheet",
+  "canManageHRPayroll",
+  "canApproveHRPayroll",
+]);
 
 export function isOwner(user) {
   return ownerRoles.has(user?.role);
+}
+
+export function canViewTeamSales(user) {
+  if (!user) return false;
+  if (user.isPlatformUser) return true;
+
+  const role = String(user.role || "").trim().toLowerCase();
+  if (teamSalesRoles.has(role)) return true;
+
+  const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+  return permissions.some((permission) => teamSalesPermissions.has(permission));
+}
+
+export function visibleSalesUserId(req, requestedUserId = null) {
+  const requested = String(requestedUserId || "").trim();
+  if (canViewTeamSales(req.user)) return requested || null;
+  return req.user?.id || "__no_authenticated_user__";
+}
+
+export function salesUserWhere(req, requestedUserId = null, field = "userId") {
+  const userId = visibleSalesUserId(req, requestedUserId);
+  return userId ? { [field]: userId } : {};
 }
 
 export function httpError(statusCode, message) {

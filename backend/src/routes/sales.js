@@ -1,7 +1,7 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requirePermission, requireCashAccount } from "../../middleware/auth.js";
-import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
+import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
 import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
 import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
@@ -320,6 +320,9 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     const userId = req.user?.id;
     const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId } = req.body;
     if (!items.length) return res.status(400).json({ error: "Items required" });
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
+      return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
+    }
 
     const discountCheck = await checkDiscountPermission(req, userId, items, cashDiscount);
     if (!discountCheck.allowed) {
@@ -428,6 +431,9 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     const userId = req.user?.id;
     const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, amountPaid, changeGiven } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
+      return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
+    }
 
     const discountCheck = await checkDiscountPermission(req, userId, cart, cashDiscount);
     if (!discountCheck.allowed) {
@@ -531,8 +537,8 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
 router.get("/", authenticateToken, requirePermission("canViewSale"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
-    const { from, to, page = 1, limit = 50 } = req.query;
-    const where = scopedWhere(scope);
+    const { from, to, page = 1, limit = 50, userId, staffId } = req.query;
+    const where = scopedWhere(scope, salesUserWhere(req, userId || staffId));
     if (from || to) {
       where.createdAt = {};
       if (from) where.createdAt.gte = new Date(from);

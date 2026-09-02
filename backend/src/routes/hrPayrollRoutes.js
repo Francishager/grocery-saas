@@ -5,7 +5,7 @@
 
 import { Router } from "express";
 import payrollService from "../services/payrollService.js";
-import { authenticateToken, requireAnyPermission, requireTenant } from "../../middleware/auth.js";
+import { authenticateToken, requireAnyPermission, requireTenant, loadUserPermissions, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
 
 const router = Router();
 const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
@@ -230,7 +230,7 @@ router.post("/:id/post", requireAnyPermission(["canPostHRPayroll", "canManageHRP
  * POST /api/hr/payroll/:id/pay
  * Record salary payment
  */
-router.post("/:id/pay", requireAnyPermission(["canPayHRPayroll", "canManageHRPayroll"]), async (req, res) => {
+router.post("/:id/pay", loadUserPermissions, requireAnyPermission(["canPayHRPayroll", "canManageHRPayroll"]), async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);
@@ -242,6 +242,9 @@ router.post("/:id/pay", requireAnyPermission(["canPayHRPayroll", "canManageHRPay
         error:
           "Missing required fields: amount (positive), paymentAccountId",
       });
+    }
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod || "cash", paymentAccountId)) {
+      return res.status(403).json({ error: "You do not have permission to use this payment account", code: "NO_PAYMENT_METHOD_PERMISSION" });
     }
 
     const result = await payrollService.paySalary({

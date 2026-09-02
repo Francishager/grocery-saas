@@ -13,6 +13,7 @@ const PERMISSION_TO_FEATURES = {
   canCreateReceipt: ['receipts', 'sales.receipts', 'sales.pos', 'sales'],
   canCreateProduct: ['inventory.products', 'inventory'],
   canViewProduct: ['inventory.products', 'inventory'],
+  canViewPriceHistory: ['inventory.products', 'inventory'],
   canEditProduct: ['inventory.products', 'inventory'],
   canDeleteProduct: ['inventory.products', 'inventory'],
   canAdjustStock: ['inventory.stock', 'inventory.adjustments', 'inventory'],
@@ -169,7 +170,7 @@ export const ALL_PERMISSION_KEYS = [
   // Sales
   "canCreateSale", "canViewSale", "canEditSale", "canDeleteSale", "canRefundSale",
   // Inventory
-  "canCreateProduct", "canViewProduct", "canEditProduct", "canDeleteProduct", "canAdjustStock", "canTransferStock",
+  "canCreateProduct", "canViewProduct", "canViewPriceHistory", "canEditProduct", "canDeleteProduct", "canAdjustStock", "canTransferStock",
   // Purchases / Payables
   "canCreatePurchase", "canViewPurchase", "canEditPurchase", "canDeletePurchase",
   "canCreatePayable", "canViewPayable", "canEditPayable", "canDeletePayable",
@@ -320,6 +321,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canViewProduct: {
     name: 'View inventory',
     description: 'See products, services, prices, cost, stock quantities, and inventory history.',
+  },
+  canViewPriceHistory: {
+    name: 'View price history',
+    description: 'See historical product price and cost changes.',
   },
   canEditProduct: {
     name: 'Edit product details',

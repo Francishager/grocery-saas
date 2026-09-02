@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions, canUsePaymentMethodOrAssignedCash, loadUserPermissions } from '../middleware/auth.js'
 import { requireAnyFeature, requireFeature } from '../middleware/featureCheck.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
@@ -18,16 +18,6 @@ const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
   bank: { type: 'bank' },
   cheque: { type: 'bank' },
   card: { type: 'card' }
-}
-
-const PAYMENT_METHOD_PERMISSION_KEYS = {
-  cash: 'canUseCash',
-  safe: 'canUseCash',
-  mobile_money: 'canUseMobileMoney',
-  bank_transfer: 'canUseBank',
-  bank: 'canUseBank',
-  cheque: 'canUseBank',
-  card: 'canUseCard'
 }
 
 const toMoney = (value, fallback = 0) => {
@@ -51,9 +41,6 @@ async function tenantCurrency(tenantId, client = prisma) {
   })
   return normalizeCurrency(tenant?.currency)
 }
-
-const paymentMethodPermissionKey = (paymentMethod) =>
-  PAYMENT_METHOD_PERMISSION_KEYS[normalizePaymentMethod(paymentMethod)]
 
 const paymentMethodAccountTypes = (paymentMethod) => {
   const method = normalizePaymentMethod(paymentMethod)
@@ -127,36 +114,6 @@ function scopedExpenseWhere(scope, filters = []) {
   }
 }
 
-async function paymentMethodPermissionsForRequest(req) {
-  if (req.userPermissions !== undefined) {
-    return getPaymentMethodPermissions(req)
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: {
-      permissions: {
-        select: {
-          canUseCash: true,
-          canUseMobileMoney: true,
-          canUseBank: true,
-          canUseCard: true
-        }
-      }
-    }
-  })
-
-  return getPaymentMethodPermissions(req, user?.permissions)
-}
-
-async function canUsePaymentMethod(req, paymentMethod) {
-  const permissionKey = paymentMethodPermissionKey(paymentMethod)
-  if (!permissionKey) return false
-
-  const permissions = await paymentMethodPermissionsForRequest(req)
-  return Boolean(permissions[permissionKey])
-}
-
 // === EXPENSES ===
 
 // Get all expenses for tenant
@@ -212,7 +169,7 @@ router.get('/expenses', authenticateToken, requirePermission('canViewExpense'), 
 })
 
 // Create new expense
-router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
+router.post('/expenses', authenticateToken, loadUserPermissions, requirePermission('canCreateExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -239,14 +196,6 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
     if (!category?.trim()) return res.status(400).json({ error: 'Expense category is required' })
     if (!description?.trim()) return res.status(400).json({ error: 'Expense description is required' })
     if (amountValue <= 0) return res.status(400).json({ error: 'Expense amount must be greater than zero' })
-
-    // Gate payment method by permission
-    if (!(await canUsePaymentMethod(req, resolvedPaymentMethod))) {
-      return res.status(403).json({
-        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
-        code: 'NO_PAYMENT_METHOD_PERMISSION'
-      })
-    }
 
     const allowedAccountTypes = paymentMethodAccountTypes(resolvedPaymentMethod)
     if (!allowedAccountTypes.length) {
@@ -293,6 +242,13 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
       return res.status(400).json({
         error: `Select an existing ${paymentMethodAccountLabel(resolvedPaymentMethod)} account for ${resolvedPaymentMethod} payments. Create it first in Transaction Accounts if it does not exist.`,
         code: 'PAYMENT_ACCOUNT_REQUIRED'
+      })
+    }
+
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, resolvedCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
       })
     }
 
@@ -372,7 +328,7 @@ router.post('/expenses', authenticateToken, requirePermission('canCreateExpense'
 })
 
 // Update expense
-router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
+router.put('/expenses/:id', authenticateToken, loadUserPermissions, requirePermission('canEditExpense'), requireFeature('expenses'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -395,10 +351,17 @@ router.put('/expenses/:id', authenticateToken, requirePermission('canEditExpense
           where: { id: cashAccountId, tenantId: req.tenant.id, isActive: true }
         })
         if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
+        if (!canUsePaymentMethodOrAssignedCash(req, normalizePaymentMethod(paymentMethod || existingExpense.paymentMethod), account.id)) {
+          return res.status(403).json({ error: 'You do not have permission to use this payment account', code: 'NO_PAYMENT_METHOD_PERMISSION' })
+        }
         resolvedCashAccountId = account.id
       } else {
         resolvedCashAccountId = null
       }
+    }
+
+    if (paymentMethod && !canUsePaymentMethodOrAssignedCash(req, normalizePaymentMethod(paymentMethod), resolvedCashAccountId)) {
+      return res.status(403).json({ error: 'You do not have permission to use this payment method', code: 'NO_PAYMENT_METHOD_PERMISSION' })
     }
 
     const data = {
@@ -465,7 +428,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 })
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     // Include assigned users so we can surface staff + branch on the API response
     const rawAccounts = await prisma.cashAccount.findMany({
@@ -491,7 +454,25 @@ router.get('/cash-accounts', authenticateToken, requireAnyPermission(['canViewAc
       },
     })
 
-    const accounts = rawAccounts.map((account) => {
+    const paymentPermissions = getPaymentMethodPermissions(req)
+    const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId
+    const visibleAccounts = rawAccounts.filter((account) => {
+      const permissionKey = account.type === 'cash' || account.type === 'safe'
+        ? 'canUseCash'
+        : account.type === 'mobile_money'
+          ? 'canUseMobileMoney'
+          : account.type === 'bank'
+            ? 'canUseBank'
+            : account.type === 'card'
+              ? 'canUseCard'
+              : null
+      return Boolean(
+        (permissionKey && paymentPermissions[permissionKey]) ||
+        (permissionKey === 'canUseCash' && assignedCashAccountId && account.id === assignedCashAccountId)
+      )
+    })
+
+    const accounts = visibleAccounts.map((account) => {
       const staff = account.AssignedUsers?.[0] || null
       const primaryBranch = staff?.branches?.find((b) => b.isPrimary)?.branch || staff?.branches?.[0]?.branch || null
 

@@ -336,7 +336,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Credit & Debit Notes</h1>
-          <p className="text-sm text-muted-foreground">Manage credit notes for customers and debit notes for suppliers</p>
+          <p className="text-sm text-muted-foreground">Manage adjustment notes separately from credit sales and purchases</p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />

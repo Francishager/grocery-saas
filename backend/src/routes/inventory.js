@@ -4,6 +4,7 @@ import { authenticateToken, requirePermission, requireFeature } from "../../midd
 import {
   handleBranchError,
   resolveBranchScope,
+  salesUserWhere,
   scopedWhere,
   tenantIdFromUser,
 } from "../utils/branchAccess.js";
@@ -153,7 +154,7 @@ function auditLogStockMovement(log) {
   };
 }
 
-async function buildInventoryMovementSummary(scope, products, range) {
+async function buildInventoryMovementSummary(scope, products, range, req) {
   const productIds = products.map((product) => product.id).filter(Boolean);
   const buckets = new Map(productIds.map((id) => [id, createMovementBucket()]));
   if (!productIds.length) {
@@ -166,6 +167,7 @@ async function buildInventoryMovementSummary(scope, products, range) {
   const dateWhere = { gte: range.start, lte: range.end };
   const afterWhere = { gt: range.end };
   const productWhere = { productId: { in: productIds } };
+  const visibleSaleUserWhere = salesUserWhere(req);
   const productSelect = { id: true, name: true, sku: true };
   const userSelect = { id: true, fname: true, lname: true, email: true };
 
@@ -190,7 +192,7 @@ async function buildInventoryMovementSummary(scope, products, range) {
     afterAdjustmentLogs,
   ] = await Promise.all([
     prisma.saleItem.findMany({
-      where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
+      where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...visibleSaleUserWhere }) },
       include: {
         sale: {
           select: {
@@ -209,7 +211,7 @@ async function buildInventoryMovementSummary(scope, products, range) {
       orderBy: { createdAt: "asc" },
     }),
     prisma.saleRecordItem.findMany({
-      where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed" }) },
+      where: { ...productWhere, sale: scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...visibleSaleUserWhere }) },
       include: {
         sale: {
           select: {
@@ -689,7 +691,7 @@ router.get("/", authenticateToken, async (req, res) => {
       }
 
       const range = inventoryDateRange(req);
-      const { byProductId, summary } = await buildInventoryMovementSummary(scope, products, range);
+      const { byProductId, summary } = await buildInventoryMovementSummary(scope, products, range, req);
       return {
         products: products.map((product) => {
           const bucket = byProductId.get(product.id) || createMovementBucket();
@@ -830,7 +832,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // Product price/cost history
-router.get("/:id/price-history", authenticateToken, requirePermission("canViewProduct"), async (req, res) => {
+router.get("/:id/price-history", authenticateToken, requirePermission("canViewPriceHistory"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({
