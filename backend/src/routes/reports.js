@@ -189,6 +189,15 @@ function normalizedPaymentMethod(value) {
   return "cash";
 }
 
+function paymentAccountLabel(method) {
+  const normalized = normalizedPaymentMethod(method);
+  if (normalized === "mobile_money") return "Mobile Money";
+  if (normalized === "bank") return "Bank";
+  if (normalized === "card") return "Card Payments";
+  if (normalized === "credit") return "Accounts Receivable";
+  return "Cash";
+}
+
 function userLabel(user) {
   return [user?.fname, user?.lname].filter(Boolean).join(" ") || user?.email || "Unknown";
 }
@@ -337,7 +346,7 @@ function staffSalesValues(method, amount) {
 function cashMovementDirection(type) {
   const normalized = String(type || "").toLowerCase();
   if (["income", "receipt", "deposit", "sale", "collection"].includes(normalized)) return "in";
-  if (["expense", "payment", "withdrawal", "purchase"].includes(normalized)) return "out";
+  if (["expense", "payment", "withdrawal", "purchase", "refund", "sale_return"].includes(normalized)) return "out";
   if (normalized.includes("transfer_in") || normalized.includes("handover_in")) return "transfer-in";
   if (normalized.includes("transfer_out") || normalized.includes("handover") || normalized.includes("transfer")) return "transfer-out";
   return normalized.includes("out") ? "out" : "in";
@@ -1486,25 +1495,42 @@ router.get("/sales/discounts", authenticateToken, async (req, res) => {
 router.get("/sales/returns", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ 
-        where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }),
-        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, status: true, createdAt: true, paymentMethod: true },
-        orderBy: { createdAt: "asc" }
+    const returns = await prisma.saleReturn.findMany({
+      where: scopedWhere(s, {
+        ...df(req),
+        saleId: { not: null },
+        status: "completed",
+        refundMethod: { not: "credit_note_stock" },
       }),
-      prisma.saleRecord.findMany({ 
-        where: scopedWhere(s, { ...df(req), status: { in: ["refunded", "cancelled"] } }), 
-        select: { id: true, receiptNo: true, total: true, discount: true, tax: true, paymentStatus: true, status: true, createdAt: true, paymentMethod: true },
-        orderBy: { createdAt: "asc" }
-      }),
-    ]);
+      select: {
+        id: true,
+        returnNo: true,
+        total: true,
+        reason: true,
+        refundMethod: true,
+        createdAt: true,
+        items: { select: { quantity: true, product: { select: { name: true } } } },
+        sale: { select: { receiptNo: true, customerName: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
     
-    // Transform to enriched format
-    const allReturns = [...sales, ...saleRecords].map(sale => ({
-      ...sale,
-      revenue: sale.total,
-      status: saleStatus(sale) || 'Refunded'
-    })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const allReturns = returns.map((ret) => ({
+      id: ret.id,
+      receiptNo: ret.returnNo,
+      originalReceiptNo: ret.sale?.receiptNo,
+      total: ret.total,
+      revenue: ret.total,
+      tax: 0,
+      discount: 0,
+      paymentMethod: ret.refundMethod,
+      status: "Returned",
+      createdAt: ret.createdAt,
+      itemCount: ret.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      items: ret.items.map((item) => item.product?.name).filter(Boolean).join(", "),
+      customerName: ret.sale?.customerName || "Walk-in Customer",
+      reason: ret.reason || "",
+    }));
     
     const enriched = transformSalesData(allReturns);
     enriched.title = 'Returns & Refunds Report';
@@ -2097,7 +2123,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       // Debit notes
       prisma.debitNote.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Sale returns
-      prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, status: "completed" }), select: { id: true, returnNo: true, total: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, status: "completed" }), select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Customer opening balances
       prisma.customer.findMany({ where: scopedWhere(s, { ...(customerId ? { id: customerId } : {}), ...branchFilter, openingBalance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true, createdAt: true }, orderBy: { name: "asc" } }),
       // Supplier opening balances
@@ -2180,10 +2206,11 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
         { date: x.createdAt, account: "Accounts Payable", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: x.amount, credit: 0 },
         { date: x.createdAt, account: "Purchase Returns & Allowances", description: `Debit Note ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount },
       ]),
-      // Sale returns: debit Sales Returns (contra-revenue), credit Accounts Receivable/Cash
+      // POS sale returns: debit Sales Returns (contra-revenue), credit the refund account.
+      // Credit sale reductions are handled by credit notes above.
       ...saleReturns.flatMap((x) => [
         { date: x.createdAt, account: "Sales Returns", description: `Sales Return ${x.returnNo} (${x.reason || ""})`, debit: x.total, credit: 0 },
-        { date: x.createdAt, account: "Accounts Receivable", description: `Sales Return ${x.returnNo}`, debit: 0, credit: x.total },
+        { date: x.createdAt, account: paymentAccountLabel(x.refundMethod), description: `Sales Return ${x.returnNo}`, debit: 0, credit: x.total },
       ]),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
     res.json({ data: entries });
