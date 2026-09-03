@@ -181,7 +181,7 @@ function fallbackPermissionCategory(key: string) {
 }
 
 function getPermissionGroups(schema: PermissionSchema | null, search: string) {
-  const keys = schema?.keys?.length ? schema.keys : Object.keys(PERM_LABELS)
+  const keys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])]
   const definitions = new Map((schema?.permissions || []).map(permission => [permission.id, permission]))
   const categories = new Map((schema?.categories || []).map(category => [category.id, category]))
   const query = search.trim().toLowerCase()
@@ -241,7 +241,7 @@ function PermissionMatrix({
   search: string
   onSearch: (value: string) => void
 }) {
-  const allKeys = schema?.keys?.length ? schema.keys : Object.keys(PERM_LABELS)
+  const allKeys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])]
   const groups = getPermissionGroups(schema, search)
 
   const setAll = (checked: boolean) => {
