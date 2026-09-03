@@ -230,7 +230,7 @@ class FeatureAccessService {
   }
 
   // Check if user can access feature
-  canAccessFeature(featureName: string, userRole?: string): boolean {
+  canAccessFeature(featureName: string | string[], userRole?: string): boolean {
     // SaaS Admin can access everything
     if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
 
@@ -238,7 +238,9 @@ class FeatureAccessService {
     // state has been loaded and the feature is explicitly enabled.
     if (this.loading) return false
 
-    return this.isFeatureEnabled(featureName)
+    return Array.isArray(featureName)
+      ? this.isAnyFeatureEnabled(featureName)
+      : this.isFeatureEnabled(featureName)
   }
 
   // Get all features by category
@@ -359,7 +361,7 @@ export function useFeatureAccess() {
     return featureAccessService.isAnyFeatureEnabled(featureNames)
   }, [])
 
-  const canAccessFeature = useCallback((featureName: string) => {
+  const canAccessFeature = useCallback((featureName: string | string[]) => {
     return featureAccessService.canAccessFeature(featureName, user?.role)
   }, [user?.role])
 
