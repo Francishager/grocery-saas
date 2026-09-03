@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import cloudinary from "cloudinary";
 import prisma from "../db.js";
-import { authenticateToken } from "../../middleware/auth.js";
+import { authenticateToken, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 import { resolveEffectivePermissions } from "../utils/permissions.js";
 import { getTenantFeatures } from "../../middleware/featureCheck.js";
@@ -38,6 +38,7 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     avatar: user.avatar || null,
     role: user.role,
     tenantId: user.tenantId,
+    tenantStatus: user.tenant?.status || null,
     branchId: primaryBranchId(user),
     cashAccountId: user.cashAccountId || null,
     cashAccount: user.cashAccount || null,
@@ -64,6 +65,9 @@ router.post("/login", async (req, res) => {
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ message: "Invalid credentials" });
+
+    const tenantBlock = tenantAccountAccessPayload(user.tenant, user);
+    if (tenantBlock) return res.status(403).json(tenantBlock);
 
     // Force password reset if otpCode is present (first login after admin invite)
     if (user.otpCode && user.otpExpires && new Date(user.otpExpires) > new Date()) {
@@ -108,6 +112,16 @@ router.post("/register", async (req, res) => {
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return res.status(409).json({ error: "User already exists" });
+
+    if (tenantId) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, status: true },
+      });
+      if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+      const tenantBlock = tenantAccountAccessPayload(tenant, { role: role || "attendant" });
+      if (tenantBlock) return res.status(403).json(tenantBlock);
+    }
 
     const hashed = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
@@ -158,6 +172,9 @@ router.post("/refresh", async (req, res) => {
     if (!user || !user.isActive) {
       return res.status(401).json({ message: "User not found or inactive" });
     }
+
+    const tenantBlock = tenantAccountAccessPayload(user.tenant, user);
+    if (tenantBlock) return res.status(403).json(tenantBlock);
 
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
     const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();

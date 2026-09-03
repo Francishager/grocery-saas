@@ -38,6 +38,7 @@ import {
   Shield,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowDownCircle,
   Printer
 } from 'lucide-react'
 
@@ -203,13 +204,13 @@ export default function ReceivablesPage() {
   }, [])
 
   useEffect(() => {
-    if (showPaymentModal) {
+    if (showPaymentModal || showWithdrawalModal) {
       loadCashAccounts()
     } else {
       setCashAccounts([])
       setSelectedCashAccountId(null)
     }
-  }, [showPaymentModal])
+  }, [showPaymentModal, showWithdrawalModal])
 
   useEffect(() => {
     if (!creditEnabled) {
@@ -755,6 +756,66 @@ export default function ReceivablesPage() {
     }
   }
 
+  const recordWithdrawal = async () => {
+    const targetCustomer = selectedCustomer
+    if (!targetCustomer) {
+      toast({ variant: 'destructive', title: 'Select a customer first' })
+      return
+    }
+    if (!withdrawalAmount || parseFloat(withdrawalAmount) <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a valid withdrawal amount' })
+      return
+    }
+    if (!selectedCashAccountId) {
+      toast({ variant: 'destructive', title: 'Select a cash account to record the withdrawal' })
+      return
+    }
+
+    try {
+      const response = await apiFetch('/api/receivables/withdrawals', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerId: targetCustomer.id,
+          amount: parseFloat(withdrawalAmount),
+          paymentMethod,
+          cashAccountId: selectedCashAccountId || undefined,
+          mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
+          phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
+          transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
+          notes: 'Customer withdrawal recorded via dashboard'
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to record withdrawal'))
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Withdrawal recorded successfully'
+      })
+      setShowWithdrawalModal(false)
+      setSelectedCustomer(null)
+      setWithdrawalAmount('')
+      setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      setSelectedCashAccountId(null)
+      if (activeTab === 'customers') loadCustomers()
+      loadCustomerOptions()
+      loadSales()
+      loadPayments()
+      loadReceivablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to record withdrawal',
+        variant: 'destructive'
+      })
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const variants = {
       active: 'default',
@@ -1230,6 +1291,11 @@ export default function ReceivablesPage() {
   const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
   const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
   const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
+  const selectedWithdrawalAccount = cashAccounts.find((account) => String(account.id) === String(selectedCashAccountId))
+  const withdrawalValue = parseAmount(withdrawalAmount)
+  const withdrawalAccountBalance = Number(selectedWithdrawalAccount?.balance || 0)
+  const withdrawalAccountBalanceAfter = selectedWithdrawalAccount ? withdrawalAccountBalance - withdrawalValue : null
+  const withdrawalCustomerBalanceAfter = Number(selectedCustomer?.balance || 0) + withdrawalValue
 
   return (
     <div className="space-y-6">
@@ -1368,7 +1434,13 @@ export default function ReceivablesPage() {
                       variant="outline"
                       onClick={() => {
                         setSelectedCustomer(customer)
+                        setSelectedSale(null)
                         setWithdrawalAmount('')
+                        setPaymentMethod('cash')
+                        setMobileProvider('')
+                        setPhoneNumber('')
+                        setTransactionId('')
+                        setSelectedCashAccountId(null)
                         setShowWithdrawalModal(true)
                       }}
                     >
@@ -2038,6 +2110,186 @@ export default function ReceivablesPage() {
                 Record Payment
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Withdrawal Modal */}
+      {showWithdrawalModal && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">Record Withdrawal</h3>
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault()
+                recordWithdrawal()
+              }}
+            >
+              <div>
+                <Label>Customer</Label>
+                <p className="font-medium">{selectedCustomer.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  Current Balance: {formatCurrency(Number(selectedCustomer.balance || 0))}
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="withdrawalAmount">Withdrawal Amount</Label>
+                <Input
+                  id="withdrawalAmount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  max={selectedWithdrawalAccount ? withdrawalAccountBalance : undefined}
+                  value={withdrawalAmount}
+                  onChange={(event) => setWithdrawalAmount(event.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="withdrawalPaymentMethod">Payment Method</Label>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(method) => {
+                    setPaymentMethod(method)
+                    setSelectedCashAccountId(null)
+                    setMobileProvider('')
+                    setPhoneNumber('')
+                    setTransactionId('')
+                    setTimeout(() => loadCashAccounts(method), 50)
+                  }}
+                >
+                  <SelectTrigger id="withdrawalPaymentMethod">
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {paymentMethod === 'mobile_money' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                  <div>
+                    <Label>Network Provider *</Label>
+                    <select
+                      value={mobileProvider}
+                      onChange={(event) => setMobileProvider(event.target.value)}
+                      className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Select provider</option>
+                      <option value="MTN">MTN</option>
+                      <option value="Airtel">Airtel</option>
+                      <option value="Zamtel">Zamtel</option>
+                      <option value="Vodafone">Vodafone</option>
+                      <option value="M-Pesa">M-Pesa</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Phone Number *</Label>
+                    <Input
+                      value={phoneNumber}
+                      onChange={(event) => setPhoneNumber(event.target.value)}
+                      placeholder="e.g. 0977123456"
+                      type="tel"
+                    />
+                  </div>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(event) => setTransactionId(event.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(event) => setTransactionId(event.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label htmlFor="withdrawalCashAccount">Staff Till / Account</Label>
+                <Select value={selectedCashAccountId || ''} onValueChange={(value) => setSelectedCashAccountId(value || null)}>
+                  <SelectTrigger id="withdrawalCashAccount">
+                    <SelectValue placeholder={cashAccounts.length === 0 ? 'No accounts available for this payment method' : 'Select till or account'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cashAccounts.length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground">No {getAccountTypeForPaymentMethod(paymentMethod)} accounts available</div>
+                    ) : (
+                      cashAccounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {account.name} (Balance: {formatCurrency(Number(account.balance || 0))})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="rounded-md border p-4 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span>Customer Balance After</span>
+                  <span className="font-semibold text-red-600">{formatCurrency(withdrawalCustomerBalanceAfter)}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-muted-foreground">
+                  <span>Account Balance After</span>
+                  <span className={withdrawalAccountBalanceAfter !== null && withdrawalAccountBalanceAfter < 0 ? 'font-semibold text-red-600' : ''}>
+                    {withdrawalAccountBalanceAfter === null ? 'Select account' : formatCurrency(withdrawalAccountBalanceAfter)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowWithdrawalModal(false)
+                    setSelectedCustomer(null)
+                    setWithdrawalAmount('')
+                    setPaymentMethod('cash')
+                    setMobileProvider('')
+                    setPhoneNumber('')
+                    setTransactionId('')
+                    setSelectedCashAccountId(null)
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 ||
+                    !selectedCashAccountId ||
+                    (withdrawalAccountBalanceAfter !== null && withdrawalAccountBalanceAfter < 0) ||
+                    (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
+                    (paymentMethod === 'card' ? !transactionId.trim() : false)
+                  }
+                >
+                  Record Withdrawal
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -76,8 +76,15 @@ export const BusinessesPage: React.FC = () => {
     setActionLoading(id)
     try {
       const res = await apiFetch(`/api/tenants/${id}/${action}`, { method: 'POST' })
-      if (res.ok) fetchTenants()
-      else alert(`Failed to ${action} tenant`)
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        await fetchTenants()
+        if (selected?.id === id) {
+          setSelected(prev => prev ? { ...prev, status: data?.tenant?.status || (action === 'activate' ? 'active' : 'suspended') } : null)
+        }
+      } else {
+        alert(data.error || data.message || `Failed to ${action} tenant`)
+      }
     } catch { alert('Request failed') }
     setActionLoading(null)
   }
@@ -116,7 +123,7 @@ export const BusinessesPage: React.FC = () => {
   }
 
   const statusBadge = (s: string) => {
-    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', suspended: 'bg-red-100 text-red-800', trial: 'bg-blue-100 text-blue-800', expired: 'bg-gray-100 text-gray-800' }
+    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', suspended: 'bg-red-100 text-red-800', trial: 'bg-blue-100 text-blue-800', cancelled: 'bg-gray-100 text-gray-800' }
     return <span className={`px-2 py-1 rounded-full text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-800'}`}>{s.charAt(0).toUpperCase() + s.slice(1)}</span>
   }
 
@@ -145,7 +152,7 @@ export const BusinessesPage: React.FC = () => {
           <input type="text" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && fetchTenants()} placeholder="Search by name or email..." className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-4 py-2 border rounded-lg">
-          <option value="all">All Status</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="trial">Trial</option><option value="expired">Expired</option>
+          <option value="all">All Status</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="trial">Trial</option><option value="cancelled">Cancelled</option>
         </select>
       </div>
 

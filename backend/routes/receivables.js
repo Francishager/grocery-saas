@@ -30,7 +30,7 @@ const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
   return false
 }
 
-async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cashAccountId = null) {
+async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cashAccountId = null, actionLabel = 'payments') {
   if (cashAccountId) {
     const account = await client.cashAccount.findFirst({
       where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true }
@@ -39,10 +39,10 @@ async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cash
       throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
     }
     if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)) {
-      throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} payments from this account`), { statusCode: 403 })
+      throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} ${actionLabel} from this account`), { statusCode: 403 })
     }
     if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
-      throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} payments`), { statusCode: 400 })
+      throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} ${actionLabel}`), { statusCode: 400 })
     }
     return account
   }
@@ -57,7 +57,7 @@ async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cash
   }
 
   throw Object.assign(
-    new Error(`Select an existing ${paymentMethodAccountLabel(paymentMethod)} account for ${paymentMethod} payments. Create it first in Transaction Accounts if it does not exist.`),
+    new Error(`Select an existing ${paymentMethodAccountLabel(paymentMethod)} account for ${paymentMethod} ${actionLabel}. Create it first in Transaction Accounts if it does not exist.`),
     { statusCode: 400, code: 'PAYMENT_ACCOUNT_REQUIRED' }
   )
 }
@@ -350,7 +350,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       ? { customerName: { equals: customer.name, mode: 'insensitive' } }
       : { id: '__no_matching_customer_name__' }
 
-    const [receivableSales, payments, posSales, creditNotes, saleReturns, balanceSnapshot] = await Promise.all([
+    const [receivableSales, payments, withdrawals, posSales, creditNotes, saleReturns, balanceSnapshot] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
         include: {
@@ -366,6 +366,16 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         include: {
           branch: { select: { id: true, name: true } },
           sale: { select: { id: true, receiptNo: true } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }),
+      prisma.customerWithdrawal.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          cashAccount: { select: { id: true, name: true, type: true } },
+          user: userSelect
         },
         orderBy: { createdAt: 'asc' },
         take: limit
@@ -512,6 +522,28 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       })
     })
 
+    withdrawals.forEach((withdrawal) => {
+      rows.push({
+        id: withdrawal.id,
+        source: 'customer_withdrawal',
+        type: 'Withdrawal',
+        date: withdrawal.createdAt,
+        reference: withdrawal.reference || withdrawal.transactionId || withdrawal.id,
+        description: withdrawal.notes || `Customer withdrawal from ${withdrawal.cashAccount?.name || paymentMethodAccountLabel(withdrawal.paymentMethod)}`,
+        debit: toMoney(withdrawal.amount),
+        credit: 0,
+        amount: toMoney(withdrawal.amount),
+        balanceImpact: toMoney(withdrawal.amount),
+        affectsBalance: true,
+        paymentMethod: withdrawal.paymentMethod,
+        status: 'posted',
+        branch: withdrawal.branch?.name || '',
+        staff: userName(withdrawal.user),
+        items: [],
+        sortOrder: 25
+      })
+    })
+
     creditNotes.forEach((note) => {
       rows.push({
         id: note.id,
@@ -612,10 +644,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       if (row.source === 'receivable_sale') acc.receivableSales += toMoney(row.amount)
       if (row.source === 'pos_sale') acc.cashSales += toMoney(row.amount)
       if (row.source === 'customer_payment') acc.payments += toMoney(row.amount)
+      if (row.source === 'customer_withdrawal') acc.withdrawals += toMoney(row.amount)
       if (row.source === 'credit_note') acc.creditNotes += toMoney(row.amount)
       if (row.source === 'sale_return') acc.returns += toMoney(row.amount)
       return acc
-    }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, creditNotes: 0, returns: 0 })
+    }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, withdrawals: 0, creditNotes: 0, returns: 0 })
 
     res.json({
       customer: {
@@ -1233,7 +1266,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
         }
       })
 
-      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
+      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'withdrawals')
       const updatedAccount = await tx.cashAccount.update({
         where: { id: accountToUse.id },
         data: { balance: { increment: paidAmount } }
@@ -1282,6 +1315,131 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
   } catch (error) {
     console.error('Record payment error:', error)
     handleBranchError(res, error, 'Failed to record payment')
+  }
+})
+
+// Record customer withdrawal
+router.post('/withdrawals', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const { customerId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
+    const withdrawalAmount = toMoney(amount)
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    if (withdrawalAmount <= 0) return res.status(400).json({ error: 'Withdrawal amount must be greater than zero' })
+
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+    if (resolvedPaymentMethod === 'credit') {
+      return res.status(400).json({ error: 'Withdrawal must use cash, mobile money, bank transfer, or card' })
+    }
+
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    const customer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id: customerId })
+    })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    if (customer.status !== 'active') return res.status(400).json({ error: 'Customer is not active' })
+
+    const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, customerId)
+    const currentCustomerBalance = balanceSnapshot?.balance ?? toMoney(customer.balance)
+    const balanceAfterWithdrawal = Math.round((currentCustomerBalance + withdrawalAmount) * 100) / 100
+    if (balanceAfterWithdrawal > 0) {
+      const creditLimitAmount = toMoney(customer.creditLimit)
+      if (creditLimitAmount <= 0) {
+        return res.status(400).json({
+          error: `Set a credit limit for ${customer.name || 'this customer'} before recording a withdrawal that creates customer debt.`,
+          code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED'
+        })
+      }
+      if (balanceAfterWithdrawal > creditLimitAmount) {
+        return res.status(400).json({
+          error: `Credit limit exceeded. Available credit is ${Math.max(0, creditLimitAmount - currentCustomerBalance).toFixed(2)}.`,
+          code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED'
+        })
+      }
+    }
+
+    const withdrawal = await prisma.$transaction(async (tx) => {
+      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
+      if (toMoney(accountToUse.balance) < withdrawalAmount) {
+        throw Object.assign(
+          new Error(`Insufficient balance in ${accountToUse.name}. Available: ${toMoney(accountToUse.balance).toFixed(2)}.`),
+          { statusCode: 400, code: 'INSUFFICIENT_ACCOUNT_BALANCE' }
+        )
+      }
+
+      const withdrawalReference = reference || `WD-${Date.now()}`
+      const createdWithdrawal = await tx.customerWithdrawal.create({
+        data: {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          customerId,
+          userId: req.user.id,
+          cashAccountId: accountToUse.id,
+          amount: withdrawalAmount,
+          paymentMethod: resolvedPaymentMethod,
+          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
+          reference: withdrawalReference,
+          notes
+        },
+        include: {
+          customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+          branch: { select: { id: true, name: true } },
+          cashAccount: { select: { id: true, name: true, type: true, balance: true } },
+          user: userSelect
+        }
+      })
+
+      const updatedAccount = await tx.cashAccount.update({
+        where: { id: accountToUse.id },
+        data: { balance: { decrement: withdrawalAmount } }
+      })
+
+      await tx.cashTransaction.create({
+        data: {
+          tenantId: scope.tenantId,
+          accountId: accountToUse.id,
+          type: 'withdrawal',
+          amount: withdrawalAmount,
+          balanceAfter: updatedAccount.balance,
+          reference: withdrawalReference || createdWithdrawal.id,
+          description: `Customer withdrawal: ${customer.name || customer.email}`,
+          userId: req.user.id
+        }
+      })
+
+      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, accountToUse.id)
+      const reconciled = await reconcileCustomerReceivableBalance(tx, scope, customerId)
+
+      return {
+        ...createdWithdrawal,
+        cashAccount: {
+          ...createdWithdrawal.cashAccount,
+          balance: updatedAccount.balance
+        },
+        customer: {
+          ...createdWithdrawal.customer,
+          balance: reconciled?.balance ?? createdWithdrawal.customer.balance
+        }
+      }
+    })
+
+    res.status(201).json(withdrawal)
+  } catch (error) {
+    console.error('Record withdrawal error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    handleBranchError(res, error, 'Failed to record withdrawal')
   }
 })
 

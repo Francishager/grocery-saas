@@ -7,6 +7,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Platform admin roles
 const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
+const BLOCKED_TENANT_STATUSES = new Set(['suspended', 'cancelled']);
+const TENANT_STATUS_MESSAGES = {
+  suspended: 'This business account has been suspended. Contact JibuSales support to reactivate it.',
+  cancelled: 'This business account has been cancelled. Contact JibuSales support for help.',
+};
 const PAYMENT_METHOD_PERMISSION_MAP = {
   cash: 'canUseCash',
   mobile_money: 'canUseMobileMoney',
@@ -15,10 +20,29 @@ const PAYMENT_METHOD_PERMISSION_MAP = {
   card: 'canUseCard',
 };
 
+export const isPlatformAdminUser = (user = {}) => (
+  PLATFORM_ROLES.includes(user.role) ||
+  user.isPlatformUser === true ||
+  user.is_platform_user === true
+);
+
+export const tenantAccountAccessPayload = (tenant, user = {}) => {
+  if (!tenant || isPlatformAdminUser(user)) return null;
+  const status = String(tenant.status || '').trim().toLowerCase();
+  if (!BLOCKED_TENANT_STATUSES.has(status)) return null;
+
+  return {
+    message: TENANT_STATUS_MESSAGES[status] || 'This business account is not active. Contact JibuSales support.',
+    error: TENANT_STATUS_MESSAGES[status] || 'Business account is not active',
+    code: status === 'suspended' ? 'TENANT_SUSPENDED' : 'TENANT_CANCELLED',
+    tenantStatus: status,
+  };
+};
+
 export const canUseCashTransactions = (user, hasAssignedCashAccount) => {
   if (!user) return false;
 
-  if (PLATFORM_ROLES.includes(user.role) || user.isPlatformUser || user.is_platform_user) {
+  if (isPlatformAdminUser(user)) {
     return true;
   }
 
@@ -51,8 +75,25 @@ export const authenticateToken = async (req, res, next) => {
     // - saas_admin: wildcard "*" (bypasses all checks)
     // - owner: feature-aware access based on the tenant subscription and overrides
     // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
-    let userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
     const tenantId = decoded.tenantId || decoded.tenant_id || decoded.business_id;
+    let tenant = null;
+    if (tenantId) {
+      tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, name: true, slug: true, status: true },
+      });
+      if (!tenant && !isPlatformAdminUser(decoded)) {
+        return res.status(403).json({
+          message: 'Business account not found. Contact JibuSales support.',
+          error: 'Business account not found',
+          code: 'TENANT_NOT_FOUND',
+        });
+      }
+      const tenantBlock = tenantAccountAccessPayload(tenant, decoded);
+      if (tenantBlock) return res.status(403).json(tenantBlock);
+    }
+
+    let userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
     const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
 
     if (!userPerm) {
@@ -70,11 +111,19 @@ export const authenticateToken = async (req, res, next) => {
 
     const permissions = resolveEffectivePermissions(decoded, userPerm, [], tenantFeatures);
 
-    req.user = { ...decoded, permissions, tenantFeatures };
+    req.user = { ...decoded, permissions, tenantFeatures, tenantStatus: tenant?.status || decoded.tenantStatus || null };
     req.userPermissions = userPerm;
     req.tenantFeatures = tenantFeatures;
   } catch (fetchErr) {
     console.error('Permission lookup error:', fetchErr);
+    const tenantId = decoded.tenantId || decoded.tenant_id || decoded.business_id;
+    if (tenantId && !isPlatformAdminUser(decoded)) {
+      return res.status(503).json({
+        message: 'Unable to verify business account status. Please try again.',
+        error: 'Unable to verify business account status',
+        code: 'TENANT_STATUS_UNAVAILABLE',
+      });
+    }
     // Fall back to decoded token permissions if available
     req.user = decoded;
   }
@@ -138,7 +187,7 @@ export const requireTenant = (req, res, next) => {
   }
   
   // Platform admins don't need tenant
-  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
+  if (isPlatformAdminUser(req.user)) {
     return next();
   }
   
@@ -518,4 +567,6 @@ export default {
   canUsePaymentMethodOrAssignedCash,
   getPaymentMethodPermissions,
   canUseCashTransactions,
+  isPlatformAdminUser,
+  tenantAccountAccessPayload,
 };

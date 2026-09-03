@@ -199,7 +199,10 @@ export const TenantDetailPage: React.FC = () => {
           method: 'PUT', body: JSON.stringify({ status: action === 'activate' ? 'active' : 'suspended' })
         })
         if (res.ok) fetchDetail()
-        else alert(`Failed to ${action}`)
+        else {
+          const d = await res.json().catch(() => ({}))
+          alert(d.error || d.message || `Failed to ${action}`)
+        }
       }
     } catch { alert('Request failed') }
     setActionLoading(null)

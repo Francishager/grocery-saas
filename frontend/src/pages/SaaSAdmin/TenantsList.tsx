@@ -12,7 +12,7 @@ export interface Tenant {
   id: string
   name: string
   slug: string
-  status: 'active' | 'suspended' | 'trial' | 'expired'
+  status: 'active' | 'suspended' | 'trial' | 'cancelled'
   planId: string
   planName: string
   ownerId: string
@@ -50,13 +50,19 @@ class TenantService {
 
   async suspend(id: string, reason?: string): Promise<Tenant> {
     const response = await apiFetch(`${this.apiEndpoint}/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) })
-    if (!response.ok) throw new Error('Failed to suspend tenant')
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || data.message || 'Failed to suspend tenant')
+    }
     return response.json()
   }
 
   async activate(id: string): Promise<Tenant> {
     const response = await apiFetch(`${this.apiEndpoint}/${id}/activate`, { method: 'POST' })
-    if (!response.ok) throw new Error('Failed to activate tenant')
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || data.message || 'Failed to activate tenant')
+    }
     return response.json()
   }
 }
@@ -124,7 +130,7 @@ export const TenantsList: React.FC<TenantsListProps> = ({
       active: 'bg-green-100 text-green-800',
       suspended: 'bg-red-100 text-red-800',
       trial: 'bg-blue-100 text-blue-800',
-      expired: 'bg-gray-100 text-gray-800',
+      cancelled: 'bg-gray-100 text-gray-800',
     }
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status]}`}>
@@ -190,7 +196,7 @@ export const TenantsList: React.FC<TenantsListProps> = ({
             <option value="active">Active</option>
             <option value="suspended">Suspended</option>
             <option value="trial">Trial</option>
-            <option value="expired">Expired</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
       </div>

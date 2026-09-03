@@ -30,6 +30,23 @@ export function getAuthToken(): string | null {
   return localStorage.getItem('token')
 }
 
+function clearStoredAuth() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('auth_tokens')
+  localStorage.removeItem('auth_user')
+  localStorage.removeItem('user')
+}
+
+function isTenantAccountBlockedResponse(status: number, data: any) {
+  return status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND'].includes(data?.code)
+}
+
+function redirectToTenantLogin() {
+  if (window.location.pathname !== '/login' && window.location.pathname !== '/saas/login') {
+    window.location.href = '/login'
+  }
+}
+
 function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
   const url = new URL(`${API_URL}${path.startsWith('/') ? '' : '/'}${path}`)
   if (params) {
@@ -72,12 +89,13 @@ async function request<T>(
   const data = isJson ? await response.json().catch(() => ({})) : await response.text()
 
   if (!response.ok) {
+    if (isTenantAccountBlockedResponse(response.status, data)) {
+      clearStoredAuth()
+      redirectToTenantLogin()
+    }
     if (response.status === 401 || (response.status === 403 && data?.message === 'Invalid token')) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('auth_tokens')
-      localStorage.removeItem('auth_user')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+      clearStoredAuth()
+      redirectToTenantLogin()
     }
     throw new ApiError(
       data?.error || data?.message || `HTTP ${response.status}`,
@@ -111,7 +129,11 @@ async function tryRefreshToken(): Promise<string | null> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: tokens.refreshToken }),
       })
-      if (!res.ok) return null
+      if (!res.ok) {
+        const data = await res.clone().json().catch(() => ({}))
+        if (isTenantAccountBlockedResponse(res.status, data)) clearStoredAuth()
+        return null
+      }
       const data = await res.json()
       if (data.tokens?.accessToken) {
         localStorage.setItem('auth_tokens', JSON.stringify(data.tokens))
@@ -136,6 +158,13 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (init?.body && !isFormData && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
   const url = path.startsWith('http') ? path : `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
   return fetch(url, { ...init, headers }).then(async (res) => {
+    if (res.status === 403) {
+      const data = await res.clone().json().catch(() => ({}))
+      if (isTenantAccountBlockedResponse(res.status, data)) {
+        clearStoredAuth()
+        redirectToTenantLogin()
+      }
+    }
     if (res.status === 401) {
       const data = await res.clone().json().catch(() => ({}))
       const msg = data?.message || ''
@@ -148,13 +177,8 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
           return fetch(url, { ...init, headers: retryHeaders })
         }
         // Refresh failed — clear auth and redirect
-        localStorage.removeItem('token')
-        localStorage.removeItem('auth_tokens')
-        localStorage.removeItem('auth_user')
-        localStorage.removeItem('user')
-        if (window.location.pathname !== '/login' && window.location.pathname !== '/saas/login') {
-          window.location.href = '/login'
-        }
+        clearStoredAuth()
+        redirectToTenantLogin()
       }
     }
     return res

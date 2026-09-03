@@ -7,6 +7,7 @@ import { buildBillingPaymentRequest, processTenantBillingPayment, normalizeRelwo
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 
 const router = Router();
+const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
 
 function withOwnerSummary(tenant) {
   const owner = tenant.users?.find((user) => user.role === "owner") || tenant.owner || null;
@@ -35,7 +36,13 @@ router.get("/", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { status, search, page = 1, limit = 50 } = req.query;
     const where = {};
-    if (status) where.status = status;
+    if (status) {
+      const normalizedStatus = String(status).trim().toLowerCase();
+      if (!VALID_TENANT_STATUSES.has(normalizedStatus)) {
+        return res.status(400).json({ error: "Invalid tenant status" });
+      }
+      where.status = normalizedStatus;
+    }
     if (search) {
       const term = String(search);
       where.OR = [
@@ -280,6 +287,8 @@ router.get("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
 // Activate tenant
 router.post("/:id/activate", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
+    const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!existing) return res.status(404).json({ error: "Tenant not found" });
     const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "active" } });
     res.json({ message: "Tenant activated", tenant });
   } catch (err) {
@@ -291,6 +300,8 @@ router.post("/:id/activate", authenticateToken, requirePlatformAdmin, async (req
 // Suspend tenant
 router.post("/:id/suspend", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
+    const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!existing) return res.status(404).json({ error: "Tenant not found" });
     const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "suspended" } });
     res.json({ message: "Tenant suspended", tenant });
   } catch (err) {

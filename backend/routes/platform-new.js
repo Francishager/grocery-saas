@@ -7,6 +7,7 @@ import { filterPlanFeaturesByPlanList, invalidateFeatureCache, planFeatureIsAllo
 
 const router = express.Router()
 const prisma = new PrismaClient()
+const VALID_TENANT_STATUSES = new Set(['active', 'suspended', 'cancelled', 'trial'])
 
 // === FEATURE ACCESS CONTROL ===
 
@@ -470,6 +471,13 @@ router.get('/tenants', authenticateToken, requirePlatformAdmin, async (req, res)
   try {
     const { page = 1, limit = 50, search, status } = req.query
     const skip = (Number(page) - 1) * Number(limit)
+    let normalizedStatus = null
+    if (status) {
+      normalizedStatus = String(status).trim().toLowerCase()
+      if (!VALID_TENANT_STATUSES.has(normalizedStatus)) {
+        return res.status(400).json({ error: 'Invalid tenant status' })
+      }
+    }
 
     const where = {
       ...(search && {
@@ -479,7 +487,7 @@ router.get('/tenants', authenticateToken, requirePlatformAdmin, async (req, res)
           { slug: { contains: search, mode: 'insensitive' } }
         ]
       }),
-      ...(status && { status })
+      ...(normalizedStatus && { status: normalizedStatus })
     }
 
     const [tenants, total] = await Promise.all([
@@ -569,7 +577,13 @@ router.put('/tenants/:tenantId/limits', authenticateToken, requirePlatformAdmin,
 router.put('/tenants/:tenantId/status', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenantId } = req.params
-    const { status } = req.body
+    const status = String(req.body?.status || '').trim().toLowerCase()
+    if (!VALID_TENANT_STATUSES.has(status)) {
+      return res.status(400).json({ error: 'Invalid tenant status' })
+    }
+
+    const existing = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } })
+    if (!existing) return res.status(404).json({ error: 'Tenant not found' })
 
     const tenant = await prisma.tenant.update({
       where: { id: tenantId },
@@ -577,7 +591,7 @@ router.put('/tenants/:tenantId/status', authenticateToken, requirePlatformAdmin,
     })
 
     res.json({
-      message: `Tenant ${status === 'suspended' ? 'suspended' : 'activated'} successfully`,
+      message: `Tenant status changed to ${status}`,
       tenant
     })
   } catch (error) {
@@ -943,7 +957,7 @@ router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async 
     if (email !== undefined && !email.trim()) return res.status(400).json({ error: 'Business email cannot be empty' })
     if (currency !== undefined && !currency.trim()) return res.status(400).json({ error: 'Currency cannot be empty' })
     if (timezone !== undefined && !timezone.trim()) return res.status(400).json({ error: 'Timezone cannot be empty' })
-    if (status !== undefined && !['active', 'suspended', 'trial', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid status value' })
+    if (status !== undefined && !VALID_TENANT_STATUSES.has(String(status).trim().toLowerCase())) return res.status(400).json({ error: 'Invalid status value' })
 
     const data = {}
     if (name !== undefined) data.name = name
@@ -951,7 +965,7 @@ router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async 
     if (phone !== undefined) data.phone = phone?.trim() || null
     if (address !== undefined) data.address = address?.trim() || null
     if (businessType !== undefined) data.businessType = businessType?.trim() || null
-    if (status !== undefined) data.status = status
+    if (status !== undefined) data.status = String(status).trim().toLowerCase()
     if (currency !== undefined) data.currency = currency
     if (timezone !== undefined) data.timezone = timezone
     if (taxRate !== undefined) data.taxRate = taxRate

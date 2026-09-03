@@ -60,6 +60,7 @@ type CustomerHistoryResponse = {
     receivableSales?: number
     cashSales?: number
     payments?: number
+    withdrawals?: number
     creditNotes?: number
     returns?: number
     transactionCount?: number
@@ -188,6 +189,7 @@ export default function CustomerTransactionHistoryDialog({
                 {metric('Credit / Customer Sales', data.summary.receivableSales)}
                 {metric('Cash POS Sales', data.summary.cashSales)}
                 {metric('Payments', data.summary.payments, 'text-green-700')}
+                {metric('Withdrawals', data.summary.withdrawals)}
                 {metric('Credit Notes', data.summary.creditNotes, 'text-green-700')}
                 {metric('Returns', data.summary.returns)}
                 <div className="rounded-md border p-3">

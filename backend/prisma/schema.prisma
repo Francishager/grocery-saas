@@ -27,6 +27,7 @@ model Branch {
   customers            Customer[]
   saleRecords          SaleRecord[]
   customerPayments     CustomerPayment[]
+  customerWithdrawals  CustomerWithdrawal[]
   invoices             Invoice[]
   suppliers            Supplier[]
   supplierPurchases    SupplierPurchase[]
@@ -142,6 +143,7 @@ model Tenant {
   // BUSINESS DATA
   // =====================
   customers               Customer[]
+  customerWithdrawals     CustomerWithdrawal[]
   suppliers               Supplier[]
   features                TenantFeature[]
   cashAccounts            CashAccount[]
@@ -417,6 +419,7 @@ model User {
   // NEW RELATIONS
   // =========================
   saleRecords               SaleRecord[]
+  customerWithdrawals       CustomerWithdrawal[]
   supplierPurchases         SupplierPurchase[]
   expenses                  Expense[]
   cashTransactions          CashTransaction[]
@@ -988,6 +991,7 @@ model Customer {
 
   sales            SaleRecord[]
   payments         CustomerPayment[]
+  withdrawals      CustomerWithdrawal[]
   invoices         Invoice[]
   rentals          Rental[]
   saleReturns      SaleReturn[]
@@ -1102,6 +1106,34 @@ model CustomerPayment {
 
   @@index([tenantId, branchId])
   @@map("customer_payments")
+}
+
+// Customer Withdrawals
+model CustomerWithdrawal {
+  id             String       @id @default(cuid())
+  tenantId       String
+  branchId       String?
+  branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  cashAccountId  String?
+  cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  amount         Float
+  paymentMethod  String       @default("cash")
+  mobileProvider String?
+  phoneNumber    String?
+  transactionId  String?
+  reference      String?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  Tenant         Tenant       @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, branchId])
+  @@index([customerId])
+  @@index([cashAccountId])
+  @@map("customer_withdrawals")
 }
 
 // Invoices
@@ -1353,6 +1385,7 @@ model CashAccount {
   Tenant          Tenant            @relation(fields: [tenantId], references: [id])
   CashTransaction CashTransaction[]
   Expense         Expense[]
+  withdrawals     CustomerWithdrawal[]
   AssignedUsers   User[]            @relation("UserCashAccount")
 
   @@unique([tenantId, name])

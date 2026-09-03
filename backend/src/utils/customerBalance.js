@@ -17,13 +17,18 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   if (!customerIds.length) return new Map();
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId: { in: customerIds } };
-  const [sales, payments, creditNotes, creditReturns] = await Promise.all([
+  const [sales, payments, withdrawals, creditNotes, creditReturns] = await Promise.all([
     client.saleRecord.groupBy({
       by: ["customerId"],
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
       _sum: { total: true },
     }),
     client.customerPayment.groupBy({
+      by: ["customerId"],
+      where: tenantCustomerWhere,
+      _sum: { amount: true },
+    }),
+    client.customerWithdrawal.groupBy({
       by: ["customerId"],
       where: tenantCustomerWhere,
       _sum: { amount: true },
@@ -42,6 +47,7 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
 
   const salesMap = groupSumMap(sales, "total");
   const paymentsMap = groupSumMap(payments, "amount");
+  const withdrawalsMap = groupSumMap(withdrawals, "amount");
   const creditNotesMap = groupSumMap(creditNotes, "amount");
   const creditReturnsMap = groupSumMap(creditReturns, "total");
 
@@ -49,9 +55,10 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
     const openingBalance = Math.max(0, toMoney(customer.openingBalance));
     const receivableSales = salesMap.get(customer.id) || 0;
     const customerPayments = paymentsMap.get(customer.id) || 0;
+    const customerWithdrawals = withdrawalsMap.get(customer.id) || 0;
     const creditNoteTotal = creditNotesMap.get(customer.id) || 0;
     const creditReturnTotal = creditReturnsMap.get(customer.id) || 0;
-    const balance = roundMoney(openingBalance + receivableSales - customerPayments - creditNoteTotal - creditReturnTotal);
+    const balance = roundMoney(openingBalance + receivableSales + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal);
     return [customer.id, {
       customerId: customer.id,
       balance,
@@ -59,6 +66,7 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
         openingBalance,
         receivableSales,
         customerPayments,
+        customerWithdrawals,
         creditNotes: creditNoteTotal,
         creditReturns: creditReturnTotal,
       },
@@ -84,12 +92,16 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   if (!customer) return null;
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId };
-  const [sales, payments, creditNotes, creditReturns] = await Promise.all([
+  const [sales, payments, withdrawals, creditNotes, creditReturns] = await Promise.all([
     client.saleRecord.aggregate({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
       _sum: { total: true },
     }),
     client.customerPayment.aggregate({
+      where: tenantCustomerWhere,
+      _sum: { amount: true },
+    }),
+    client.customerWithdrawal.aggregate({
       where: tenantCustomerWhere,
       _sum: { amount: true },
     }),
@@ -106,16 +118,18 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const openingBalance = Math.max(0, toMoney(customer.openingBalance));
   const receivableSales = toMoney(sales._sum.total);
   const customerPayments = toMoney(payments._sum.amount);
+  const customerWithdrawals = toMoney(withdrawals._sum.amount);
   const creditNoteTotal = toMoney(creditNotes._sum.amount);
   const creditReturnTotal = toMoney(creditReturns._sum.total);
 
   return {
     customerId,
-    balance: roundMoney(openingBalance + receivableSales - customerPayments - creditNoteTotal - creditReturnTotal),
+    balance: roundMoney(openingBalance + receivableSales + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal),
     components: {
       openingBalance,
       receivableSales,
       customerPayments,
+      customerWithdrawals,
       creditNotes: creditNoteTotal,
       creditReturns: creditReturnTotal,
     },
