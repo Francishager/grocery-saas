@@ -100,9 +100,11 @@ const ACCOUNTING_ACCESS_KEYS = [
 ]
 
 const TRANSACTION_PERMISSION_KEYS = [
-  'canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canCreateTransactionAccount',
+  'canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount',
   'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canCreateWithdrawal',
 ]
+
+const PAYMENT_METHOD_PERMISSION_KEYS = ['canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard']
 
 const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaff', 'canDeleteStaff']
 const HR_PERMISSION_KEYS = [
@@ -131,7 +133,7 @@ const REPORT_PERMISSION_KEYS = [
 const PERM_GROUPS = [
   { label: 'Dashboard', prefix: 'Dashboard' },
   { label: 'Sales', prefix: 'Sale' },
-  { label: 'Products', prefix: 'Product' },
+  { label: 'Products', matcher: (key: string) => key.includes('Product') || key === 'canViewPriceHistory' },
   { label: 'Purchases', prefix: 'Purchase' },
   { label: 'Payables', prefix: 'Payable' },
   { label: 'Expenses', matcher: (key: string) => EXPENSE_PERMISSION_KEYS.includes(key) },
@@ -157,7 +159,7 @@ const PERM_GROUPS = [
   { label: 'Accounting', matcher: (key: string) => ACCOUNTING_ACCESS_KEYS.includes(key) },
   { label: 'Transaction Accounts & Cash Movements', matcher: (key: string) => TRANSACTION_PERMISSION_KEYS.includes(key) },
   { label: 'Stock', prefix: 'Stock' },
-  { label: 'Payment Methods', prefix: 'canUse' },
+  { label: 'Payment Methods', matcher: (key: string) => PAYMENT_METHOD_PERMISSION_KEYS.includes(key) },
   { label: 'Data Import', prefix: 'Import' },
 ]
 

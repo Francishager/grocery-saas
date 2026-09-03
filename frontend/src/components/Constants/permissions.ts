@@ -265,14 +265,16 @@ export const permissions: Permission[] = [
   { id: 'canViewTransactionAccount', name: 'View Transaction Accounts', description: 'View cash, safe, bank, mobile money, and card transaction accounts', category: 'transactions', accessesBusinessData: true },
   { id: 'canUseAnyTransactionAccount', name: 'Use Any Transaction Account', description: 'Select permitted tills, safe, bank, mobile money, and card accounts beyond the user assigned account', category: 'transactions', accessesBusinessData: true },
   { id: 'canUseOtherCashAccount', name: 'Use Other Cash Accounts', description: 'Select another staff cash till or safe account for cash payments, collections, withdrawals, and cash journal movements', category: 'transactions', accessesBusinessData: true },
-  { id: 'canUseCash', name: 'Use Assigned Cash Account', description: 'Use the cash or safe account assigned to this user for permitted cash transactions', category: 'transactions', accessesBusinessData: true },
-  { id: 'canUseMobileMoney', name: 'Use Mobile Money', description: 'Use mobile money accounts for permitted transactions', category: 'transactions', accessesBusinessData: true },
-  { id: 'canUseBank', name: 'Use Bank Accounts', description: 'Use bank accounts for permitted transactions', category: 'transactions', accessesBusinessData: true },
-  { id: 'canUseCard', name: 'Use Card Accounts', description: 'Use card accounts for permitted transactions', category: 'transactions', accessesBusinessData: true },
   { id: 'canCreateTransactionAccount', name: 'Create Transaction Accounts', description: 'Create cash tills, safe accounts, bank accounts, mobile money accounts, and card accounts', category: 'transactions', accessesBusinessData: true },
   { id: 'canEditTransactionAccount', name: 'Edit Transaction Accounts', description: 'Update transaction account details, assignments, status, and balances', category: 'transactions', accessesBusinessData: true },
   { id: 'canDeleteTransactionAccount', name: 'Deactivate Transaction Accounts', description: 'Deactivate transaction accounts that should no longer be used', category: 'transactions', accessesBusinessData: true },
   { id: 'canCreateWithdrawal', name: 'Record Customer Withdrawals', description: 'Record customer withdrawals and update the linked transaction account', category: 'transactions', accessesBusinessData: true },
+
+  // Payment Methods
+  { id: 'canUseCash', name: 'Use Assigned Cash Account', description: 'Use the cash or safe account assigned to this user for permitted cash transactions', category: 'payment_methods', accessesBusinessData: true },
+  { id: 'canUseMobileMoney', name: 'Use Mobile Money', description: 'Use mobile money accounts for permitted transactions', category: 'payment_methods', accessesBusinessData: true },
+  { id: 'canUseBank', name: 'Use Bank Accounts', description: 'Use bank accounts for permitted transactions', category: 'payment_methods', accessesBusinessData: true },
+  { id: 'canUseCard', name: 'Use Card Accounts', description: 'Use card accounts for permitted transactions', category: 'payment_methods', accessesBusinessData: true },
   
   // Data Import
   { id: 'canImportInventory', name: 'Import Inventory Data', description: 'Bulk import products and inventory via CSV/Excel', category: 'inventory', accessesBusinessData: true },
