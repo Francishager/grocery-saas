@@ -173,7 +173,7 @@ function App() {
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting']}><AccountingPage /></FeatureGuard>} />
           <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport']}><ExpensesPage /></FeatureGuard>} />
-          <Route path="accounting/transactions" element={<FeatureGuard feature="accounting" permission={['canViewTransactionAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount']}><TransactionAccountsPage /></FeatureGuard>} />
+          <Route path="accounting/transactions" element={<FeatureGuard feature={['accounting', 'expenses']} permission={['canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount']}><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="developer.data_importer"><DataImporterPage /></FeatureGuard>} />
           <Route path="hr" element={<FeatureGuard feature="hr" permission="canViewHR"><HRDashboardPage /></FeatureGuard>} />

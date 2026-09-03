@@ -428,7 +428,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 })
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
   try {
     // Include assigned users so we can surface staff + branch on the API response
     const rawAccounts = await prisma.cashAccount.findMany({
