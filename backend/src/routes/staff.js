@@ -19,13 +19,11 @@ const staffRoles = new Set(["manager", "accountant", "attendant"]);
 
 // Get permission keys and role defaults
 router.get("/permissions/schema", authenticateToken, requirePermission("canViewStaff"), (req, res) => {
-  const visibleKeys = PERM_KEYS.filter((key) => permissionAllowedForTenant(key, req.tenantFeatures));
-  const visibleCategories = new Set(visibleKeys.map((key) => PERMISSION_METADATA[key]?.category).filter(Boolean));
   res.json({
-    keys: visibleKeys,
+    keys: PERM_KEYS,
     defaults: ROLE_DEFAULTS,
-    categories: PERMISSION_CATEGORIES.filter((category) => visibleCategories.has(category.id)),
-    permissions: visibleKeys.map((key) => PERMISSION_METADATA[key] || { id: key, name: key, category: "settings" }),
+    categories: PERMISSION_CATEGORIES,
+    permissions: PERM_KEYS.map((key) => PERMISSION_METADATA[key] || { id: key, name: key, category: "settings" }),
   });
 });
 
