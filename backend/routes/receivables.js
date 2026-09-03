@@ -1319,7 +1319,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
 })
 
 // Record customer withdrawal
-router.post('/withdrawals', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, loadUserPermissions, async (req, res) => {
+router.post('/withdrawals', authenticateToken, requirePermission('canCreateWithdrawal'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',

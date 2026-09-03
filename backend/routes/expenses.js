@@ -428,7 +428,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 })
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
   try {
     // Include assigned users so we can surface staff + branch on the API response
     const rawAccounts = await prisma.cashAccount.findMany({
@@ -454,9 +454,29 @@ router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyP
       },
     })
 
+    const requestPermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+    const canSeeAllTransactionAccounts = requestPermissions.includes('*') || [
+      'canViewTransactionAccount',
+      'canCreateTransactionAccount',
+      'canEditTransactionAccount',
+      'canDeleteTransactionAccount',
+    ].some((permission) => requestPermissions.includes(permission))
+    const canUseAnyTransactionAccount = requestPermissions.includes('*') || [
+      'canUseAnyTransactionAccount',
+      'canEditTransactionAccount',
+      'canDeleteTransactionAccount',
+    ].some((permission) => requestPermissions.includes(permission))
+    const canUseOtherCashAccount = requestPermissions.includes('*') || [
+      'canUseOtherCashAccount',
+      'canUseAnyTransactionAccount',
+      'canEditTransactionAccount',
+      'canDeleteTransactionAccount',
+    ].some((permission) => requestPermissions.includes(permission))
     const paymentPermissions = getPaymentMethodPermissions(req)
     const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId
     const visibleAccounts = rawAccounts.filter((account) => {
+      if (canSeeAllTransactionAccounts) return true
+
       const permissionKey = account.type === 'cash' || account.type === 'safe'
         ? 'canUseCash'
         : account.type === 'mobile_money'
@@ -466,9 +486,16 @@ router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyP
             : account.type === 'card'
               ? 'canUseCard'
               : null
+      const hasPaymentPermission = Boolean(permissionKey && paymentPermissions[permissionKey])
+      const isOwnAssignedAccount = assignedCashAccountId && account.id === assignedCashAccountId
+      if (account.type === 'cash' || account.type === 'safe') {
+        return Boolean(hasPaymentPermission && (isOwnAssignedAccount || canUseOtherCashAccount))
+      }
+      if (canUseAnyTransactionAccount) return hasPaymentPermission
+
       return Boolean(
-        (permissionKey && paymentPermissions[permissionKey]) ||
-        (permissionKey === 'canUseCash' && assignedCashAccountId && account.id === assignedCashAccountId)
+        isOwnAssignedAccount &&
+        hasPaymentPermission
       )
     })
 
@@ -516,8 +543,8 @@ router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyP
   }
 })
 
-// Create cash account
-router.post('/cash-accounts', authenticateToken, requireAnyPermission(['canCreateAccounting', 'canCreateExpense', 'canEditAccounting']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
+// Create transaction account
+router.post('/cash-accounts', authenticateToken, requirePermission('canCreateTransactionAccount'), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { name, type, currency, accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
     const resolvedCurrency = normalizeCurrency(currency || await tenantCurrency(req.tenant.id))
@@ -598,8 +625,8 @@ router.post('/cash-accounts', authenticateToken, requireAnyPermission(['canCreat
   }
 })
 
-// Update cash account
-router.put('/cash-accounts/:id', authenticateToken, requireAnyPermission(['canEditAccounting', 'canCreateAccounting', 'canCreateExpense']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
+// Update transaction account
+router.put('/cash-accounts/:id', authenticateToken, requirePermission('canEditTransactionAccount'), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
     const { name, type, currency, accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
@@ -685,6 +712,31 @@ router.put('/cash-accounts/:id', authenticateToken, requireAnyPermission(['canEd
   } catch (error) {
     console.error('Update cash account error:', error)
     res.status(500).json({ error: 'Failed to update cash account' })
+  }
+})
+
+// Deactivate transaction account
+router.delete('/cash-accounts/:id', authenticateToken, requirePermission('canDeleteTransactionAccount'), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
+  try {
+    const { id } = req.params
+    const existing = await prisma.cashAccount.findFirst({
+      where: { id, tenantId: req.tenant.id }
+    })
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Cash account not found' })
+    }
+
+    const account = await prisma.cashAccount.update({
+      where: { id },
+      data: { isActive: false }
+    })
+
+    await syncLinkedTransactionAccountBalance(prisma, req.tenant.id, id).catch(() => null)
+    res.json({ message: 'Transaction account deactivated', account })
+  } catch (error) {
+    console.error('Deactivate cash account error:', error)
+    res.status(500).json({ error: 'Failed to deactivate cash account' })
   }
 })
 

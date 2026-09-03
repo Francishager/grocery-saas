@@ -145,6 +145,13 @@ const PERMISSION_TO_FEATURES = {
   canCreateAccounting: ['accounting'],
   canEditAccounting: ['accounting'],
   canDeleteAccounting: ['accounting'],
+  canViewTransactionAccount: ['accounting', 'expenses'],
+  canUseAnyTransactionAccount: ['accounting', 'expenses'],
+  canUseOtherCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canCreateTransactionAccount: ['accounting', 'expenses'],
+  canEditTransactionAccount: ['accounting', 'expenses'],
+  canDeleteTransactionAccount: ['accounting', 'expenses'],
+  canCreateWithdrawal: ['receivables', 'receivables.payments'],
   canUseCash: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
   canUseMobileMoney: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
   canUseBank: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
@@ -234,6 +241,9 @@ export const ALL_PERMISSION_KEYS = [
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   // Accounting
   "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting",
+  // Transaction Accounts & Cash Movements
+  "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount",
+  "canCreateTransactionAccount", "canEditTransactionAccount", "canDeleteTransactionAccount", "canCreateWithdrawal",
   // Payment Methods (for spending — expenses, payables)
   "canUseCash", "canUseMobileMoney", "canUseBank", "canUseCard",
   // Data Import
@@ -274,6 +284,7 @@ export const PERMISSION_CATEGORIES = [
   { id: 'service_business', name: 'Service Business' },
   { id: 'communication', name: 'Communication' },
   { id: 'accounting', name: 'Accounting' },
+  { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
   { id: 'payment_methods', name: 'Payment Methods' },
 ];
 
@@ -850,9 +861,37 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Delete accounting entries',
     description: 'Remove accounting records where allowed.',
   },
+  canViewTransactionAccount: {
+    name: 'View transaction accounts',
+    description: 'Open cash, safe, bank, mobile money, and card transaction account balances.',
+  },
+  canUseAnyTransactionAccount: {
+    name: 'Use any transaction account',
+    description: 'Select permitted cash, safe, bank, mobile money, or card accounts beyond the user assigned account.',
+  },
+  canUseOtherCashAccount: {
+    name: 'Use other cash accounts',
+    description: 'Select another staff cash till or safe account for cash payments, collections, withdrawals, and cash journal movements.',
+  },
+  canCreateTransactionAccount: {
+    name: 'Create transaction accounts',
+    description: 'Create cash tills, safe accounts, bank accounts, mobile money accounts, and card accounts.',
+  },
+  canEditTransactionAccount: {
+    name: 'Edit transaction accounts',
+    description: 'Update transaction account details, status, assignment, and balances where allowed.',
+  },
+  canDeleteTransactionAccount: {
+    name: 'Deactivate transaction accounts',
+    description: 'Deactivate transaction accounts that should no longer be used.',
+  },
+  canCreateWithdrawal: {
+    name: 'Record customer withdrawals',
+    description: 'Record money withdrawn by customers from receivables and update the linked transaction account.',
+  },
   canUseCash: {
-    name: 'Use cash payment method',
-    description: 'Select cash when recording sales, expenses, payables, receivables, or salary payments.',
+    name: 'Use own cash payment method',
+    description: 'Select cash when recording sales, expenses, payables, receivables, or salary payments through the user assigned cash till.',
   },
   canUseMobileMoney: {
     name: 'Use mobile money payment method',
@@ -870,11 +909,12 @@ const PERMISSION_DETAIL_OVERRIDES = {
 
 function permissionCategoryForKey(key) {
   if (key === 'canViewDashboard') return 'dashboard';
+  if (key.includes('TransactionAccount') || key === 'canUseOtherCashAccount' || key === 'canCreateWithdrawal') return 'transactions';
   if (key.startsWith('canUse')) return 'payment_methods';
   if (key.includes('Report') || key === 'canExportReport') return 'reports';
   if (key.includes('Receipt')) return 'receipts';
   if (key.includes('Sale') || key === 'canGiveDiscount') return 'sales';
-  if (key.includes('Product') || key.includes('Stock') || key === 'canImportInventory') return 'inventory';
+  if (key.includes('Product') || key.includes('Stock') || key.includes('PriceHistory') || key === 'canImportInventory') return 'inventory';
   if (key.includes('Purchase')) return 'purchases';
   if (key.includes('Payable')) return 'payables';
   if (key.includes('Expense') || key === 'canViewStaffTillSheet') return 'expenses';

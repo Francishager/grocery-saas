@@ -282,6 +282,11 @@ export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
+  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
+  const canCreateAccountingEntries = hasPermission('canCreateAccounting')
+  const canDeleteAccountingEntries = hasPermission('canDeleteAccounting')
+  const canUseAnyTransactionAccount = hasPermission('canUseAnyTransactionAccount')
+  const canUseOtherCashAccount = hasPermission('canUseOtherCashAccount')
   const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -309,12 +314,7 @@ export default function AccountingPage() {
   const [jeBranch, setJeBranch] = useState('')
   const [jeAction, setJeAction] = useState(DEFAULT_JOURNAL_ACTION)
   const [jeDate, setJeDate] = useState(new Date().toISOString().split('T')[0])
-  const [jeAccount, setJeAccount] = useState(() => {
-    const role = normalizeValue(user?.role)
-    const canChooseOthers = ['owner', 'admin', 'manager', 'accountant', 'saas_admin', 'platform_admin', 'super_admin'].includes(role) ||
-      hasPermission('canEditAccounting') || hasPermission('canDeleteAccounting')
-    return canChooseOthers ? '' : (assignedCashAccountId || '')
-  })
+  const [jeAccount, setJeAccount] = useState('')
   const [jeDescription, setJeDescription] = useState('')
   const [jeAmount, setJeAmount] = useState('')
   const [jeCurrency, setJeCurrency] = useState(tenantCurrency)
@@ -419,14 +419,9 @@ export default function AccountingPage() {
     return !permissionKey || hasPermission(permissionKey)
   }
 
-  const canChooseOtherTransactionAccounts = useMemo(() => {
-    const role = normalizeValue(user?.role)
-    return ['owner', 'admin', 'manager', 'accountant', 'saas_admin', 'platform_admin', 'super_admin'].includes(role) ||
-      hasPermission('canEditAccounting') ||
-      hasPermission('canDeleteAccounting')
-  }, [user?.role, hasPermission])
-
-  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
+  const canChooseOtherTransactionAccounts = useMemo(() => (
+    canUseAnyTransactionAccount || canUseOtherCashAccount
+  ), [canUseAnyTransactionAccount, canUseOtherCashAccount])
 
   const visibleAccounts = useMemo(() => (
     accounts.filter(account => {
@@ -588,6 +583,13 @@ export default function AccountingPage() {
   }, [assignedCashAccountId, canChooseOtherTransactionAccounts, jePaymentAccount, jePaymentMethod, paymentAccountOptions])
 
   const handleCreateAccount = async () => {
+    if (!canCreateAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to create accounting accounts',
+        description: 'Required permission: canCreateAccounting',
+      })
+    }
     if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
     if (!accCategory) return toast({ variant: 'destructive', title: 'Account category required' })
 
@@ -643,6 +645,13 @@ export default function AccountingPage() {
   }
 
   const handleDeleteAccount = async (id: string) => {
+    if (!canDeleteAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to delete accounting accounts',
+        description: 'Required permission: canDeleteAccounting',
+      })
+    }
     try {
       const res = await apiFetch(`/api/accounting/accounts/${id}`, { method: 'DELETE' })
       if (res.ok) {
@@ -686,7 +695,7 @@ export default function AccountingPage() {
 
   // Submit single journal entry
   const handleSingleJournalSubmit = async () => {
-    if (!hasPermission('canCreateAccounting')) {
+    if (!canCreateAccountingEntries) {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to post accounting entries',
@@ -749,7 +758,7 @@ export default function AccountingPage() {
 
   // Submit multiple general journal
   const handleMultipleJournalSubmit = async () => {
-    if (!hasPermission('canCreateAccounting')) {
+    if (!canCreateAccountingEntries) {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to post accounting entries',
@@ -974,23 +983,27 @@ export default function AccountingPage() {
         <TabsList className="grid grid-cols-3 sm:grid-cols-5 h-auto w-full">
           <TabsTrigger value="chart-of-accounts" className="text-xs sm:text-base font-medium"><Calculator className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Chart of Accounts</span><span className="sm:hidden">Accounts</span></TabsTrigger>
           <TabsTrigger value="account-categories" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Categories</span><span className="sm:hidden">Cats</span></TabsTrigger>
-          <TabsTrigger value="journal-entry" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Register Entries</span><span className="sm:hidden">Entry</span></TabsTrigger>
+          {canCreateAccountingEntries && (
+            <TabsTrigger value="journal-entry" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Register Entries</span><span className="sm:hidden">Entry</span></TabsTrigger>
+          )}
           <TabsTrigger value="journal-ledger" className="text-xs sm:text-base font-medium"><Scale className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Journal Ledger</span><span className="sm:hidden">Ledger</span></TabsTrigger>
           <TabsTrigger value="tax-management" className="text-xs sm:text-base font-medium"><DollarSign className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Tax Management</span><span className="sm:hidden">Tax</span></TabsTrigger>
         </TabsList>
 
         {/* ─── Chart of Accounts Tab ─── */}
         <TabsContent value="chart-of-accounts" className="space-y-4">
-          <div className="flex justify-end">
-            <span ref={dropdownBtnRef} className="inline-block">
-              <Button onClick={() => setShowAccountDropdown(!showAccountDropdown)}>
-                <Plus className="h-4 w-4 mr-2" /> Add New Account
-                <ChevronDown className={`h-4 w-4 ml-2 transition-transform ${showAccountDropdown ? 'rotate-180' : ''}`} />
-              </Button>
-            </span>
-          </div>
+          {canCreateAccountingEntries && (
+            <div className="flex justify-end">
+              <span ref={dropdownBtnRef} className="inline-block">
+                <Button onClick={() => setShowAccountDropdown(!showAccountDropdown)}>
+                  <Plus className="h-4 w-4 mr-2" /> Add New Account
+                  <ChevronDown className={`h-4 w-4 ml-2 transition-transform ${showAccountDropdown ? 'rotate-180' : ''}`} />
+                </Button>
+              </span>
+            </div>
+          )}
 
-          {showAccountDropdown && dropdownBtnRef.current && createPortal(
+          {canCreateAccountingEntries && showAccountDropdown && dropdownBtnRef.current && createPortal(
             <>
               <div className="fixed inset-0 z-[100]" onClick={() => setShowAccountDropdown(false)} />
               <div
@@ -1288,9 +1301,11 @@ export default function AccountingPage() {
                                   <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setSelectedHistoryAccount(acc) }}>
                                     History
                                   </Button>
-                                  <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(acc.id) }}>
-                                    <Trash2 className="h-4 w-4 text-red-500" />
-                                  </Button>
+                                  {canDeleteAccountingEntries && (
+                                    <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(acc.id) }}>
+                                      <Trash2 className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                  )}
                                 </td>
                               </tr>
                               {isExpanded && childAccounts.map(child => (
@@ -1311,9 +1326,11 @@ export default function AccountingPage() {
                                     <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setSelectedHistoryAccount(child) }}>
                                       History
                                     </Button>
-                                    <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(child.id) }}>
-                                      <Trash2 className="h-4 w-4 text-red-500" />
-                                    </Button>
+                                    {canDeleteAccountingEntries && (
+                                      <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(child.id) }}>
+                                        <Trash2 className="h-4 w-4 text-red-500" />
+                                      </Button>
+                                    )}
                                   </td>
                                 </tr>
                               ))}

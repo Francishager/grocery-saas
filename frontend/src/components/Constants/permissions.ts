@@ -48,6 +48,7 @@ export const permissionCategories = [
   { id: 'service_business', name: 'Service Business' },
   { id: 'communication', name: 'Communication' },
   { id: 'accounting', name: 'Accounting' },
+  { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
   { id: 'billing', name: 'Billing & Subscription' },
 ]
 
@@ -91,6 +92,7 @@ export const permissions: Permission[] = [
   // Inventory
   { id: 'canViewProduct', name: 'View Inventory', description: 'View inventory list and details', category: 'inventory', accessesBusinessData: true },
   { id: 'canCreateProduct', name: 'Create Products', description: 'Add new inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canViewPriceHistory', name: 'View Price History', description: 'View historical product selling price and cost price changes', category: 'inventory', accessesBusinessData: true },
   { id: 'canEditProduct', name: 'Edit Products', description: 'Edit inventory items', category: 'inventory', accessesBusinessData: true },
   { id: 'canDeleteProduct', name: 'Delete Products', description: 'Delete inventory items', category: 'inventory', accessesBusinessData: true },
   { id: 'canAdjustStock', name: 'Adjust Stock', description: 'Make stock adjustments', category: 'inventory', accessesBusinessData: true },
@@ -254,10 +256,23 @@ export const permissions: Permission[] = [
   { id: 'canDeleteCommunication', name: 'Delete Communication', description: 'Delete communication records', category: 'communication', accessesBusinessData: true },
 
   // Accounting
-  { id: 'canViewAccounting', name: 'View Accounting Module', description: 'Open the accounting module and view transaction accounts', category: 'accounting', accessesBusinessData: true },
-  { id: 'canCreateAccounting', name: 'Create Accounting Entries', description: 'Create journal entries and accounting transaction records', category: 'accounting', accessesBusinessData: true },
-  { id: 'canEditAccounting', name: 'Edit Accounting Entries', description: 'Edit accounting records and transaction accounts', category: 'accounting', accessesBusinessData: true },
-  { id: 'canDeleteAccounting', name: 'Delete Accounting Entries', description: 'Delete accounting records and transaction accounts', category: 'accounting', accessesBusinessData: true },
+  { id: 'canViewAccounting', name: 'View Accounting Module', description: 'Open the accounting module, chart of accounts, journals, and ledgers', category: 'accounting', accessesBusinessData: true },
+  { id: 'canCreateAccounting', name: 'Create Accounting Entries', description: 'Create journal entries and accounting records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canEditAccounting', name: 'Edit Accounting Entries', description: 'Edit accounting records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canDeleteAccounting', name: 'Delete Accounting Entries', description: 'Delete accounting records', category: 'accounting', accessesBusinessData: true },
+
+  // Transaction Accounts & Cash Movements
+  { id: 'canViewTransactionAccount', name: 'View Transaction Accounts', description: 'View cash, safe, bank, mobile money, and card transaction accounts', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseAnyTransactionAccount', name: 'Use Any Transaction Account', description: 'Select permitted tills, safe, bank, mobile money, and card accounts beyond the user assigned account', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOtherCashAccount', name: 'Use Other Cash Accounts', description: 'Select another staff cash till or safe account for cash payments, collections, withdrawals, and cash journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseCash', name: 'Use Assigned Cash Account', description: 'Use the cash or safe account assigned to this user for permitted cash transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseMobileMoney', name: 'Use Mobile Money', description: 'Use mobile money accounts for permitted transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseBank', name: 'Use Bank Accounts', description: 'Use bank accounts for permitted transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseCard', name: 'Use Card Accounts', description: 'Use card accounts for permitted transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canCreateTransactionAccount', name: 'Create Transaction Accounts', description: 'Create cash tills, safe accounts, bank accounts, mobile money accounts, and card accounts', category: 'transactions', accessesBusinessData: true },
+  { id: 'canEditTransactionAccount', name: 'Edit Transaction Accounts', description: 'Update transaction account details, assignments, status, and balances', category: 'transactions', accessesBusinessData: true },
+  { id: 'canDeleteTransactionAccount', name: 'Deactivate Transaction Accounts', description: 'Deactivate transaction accounts that should no longer be used', category: 'transactions', accessesBusinessData: true },
+  { id: 'canCreateWithdrawal', name: 'Record Customer Withdrawals', description: 'Record customer withdrawals and update the linked transaction account', category: 'transactions', accessesBusinessData: true },
   
   // Data Import
   { id: 'canImportInventory', name: 'Import Inventory Data', description: 'Bulk import products and inventory via CSV/Excel', category: 'inventory', accessesBusinessData: true },

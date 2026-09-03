@@ -88,6 +88,8 @@ const PERM_LABELS: Record<string, string> = {
   canViewServiceBusiness:'Can view service business', canCreateServiceBusiness:'Can create service business entries', canEditServiceBusiness:'Can edit service business entries', canDeleteServiceBusiness:'Can delete service business entries', canViewServiceBusinessReport:'Can view service business reports',
   canViewCommunication:'Can view communication', canCreateCommunication:'Can create communication', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
   canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canDeleteAccounting:'Can delete accounting entries',
+  canViewTransactionAccount:'Can view transaction accounts', canUseAnyTransactionAccount:'Can use any transaction account', canUseOtherCashAccount:'Can use other cash accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
+  canCreateWithdrawal:'Can record customer withdrawals',
   canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock', canViewPriceHistory:'Can view price history',
   canUseCash:'Can use cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
   canImportInventory:'Can import inventory',
@@ -95,7 +97,11 @@ const PERM_LABELS: Record<string, string> = {
 
 const ACCOUNTING_ACCESS_KEYS = [
   'canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting',
-  'canViewExpense', 'canCreateExpense', 'canEditExpense', 'canDeleteExpense', 'canViewStaffTillSheet',
+]
+
+const TRANSACTION_PERMISSION_KEYS = [
+  'canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canCreateTransactionAccount',
+  'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canCreateWithdrawal',
 ]
 
 const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaff', 'canDeleteStaff']
@@ -149,6 +155,7 @@ const PERM_GROUPS = [
   { label: 'Service Business', prefix: 'ServiceBusiness' },
   { label: 'Communication', prefix: 'Communication' },
   { label: 'Accounting', matcher: (key: string) => ACCOUNTING_ACCESS_KEYS.includes(key) },
+  { label: 'Transaction Accounts & Cash Movements', matcher: (key: string) => TRANSACTION_PERMISSION_KEYS.includes(key) },
   { label: 'Stock', prefix: 'Stock' },
   { label: 'Payment Methods', prefix: 'canUse' },
   { label: 'Data Import', prefix: 'Import' },

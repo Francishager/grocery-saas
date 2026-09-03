@@ -14,6 +14,7 @@ const TENANT_STATUS_MESSAGES = {
 };
 const PAYMENT_METHOD_PERMISSION_MAP = {
   cash: 'canUseCash',
+  safe: 'canUseCash',
   mobile_money: 'canUseMobileMoney',
   bank_transfer: 'canUseBank',
   bank: 'canUseBank',
@@ -339,6 +340,11 @@ export const hasAccountingPermission = (req) => {
     'canCreateAccounting',
     'canEditAccounting',
     'canDeleteAccounting',
+    'canViewTransactionAccount',
+    'canUseAnyTransactionAccount',
+    'canCreateTransactionAccount',
+    'canEditTransactionAccount',
+    'canDeleteTransactionAccount',
   ].some((permission) => permissions.includes(permission));
 };
 
@@ -466,15 +472,7 @@ export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) 
     return { canUseCash: true, canUseMobileMoney: true, canUseBank: true, canUseCard: true };
   }
 
-  const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
-  const rawPermissionRecord = permissionRecordOrList || req.userPermissions;
-  const permissionRecord = Array.isArray(rawPermissionRecord) ? rawPermissionRecord[0] : rawPermissionRecord;
-
-  const hasPermission = (key) => (
-    effectivePermissions.includes('*') ||
-    effectivePermissions.includes(key) ||
-    Boolean(permissionRecord?.[key])
-  );
+  const hasPermission = (key) => hasResolvedPermission(req, key, permissionRecordOrList);
 
   return {
     canUseCash: hasPermission('canUseCash'),
@@ -482,6 +480,20 @@ export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) 
     canUseBank: hasPermission('canUseBank'),
     canUseCard: hasPermission('canUseCard'),
   };
+};
+
+const hasResolvedPermission = (req, key, permissionRecordOrList = null) => {
+  if (PLATFORM_ROLES.includes(req.user?.role) || req.user?.isPlatformUser) return true;
+
+  const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  const rawPermissionRecord = permissionRecordOrList || req.userPermissions;
+  const permissionRecord = Array.isArray(rawPermissionRecord) ? rawPermissionRecord[0] : rawPermissionRecord;
+
+  return (
+    effectivePermissions.includes('*') ||
+    effectivePermissions.includes(key) ||
+    Boolean(permissionRecord?.[key])
+  );
 };
 
 export const resolveReqPermissions = async (req) => {
@@ -509,10 +521,23 @@ export const checkPaymentMethodPermission = (req, paymentMethod) => {
 export const canUsePaymentMethodOrAssignedCash = (req, paymentMethod, cashAccountId = null) => {
   const normalizedMethod = String(paymentMethod || '').trim().toLowerCase();
   const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId;
-  const isOwnCashAccount = normalizedMethod === 'cash' && cashAccountId && assignedCashAccountId &&
-    String(cashAccountId) === String(assignedCashAccountId);
+  const hasPaymentMethod = checkPaymentMethodPermission(req, normalizedMethod);
 
-  return Boolean(isOwnCashAccount || checkPaymentMethodPermission(req, normalizedMethod));
+  if (!['cash', 'safe'].includes(normalizedMethod)) {
+    return hasPaymentMethod;
+  }
+
+  if (!hasPaymentMethod) return false;
+
+  const selectedCashAccountId = cashAccountId || assignedCashAccountId;
+  const isOwnCashAccount = selectedCashAccountId && assignedCashAccountId &&
+    String(selectedCashAccountId) === String(assignedCashAccountId);
+
+  return Boolean(
+    isOwnCashAccount ||
+    hasResolvedPermission(req, 'canUseOtherCashAccount') ||
+    hasResolvedPermission(req, 'canUseAnyTransactionAccount')
+  );
 };
 
 /**

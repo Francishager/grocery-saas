@@ -182,6 +182,7 @@ export default function ReceivablesPage() {
   })
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
   const creditEnabled = hasPermission('canViewReceivable')
+  const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
 
   // Fuel Cards state
   const [fuelCards, setFuelCards] = useState<FuelCard[]>([])
@@ -757,6 +758,14 @@ export default function ReceivablesPage() {
   }
 
   const recordWithdrawal = async () => {
+    if (!canCreateWithdrawal) {
+      toast({
+        variant: 'destructive',
+        title: 'You do not have permission to record customer withdrawals',
+        description: 'Required permission: canCreateWithdrawal',
+      })
+      return
+    }
     const targetCustomer = selectedCustomer
     if (!targetCustomer) {
       toast({ variant: 'destructive', title: 'Select a customer first' })
@@ -1429,24 +1438,26 @@ export default function ReceivablesPage() {
                       <DollarSign className="h-4 w-4 mr-1" />
                       Record Payment
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setSelectedCustomer(customer)
-                        setSelectedSale(null)
-                        setWithdrawalAmount('')
-                        setPaymentMethod('cash')
-                        setMobileProvider('')
-                        setPhoneNumber('')
-                        setTransactionId('')
-                        setSelectedCashAccountId(null)
-                        setShowWithdrawalModal(true)
-                      }}
-                    >
-                      <ArrowDownCircle className="h-4 w-4 mr-1" />
-                      Withdrawal
-                    </Button>
+                    {canCreateWithdrawal && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedCustomer(customer)
+                          setSelectedSale(null)
+                          setWithdrawalAmount('')
+                          setPaymentMethod('cash')
+                          setMobileProvider('')
+                          setPhoneNumber('')
+                          setTransactionId('')
+                          setSelectedCashAccountId(null)
+                          setShowWithdrawalModal(true)
+                        }}
+                      >
+                        <ArrowDownCircle className="h-4 w-4 mr-1" />
+                        Withdrawal
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => setSelectedCustomerDetail(customer)}>
                       <Eye className="h-4 w-4 mr-1" />
                       View Details
@@ -2115,7 +2126,7 @@ export default function ReceivablesPage() {
       )}
 
       {/* Withdrawal Modal */}
-      {showWithdrawalModal && selectedCustomer && (
+      {showWithdrawalModal && selectedCustomer && canCreateWithdrawal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
             <h3 className="text-lg font-semibold mb-4">Record Withdrawal</h3>

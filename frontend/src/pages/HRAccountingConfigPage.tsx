@@ -112,6 +112,16 @@ const PAYMENT_METHOD_ACCOUNT_LABELS: Record<string, string> = {
   card: "card",
 }
 
+const PAYMENT_METHOD_PERMISSION_KEYS: Record<string, string> = {
+  cash: "canUseCash",
+  safe: "canUseCash",
+  mobile_money: "canUseMobileMoney",
+  bank: "canUseBank",
+  bank_transfer: "canUseBank",
+  cheque: "canUseBank",
+  card: "canUseCard",
+}
+
 const emptyMapping = {
   salaryExpenseAccountId: "",
   salaryPayableAccountId: "",
@@ -154,7 +164,7 @@ const transactionAccountMatchesMethod = (account: Account, paymentMethod?: strin
   const type = getTransactionAccountType(account)
   const method = normalizeValue(paymentMethod || "cash")
   if (!type) return false
-  if (method === "cash") {
+  if (method === "cash" || method === "safe") {
     if (type !== "cash") return false
     return assignedCashAccountId ? linkedCashAccountId(account) === assignedCashAccountId : false
   }
@@ -163,6 +173,23 @@ const transactionAccountMatchesMethod = (account: Account, paymentMethod?: strin
   if (method === "mobile_money") return type === "mobile_money"
   if (method === "card") return type === "card"
   return type === method
+}
+
+const canSelectTransactionAccount = (
+  account: Account,
+  paymentMethod: string,
+  assignedCashAccountId: string | null,
+  canUseMethod: boolean,
+  canUseOtherCashAccount: boolean,
+  canUseAnyTransactionAccount: boolean,
+) => {
+  if (!canUseMethod || !transactionAccountMatchesMethod(account, paymentMethod, assignedCashAccountId)) return false
+  if (!['cash', 'safe'].includes(normalizeValue(paymentMethod))) return true
+  return Boolean(
+    linkedCashAccountId(account) === assignedCashAccountId ||
+    canUseOtherCashAccount ||
+    canUseAnyTransactionAccount
+  )
 }
 
 const paymentAccountPlaceholder = (paymentMethod?: string | null) =>
@@ -319,6 +346,8 @@ export default function HRAccountingConfigPage() {
   const canApprovePayroll = isOwner || canUseLegacyPayroll || hasPermission("canApproveHRPayroll")
   const canPostPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPostHRPayroll")
   const canPayPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPayHRPayroll")
+  const canUseOtherCashAccount = hasPermission("canUseOtherCashAccount")
+  const canUseAnyTransactionAccount = hasPermission("canUseAnyTransactionAccount")
   const canIssueAdvance = canCreatePayroll || canPayPayroll
   const canViewPayrollData =
     isOwner ||
@@ -457,16 +486,16 @@ export default function HRAccountingConfigPage() {
     ["outstanding", "partially_recovered"].includes(advance.status) && Number(advance.outstandingAmount || 0) > 0
   )
   const paymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, paymentForm.paymentMethod, assignedCashAccountId)),
-    [availableAccounts.assetAccounts, paymentForm.paymentMethod, assignedCashAccountId]
+    () => availableAccounts.assetAccounts.filter((account) => canSelectTransactionAccount(account, paymentForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[paymentForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
+    [availableAccounts.assetAccounts, paymentForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
   )
   const advancePaymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, advanceForm.paymentMethod, assignedCashAccountId)),
-    [availableAccounts.assetAccounts, advanceForm.paymentMethod, assignedCashAccountId]
+    () => availableAccounts.assetAccounts.filter((account) => canSelectTransactionAccount(account, advanceForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[advanceForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
+    [availableAccounts.assetAccounts, advanceForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
   )
   const repaymentPaymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => transactionAccountMatchesMethod(account, repaymentForm.paymentMethod, assignedCashAccountId)),
-    [availableAccounts.assetAccounts, repaymentForm.paymentMethod, assignedCashAccountId]
+    () => availableAccounts.assetAccounts.filter((account) => canSelectTransactionAccount(account, repaymentForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[repaymentForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
+    [availableAccounts.assetAccounts, repaymentForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
   )
 
   const loadConfiguration = async () => {

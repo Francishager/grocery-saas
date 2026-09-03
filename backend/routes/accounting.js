@@ -25,7 +25,6 @@ const PAYMENT_METHOD_PERMISSION_SELECT = {
   canUseBank: true,
   canUseCard: true,
 };
-const BROAD_TRANSACTION_ACCOUNT_ROLES = new Set(["owner", "admin", "manager", "accountant", "saas_admin", "platform_admin", "super_admin"]);
 const JOURNAL_ACTION_ACCOUNT_TYPES = {
   register_income: ["income", "revenue"],
   register_expense: ["expense", "expenses"],
@@ -86,12 +85,14 @@ const transactionAccountMatchesPaymentMethod = (cashAccountType, paymentMethod) 
 };
 
 const hasBroadTransactionAccountAccess = (req) => {
-  const role = normalizeValue(req.user?.role);
   const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
-  return BROAD_TRANSACTION_ACCOUNT_ROLES.has(role) ||
-    permissions.includes("*") ||
-    permissions.includes("canEditAccounting") ||
-    permissions.includes("canDeleteAccounting");
+  return permissions.includes("*") ||
+    permissions.includes("canUseAnyTransactionAccount");
+};
+
+const hasRequestPermission = (req, permission) => {
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  return permissions.includes("*") || permissions.includes(permission);
 };
 
 async function requestUserCashAccountId(req) {
@@ -130,10 +131,11 @@ const canUseTransactionAccount = async (req, cashAccount) => {
   if (!permissionKey) return false;
   const permissions = await paymentMethodPermissionsForRequest(req);
   if (!permissions[permissionKey]) return false;
-  if (hasBroadTransactionAccountAccess(req)) return true;
 
   const ownCashAccountId = await requestUserCashAccountId(req);
-  return Boolean(ownCashAccountId && ownCashAccountId === cashAccount?.id);
+  if (ownCashAccountId && ownCashAccountId === cashAccount?.id) return true;
+  if (["cash", "safe"].includes(normalizeValue(cashAccount?.type)) && hasRequestPermission(req, "canUseOtherCashAccount")) return true;
+  return hasBroadTransactionAccountAccess(req);
 };
 
 const normalizeJournalLines = (lines) => {

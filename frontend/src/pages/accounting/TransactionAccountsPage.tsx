@@ -13,7 +13,7 @@ import { cacheTenantFormattingSettings, getTenantCurrency } from '@/lib/utils'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalCashAccounts, getLocalBranches } from '@/db/hybrid'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { Wallet, Landmark, Shield, Smartphone, Plus, Edit } from 'lucide-react'
+import { Wallet, Landmark, Shield, Smartphone, Plus, Edit, Trash2 } from 'lucide-react'
 
 interface CashAccount {
   id: string
@@ -151,6 +151,9 @@ export default function TransactionAccountsPage() {
   const cashAccounts = accounts.filter(a => a.type === 'cash')
   const safeAccounts = accounts.filter(a => a.type === 'safe')
   const mobileMoneyAccounts = accounts.filter(a => a.type === 'mobile_money')
+  const canCreateTransactionAccount = hasPermission('canCreateTransactionAccount')
+  const canEditTransactionAccount = hasPermission('canEditTransactionAccount')
+  const canDeleteTransactionAccount = hasPermission('canDeleteTransactionAccount')
 
   const totalBalance = accounts.reduce((s, a) => s + Number(a.balance || 0), 0)
   const totalBank = bankAccounts.reduce((s, a) => s + Number(a.balance || 0), 0)
@@ -176,6 +179,12 @@ export default function TransactionAccountsPage() {
   }
 
   const handleSave = async () => {
+    if (editingAccount && !canEditTransactionAccount) {
+      return toast({ variant: 'destructive', title: 'You do not have permission to edit transaction accounts' })
+    }
+    if (!editingAccount && !canCreateTransactionAccount) {
+      return toast({ variant: 'destructive', title: 'You do not have permission to create transaction accounts' })
+    }
     if (!form.currency) return toast({ variant: 'destructive', title: 'Currency required' })
     if (!form.branchId) return toast({ variant: 'destructive', title: 'Branch required' })
     if (form.type === 'bank') {
@@ -229,8 +238,12 @@ export default function TransactionAccountsPage() {
         setForm({ name: '', type: form.type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
         fetchAccounts()
       } else {
-        const data = await res.json()
-        toast({ variant: 'destructive', title: data.error || 'Failed to save' })
+        const data = await res.json().catch(() => ({}))
+        toast({
+          variant: 'destructive',
+          title: data.error || data.message || 'Failed to save',
+          description: data.required ? `Required permission: ${data.required}` : undefined,
+        })
       }
     } catch {
       toast({ variant: 'destructive', title: 'Failed to save account' })
@@ -238,6 +251,10 @@ export default function TransactionAccountsPage() {
   }
 
   const openEdit = (account: CashAccount) => {
+    if (!canEditTransactionAccount) {
+      toast({ variant: 'destructive', title: 'You do not have permission to edit transaction accounts' })
+      return
+    }
     setEditingAccount(account)
     setForm({
       name: account.name,
@@ -257,16 +274,47 @@ export default function TransactionAccountsPage() {
   }
 
   const openCreate = (type: string) => {
+    if (!canCreateTransactionAccount) {
+      toast({ variant: 'destructive', title: 'You do not have permission to create transaction accounts' })
+      return
+    }
     setEditingAccount(null)
     setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
     setShowModal(true)
   }
 
+  const handleDeactivate = async (account: CashAccount) => {
+    if (!canDeleteTransactionAccount) {
+      toast({ variant: 'destructive', title: 'You do not have permission to deactivate transaction accounts' })
+      return
+    }
+    if (!confirm(`Deactivate ${account.name}? It will no longer be available for new transactions.`)) return
+
+    try {
+      const res = await apiFetch(`/api/expenses/cash-accounts/${account.id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast({
+          variant: 'destructive',
+          title: data.error || data.message || 'Failed to deactivate account',
+          description: data.required ? `Required permission: ${data.required}` : undefined,
+        })
+        return
+      }
+      toast({ title: 'Account deactivated' })
+      fetchAccounts()
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to deactivate account' })
+    }
+  }
+
   const renderAccountTable = (list: CashAccount[], type: string) => (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => openCreate(type)}><Plus className="h-4 w-4 mr-2" /> Add {ACCOUNT_TYPE_LABELS[type]}</Button>
-      </div>
+      {canCreateTransactionAccount && (
+        <div className="flex justify-end">
+          <Button size="sm" onClick={() => openCreate(type)}><Plus className="h-4 w-4 mr-2" /> Add {ACCOUNT_TYPE_LABELS[type]}</Button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -279,7 +327,7 @@ export default function TransactionAccountsPage() {
               <th className="text-left py-2 px-2 font-medium">Currency</th>
               <th className="text-right py-2 px-2 font-medium">Balance</th>
               <th className="text-left py-2 px-2 font-medium">Status</th>
-              <th className="text-left py-2 px-2 font-medium">Actions</th>
+              {(canEditTransactionAccount || canDeleteTransactionAccount) && <th className="text-left py-2 px-2 font-medium">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -293,13 +341,22 @@ export default function TransactionAccountsPage() {
                 <td className="py-2 px-2">{acc.currency || '—'}</td>
                 <td className="py-2 px-2 text-right font-mono">{fmt(acc.balance)}</td>
                 <td className="py-2 px-2"><Badge variant={acc.isActive ? 'default' : 'secondary'}>{acc.isActive ? 'Active' : 'Inactive'}</Badge></td>
-                <td className="py-2 px-2">
-                  <Button size="sm" variant="ghost" onClick={() => openEdit(acc)}><Edit className="h-4 w-4" /></Button>
-                </td>
+                {(canEditTransactionAccount || canDeleteTransactionAccount) && (
+                  <td className="py-2 px-2">
+                    <div className="flex items-center gap-1">
+                      {canEditTransactionAccount && (
+                        <Button size="sm" variant="ghost" onClick={() => openEdit(acc)}><Edit className="h-4 w-4" /></Button>
+                      )}
+                      {canDeleteTransactionAccount && acc.isActive && (
+                        <Button size="sm" variant="ghost" onClick={() => handleDeactivate(acc)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                      )}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
             {list.length === 0 && !loading && (
-              <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">No {ACCOUNT_TYPE_LABELS[type].toLowerCase()}s found</td></tr>
+              <tr><td colSpan={canEditTransactionAccount || canDeleteTransactionAccount ? 9 : 8} className="text-center py-8 text-muted-foreground">No {ACCOUNT_TYPE_LABELS[type].toLowerCase()}s found</td></tr>
             )}
           </tbody>
         </table>

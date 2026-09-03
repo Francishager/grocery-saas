@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveEffectivePermissions } from '../src/utils/permissions.js';
+import { PERMISSION_METADATA, resolveEffectivePermissions } from '../src/utils/permissions.js';
 
 test('returns explicit permissions from a user permission record', () => {
   const result = resolveEffectivePermissions(
@@ -46,4 +46,24 @@ test('prisma schema exposes the staff till sheet permission field', () => {
   const schema = readFileSync(schemaPath, 'utf8');
 
   assert.match(schema, /canViewStaffTillSheet\s+Boolean/);
+});
+
+test('prisma schema exposes transaction account and withdrawal permission fields', () => {
+  const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
+  const schema = readFileSync(schemaPath, 'utf8');
+
+  assert.match(schema, /canViewTransactionAccount\s+Boolean/);
+  assert.match(schema, /canUseAnyTransactionAccount\s+Boolean/);
+  assert.match(schema, /canCreateTransactionAccount\s+Boolean/);
+  assert.match(schema, /canEditTransactionAccount\s+Boolean/);
+  assert.match(schema, /canDeleteTransactionAccount\s+Boolean/);
+  assert.match(schema, /canCreateWithdrawal\s+Boolean/);
+});
+
+test('new transaction permissions are grouped separately from accounting permissions', () => {
+  assert.equal(PERMISSION_METADATA.canViewPriceHistory.category, 'inventory');
+  assert.equal(PERMISSION_METADATA.canCreateAccounting.category, 'accounting');
+  assert.equal(PERMISSION_METADATA.canUseAnyTransactionAccount.category, 'transactions');
+  assert.equal(PERMISSION_METADATA.canCreateTransactionAccount.category, 'transactions');
+  assert.equal(PERMISSION_METADATA.canCreateWithdrawal.category, 'transactions');
 });
