@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canUseCashTransactions, canUsePaymentMethodOrAssignedCash, hasAccountingPermission } from '../middleware/auth.js'
+import { canUseCashTransactions, canUsePaymentMethodOrAssignedCash, hasAccountingPermission, tenantAccountAccessPayload } from '../middleware/auth.js'
 
 test('owners can transact when they have a cash account assigned', () => {
   assert.equal(canUseCashTransactions({ role: 'owner' }, true), true)
@@ -34,4 +34,10 @@ test('other cash permission allows another cash account without broad account ac
   }
 
   assert.equal(canUsePaymentMethodOrAssignedCash(req, 'cash', 'another-cash'), true)
+})
+
+test('suspended and cancelled business tenants are blocked while platform users are exempt', () => {
+  assert.equal(tenantAccountAccessPayload({ status: 'suspended' }, { role: 'owner' })?.code, 'TENANT_SUSPENDED')
+  assert.equal(tenantAccountAccessPayload({ status: 'cancelled' }, { role: 'attendant' })?.code, 'TENANT_CANCELLED')
+  assert.equal(tenantAccountAccessPayload({ status: 'suspended' }, { role: 'saas_admin' }), null)
 })

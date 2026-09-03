@@ -452,6 +452,7 @@ model User {
 
 enum UserRole {
   saas_admin // Platform admin
+  platform_staff // SaaS platform staff member
   owner // Business owner
   manager // Business manager
   accountant // Business accountant

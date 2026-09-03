@@ -122,6 +122,7 @@ export const TenantDetailPage: React.FC = () => {
 
   useEffect(() => { fetchDetail() }, [fetchDetail])
 
+
   const handleSaveLimits = async () => {
     if (!tenantId) return
     setSavingLimits(true)

@@ -90,6 +90,7 @@ async function request<T>(
 
   if (!response.ok) {
     if (isTenantAccountBlockedResponse(response.status, data)) {
+      sessionStorage.setItem('tenant_account_blocked_message', data.message || data.error || 'This business account is not active.')
       clearStoredAuth()
       redirectToTenantLogin()
     }

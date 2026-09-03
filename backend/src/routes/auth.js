@@ -26,7 +26,7 @@ function primaryBranchId(user) {
 }
 
 function userPayload(user, userPerm, tenantFeatures = null) {
-  const isPlatformUser = user.role === "saas_admin";
+  const isPlatformUser = user.role === "saas_admin" || user.role === "platform_staff";
   const permissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
   return {
@@ -86,7 +86,7 @@ router.post("/login", async (req, res) => {
     const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
     const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -183,7 +183,7 @@ router.post("/refresh", async (req, res) => {
     const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
     const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
       JWT_SECRET,
       { expiresIn: "24h" }
     );

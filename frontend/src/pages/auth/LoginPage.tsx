@@ -35,6 +35,13 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, user, navigate])
 
+  useEffect(() => {
+    const message = sessionStorage.getItem('tenant_account_blocked_message')
+    if (!message) return
+    sessionStorage.removeItem('tenant_account_blocked_message')
+    toast({ variant: 'destructive', title: 'Business account unavailable', description: message })
+  }, [toast])
+
   // Auto-rotate carousel
   useEffect(() => {
     const interval = setInterval(() => {

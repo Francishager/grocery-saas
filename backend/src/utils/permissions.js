@@ -1052,6 +1052,10 @@ export function permissionAllowedForTenant(permissionKey, tenantFeatures) {
 export function resolveEffectivePermissions(user, permissionRecord = null, inheritedPermissions = [], tenantFeatures = null) {
   if (!user) return [];
   if (user.role === "saas_admin") return ["*"];
+  if (user.role === "platform_staff") {
+    const normalized = normalizePermissionRecord(permissionRecord || {});
+    return Object.entries(normalized).filter(([, enabled]) => enabled).map(([key]) => key);
+  }
   if (user.role === "owner") {
     const granted = new Set();
     for (const permissionKey of ALL_PERMISSION_KEYS) {

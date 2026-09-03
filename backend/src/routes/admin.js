@@ -9,6 +9,7 @@ import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSu
 
 const router = Router();
 
+
 // Helper: generate 6-digit OTP
 function generateOTP() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -402,6 +403,32 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
   } catch (err) {
     console.error("Reset password error:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/platform-staff", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  const staff = await prisma.user.findMany({ where: { role: "platform_staff" }, orderBy: { createdAt: "desc" }, select: { id: true, email: true, fname: true, lname: true, phone: true, role: true, isActive: true, createdAt: true } });
+  res.json({ staff });
+});
+
+router.post("/platform-staff", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { name, email, password, phone, permissions = {} } = req.body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!name?.trim() || !normalizedEmail || !password) return res.status(400).json({ error: "Name, email, and password are required" });
+    if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (await prisma.user.findUnique({ where: { email: normalizedEmail } })) return res.status(409).json({ error: "User already exists" });
+    const parsed = splitStaffName(name);
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({ data: { email: normalizedEmail, password: await bcrypt.hash(String(password), 12), fname: parsed.fname || normalizedEmail.split("@")[0], lname: parsed.lname, phone, role: "platform_staff", tenantId: null, isActive: true } });
+      await tx.userPermission.create({ data: { userId: created.id, ...Object.fromEntries(ALL_PERMISSION_KEYS.map((key) => [key, Boolean(permissions[key])])) } });
+      return created;
+    });
+    res.status(201).json({ message: "Platform staff created", staff: { id: user.id, email: user.email, name: `${user.fname} ${user.lname}`.trim(), role: user.role } });
+  } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "User already exists" });
+    console.error("Create platform staff error:", err);
+    res.status(500).json({ error: "Failed to create platform staff" });
   }
 });
 

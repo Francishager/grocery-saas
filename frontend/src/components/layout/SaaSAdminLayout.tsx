@@ -15,6 +15,7 @@ const navItems = [
   { to: '/saas/hr-settings', label: 'HR Module', icon: Users },
   { to: '/saas/subscriptions', label: 'Subscriptions', icon: Wallet },
   { to: '/saas/owners', label: 'Owners', icon: Users },
+  { to: '/saas/staff', label: 'Platform Staff', icon: Users },
   { to: '/saas/invitations', label: 'Invitations', icon: Mail },
   { to: '/saas/audit', label: 'Audit Logs', icon: Activity },
   { to: '/saas/referrals', label: 'Referrals', icon: Gift },
