@@ -135,7 +135,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 )
 
 export default function ReceivablesPage() {
-  const { hasPermission } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
   const online = useOnlineStatus()
   
@@ -183,6 +183,13 @@ export default function ReceivablesPage() {
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
   const creditEnabled = hasPermission('canViewReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
+  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
+  const canUseOtherCashAccount = hasPermission('canUseOtherCashAccount')
+  const canUseAnyTransactionAccount = (
+    hasPermission('canUseAnyTransactionAccount') ||
+    hasPermission('canEditTransactionAccount') ||
+    hasPermission('canDeleteTransactionAccount')
+  )
 
   // Fuel Cards state
   const [fuelCards, setFuelCards] = useState<FuelCard[]>([])
@@ -525,25 +532,31 @@ export default function ReceivablesPage() {
     }
   }
 
-  const getAccountTypeForPaymentMethod = (method: string): string => {
-    const methodToType: { [key: string]: string } = {
-      cash: 'cash',
-      mobile_money: 'mobile_money',
-      bank_transfer: 'bank',
-      card: 'card'
+  const getAccountTypesForPaymentMethod = (method: string): string[] => {
+    const methodToTypes: { [key: string]: string[] } = {
+      cash: ['cash', 'safe'],
+      mobile_money: ['mobile_money'],
+      bank_transfer: ['bank'],
+      card: ['card']
     }
-    return methodToType[method] || 'cash'
+    return methodToTypes[method] || ['cash']
   }
+
+  const getAccountTypeForPaymentMethod = (method: string): string => getAccountTypesForPaymentMethod(method).join(' / ')
 
   const loadCashAccounts = async (forPaymentMethod: string = paymentMethod) => {
     try {
       const response = await apiFetch('/api/expenses/cash-accounts')
       if (response.ok) {
         const data = await response.json()
-        const accountType = getAccountTypeForPaymentMethod(forPaymentMethod)
+        const accountTypes = getAccountTypesForPaymentMethod(forPaymentMethod)
         
-        // Filter accounts: only show accounts matching the payment method type
-        const filteredAccounts = (data || []).filter((acc: any) => acc.type === accountType)
+        const filteredAccounts = (data || []).filter((acc: any) => {
+          if (!accountTypes.includes(acc.type)) return false
+          if (forPaymentMethod !== 'cash') return true
+          const isAssignedAccount = assignedCashAccountId && String(acc.id) === String(assignedCashAccountId)
+          return Boolean(isAssignedAccount || canUseOtherCashAccount || canUseAnyTransactionAccount)
+        })
         
         setCashAccounts(filteredAccounts)
         

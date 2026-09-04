@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePlatformAdmin } from '../middleware/auth.js'
+import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from '../middleware/auth.js'
 import { filterPlanFeaturesByPlanList, invalidateFeatureCache, planFeatureIsAllowedByPlanList } from '../middleware/featureCheck.js'
 
 const router = express.Router()
@@ -589,9 +589,11 @@ router.put('/tenants/:tenantId/status', authenticateToken, requirePlatformAdmin,
       where: { id: tenantId },
       data: { status }
     })
+    const blockPayload = tenantAccountAccessPayload(tenant, { role: 'owner' })
 
     res.json({
-      message: `Tenant status changed to ${status}`,
+      message: blockPayload?.message || `Tenant status changed to ${status}`,
+      code: blockPayload?.code,
       tenant
     })
   } catch (error) {
@@ -973,7 +975,8 @@ router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async 
     if (taxId !== undefined) data.taxId = taxId?.trim() || null
 
     const tenant = await prisma.tenant.update({ where: { id: tenantId }, data })
-    res.json({ message: 'Tenant updated', tenant })
+    const blockPayload = tenantAccountAccessPayload(tenant, { role: 'owner' })
+    res.json({ message: blockPayload?.message || 'Tenant updated', code: blockPayload?.code, tenant })
   } catch (error) {
     console.error('Update tenant error:', error)
     const msg = error?.code === 'P2002' ? 'A tenant with this email already exists' : error?.message || 'Failed to update tenant'

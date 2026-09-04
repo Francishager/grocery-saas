@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import prisma from "../db.js";
-import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
@@ -262,8 +262,11 @@ async function updateSubscription(req, res) {
       include: { plan: true },
     });
 
+    const blockPayload = tenantAccountAccessPayload(updatedTenant, { role: "owner" });
+
     res.json({
-      message: "Subscription updated",
+      message: blockPayload?.message || "Subscription updated",
+      code: blockPayload?.code,
       subscription: subscriptionPayload(updatedTenant),
     });
   } catch (err) {

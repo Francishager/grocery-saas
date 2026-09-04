@@ -46,7 +46,11 @@ async function resolvePaymentCashAccount(client, scope, req, paymentMethod, cash
     const account = await client.cashAccount.findFirst({
       where: { id: req.userCashAccountId, tenantId: scope.tenantId, isActive: true }
     })
-    if (account && cashAccountMatchesPaymentMethod(account, paymentMethod)) {
+    if (
+      account &&
+      cashAccountMatchesPaymentMethod(account, paymentMethod) &&
+      canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)
+    ) {
       return account
     }
   }

@@ -20,6 +20,7 @@ export interface User {
   isPlatformUser?: boolean
   /** Tenant ID for business users */
   tenantId?: string
+  tenantStatus?: string | null
   cashAccountId?: string | null
   cashAccount?: { id: string; name: string; type: string } | null
 }
@@ -251,6 +252,10 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cachedTokens = cache.tokens
             // Silent
             if (cachedUser?.email?.toLowerCase() === email.toLowerCase()) {
+              const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
+              if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
+                return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.'))
+              }
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
@@ -269,6 +274,10 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cachedTokens = JSON.parse(cachedTokensStr)
             // Silent
             if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+              const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
+              if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
+                return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.'))
+              }
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
@@ -357,6 +366,13 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       })
 
       if (!response.ok) {
+        const data = await response.clone().json().catch(() => ({}))
+        if (response.status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND'].includes(data?.code)) {
+          sessionStorage.setItem(
+            'tenant_account_blocked_message',
+            data?.message || data?.error || 'This business account is not active.'
+          )
+        }
         // 401/403 means the refresh token is actually invalid/expired — logout
         if (response.status === 401 || response.status === 403) {
           logout()

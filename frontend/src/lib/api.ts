@@ -41,6 +41,13 @@ function isTenantAccountBlockedResponse(status: number, data: any) {
   return status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND'].includes(data?.code)
 }
 
+function rememberTenantAccountBlockedMessage(data: any) {
+  sessionStorage.setItem(
+    'tenant_account_blocked_message',
+    data?.message || data?.error || 'This business account is not active.'
+  )
+}
+
 function redirectToTenantLogin() {
   if (window.location.pathname !== '/login' && window.location.pathname !== '/saas/login') {
     window.location.href = '/login'
@@ -90,7 +97,7 @@ async function request<T>(
 
   if (!response.ok) {
     if (isTenantAccountBlockedResponse(response.status, data)) {
-      sessionStorage.setItem('tenant_account_blocked_message', data.message || data.error || 'This business account is not active.')
+      rememberTenantAccountBlockedMessage(data)
       clearStoredAuth()
       redirectToTenantLogin()
     }
@@ -132,7 +139,11 @@ async function tryRefreshToken(): Promise<string | null> {
       })
       if (!res.ok) {
         const data = await res.clone().json().catch(() => ({}))
-        if (isTenantAccountBlockedResponse(res.status, data)) clearStoredAuth()
+        if (isTenantAccountBlockedResponse(res.status, data)) {
+          rememberTenantAccountBlockedMessage(data)
+          clearStoredAuth()
+          redirectToTenantLogin()
+        }
         return null
       }
       const data = await res.json()
@@ -162,6 +173,7 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     if (res.status === 403) {
       const data = await res.clone().json().catch(() => ({}))
       if (isTenantAccountBlockedResponse(res.status, data)) {
+        rememberTenantAccountBlockedMessage(data)
         clearStoredAuth()
         redirectToTenantLogin()
       }

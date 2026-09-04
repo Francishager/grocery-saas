@@ -54,6 +54,7 @@ test('prisma schema exposes transaction account and withdrawal permission fields
 
   assert.match(schema, /canViewTransactionAccount\s+Boolean/);
   assert.match(schema, /canUseAnyTransactionAccount\s+Boolean/);
+  assert.match(schema, /canUseOtherCashAccount\s+Boolean/);
   assert.match(schema, /canCreateTransactionAccount\s+Boolean/);
   assert.match(schema, /canEditTransactionAccount\s+Boolean/);
   assert.match(schema, /canDeleteTransactionAccount\s+Boolean/);
@@ -64,6 +65,7 @@ test('new transaction permissions are grouped separately from accounting permiss
   assert.equal(PERMISSION_METADATA.canViewPriceHistory.category, 'inventory');
   assert.equal(PERMISSION_METADATA.canCreateAccounting.category, 'accounting');
   assert.equal(PERMISSION_METADATA.canUseAnyTransactionAccount.category, 'transactions');
+  assert.equal(PERMISSION_METADATA.canUseOtherCashAccount.category, 'transactions');
   assert.equal(PERMISSION_METADATA.canCreateTransactionAccount.category, 'transactions');
   assert.equal(PERMISSION_METADATA.canCreateWithdrawal.category, 'transactions');
 });

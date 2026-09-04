@@ -91,7 +91,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewTransactionAccount:'Can view transaction accounts', canUseAnyTransactionAccount:'Can use any transaction account', canUseOtherCashAccount:'Can use other cash accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
   canCreateWithdrawal:'Can record customer withdrawals',
   canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock', canViewPriceHistory:'Can view price history',
-  canUseCash:'Can use cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
+  canUseCash:'Can use assigned cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
   canImportInventory:'Can import inventory',
 }
 

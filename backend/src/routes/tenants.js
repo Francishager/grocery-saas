@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
-import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
 import { buildBillingPaymentRequest, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
@@ -303,7 +303,8 @@ router.post("/:id/suspend", authenticateToken, requirePlatformAdmin, async (req,
     const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: "Tenant not found" });
     const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "suspended" } });
-    res.json({ message: "Tenant suspended", tenant });
+    const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });
+    res.json({ message: blockPayload?.message || "Tenant suspended", code: blockPayload?.code, tenant });
   } catch (err) {
     console.error("Suspend tenant error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -361,8 +362,17 @@ router.put("/:id/plan", authenticateToken, requirePlatformAdmin, async (req, res
 // Update tenant
 router.put("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: req.body });
-    res.json({ message: "Tenant updated", tenant });
+    const data = { ...req.body };
+    if (data.status !== undefined) {
+      const status = String(data.status).trim().toLowerCase();
+      if (!VALID_TENANT_STATUSES.has(status)) {
+        return res.status(400).json({ error: "Invalid tenant status" });
+      }
+      data.status = status;
+    }
+    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data });
+    const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });
+    res.json({ message: blockPayload?.message || "Tenant updated", code: blockPayload?.code, tenant });
   } catch (err) {
     console.error("Update tenant error:", err);
     res.status(500).json({ error: "Internal server error" });

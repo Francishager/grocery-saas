@@ -200,6 +200,21 @@ const transactionAccountMatchesMethod = (account: Account, paymentMethod?: strin
   return type === paymentMethod
 }
 
+const canSelectPaymentTransactionAccount = (
+  account: Account,
+  assignedCashAccountId: string | null,
+  canUseOtherCashAccount: boolean,
+  canUseAnyTransactionAccount: boolean,
+) => {
+  const transactionType = getTransactionAccountType(account)
+  const linkedAccountId = linkedCashAccountId(account)
+  if (linkedAccountId && assignedCashAccountId && linkedAccountId === assignedCashAccountId) return true
+  if (transactionType === 'cash' || transactionType === 'safe') {
+    return canUseOtherCashAccount || canUseAnyTransactionAccount
+  }
+  return canUseAnyTransactionAccount
+}
+
 const accountMatchesTypeFilter = (account: Account, typeFilter?: string) => {
   if (!typeFilter) return true
   if (typeFilter === 'income') return account.type === 'income' || account.type === 'revenue'
@@ -450,9 +465,9 @@ export default function AccountingPage() {
     transactionAccounts
       .filter(account => account.id !== jeAccount)
       .filter(account => transactionAccountMatchesMethod(account, jePaymentMethod))
-      .filter(account => canChooseOtherTransactionAccounts || linkedCashAccountId(account) === assignedCashAccountId)
+      .filter(account => canSelectPaymentTransactionAccount(account, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount))
       .map(account => ({ value: account.id, label: `${account.name} - ${accountBalanceLabel(account)}`, account }))
-  ), [transactionAccounts, jeAccount, jePaymentMethod, canChooseOtherTransactionAccounts, assignedCashAccountId])
+  ), [transactionAccounts, jeAccount, jePaymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount])
   const flatAccounts = useMemo(() => flattenAccountTree(accounts), [accounts])
   const accountById = useMemo(() => new Map(flatAccounts.map(account => [account.id, account])), [flatAccounts])
   const selectedHistoryAccountIds = useMemo(() => collectAccountIds(selectedHistoryAccount), [selectedHistoryAccount])
@@ -573,7 +588,7 @@ export default function AccountingPage() {
     }
 
     const preferredOwnAccount = paymentAccountOptions.find(option => linkedCashAccountId(option.account) === assignedCashAccountId)
-    const fallbackAccount = canChooseOtherTransactionAccounts ? paymentAccountOptions[0] : undefined
+    const fallbackAccount = paymentAccountOptions[0]
     const nextAccount = preferredOwnAccount || fallbackAccount
     if (nextAccount?.value && nextAccount.value !== jePaymentAccount) {
       setJePaymentAccount(nextAccount.value)

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 interface CashAccount {
   id: string
@@ -142,6 +143,7 @@ const hasPaymentMethodPermission = (paymentPerms: PaymentMethodPermissions, paym
 
 export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initialData }: CreateExpenseModalProps) {
   const { isFeatureEnabled } = useFeatureAccess()
+  const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
   
   const [formData, setFormData] = useState<{
@@ -174,6 +176,13 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
   const [myCashAccount, setMyCashAccount] = useState<CashAccount | null>(null)
   const [paymentPerms, setPaymentPerms] = useState<PaymentMethodPermissions>({ canUseCash: false, canUseMobileMoney: false, canUseBank: false, canUseCard: false })
+  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || myCashAccount?.id || ''
+  const canUseOtherCashAccount = hasPermission('canUseOtherCashAccount')
+  const canUseAnyTransactionAccount = (
+    hasPermission('canUseAnyTransactionAccount') ||
+    hasPermission('canEditTransactionAccount') ||
+    hasPermission('canDeleteTransactionAccount')
+  )
 
   useEffect(() => {
     if (isOpen) {
@@ -196,11 +205,15 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
     for (const account of cashAccounts) {
       if (!account.isActive) continue
       if (!accountMatchesPaymentMethod(account, formData.paymentMethod)) continue
+      if (formData.paymentMethod === 'cash') {
+        const isAssignedCashAccount = assignedCashAccountId && String(account.id) === String(assignedCashAccountId)
+        if (!isAssignedCashAccount && !canUseOtherCashAccount && !canUseAnyTransactionAccount) continue
+      }
       byId.set(account.id, account)
     }
 
     return [...byId.values()]
-  }, [cashAccounts, formData.paymentMethod, myCashAccount, paymentPerms])
+  }, [assignedCashAccountId, cashAccounts, canUseAnyTransactionAccount, canUseOtherCashAccount, formData.paymentMethod, myCashAccount, paymentPerms])
 
   useEffect(() => {
     if (!isOpen) return
