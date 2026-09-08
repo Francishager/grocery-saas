@@ -37,16 +37,22 @@ const numberValue = (value: unknown) => {
   return Number.isFinite(number) ? number : 0
 }
 const money = (value: unknown) => formatCurrency(numberValue(value))
-const text = (value: unknown) => String(value || '-').replace(/_/g, ' ')
+const text = (value: unknown) => normalizePaymentMethod(value) === 'accrual' ? 'Accrued / Payable' : String(value || '-').replace(/_/g, ' ')
 const normalizePaymentMethod = (value: unknown) => {
-  const method = String(value || 'cash').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const raw = String(value || '').trim()
+  if (!raw) return 'cash'
+  const method = raw.toLowerCase().replace(/[\s-]+/g, '_')
+  if (method === 'all') return 'all'
   if (['mobile_money', 'mobilemoney', 'momo', 'mtn', 'mtn_momo', 'airtel', 'airtel_money'].includes(method)) return 'mobile_money'
   if (['bank_transfer', 'banktransfer', 'wire_transfer', 'bank', 'cheque', 'check'].includes(method)) return 'bank'
   if (['card', 'debit_card', 'credit_card'].includes(method)) return 'card'
   if (method === 'safe') return 'safe'
   if (method === 'credit' || method === 'on_credit') return 'credit'
+  if (['accrual', 'non_cash', 'noncash', 'payable', 'unpaid'].includes(method)) return 'accrual'
   return 'cash'
 }
+const hasRealCashExpenseImpact = (row: any) => row?.paymentMethod === 'cash' && row?.cashImpact !== false && normalizePaymentMethod(row?.accountType || row?.paymentMethod) === 'cash'
+
 const normalizeMovementDirection = (value: unknown) => {
   const direction = String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '-')
   if (direction === 'transfer-in' || direction === 'handover-in') return 'transfer-in'
@@ -386,7 +392,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     const transactionTotal = sum(saleRows, (row) => numberValue(row.amount))
     const collectionTotal = sum(transactions.filter((row) => row.kind === 'collection'), (row) => numberValue(row.amount))
     const cashCollectionTotal = sum(transactions.filter((row) => row.kind === 'collection' && row.paymentMethod === 'cash'), (row) => numberValue(row.amount))
-    const cashExpenseTotal = sum(expenseRows.filter((row) => row.paymentMethod === 'cash'), (row) => numberValue(row.amount))
+    const cashExpenseTotal = sum(expenseRows.filter(hasRealCashExpenseImpact), (row) => numberValue(row.amount))
     const movementAccountType = (row: any) => normalizePaymentMethod(row.accountType || row.paymentMethod || row.method)
     const physicalCashRows = cashMovementRows.filter((row) => movementAccountType(row) === 'cash')
     const movementGroups = new Map<string, { outgoingTypes: Set<string> }>()
@@ -486,7 +492,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     ['Cash Debt Collections', metricValue(cash.cashCollections, cardTotals.debtCollections)],
     ['Other Cash In', cash.otherCashIn],
     ['Cash Transfers In', cash.cashTransfersIn],
-    ['Cash Expenses', metricValue(cash.cashExpenses, expenseRows.filter((row) => row.paymentMethod === 'cash').reduce((total, row) => total + numberValue(row.amount), 0))],
+    ['Cash Expenses', metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0))],
     ['Other Cash Out', cash.otherCashOut],
     ['Cash Transfers Out', cash.cashTransfersOut],
     ['Moved to Safe', cash.cashToSafe],
@@ -511,7 +517,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Cash Debt Collections', inflow: metricValue(cash.cashCollections ?? cash.debtCollections, cardTotals.debtCollections), outflow: 0 },
     { label: 'Other Cash In', inflow: cash.otherPhysicalCashIn ?? cash.otherCashIn, outflow: 0 },
     { label: 'Cash Transfers In', inflow: cash.cashTransfersIn, outflow: 0 },
-    { label: 'Cash Expenses', inflow: 0, outflow: metricValue(cash.cashExpenses, expenseRows.filter((row) => row.paymentMethod === 'cash').reduce((total, row) => total + numberValue(row.amount), 0)) },
+    { label: 'Cash Expenses', inflow: 0, outflow: metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0)) },
     { label: 'Other Cash Out', inflow: 0, outflow: cash.otherPhysicalCashOut ?? cash.otherCashOut },
     { label: 'Cash Transfers Out', inflow: 0, outflow: cash.cashTransfersOut },
     { label: 'Moved to Safe', inflow: 0, outflow: cash.cashToSafe },

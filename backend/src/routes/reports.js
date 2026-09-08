@@ -196,12 +196,16 @@ function saleStatus(sale) {
 }
 
 function normalizedPaymentMethod(value) {
-  const method = String(value || "cash").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const raw = String(value || "").trim();
+  if (!raw) return "cash";
+  const method = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (method === "all") return "all";
   if (["mobile_money", "mobilemoney", "momo", "mtn", "mtn_momo", "airtel", "airtel_money"].includes(method)) return "mobile_money";
   if (["bank_transfer", "banktransfer", "wire_transfer", "bank", "cheque", "check"].includes(method)) return "bank";
   if (["card", "debit_card", "credit_card"].includes(method)) return "card";
   if (method === "safe") return "safe";
   if (method === "credit" || method === "on_credit") return "credit";
+  if (["accrual", "non_cash", "noncash", "payable", "unpaid"].includes(method)) return "accrual";
   return "cash";
 }
 
@@ -238,6 +242,9 @@ function expenseReportRow(expense) {
   return {
     id: expense?.id,
     kind: "expense",
+    source: expense?.source || "expense",
+    journalEntryId: expense?.journalEntryId || null,
+    cashImpact: expense?.cashImpact !== false && method === "cash",
     date: expense?.date || expense?.createdAt,
     reference: expense?.reference || expense?.id,
     category: expense?.category || "Uncategorized",
@@ -251,7 +258,7 @@ function expenseReportRow(expense) {
     amount,
     debit: 0,
     credit: amount,
-    cashAmount: method === "cash" ? amount : 0,
+    cashAmount: expense?.cashImpact !== false && method === "cash" ? amount : 0,
     creditAmount: amount,
   };
 }
@@ -269,7 +276,7 @@ function transactionAccountMethod(account) {
   const subType = String(account?.subType || "").trim().toLowerCase();
   if (subType.startsWith("transaction_")) return normalizedPaymentMethod(subType.replace("transaction_", ""));
   if (String(account?.description || "").includes("cashAccount:")) return "cash";
-  return normalizedPaymentMethod(account?.type || "cash");
+  return account ? normalizedPaymentMethod(account.type || "cash") : "accrual";
 }
 
 function scopedJournalWhere(scope, extra = {}) {
@@ -316,7 +323,7 @@ async function journalExpenseRows(scope, dateWhere, { userId = null, requestedMe
   for (const entry of entries) {
     const paymentLine = entry.lines.find((line) => isLinkedTransactionAccount(line.account) && Number(line.credit || 0) > 0) ||
       entry.lines.find((line) => isLinkedTransactionAccount(line.account));
-    const method = transactionAccountMethod(paymentLine?.account);
+    const method = paymentLine?.account ? transactionAccountMethod(paymentLine.account) : "accrual";
     if (!paymentMethodMatches(method, requestedMethod)) continue;
 
     for (const line of entry.lines) {
@@ -332,7 +339,8 @@ async function journalExpenseRows(scope, dateWhere, { userId = null, requestedMe
         category: line.account?.name || "Accounting Expense",
         description: line.description || entry.description || line.account?.name || "Accounting expense",
         paymentMethod: method,
-        cashAccount: paymentLine?.account ? { name: paymentLine.account.name, type: method } : null,
+        cashAccount: paymentLine?.account ? { name: paymentLine.account.name, type: method } : { name: "Accrued / Payable", type: "accrual" },
+        cashImpact: Boolean(paymentLine?.account),
         branch: entry.branch,
         User: entry.user,
         amount,
@@ -1180,7 +1188,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       const method = normalizedPaymentMethod(expense.paymentMethod);
       if (!paymentMethodMatches(method, expenseMethodFilter)) continue;
       filteredExpenses.push(expense);
-      if (method === "cash") cashExpenses += Number(expense.amount || 0);
+      const hasCashImpact = expense.cashImpact !== false && method === "cash";
+      if (hasCashImpact) cashExpenses += Number(expense.amount || 0);
       addStaff(expense.User, { expenses: expense.amount });
       transactionRows.push({
         id: expense.id,
@@ -1195,10 +1204,13 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         branch: expense.branch?.name || "",
         staff: userLabel(expense.User),
         staffId: expense.User?.id,
+        source: expense.source || "expense",
+        journalEntryId: expense.journalEntryId || null,
+        cashImpact: hasCashImpact,
         amount: expense.amount,
         debit: 0,
         credit: expense.amount,
-        cashAmount: method === "cash" ? expense.amount : 0,
+        cashAmount: hasCashImpact ? expense.amount : 0,
         creditAmount: expense.amount,
       });
     }
