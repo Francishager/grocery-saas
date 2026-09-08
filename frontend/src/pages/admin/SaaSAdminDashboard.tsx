@@ -182,17 +182,24 @@ export default function SaaSAdminDashboard() {
         body: JSON.stringify({ status })
       })
 
-      if (response.ok) {
-        toast({
-          title: 'Success',
-          description: `Tenant ${status === 'suspended' ? 'suspended' : 'activated'} successfully`
-        })
-        loadTenants()
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || `Failed to update tenant status (${response.status})`)
       }
+
+      setTenants(prev => prev.map(tenant =>
+        tenant.id === tenantId ? { ...tenant, status: data?.tenant?.status || status } : tenant
+      ))
+      toast({
+        title: 'Success',
+        description: `Tenant ${status === 'suspended' ? 'suspended' : 'activated'} successfully`
+      })
+      loadTenants()
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to update tenant status',
+        description: error instanceof Error ? error.message : 'Failed to update tenant status',
         variant: 'destructive'
       })
     }

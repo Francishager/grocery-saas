@@ -8,6 +8,7 @@ import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 
 const router = Router();
+const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
 
 
 // Helper: generate 6-digit OTP
@@ -71,6 +72,38 @@ function subscriptionPayload(tenant) {
   };
 }
 
+function normalizeTenantStatus(status) {
+  if (status === undefined || status === null || status === "") return null;
+  return String(status).trim().toLowerCase();
+}
+
+async function changeTenantStatus(req, res, forcedStatus = null) {
+  try {
+    const status = forcedStatus || normalizeTenantStatus(req.body?.status);
+    if (!VALID_TENANT_STATUSES.has(status)) {
+      return res.status(400).json({ error: "Invalid tenant status" });
+    }
+
+    const tenant = await prisma.tenant.update({
+      where: { id: req.params.id },
+      data: { status },
+      include: { plan: true },
+    });
+    const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });
+
+    res.json({
+      message: blockPayload?.message || `Tenant status changed to ${status}`,
+      code: blockPayload?.code,
+      tenant,
+      subscription: subscriptionPayload(tenant),
+    });
+  } catch (err) {
+    if (err?.code === "P2025") return res.status(404).json({ error: "Tenant not found" });
+    console.error("Change tenant status error:", err);
+    res.status(500).json({ error: "Failed to update tenant status" });
+  }
+}
+
 async function updateSubscription(req, res) {
   try {
     const {
@@ -111,7 +144,8 @@ async function updateSubscription(req, res) {
       if (!plan) return res.status(404).json({ error: "Plan not found" });
     }
 
-    if (status && !["active", "suspended", "cancelled", "trial"].includes(status)) {
+    const normalizedStatus = normalizeTenantStatus(status);
+    if (normalizedStatus && !VALID_TENANT_STATUSES.has(normalizedStatus)) {
       return res.status(400).json({ error: "Invalid subscription status" });
     }
 
@@ -119,7 +153,7 @@ async function updateSubscription(req, res) {
     const planUpdateData = {};
 
     if (targetPlanId) data.planId = targetPlanId;
-    if (status) data.status = status;
+    if (normalizedStatus) data.status = normalizedStatus;
     if (subscriptionStart !== undefined) data.subscriptionStart = subscriptionStart ? new Date(subscriptionStart) : null;
     if (subscriptionEnd !== undefined) data.subscriptionEnd = subscriptionEnd ? new Date(subscriptionEnd) : null;
     if (trialEndsAt !== undefined) data.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
@@ -588,7 +622,13 @@ router.post("/subscription/edit", authenticateToken, requirePlatformAdmin, async
     if (!tenantId) return res.status(400).json({ error: "tenantId required" });
     const data = {};
     if (planId) data.planId = planId;
-    if (status) data.status = status;
+    const normalizedStatus = normalizeTenantStatus(status);
+    if (normalizedStatus) {
+      if (!VALID_TENANT_STATUSES.has(normalizedStatus)) {
+        return res.status(400).json({ error: "Invalid subscription status" });
+      }
+      data.status = normalizedStatus;
+    }
     await prisma.tenant.update({ where: { id: tenantId }, data });
     res.json({ message: "Subscription updated" });
   } catch (err) {
@@ -613,6 +653,10 @@ router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req
     res.status(500).json({ error: "Failed to load subscriptions" });
   }
 });
+router.put("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
+router.patch("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
+router.post("/tenants/:id/suspend", authenticateToken, requirePlatformAdmin, (req, res) => changeTenantStatus(req, res, "suspended"));
+router.post("/tenants/:id/activate", authenticateToken, requirePlatformAdmin, (req, res) => changeTenantStatus(req, res, "active"));
 router.put("/subscriptions/:id", authenticateToken, requirePlatformAdmin, updateSubscription);
 router.patch("/subscriptions/:id", authenticateToken, requirePlatformAdmin, updateSubscription);
 

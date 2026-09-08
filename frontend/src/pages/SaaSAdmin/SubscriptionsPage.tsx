@@ -35,6 +35,7 @@ export const SubscriptionsPage: React.FC = () => {
   const [trialEnd, setTrialEnd] = useState('')
   const [autoEnd, setAutoEnd] = useState(true)
   const [selectedPlanId, setSelectedPlanId] = useState('')
+  const [tenantStatus, setTenantStatus] = useState('active')
   const [planPrice, setPlanPrice] = useState('')
   const [planBillingCycle, setPlanBillingCycle] = useState('monthly')
   const [customCurrency, setCustomCurrency] = useState('UGX')
@@ -70,6 +71,7 @@ export const SubscriptionsPage: React.FC = () => {
     setTrialEnd(sub.trialEndsAt ? sub.trialEndsAt.split('T')[0] : '')
     setAutoEnd(!sub.endDate)
     setSelectedPlanId(sub.plan?.id || '')
+    setTenantStatus(sub.tenant?.status || sub.status || 'active')
     setPlanPrice(String(sub.customPrice ?? sub.plan?.price ?? ''))
     setCustomCurrency(sub.customCurrency || sub.plan?.currency || 'UGX')
     setCustomBillingCycle(sub.customBillingCycle || sub.plan?.billingCycle || 'monthly')
@@ -89,6 +91,7 @@ export const SubscriptionsPage: React.FC = () => {
     try {
       const body: Record<string, string | boolean> = {}
       if (selectedPlanId) body.planId = selectedPlanId
+      if (tenantStatus) body.status = tenantStatus
       if (subStart) body.subscriptionStart = subStart
       if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
       if (trialEnd) body.trialEndsAt = trialEnd
@@ -126,9 +129,11 @@ export const SubscriptionsPage: React.FC = () => {
   const isTrialActive = (trialEndsAt: string | null) => trialEndsAt && new Date(trialEndsAt) > new Date()
 
   const effectiveStatus = (s: Subscription) => {
+    const savedStatus = s.tenant?.status || s.status
+    if (savedStatus === 'suspended' || savedStatus === 'cancelled') return savedStatus
     if (isExpired(s.endDate)) return 'expired'
     if (isTrialActive(s.trialEndsAt)) return 'trial'
-    return s.status
+    return savedStatus
   }
 
   const statusBadge = (s: string) => {
@@ -176,7 +181,7 @@ export const SubscriptionsPage: React.FC = () => {
                 const effStatus = effectiveStatus(s)
                 return (
                   <tr key={s.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3"><div className="text-sm font-medium">{s.tenant?.name || '-'}</div><span className={`text-xs px-2 py-0.5 rounded ${s.tenant?.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{s.tenant?.status || '-'}</span></td>
+                    <td className="px-4 py-3"><div className="text-sm font-medium">{s.tenant?.name || '-'}</div>{statusBadge(s.tenant?.status || s.status || '-')}</td>
                     <td className="px-4 py-3"><div className="text-sm font-medium">{s.plan?.name || 'No Plan'}</div><div className="text-xs text-gray-500">{fmt(s.plan?.price || 0, s.plan?.currency || 'UGX')}/{s.plan?.billingCycle || '-'}</div></td>
                     <td className="px-4 py-3">{statusBadge(effStatus)}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.startDate)}</td>
@@ -214,6 +219,16 @@ export const SubscriptionsPage: React.FC = () => {
               <div className="flex justify-between"><span className="text-gray-500">Start</span><span>{fmtDate(selected.startDate)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">End</span><span>{fmtDate(selected.endDate)}</span></div>
               {selected.trialEndsAt && <div className="flex justify-between"><span className="text-gray-500">Trial Ends</span><span>{fmtDate(selected.trialEndsAt)}</span></div>}
+            </div>
+
+            <div className="border-t pt-4 mb-4">
+              <label className="block text-sm font-medium mb-2">Tenant Status</label>
+              <select value={tenantStatus} onChange={(e) => setTenantStatus(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="trial">Trial</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
             </div>
 
             <div className="border-t pt-4 mb-4">
