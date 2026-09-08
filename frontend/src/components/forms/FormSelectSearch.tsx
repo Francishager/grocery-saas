@@ -62,6 +62,12 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  useEffect(() => {
+    if (!isOpen) return
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0)
+    return () => window.clearTimeout(timer)
+  }, [isOpen])
+
   const handleSelect = (optionValue: string | number) => {
     onChange?.(optionValue)
     setIsOpen(false)
@@ -86,10 +92,10 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
           type="button"
           onClick={() => !disabled && setIsOpen(!isOpen)}
           className={cn(
-            'w-full px-3 py-2 border rounded-md shadow-sm text-left',
+            'w-full min-h-10 px-3 py-2 border rounded-md shadow-sm text-left touch-manipulation',
             'focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary',
             'disabled:bg-gray-100 disabled:cursor-not-allowed',
-            'flex items-center justify-between',
+            'flex items-center justify-between gap-2',
             error
               ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
               : 'border-gray-300',
@@ -97,7 +103,7 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
           )}
           disabled={disabled}
         >
-          <span className={selectedOption ? 'text-gray-900' : 'text-gray-400'}>
+          <span className={cn('min-w-0 flex-1 truncate', selectedOption ? 'text-gray-900' : 'text-gray-400')}>
             {selectedOption?.label || placeholder}
           </span>
           <div className="flex items-center gap-1">
@@ -117,7 +123,7 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
         </button>
 
         {isOpen && (
-          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg">
+          <div className="absolute z-[100] w-full mt-1 overflow-hidden bg-white border border-gray-300 rounded-md shadow-lg">
             <div className="p-2 border-b border-gray-200">
               <div className="relative">
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -127,11 +133,12 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={searchPlaceholder}
-                  className="w-full pl-8 pr-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md text-base focus:outline-none focus:ring-1 focus:ring-primary sm:text-sm"
+                  autoComplete="off"
                 />
               </div>
             </div>
-            <ul className="max-h-60 overflow-auto py-1">
+            <ul className="max-h-[min(16rem,50vh)] overflow-auto py-1">
               {filteredOptions.length === 0 ? (
                 <li className="px-3 py-2 text-sm text-gray-500 text-center">
                   No options found
@@ -142,7 +149,7 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
                     key={option.value}
                     onClick={() => !option.disabled && handleSelect(option.value)}
                     className={cn(
-                      'px-3 py-2 text-sm cursor-pointer',
+                      'px-3 py-2.5 text-sm cursor-pointer break-words touch-manipulation',
                       option.disabled
                         ? 'text-gray-400 cursor-not-allowed'
                         : 'hover:bg-gray-100',

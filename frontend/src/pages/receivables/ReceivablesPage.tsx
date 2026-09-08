@@ -15,6 +15,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
+import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
@@ -189,8 +190,6 @@ export default function ReceivablesPage() {
     notes: '',
   })
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
-  const [saleCustomerSearch, setSaleCustomerSearch] = useState('')
-  const [saleItemSearchByIndex, setSaleItemSearchByIndex] = useState<Record<number, string>>({})
   const creditEnabled = hasPermission('canViewReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
@@ -617,8 +616,6 @@ export default function ReceivablesPage() {
   }
 
   const openSaleModal = () => {
-    setSaleCustomerSearch('')
-    setSaleItemSearchByIndex({})
     setShowSaleModal(true)
     loadCustomerOptions()
     if (products.length === 0) loadProducts()
@@ -640,24 +637,10 @@ export default function ReceivablesPage() {
       productId,
       price: product ? String(defaultPrice) : '',
     })
-    setSaleItemSearchByIndex((prev) => {
-      const next = { ...prev }
-      delete next[index]
-      return next
-    })
   }
 
   const removeSaleItem = (index: number) => {
     setSaleItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
-    setSaleItemSearchByIndex((prev) => {
-      const next: Record<number, string> = {}
-      Object.entries(prev).forEach(([key, value]) => {
-        const keyIndex = Number(key)
-        if (keyIndex < index) next[keyIndex] = value
-        if (keyIndex > index) next[keyIndex - 1] = value
-      })
-      return next
-    })
   }
 
   const saleSubtotal = saleItems.reduce((sum, item) => {
@@ -1393,28 +1376,28 @@ export default function ReceivablesPage() {
     tab === 'credit-accounts' ? 'Manage customer credit account terms' :
     'Manage customer credit and outstanding payments'
   const saleCustomerList = customerOptions.length ? customerOptions : customers
-  const saleCustomerQuery = saleCustomerSearch.trim().toLowerCase()
-  const filteredSaleCustomerList = saleCustomerQuery
-    ? saleCustomerList.filter((customer) => searchText(customer.name, customer.phone, customer.email, customer.address).includes(saleCustomerQuery))
-    : saleCustomerList
-  const saleProductOptionsFor = (index: number) => {
-    const query = (saleItemSearchByIndex[index] || '').trim().toLowerCase()
-    const selectedProductId = saleItems[index]?.productId
-    if (!query) return products
-    return products.filter((product) => {
-      const matches = searchText(
-        product.product_name,
+  const saleCustomerOptions = saleCustomerList.map((customer) => ({
+    value: customer.id,
+    label: [
+      customer.name,
+      customer.phone,
+      customer.email,
+      `Balance ${formatCurrency(customer.balance || 0)}`,
+    ].filter(Boolean).join(' - '),
+  }))
+  const saleProductOptions = products.map((product) => {
+    const pType = (product as any)?.itemType || 'product'
+    const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
+    return {
+      value: String(product.id),
+      label: [
+        `[${typeLabel}] ${product.product_name}`,
         product.product_id,
-        product.sku,
-        product.barcode,
-        product.batchNumber,
-        product.categoryName,
-        product.description,
-        (product as any)?.itemType
-      ).includes(query)
-      return matches || String(product.id) === String(selectedProductId)
-    })
-  }
+        product.sku ? `SKU ${product.sku}` : '',
+        product.barcode ? `Barcode ${product.barcode}` : '',
+      ].filter(Boolean).join(' - '),
+    }
+  })
   const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
   const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
   const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
@@ -1877,40 +1860,17 @@ export default function ReceivablesPage() {
             <form onSubmit={createSale} className="space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <Label>Customer</Label>
-                  <Select
+                  <FormSelectSearch
+                    label="Customer"
+                    required
                     value={saleForm.customerId}
-                    onValueChange={(value) => {
-                      setSaleForm((prev) => ({ ...prev, customerId: value }))
-                      setSaleCustomerSearch('')
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select customer" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[360px]">
-                      <div className="sticky top-0 z-10 bg-popover p-1">
-                        <div className="relative">
-                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            value={saleCustomerSearch}
-                            onChange={(event) => setSaleCustomerSearch(event.target.value)}
-                            onKeyDown={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            placeholder="Search customer name or phone"
-                            className="h-9 pl-8"
-                          />
-                        </div>
-                      </div>
-                      {filteredSaleCustomerList.length ? filteredSaleCustomerList.map((customer) => (
-                        <SelectItem key={customer.id} value={customer.id}>
-                          {customer.name} {customer.phone ? `(${customer.phone})` : ''} - Balance {formatCurrency(customer.balance || 0)}
-                        </SelectItem>
-                      )) : (
-                        <SelectItem value="no-customers-found" disabled>No customers found</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
+                    options={saleCustomerOptions}
+                    onChange={(value) => setSaleForm((prev) => ({ ...prev, customerId: value ? String(value) : '' }))}
+                    placeholder="Select customer"
+                    searchPlaceholder="Search customer by name, phone, email, or address..."
+                    helperText={saleCustomerOptions.length === 0 ? 'No customers found' : undefined}
+                    clearable={false}
+                  />
                   {selectedSaleCustomer && (
                     <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
                       <div className="flex items-center justify-between gap-3">
@@ -1975,40 +1935,16 @@ export default function ReceivablesPage() {
                   const isRental = selectedItemType === 'rental'
                   return (
                   <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]">
-                    <Select value={item.productId} onValueChange={(value) => handleSaleProductChange(index, value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select item" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[360px]">
-                        <div className="sticky top-0 z-10 bg-popover p-1">
-                          <div className="relative">
-                            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                              value={saleItemSearchByIndex[index] || ''}
-                              onChange={(event) => setSaleItemSearchByIndex((prev) => ({ ...prev, [index]: event.target.value }))}
-                              onKeyDown={(event) => event.stopPropagation()}
-                              onPointerDown={(event) => event.stopPropagation()}
-                              placeholder="Search item, SKU, barcode"
-                              className="h-9 pl-8"
-                            />
-                          </div>
-                        </div>
-                        {saleProductOptionsFor(index).length ? saleProductOptionsFor(index).map((product) => {
-                          const pType = (product as any)?.itemType || 'product'
-                          const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
-                          return (
-                          <SelectItem key={product.id} value={String(product.id)}>
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="text-xs text-muted-foreground">[{typeLabel}]</span>
-                              <span className="truncate">{product.product_name} {product.product_id ? `(${product.product_id})` : ''}</span>
-                            </span>
-                          </SelectItem>
-                          )
-                        }) : (
-                          <SelectItem value={`no-items-found-${index}`} disabled>No items found</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
+                    <FormSelectSearch
+                      containerClassName="min-w-0"
+                      value={item.productId}
+                      options={saleProductOptions}
+                      onChange={(value) => handleSaleProductChange(index, value ? String(value) : '')}
+                      placeholder="Select item"
+                      searchPlaceholder="Search item, SKU, barcode, category..."
+                      helperText={saleProductOptions.length === 0 ? 'No products or services found' : undefined}
+                      clearable={false}
+                    />
                     <Input
                       type="number"
                       min="1"

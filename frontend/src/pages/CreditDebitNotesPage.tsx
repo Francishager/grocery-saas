@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { creditNotesApi, debitNotesApi, apiFetch, branchesApi } from '@/lib/api'
@@ -31,6 +32,8 @@ interface Note {
 interface Entity {
   id: string
   name: string
+  phone?: string
+  email?: string
 }
 
 interface LinkedDocItem {
@@ -104,6 +107,18 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   const [returnItems, setReturnItems] = useState<LinkedDocItem[]>([])
   const [loadingLinkedDocs, setLoadingLinkedDocs] = useState(false)
   const stockReturnMode = isStockReturnReason(activeTab, reason)
+  const entityOptions = useMemo(() => entities.map(entity => ({
+    value: entity.id,
+    label: [entity.name, entity.phone, entity.email].filter(Boolean).join(' - '),
+  })), [entities])
+  const linkedDocOptions = useMemo(() => linkedDocs.map(doc => ({
+    value: doc.id,
+    label: [
+      doc.refNo,
+      formatCurrency(doc.total),
+      doc.createdAt ? new Date(doc.createdAt).toLocaleDateString() : '',
+    ].filter(Boolean).join(' - '),
+  })), [linkedDocs])
 
   const fetchEntities = useCallback(async () => {
     try {
@@ -112,7 +127,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
         if (res.ok) {
           const data = await res.json()
           const list = data?.customers || data || []
-          setEntities(list.map((c: any) => ({ id: c.id, name: c.name })))
+          setEntities(list.map((c: any) => ({ id: c.id, name: c.name, phone: c.phone, email: c.email })))
         } else {
           setEntities([])
           toast({ variant: 'destructive', title: 'Failed to load customers' })
@@ -122,7 +137,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
         if (res.ok) {
           const data = await res.json()
           const list = data?.suppliers || data || []
-          setEntities(list.map((s: any) => ({ id: s.id, name: s.name })))
+          setEntities(list.map((s: any) => ({ id: s.id, name: s.name, phone: s.phone, email: s.email })))
         } else {
           setEntities([])
           toast({ variant: 'destructive', title: 'Failed to load suppliers' })
@@ -473,23 +488,21 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
           </DialogHeader>
           <div className="space-y-4">
             {!editNote && (
-              <div>
-                <Label>{entityLabel} <span className="text-red-500">*</span></Label>
-                <Select value={entityId} onValueChange={(value) => {
-                  setEntityId(value)
+              <FormSelectSearch
+                label={entityLabel}
+                required
+                options={entityOptions}
+                value={entityId}
+                onChange={(value) => {
+                  setEntityId(value ? String(value) : '')
                   setLinkedDocId('')
                   setReturnItems([])
-                }}>
-                  <SelectTrigger><SelectValue placeholder={`Select ${entityLabel}...`} /></SelectTrigger>
-                  <SelectContent>
-                    {entities.length === 0 ? (
-                      <SelectItem value="_none" disabled>No {entityLabel.toLowerCase()}s available</SelectItem>
-                    ) : (
-                      entities.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+                }}
+                placeholder={`Select ${entityLabel.toLowerCase()}...`}
+                searchPlaceholder={`Search ${entityLabel.toLowerCase()} by name, phone, or email...`}
+                helperText={entities.length === 0 ? `No ${entityLabel.toLowerCase()}s available` : undefined}
+                clearable={false}
+              />
             )}
             <div>
               <Label>Reason <span className="text-red-500">*</span></Label>
@@ -519,25 +532,18 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
             </div>
             {!editNote && (
               <div className="space-y-3 rounded-md border p-3">
-                <div>
-                  <Label>Original {activeTab === 'credit' ? 'Sale' : 'Purchase'} <span className="text-red-500">*</span></Label>
-                  <Select value={linkedDocId} onValueChange={selectLinkedDoc} disabled={!entityId || loadingLinkedDocs}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={loadingLinkedDocs ? 'Loading...' : `Select original ${activeTab === 'credit' ? 'sale' : 'purchase'}...`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {linkedDocs.length === 0 ? (
-                        <SelectItem value="_none" disabled>No original transactions found</SelectItem>
-                      ) : (
-                        linkedDocs.map(doc => (
-                          <SelectItem key={doc.id} value={doc.id}>
-                            {doc.refNo} - {formatCurrency(doc.total)}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <FormSelectSearch
+                  label={`Original ${activeTab === 'credit' ? 'Sale' : 'Purchase'}`}
+                  required
+                  value={linkedDocId}
+                  options={linkedDocOptions}
+                  onChange={(value) => selectLinkedDoc(value ? String(value) : '')}
+                  disabled={!entityId || loadingLinkedDocs}
+                  placeholder={loadingLinkedDocs ? 'Loading...' : `Select original ${activeTab === 'credit' ? 'sale' : 'purchase'}...`}
+                  searchPlaceholder={`Search original ${activeTab === 'credit' ? 'sale' : 'purchase'} by number, amount, or date...`}
+                  helperText={entityId && !loadingLinkedDocs && linkedDocOptions.length === 0 ? 'No original transactions found' : undefined}
+                  clearable={false}
+                />
                 {stockReturnMode && returnItems.length > 0 && (
                   <div className="space-y-2">
                     <div className="hidden grid-cols-[minmax(0,1fr)_96px_112px] gap-3 text-xs font-medium text-muted-foreground sm:grid">
