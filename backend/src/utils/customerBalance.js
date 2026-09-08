@@ -9,6 +9,45 @@ const groupSumMap = (groups, field) => new Map(
   groups.map((group) => [group.customerId, toMoney(group._sum?.[field])])
 );
 
+async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = []) {
+  const ids = [...new Set(customerIds.filter(Boolean))];
+  if (!scope?.tenantId || !ids.length) return new Map();
+
+  const notes = await client.creditNote.findMany({
+    where: { tenantId: scope.tenantId, customerId: { in: ids }, status: { not: "cancelled" } },
+    select: {
+      customerId: true,
+      saleId: true,
+      amount: true,
+      sale: { select: { id: true, total: true, status: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const totalsByCustomer = new Map();
+  const totalsBySale = new Map();
+
+  for (const note of notes) {
+    const amount = toMoney(note.amount);
+    if (note.saleId) {
+      if (!note.sale || note.sale.status === "cancelled") continue;
+      const current = totalsBySale.get(note.saleId) || { customerId: note.customerId, saleTotal: toMoney(note.sale.total), amount: 0 };
+      current.amount = roundMoney(current.amount + amount);
+      totalsBySale.set(note.saleId, current);
+      continue;
+    }
+
+    totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + amount));
+  }
+
+  for (const saleGroup of totalsBySale.values()) {
+    const effectiveAmount = Math.min(toMoney(saleGroup.saleTotal), toMoney(saleGroup.amount));
+    totalsByCustomer.set(saleGroup.customerId, roundMoney(toMoney(totalsByCustomer.get(saleGroup.customerId)) + effectiveAmount));
+  }
+
+  return totalsByCustomer;
+}
+
 export async function getCustomerReceivableBalanceMap(client, scope, customers = []) {
   if (!scope?.tenantId) return new Map();
 
@@ -33,11 +72,8 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
       where: tenantCustomerWhere,
       _sum: { amount: true },
     }),
-    client.creditNote.groupBy({
-      by: ["customerId"],
-      where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      _sum: { amount: true },
-    }),
+    getEffectiveCreditNoteTotalMap(client, scope, customerIds),
+
     client.saleReturn.groupBy({
       by: ["customerId"],
       where: { ...tenantCustomerWhere, status: "completed", refundMethod: "credit" },
@@ -48,7 +84,7 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   const salesMap = groupSumMap(sales, "total");
   const paymentsMap = groupSumMap(payments, "amount");
   const withdrawalsMap = groupSumMap(withdrawals, "amount");
-  const creditNotesMap = groupSumMap(creditNotes, "amount");
+  const creditNotesMap = creditNotes;
   const creditReturnsMap = groupSumMap(creditReturns, "total");
 
   return new Map(customerList.map((customer) => {
@@ -105,10 +141,8 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
       where: tenantCustomerWhere,
       _sum: { amount: true },
     }),
-    client.creditNote.aggregate({
-      where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      _sum: { amount: true },
-    }),
+    getEffectiveCreditNoteTotalMap(client, scope, [customerId]),
+
     client.saleReturn.aggregate({
       where: { ...tenantCustomerWhere, status: "completed", refundMethod: "credit" },
       _sum: { total: true },
@@ -119,7 +153,7 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const receivableSales = toMoney(sales._sum.total);
   const customerPayments = toMoney(payments._sum.amount);
   const customerWithdrawals = toMoney(withdrawals._sum.amount);
-  const creditNoteTotal = toMoney(creditNotes._sum.amount);
+  const creditNoteTotal = toMoney(creditNotes.get(customerId));
   const creditReturnTotal = toMoney(creditReturns._sum.total);
 
   return {

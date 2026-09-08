@@ -14,6 +14,11 @@ import {
 const router = Router();
 
 // ==================== HELPERS ====================
+const toMoney = (value, fallback = 0) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : fallback;
+};
+
 const reportRoles = ["owner", "manager", "accountant"];
 const stockLedgerSaleReturnStatuses = ["completed", "stock_adjusted"];
 
@@ -2198,7 +2203,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       // Supplier payments
       prisma.supplierPayment.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Credit notes
-      prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, ...saleUserFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, ...saleUserFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true, saleId: true, sale: { select: { id: true, total: true } } }, orderBy: { createdAt: "desc" } }),
       // Debit notes
       prisma.debitNote.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter, ...saleUserFilter, status: { not: "cancelled" } }), select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Sale returns
@@ -2211,6 +2216,18 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
     const { from, to } = req.query;
     const fromDate = from ? new Date(from) : null;
     const toDate = to ? new Date(to) : null;
+    const creditedBySale = new Map();
+    const effectiveCreditNotes = creditNotes.map((x) => {
+      let effectiveAmount = toMoney(x.amount);
+      const saleTotal = toMoney(x.sale?.total);
+      if (x.saleId && saleTotal > 0) {
+        const alreadyCredited = toMoney(creditedBySale.get(x.saleId));
+        const remainingSaleCredit = Math.max(0, toMoney(saleTotal - alreadyCredited));
+        effectiveAmount = Math.min(effectiveAmount, remainingSaleCredit);
+        creditedBySale.set(x.saleId, toMoney(alreadyCredited + effectiveAmount));
+      }
+      return { ...x, effectiveAmount };
+    }).filter((x) => x.effectiveAmount > 0);
     const entries = [
       // Customer opening balances: debit AR, credit opening balance equity
       ...openingCustomers.filter((x) => isWithinDateRange(openingBalanceDate(x), fromDate, toDate)).flatMap((x) => [
@@ -2276,9 +2293,9 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
         { date: x.createdAt, account: "Cash", description: "Supplier Payment", debit: 0, credit: x.amount },
       ]),
       // Credit notes are adjustment documents, not credit sales.
-      ...creditNotes.flatMap((x) => [
-        { date: x.createdAt, account: "Sales Allowances", description: `Credit Note Adjustment ${x.noteNo} (${x.reason})`, debit: x.amount, credit: 0 },
-        { date: x.createdAt, account: "Accounts Receivable", description: `Credit Note Adjustment ${x.noteNo} (${x.reason})`, debit: 0, credit: x.amount },
+      ...effectiveCreditNotes.flatMap((x) => [
+        { date: x.createdAt, account: "Sales Allowances", description: `Credit Note Adjustment ${x.noteNo} (${x.reason})`, debit: x.effectiveAmount, credit: 0 },
+        { date: x.createdAt, account: "Accounts Receivable", description: `Credit Note Adjustment ${x.noteNo} (${x.reason})`, debit: 0, credit: x.effectiveAmount },
       ]),
       // Debit notes are supplier adjustment documents, not purchases.
       ...debitNotes.flatMap((x) => [
@@ -2721,7 +2738,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
     const saleUserFilter = saleVisibilityFilter(req);
-    const [sales, payments, withdrawals, creditNotes, saleReturns, discounts] = await Promise.all([
+    const [sales, payments, withdrawals, creditNotes, saleReturns] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedSaleWhere(req, s, { customerId }),
         include: { items: { include: { product: { select: { name: true } } } } },
@@ -2738,18 +2755,14 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       prisma.creditNote.findMany({
         where: scopedWhere(s, { customerId, ...df(req), ...saleUserFilter, status: { not: "cancelled" } }),
         orderBy: { createdAt: "asc" },
-        select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true },
+        select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true, saleId: true, sale: { select: { id: true, total: true } } },
       }),
       prisma.saleReturn.findMany({
         where: scopedWhere(s, { customerId, ...df(req), ...saleUserFilter, status: "completed" }),
         orderBy: { createdAt: "asc" },
         select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true },
       }),
-      prisma.saleRecord.findMany({
-        where: scopedSaleWhere(req, s, { customerId, discount: { gt: 0 } }),
-        select: { id: true, receiptNo: true, discount: true, createdAt: true },
-        orderBy: { createdAt: "asc" },
-      }),
+
     ]);
 
     // Compile all transactions chronologically
@@ -2772,8 +2785,9 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       });
     }
 
-    // Add sales as debits (charges)
+    // Add sales as debits (charges). Sale totals are already net of invoice discounts.
     sales.forEach((sale) => {
+      const saleDiscount = toMoney(sale.discount) + toMoney(sale.cashDiscount);
       transactions.push({
         id: sale.id,
         date: sale.createdAt,
@@ -2782,25 +2796,9 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         debit: sale.total,
         credit: 0,
         reference: sale.receiptNo,
-        details: `Status: ${sale.paymentStatus}, Paid: ${sale.amountPaid}, Balance: ${sale.balance}`,
+        details: `Status: ${sale.paymentStatus}, Paid: ${sale.amountPaid}, Balance: ${sale.balance}${saleDiscount > 0 ? `, Discount included: ${saleDiscount}` : ""}`,
         paymentMethod: sale.paymentMethod || "-",
         relatedId: sale.id,
-      });
-    });
-
-    // Add discounts if any
-    discounts.forEach((disc) => {
-      transactions.push({
-        id: `disc-${disc.id}`,
-        date: disc.createdAt,
-        type: "Discount",
-        description: "Sale Discount",
-        debit: 0,
-        credit: disc.discount,
-        reference: disc.receiptNo,
-        details: `Discount applied on sale`,
-        paymentMethod: "-",
-        relatedId: disc.id,
       });
     });
 
@@ -2836,17 +2834,30 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       });
     });
 
+    const creditedBySale = new Map();
+    const creditNoteRows = creditNotes.map((cn) => {
+      let effectiveAmount = toMoney(cn.amount);
+      const saleTotal = toMoney(cn.sale?.total);
+      if (cn.saleId && saleTotal > 0) {
+        const alreadyCredited = toMoney(creditedBySale.get(cn.saleId));
+        const remainingSaleCredit = Math.max(0, toMoney(saleTotal - alreadyCredited));
+        effectiveAmount = Math.min(effectiveAmount, remainingSaleCredit);
+        creditedBySale.set(cn.saleId, toMoney(alreadyCredited + effectiveAmount));
+      }
+      return { ...cn, effectiveAmount };
+    }).filter((cn) => cn.effectiveAmount > 0);
+
     // Add credit notes (allowances/adjustments)
-    creditNotes.forEach((cn) => {
+    creditNoteRows.forEach((cn) => {
       transactions.push({
         id: `creditnote-${cn.id}`,
         date: cn.createdAt,
         type: "Credit Note",
         description: "Credit Adjustment",
         debit: 0,
-        credit: cn.amount,
+        credit: cn.effectiveAmount,
         reference: cn.noteNo,
-        details: `Reason: ${cn.reason}`,
+        details: `Reason: ${cn.reason}${cn.effectiveAmount !== toMoney(cn.amount) ? `, Adjusted to net sale balance from recorded ${cn.amount}` : ""}`,
         paymentMethod: "-",
         relatedId: cn.id,
       });
@@ -2884,9 +2895,9 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const totalSales = sales.reduce((a, x) => a + x.total, 0);
     const totalPayments = payments.reduce((a, x) => a + x.amount, 0);
     const totalWithdrawals = withdrawals.reduce((a, x) => a + x.amount, 0);
-    const totalCreditNotes = creditNotes.reduce((a, x) => a + x.amount, 0);
+    const totalCreditNotes = creditNoteRows.reduce((a, x) => a + x.effectiveAmount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
-    const totalDiscounts = discounts.reduce((a, x) => a + x.discount, 0);
+    const totalDiscounts = sales.reduce((a, x) => a + toMoney(x.discount) + toMoney(x.cashDiscount), 0);
     const currentBalance = customer.balance || 0;
 
     res.json({
@@ -2913,6 +2924,8 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         amountPaid: x.amountPaid,
         balance: x.balance,
         paymentStatus: x.paymentStatus,
+        discount: x.discount,
+        cashDiscount: x.cashDiscount,
         createdAt: x.createdAt,
         items: x.items.map((i) => ({ name: i.product?.name || "N/A", quantity: i.quantity, total: i.total })),
       })),
@@ -2930,10 +2943,11 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         reference: x.reference,
         createdAt: x.createdAt,
       })),
-      creditNotes: creditNotes.map((x) => ({
+      creditNotes: creditNoteRows.map((x) => ({
         id: x.id,
         noteNo: x.noteNo,
-        amount: x.amount,
+        amount: x.effectiveAmount,
+        recordedAmount: x.amount,
         reason: x.reason,
         createdAt: x.createdAt,
       })),

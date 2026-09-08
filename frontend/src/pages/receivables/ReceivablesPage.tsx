@@ -122,6 +122,12 @@ const parseAmount = (value: string | number | undefined) => {
   return Number.isFinite(amount) ? amount : 0
 }
 
+const searchText = (...values: unknown[]) =>
+  values
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).toLowerCase())
+    .join(' ')
+
 const readResponseError = async (response: Response, fallback: string) => {
   const data = await response.json().catch(() => ({}))
   return data?.error || data?.message || fallback
@@ -183,6 +189,8 @@ export default function ReceivablesPage() {
     notes: '',
   })
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
+  const [saleCustomerSearch, setSaleCustomerSearch] = useState('')
+  const [saleItemSearchByIndex, setSaleItemSearchByIndex] = useState<Record<number, string>>({})
   const creditEnabled = hasPermission('canViewReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
@@ -609,6 +617,8 @@ export default function ReceivablesPage() {
   }
 
   const openSaleModal = () => {
+    setSaleCustomerSearch('')
+    setSaleItemSearchByIndex({})
     setShowSaleModal(true)
     loadCustomerOptions()
     if (products.length === 0) loadProducts()
@@ -629,6 +639,24 @@ export default function ReceivablesPage() {
     updateSaleItem(index, {
       productId,
       price: product ? String(defaultPrice) : '',
+    })
+    setSaleItemSearchByIndex((prev) => {
+      const next = { ...prev }
+      delete next[index]
+      return next
+    })
+  }
+
+  const removeSaleItem = (index: number) => {
+    setSaleItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
+    setSaleItemSearchByIndex((prev) => {
+      const next: Record<number, string> = {}
+      Object.entries(prev).forEach(([key, value]) => {
+        const keyIndex = Number(key)
+        if (keyIndex < index) next[keyIndex] = value
+        if (keyIndex > index) next[keyIndex - 1] = value
+      })
+      return next
     })
   }
 
@@ -725,6 +753,8 @@ export default function ReceivablesPage() {
         notes: '',
       })
       setSaleItems([createEmptySaleItem()])
+      setSaleCustomerSearch('')
+      setSaleItemSearchByIndex({})
       loadSales()
       if (activeTab === 'customers') loadCustomers()
       loadCustomerOptions()
@@ -1363,6 +1393,28 @@ export default function ReceivablesPage() {
     tab === 'credit-accounts' ? 'Manage customer credit account terms' :
     'Manage customer credit and outstanding payments'
   const saleCustomerList = customerOptions.length ? customerOptions : customers
+  const saleCustomerQuery = saleCustomerSearch.trim().toLowerCase()
+  const filteredSaleCustomerList = saleCustomerQuery
+    ? saleCustomerList.filter((customer) => searchText(customer.name, customer.phone, customer.email, customer.address).includes(saleCustomerQuery))
+    : saleCustomerList
+  const saleProductOptionsFor = (index: number) => {
+    const query = (saleItemSearchByIndex[index] || '').trim().toLowerCase()
+    const selectedProductId = saleItems[index]?.productId
+    if (!query) return products
+    return products.filter((product) => {
+      const matches = searchText(
+        product.product_name,
+        product.product_id,
+        product.sku,
+        product.barcode,
+        product.batchNumber,
+        product.categoryName,
+        product.description,
+        (product as any)?.itemType
+      ).includes(query)
+      return matches || String(product.id) === String(selectedProductId)
+    })
+  }
   const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
   const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
   const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
@@ -1828,17 +1880,35 @@ export default function ReceivablesPage() {
                   <Label>Customer</Label>
                   <Select
                     value={saleForm.customerId}
-                    onValueChange={(value) => setSaleForm((prev) => ({ ...prev, customerId: value }))}
+                    onValueChange={(value) => {
+                      setSaleForm((prev) => ({ ...prev, customerId: value }))
+                      setSaleCustomerSearch('')
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select customer" />
                     </SelectTrigger>
-                    <SelectContent>
-                      {saleCustomerList.map((customer) => (
+                    <SelectContent className="max-h-[360px]">
+                      <div className="sticky top-0 z-10 bg-popover p-1">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={saleCustomerSearch}
+                            onChange={(event) => setSaleCustomerSearch(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            placeholder="Search customer name or phone"
+                            className="h-9 pl-8"
+                          />
+                        </div>
+                      </div>
+                      {filteredSaleCustomerList.length ? filteredSaleCustomerList.map((customer) => (
                         <SelectItem key={customer.id} value={customer.id}>
                           {customer.name} {customer.phone ? `(${customer.phone})` : ''} - Balance {formatCurrency(customer.balance || 0)}
                         </SelectItem>
-                      ))}
+                      )) : (
+                        <SelectItem value="no-customers-found" disabled>No customers found</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                   {selectedSaleCustomer && (
@@ -1909,19 +1979,34 @@ export default function ReceivablesPage() {
                       <SelectTrigger>
                         <SelectValue placeholder="Select item" />
                       </SelectTrigger>
-                      <SelectContent>
-                        {products.map((product) => {
+                      <SelectContent className="max-h-[360px]">
+                        <div className="sticky top-0 z-10 bg-popover p-1">
+                          <div className="relative">
+                            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              value={saleItemSearchByIndex[index] || ''}
+                              onChange={(event) => setSaleItemSearchByIndex((prev) => ({ ...prev, [index]: event.target.value }))}
+                              onKeyDown={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              placeholder="Search item, SKU, barcode"
+                              className="h-9 pl-8"
+                            />
+                          </div>
+                        </div>
+                        {saleProductOptionsFor(index).length ? saleProductOptionsFor(index).map((product) => {
                           const pType = (product as any)?.itemType || 'product'
                           const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
                           return (
                           <SelectItem key={product.id} value={String(product.id)}>
-                            <span className="flex items-center gap-1.5">
+                            <span className="flex min-w-0 items-center gap-1.5">
                               <span className="text-xs text-muted-foreground">[{typeLabel}]</span>
-                              {product.product_name} {product.product_id ? `(${product.product_id})` : ''}
+                              <span className="truncate">{product.product_name} {product.product_id ? `(${product.product_id})` : ''}</span>
                             </span>
                           </SelectItem>
                           )
-                        })}
+                        }) : (
+                          <SelectItem value={`no-items-found-${index}`} disabled>No items found</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                     <Input
@@ -1952,7 +2037,7 @@ export default function ReceivablesPage() {
                       variant="ghost"
                       size="icon"
                       disabled={saleItems.length === 1}
-                      onClick={() => setSaleItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                      onClick={() => removeSaleItem(index)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

@@ -32,6 +32,51 @@ function toMoney(value, fallback = 0) {
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : fallback
 }
 
+function saleLineGrossTotal(sale) {
+  return (sale?.items || []).reduce((sum, item) => sum + toMoney(item.total), 0)
+}
+
+function saleNetTotal(sale) {
+  const total = toMoney(sale?.total)
+  if (total > 0) return total
+  return toMoney(saleLineGrossTotal(sale) - toMoney(sale?.discount) - toMoney(sale?.cashDiscount) + toMoney(sale?.tax))
+}
+
+function netAmountForReturnedItems(sale, returnItems = []) {
+  const rawReturnTotal = returnItems.reduce((sum, item) => sum + toMoney(item.total), 0)
+  const grossTotal = saleLineGrossTotal(sale)
+  const netTotal = saleNetTotal(sale)
+  if (rawReturnTotal <= 0) return 0
+  if (grossTotal <= 0 || netTotal <= 0) return toMoney(rawReturnTotal)
+  return toMoney(rawReturnTotal * Math.min(1, netTotal / grossTotal))
+}
+
+async function remainingSaleCreditCapacity(client, scope, saleId, excludeNoteId = null) {
+  if (!saleId) return null
+  const sale = await client.saleRecord.findFirst({
+    where: scopedWhere(scope, { id: saleId, status: { not: 'cancelled' } }),
+    include: { items: true },
+  })
+  if (!sale) return null
+
+  const creditNotes = await client.creditNote.aggregate({
+    where: {
+      tenantId: scope.tenantId,
+      saleId,
+      status: { not: 'cancelled' },
+      ...(excludeNoteId ? { id: { not: excludeNoteId } } : {}),
+    },
+    _sum: { amount: true },
+  })
+
+  const alreadyCredited = toMoney(creditNotes._sum.amount)
+  return {
+    sale,
+    alreadyCredited,
+    remaining: Math.max(0, toMoney(saleNetTotal(sale) - alreadyCredited)),
+  }
+}
+
 function normalizeReason(reason) {
   return String(reason || '').trim().toLowerCase()
 }
@@ -159,7 +204,7 @@ async function resolveCreditReturnItems(client, scope, { customerId, saleId, ite
     throw httpError(400, 'Select at least one stock-tracked product to return')
   }
 
-  return { sale, returnItems }
+  return { sale, returnItems, netReturnAmount: netAmountForReturnedItems(sale, returnItems) }
 }
 async function createCreditNoteStockReturn(client, scope, note, items) {
   if (!CREDIT_STOCK_REASONS.has(String(note.reason || '').toLowerCase())) return null
@@ -214,9 +259,9 @@ async function updateLinkedSaleBalanceFromCreditNotes(client, scope, saleId) {
     where: { tenantId: scope.tenantId, saleId, status: { not: 'cancelled' } },
     _sum: { amount: true },
   })
-  const adjustmentTotal = toMoney(creditNotes._sum.amount)
   const total = toMoney(sale.total)
   const amountPaid = toMoney(sale.amountPaid)
+  const adjustmentTotal = Math.min(total, toMoney(creditNotes._sum.amount))
   const balance = Math.max(0, toMoney(total - amountPaid - adjustmentTotal))
 
   return client.saleRecord.update({
@@ -572,9 +617,9 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
     const { customerId, saleId, amount, reason, notes, branchId, items = [] } = req.body
 
     if (!customerId) return res.status(400).json({ error: 'customerId is required' })
-    const noteAmount = toMoney(amount)
-    if (noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
     const normalizedReason = validateReason(reason, CREDIT_REASONS, 'credit note')
+    let noteAmount = toMoney(amount)
+    if (!CREDIT_STOCK_REASONS.has(normalizedReason) && noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
     if (!saleId) {
       return res.status(400).json({ error: 'Select the original customer sale before creating a credit note' })
     }
@@ -589,8 +634,21 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
     })
     if (!originalSale) return res.status(404).json({ error: 'Original customer sale was not found' })
 
-    const noteNo = await generateNoteNo('CN', prisma.creditNote, tenantId)
+    const creditCapacity = await remainingSaleCreditCapacity(prisma, scope, saleId)
+    if (!creditCapacity) return res.status(404).json({ error: 'Original customer sale was not found' })
 
+    if (CREDIT_STOCK_REASONS.has(normalizedReason)) {
+      const { netReturnAmount } = await resolveCreditReturnItems(prisma, scope, { customerId, saleId, items })
+      noteAmount = normalizedReason === 'cancellation' ? creditCapacity.remaining : netReturnAmount
+    }
+
+    if (noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+    if (noteAmount - creditCapacity.remaining > 0.01) {
+      return res.status(400).json({ error: 'Credit note amount exceeds the remaining net sale balance. Maximum allowed is ' + creditCapacity.remaining.toFixed(2) + '.' })
+    }
+    noteAmount = toMoney(Math.min(noteAmount, creditCapacity.remaining))
+
+    const noteNo = await generateNoteNo('CN', prisma.creditNote, tenantId)
     const note = await prisma.$transaction(async (tx) => {
       const createdNote = await tx.creditNote.create({
         data: {
@@ -637,6 +695,10 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
     if (amount !== undefined) {
       const nextAmount = toMoney(amount)
       if (nextAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+      const creditCapacity = await remainingSaleCreditCapacity(prisma, scope, existing.saleId, existing.id)
+      if (creditCapacity && nextAmount - creditCapacity.remaining > 0.01) {
+        return res.status(400).json({ error: 'Credit note amount exceeds the remaining net sale balance. Maximum allowed is ' + creditCapacity.remaining.toFixed(2) + '.' })
+      }
       updates.amount = nextAmount
     }
     const normalizedReason = reason !== undefined ? validateReason(reason, CREDIT_REASONS, 'credit note') : normalizeReason(existing.reason)
@@ -855,6 +917,7 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
     if (amount !== undefined) {
       const nextAmount = toMoney(amount)
       if (nextAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+
       updates.amount = nextAmount
     }
     const normalizedReason = reason !== undefined ? validateReason(reason, DEBIT_REASONS, 'debit note') : normalizeReason(existing.reason)

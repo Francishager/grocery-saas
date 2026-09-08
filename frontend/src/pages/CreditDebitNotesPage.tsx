@@ -73,6 +73,13 @@ const lineUnitAmount = (item: any, field: 'price' | 'cost') => {
   return money(item[field])
 }
 
+const saleNetLineFactor = (row: any) => {
+  const itemGrossTotal = (row.items || []).reduce((sum: number, item: any) => sum + money(item.total), 0)
+  const saleTotal = money(row.total)
+  if (itemGrossTotal <= 0 || saleTotal <= 0 || saleTotal >= itemGrossTotal) return 1
+  return saleTotal / itemGrossTotal
+}
+
 export default function CreditDebitNotesPage({ initialTab }: { initialTab?: NoteType }) {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<NoteType>(initialTab || 'credit')
@@ -180,7 +187,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
             .map((item: any) => {
               const productId = item.productId || item.product?.id
               const quantity = Math.max(0, Number(item.quantity || 0))
-              const unitAmount = lineUnitAmount(item, activeTab === 'credit' ? 'price' : 'cost')
+              const unitAmount = money(lineUnitAmount(item, activeTab === 'credit' ? 'price' : 'cost') * (activeTab === 'credit' ? saleNetLineFactor(row) : 1))
               return {
                 productId,
                 productName: item.product?.name || item.productName || 'Product',
