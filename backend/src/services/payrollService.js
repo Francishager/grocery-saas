@@ -567,6 +567,7 @@ class PayrollService {
       referenceNo,
       userId,
     } = params;
+    const paymentAmount = Number(amount);
 
     const session = await prisma.$transaction(async (tx) => {
       try {
@@ -587,7 +588,7 @@ class PayrollService {
 
         // Check payment amount doesn't exceed net salary
         const remaining = payroll.netSalary - payroll.paidAmount;
-        if (amount <= 0 || amount > remaining) {
+        if (!Number.isFinite(paymentAmount) || paymentAmount <= 0 || paymentAmount > remaining) {
           throw new Error(
             `Enter a valid salary payment amount up to ${remaining}`
           );
@@ -607,7 +608,7 @@ class PayrollService {
           data: {
             tenantId,
             payrollId,
-            amount,
+            amount: paymentAmount,
             paymentMethod,
             paymentAccountId,
             referenceNo,
@@ -622,7 +623,7 @@ class PayrollService {
           tenantId,
           branchId: payroll.branchId,
           paymentId: payment.id,
-          amount,
+          amount: paymentAmount,
           paymentAccountId,
           paymentMethod,
           employeeName: `${payroll.employee.firstName} ${payroll.employee.lastName}`,
@@ -643,7 +644,7 @@ class PayrollService {
         });
 
         // Update payroll payment status
-        const newPaidAmount = payroll.paidAmount + amount;
+        const newPaidAmount = payroll.paidAmount + paymentAmount;
         const newStatus =
           newPaidAmount >= payroll.netSalary
             ? "paid"
@@ -670,7 +671,7 @@ class PayrollService {
           where: { id: payroll.employeeId },
           data: {
             salaryPayableBalance: {
-              decrement: amount,
+              decrement: paymentAmount,
             },
           },
         });
@@ -683,8 +684,8 @@ class PayrollService {
           recordId: payrollId,
           employeeId: payroll.employeeId,
           action: "paid",
-          description: `Salary payment: ${amount}`,
-          amount,
+          description: `Salary payment: ${paymentAmount}`,
+          amount: paymentAmount,
           userId,
           branchId: payroll.branchId,
           journalEntryId: journalResult.journalEntry.id,

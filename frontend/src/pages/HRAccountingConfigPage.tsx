@@ -114,7 +114,7 @@ const PAYMENT_METHOD_ACCOUNT_LABELS: Record<string, string> = {
 
 const PAYMENT_METHOD_PERMISSION_KEYS: Record<string, string> = {
   cash: "canUseCash",
-  safe: "canUseCash",
+  safe: "canUseSafeAccount",
   mobile_money: "canUseMobileMoney",
   bank: "canUseBank",
   bank_transfer: "canUseBank",
@@ -160,14 +160,13 @@ const getTransactionAccountType = (account: Account) => {
   return null
 }
 
+const isTransactionLinkedAccount = (account: Account) => Boolean(getTransactionAccountType(account))
+
 const transactionAccountMatchesMethod = (account: Account, paymentMethod?: string | null, assignedCashAccountId?: string | null) => {
   const type = getTransactionAccountType(account)
   const method = normalizeValue(paymentMethod || "cash")
   if (!type) return false
-  if (method === "cash" || method === "safe") {
-    if (type !== "cash") return false
-    return assignedCashAccountId ? linkedCashAccountId(account) === assignedCashAccountId : false
-  }
+  if (method === "cash") return type === "cash"
   if (method === "safe") return type === "safe"
   if (method === "bank" || method === "bank_transfer" || method === "cheque") return type === "bank"
   if (method === "mobile_money") return type === "mobile_money"
@@ -184,12 +183,16 @@ const canSelectTransactionAccount = (
   canUseAnyTransactionAccount: boolean,
 ) => {
   if (!canUseMethod || !transactionAccountMatchesMethod(account, paymentMethod, assignedCashAccountId)) return false
-  if (!['cash', 'safe'].includes(normalizeValue(paymentMethod))) return true
-  return Boolean(
-    linkedCashAccountId(account) === assignedCashAccountId ||
-    canUseOtherCashAccount ||
-    canUseAnyTransactionAccount
-  )
+  const method = normalizeValue(paymentMethod)
+  if (method === "cash") {
+    return Boolean(
+      linkedCashAccountId(account) === assignedCashAccountId ||
+      canUseOtherCashAccount ||
+      canUseAnyTransactionAccount
+    )
+  }
+  if (method === "safe") return Boolean(canUseMethod || canUseAnyTransactionAccount)
+  return true
 }
 
 const paymentAccountPlaceholder = (paymentMethod?: string | null) =>
@@ -364,7 +367,8 @@ export default function HRAccountingConfigPage() {
     expenseAccounts: Account[]
     liabilityAccounts: Account[]
     assetAccounts: Account[]
-  }>({ expenseAccounts: [], liabilityAccounts: [], assetAccounts: [] })
+    transactionAccounts: Account[]
+  }>({ expenseAccounts: [], liabilityAccounts: [], assetAccounts: [], transactionAccounts: [] })
   const [employees, setEmployees] = useState<Employee[]>([])
   const [payrollPeriod, setPayrollPeriod] = useState(defaultPayrollPeriod())
   const [payrollSummary, setPayrollSummary] = useState<any>(null)
@@ -486,16 +490,16 @@ export default function HRAccountingConfigPage() {
     ["outstanding", "partially_recovered"].includes(advance.status) && Number(advance.outstandingAmount || 0) > 0
   )
   const paymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => canSelectTransactionAccount(account, paymentForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[paymentForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
-    [availableAccounts.assetAccounts, paymentForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
+    () => availableAccounts.transactionAccounts.filter((account) => canSelectTransactionAccount(account, paymentForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[paymentForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
+    [availableAccounts.transactionAccounts, paymentForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
   )
   const advancePaymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => canSelectTransactionAccount(account, advanceForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[advanceForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
-    [availableAccounts.assetAccounts, advanceForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
+    () => availableAccounts.transactionAccounts.filter((account) => canSelectTransactionAccount(account, advanceForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[advanceForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
+    [availableAccounts.transactionAccounts, advanceForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
   )
   const repaymentPaymentAccountOptions = useMemo(
-    () => availableAccounts.assetAccounts.filter((account) => canSelectTransactionAccount(account, repaymentForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[repaymentForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
-    [availableAccounts.assetAccounts, repaymentForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
+    () => availableAccounts.transactionAccounts.filter((account) => canSelectTransactionAccount(account, repaymentForm.paymentMethod, assignedCashAccountId, hasPermission(PAYMENT_METHOD_PERMISSION_KEYS[repaymentForm.paymentMethod] || ""), canUseOtherCashAccount, canUseAnyTransactionAccount)),
+    [availableAccounts.transactionAccounts, repaymentForm.paymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount, hasPermission]
   )
 
   const loadConfiguration = async () => {
@@ -504,10 +508,12 @@ export default function HRAccountingConfigPage() {
       fetchJson("/api/hr/config/available-accounts"),
     ])
     setConfig(configRes.config)
+    const rawAssetAccounts = accountsRes.assetAccounts || []
     setAvailableAccounts({
-      expenseAccounts: accountsRes.expenseAccounts || [],
-      liabilityAccounts: accountsRes.liabilityAccounts || [],
-      assetAccounts: accountsRes.assetAccounts || [],
+      expenseAccounts: (accountsRes.expenseAccounts || []).filter((account: Account) => !isTransactionLinkedAccount(account)),
+      liabilityAccounts: (accountsRes.liabilityAccounts || []).filter((account: Account) => !isTransactionLinkedAccount(account)),
+      assetAccounts: rawAssetAccounts.filter((account: Account) => !isTransactionLinkedAccount(account)),
+      transactionAccounts: accountsRes.transactionAccounts || rawAssetAccounts.filter((account: Account) => isTransactionLinkedAccount(account)),
     })
     setSelectedAccounts(mappingFromConfig(configRes.config))
     setMappingEditable(false)

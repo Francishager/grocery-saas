@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
-  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory,
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory, X,
   TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
@@ -604,6 +604,122 @@ function formatValue(value: any, format?: string): string {
   }
 }
 
+const detailAliases: Record<string, string[]> = {
+  revenue: ['revenue', 'salesRevenue', 'totalIncome'],
+  salesRevenue: ['salesRevenue', 'revenue', 'totalIncome'],
+  posSalesRevenue: ['posSalesRevenue'],
+  receivableSalesRevenue: ['receivableSalesRevenue'],
+  cogs: ['cogs'],
+  grossProfit: ['grossProfit', 'revenue', 'cogs'],
+  expenses: ['expenses', 'totalExpense'],
+  totalExpense: ['totalExpense', 'expenses'],
+  netProfit: ['netProfit', 'revenue', 'cogs', 'expenses'],
+  totalDiscount: ['totalDiscount'],
+  totalTax: ['totalTax', 'taxPayable'],
+  salesCount: ['salesCount', 'revenue'],
+  customerPayments: ['customerPayments', 'customerCollections'],
+  customerCollections: ['customerCollections', 'customerPayments'],
+  totalIncome: ['totalIncome', 'salesRevenue'],
+  inflow: ['inflow', 'cashInflows'],
+  outflow: ['outflow', 'cashOutflows'],
+  transfersIn: ['transfersIn'],
+  transfersOut: ['transfersOut'],
+  netCashFlow: ['netCashFlow', 'inflow', 'outflow'],
+  netAccountMovement: ['netAccountMovement', 'inflow', 'outflow', 'transfersIn', 'transfersOut'],
+  openingBalance: ['openingBalance'],
+  closingBalance: ['closingBalance'],
+}
+
+function financialDetailRows(data: any, key?: string): any[] {
+  if (!data || !key) return []
+  const groups = data.detailGroups || data.details || {}
+  const keys = detailAliases[key] || [key]
+  const rows = keys.flatMap((candidate) => {
+    const value = groups[candidate]
+    return Array.isArray(value) ? value : []
+  })
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    const id = String(row?.id || row?.reference || JSON.stringify(row))
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+function valueLooksMoney(key: string) {
+  return /(amount|balance|debit|credit|total|revenue|profit|cost|cogs|tax|discount|paid|expense|inflow|outflow|value)$/i.test(key)
+}
+
+function FinancialDetailModal({ title, rows, onClose }: { title: string; rows: any[]; onClose: () => void }) {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'inQty', 'outQty', 'itemCount', 'grossAmount', 'revenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
+    .filter((key) => normalizedRows.some((row) => row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== ''))
+  const visibleColumns = columns.length ? columns : ['description', 'amount']
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true">
+      <div className="max-h-[92vh] w-full overflow-hidden rounded-t-lg bg-background shadow-xl sm:max-w-6xl sm:rounded-lg">
+        <div className="flex items-start justify-between gap-4 border-b px-4 py-3 sm:px-6">
+          <div>
+            <h3 className="text-base font-semibold">{title}</h3>
+            <p className="text-xs text-muted-foreground">{normalizedRows.length} source transaction{normalizedRows.length === 1 ? '' : 's'}</p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close details">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="max-h-[74vh] overflow-y-auto p-4 sm:p-6">
+          {normalizedRows.length ? (
+            <>
+              <div className="hidden overflow-x-auto rounded-lg border lg:block">
+                <table className="min-w-[1200px] w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      {visibleColumns.map((column) => (
+                        <th key={column} className={cn('px-4 py-3 font-medium text-muted-foreground', valueLooksMoney(column) ? 'text-right' : 'text-left')}>
+                          {column.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {normalizedRows.map((row, index) => (
+                      <tr key={`${row?.id || row?.reference || index}-${index}`} className="border-t hover:bg-muted/30">
+                        {visibleColumns.map((column) => (
+                          <td key={column} className={cn('px-4 py-2 align-top', valueLooksMoney(column) ? 'text-right tabular-nums' : '')}>
+                            {column === 'date' ? formatValue(row?.[column], 'date') : valueLooksMoney(column) ? formatCurrency(Number(row?.[column] || 0)) : formatValue(row?.[column])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="space-y-3 lg:hidden">
+                {normalizedRows.map((row, index) => (
+                  <div key={`${row?.id || row?.reference || index}-${index}`} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium break-words">{row?.description || row?.account || row?.type || 'Transaction'}</p>
+                        <p className="text-xs text-muted-foreground">{formatValue(row?.date, 'date')} {row?.reference ? `- ${row.reference}` : ''}</p>
+                      </div>
+                      <p className="shrink-0 text-right font-semibold">{formatCurrency(Number(row?.amount ?? row?.debit ?? row?.credit ?? row?.balance ?? 0))}</p>
+                    </div>
+                    {row?.details && <p className="mt-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{row.details}</p>}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">No source transactions were returned for this line.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BreakdownList({ title, data }: { title: string; data?: Record<string, number | any> }) {
   const entries = Object.entries(data || {}).map(([label, value]) => {
     let numValue = 0
@@ -705,6 +821,7 @@ function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['colu
 }
 
 function LedgerReport({ data, columns }: { data: any; columns: ReportItem['columns'] }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Click Generate to load.</p>
   const entries = data.data || []
   if (!entries.length) return <p className="text-center text-muted-foreground py-8">No transactions found for the selected period.</p>
@@ -716,88 +833,60 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
   const closingLabel = isProductLedger ? 'Closing Stock' : 'Closing Balance'
   const openingValue = isProductLedger ? data.openingStock : data.openingBalance
   const closingValue = isProductLedger ? data.closingStock : data.closingBalance
+  const detailsForRow = (row: any) => {
+    if (Array.isArray(row.detailsRows) && row.detailsRows.length) return row.detailsRows
+    if (Array.isArray(row.items) && row.items.length) return [row, ...row.items.map((item: any, index: number) => ({ id: `${row.id || row.reference || 'row'}-item-${index}`, date: row.date, type: 'Item', account: row.account, description: item.product || item.name || row.description, reference: row.reference, quantity: item.quantity, amount: item.total, revenue: item.total, cogs: item.cogs, grossProfit: item.grossProfit }))]
+    return [row]
+  }
 
   return (
-    <div className="space-y-4">
-      {/* Entity header */}
-      {entityName && (
-        <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
-          <div>
-            <p className="text-xs text-muted-foreground">{entityType}</p>
-            <p className="text-lg font-semibold">{entityName}</p>
-            {data.customer?.phone && <p className="text-sm text-muted-foreground">{data.customer.phone}</p>}
-            {data.supplier?.phone && <p className="text-sm text-muted-foreground">{data.supplier.phone}</p>}
-            {data.product?.sku && <p className="text-sm text-muted-foreground">SKU: {data.product.sku}</p>}
-          </div>
-          <div className="flex gap-6">
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">{openingLabel}</p>
-              <p className="font-semibold">{isProductLedger ? openingValue : formatCurrency(openingValue)}</p>
+    <>
+      <div className="space-y-4">
+        {entityName && (
+          <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">{entityType}</p>
+              <p className="text-lg font-semibold">{entityName}</p>
+              {data.customer?.phone && <p className="text-sm text-muted-foreground">{data.customer.phone}</p>}
+              {data.supplier?.phone && <p className="text-sm text-muted-foreground">{data.supplier.phone}</p>}
+              {data.product?.sku && <p className="text-sm text-muted-foreground">SKU: {data.product.sku}</p>}
             </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">{closingLabel}</p>
-              <p className="font-semibold">{isProductLedger ? closingValue : formatCurrency(closingValue)}</p>
+            <div className="flex gap-6 sm:justify-end">
+              <div className="text-right"><p className="text-xs text-muted-foreground">{openingLabel}</p><p className="font-semibold">{isProductLedger ? openingValue : formatCurrency(openingValue)}</p></div>
+              <div className="text-right"><p className="text-xs text-muted-foreground">{closingLabel}</p><p className="font-semibold">{isProductLedger ? closingValue : formatCurrency(closingValue)}</p></div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Ledger table */}
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50">
-            <tr>
-              {columns?.map(col => {
-                const isNumeric = col.format === 'currency' || col.format === 'number'
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="bg-muted/50">
+              <tr>{columns?.map(col => { const isNumeric = col.format === 'currency' || col.format === 'number'; return <th key={col.key} className={`px-4 py-3 font-medium text-muted-foreground ${isNumeric ? 'text-right' : 'text-left'}`}>{col.label}</th> })}</tr>
+            </thead>
+            <tbody>
+              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Opening Balance</td><td className="px-4 py-2 text-right">{isProductLedger ? openingValue : formatCurrency(openingValue)}</td></tr>
+              {entries.map((row: any, i: number) => {
+                const rowDetails = detailsForRow(row)
                 return (
-                  <th key={col.key} className={`px-4 py-3 font-medium text-muted-foreground ${isNumeric ? 'text-right' : 'text-left'}`}>
-                    {col.label}
-                  </th>
+                  <tr key={row.id || row.reference || i} className="cursor-pointer border-t hover:bg-muted/30" onClick={() => setDetail({ title: row.description || row.account || 'Ledger entry', rows: rowDetails })}>
+                    {columns?.map(col => {
+                      const isNumeric = col.format === 'currency' || col.format === 'number'
+                      const val = row[col.key]
+                      const displayVal = (isNumeric && (val === 0 || val === null || val === undefined)) ? '-' : formatValue(val, col.format)
+                      return <td key={col.key} className={`px-4 py-2 ${isNumeric ? 'text-right tabular-nums' : ''}`}>{displayVal}</td>
+                    })}
+                  </tr>
                 )
               })}
-            </tr>
-          </thead>
-          <tbody>
-            {/* Opening balance row */}
-            <tr className="border-t bg-muted/20 font-medium">
-              <td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Opening Balance</td>
-              <td className="px-4 py-2 text-right">{isProductLedger ? openingValue : formatCurrency(openingValue)}</td>
-            </tr>
-            {entries.map((row: any, i: number) => (
-              <tr key={i} className="border-t hover:bg-muted/30">
-                {columns?.map(col => {
-                  const isNumeric = col.format === 'currency' || col.format === 'number'
-                  const val = row[col.key]
-                  const displayVal = (isNumeric && (val === 0 || val === null || val === undefined)) ? '—' : formatValue(val, col.format)
-                  return (
-                    <td key={col.key} className={`px-4 py-2 ${isNumeric ? 'text-right tabular-nums' : ''}`}>
-                      {displayVal}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-            {/* Closing balance row */}
-            <tr className="border-t bg-muted/20 font-medium">
-              <td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Closing Balance</td>
-              <td className="px-4 py-2 text-right">{isProductLedger ? closingValue : formatCurrency(closingValue)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Summary */}
-      {data.summary && (
-        <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
-          {Object.entries(data.summary).map(([k, v]) => (
-            <div key={k}>
-              <p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p>
-              <p className="font-semibold">{typeof v === 'number' ? (k.toLowerCase().includes('count') || k.toLowerCase().includes('qty') ? v : formatCurrency(v)) : String(v)}</p>
-            </div>
-          ))}
+              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Closing Balance</td><td className="px-4 py-2 text-right">{isProductLedger ? closingValue : formatCurrency(closingValue)}</td></tr>
+            </tbody>
+          </table>
         </div>
-      )}
-    </div>
+
+        {data.summary && <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">{Object.entries(data.summary).map(([k, v]) => <div key={k}><p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p><p className="font-semibold">{typeof v === 'number' ? (k.toLowerCase().includes('count') || k.toLowerCase().includes('qty') ? v : formatCurrency(v)) : String(v)}</p></div>)}</div>}
+      </div>
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
   )
 }
 
@@ -984,18 +1073,37 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
 }
 
 function SummaryCards({ data, keys }: { data: any; keys: ReportItem['summaryKeys'] }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+  const valueFor = (key: string) => data[key] ?? data.summary?.[key]
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {keys?.map(k => (
-        <Card key={k.key}>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">{k.label}</p>
-            <p className="mt-1 text-2xl font-bold">{formatValue(data[k.key], k.format)}</p>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {keys?.map(k => {
+          const rows = financialDetailRows(data, k.key)
+          const clickable = rows.length > 0
+          return (
+            <Card
+              key={k.key}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              className={cn(clickable && 'cursor-pointer transition hover:border-primary/40 hover:shadow-sm')}
+              onClick={() => clickable && setDetail({ title: k.label, rows })}
+              onKeyDown={(event) => {
+                if (clickable && (event.key === 'Enter' || event.key === ' ')) setDetail({ title: k.label, rows })
+              }}
+            >
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">{k.label}</p>
+                <p className="mt-1 text-2xl font-bold">{formatValue(valueFor(k.key), k.format)}</p>
+                {clickable && <p className="mt-2 text-xs font-medium text-primary">View source transactions</p>}
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
   )
 }
 
@@ -1171,18 +1279,28 @@ function formatNumber(value: number) {
 }
 
 function PnLReport({ data }: { data: any }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
 
-  const hasComparison = !!data.previous;
-  const fmtChange = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
-
+  const hasComparison = !!data.previous
+  const fmtChange = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
   const rows = [
-    { label: 'Revenue', value: data.revenue, bold: true, prev: data.previous?.revenue, change: data.changes?.revenue },
-    { label: 'Cost of Goods Sold (COGS)', value: -data.cogs, prev: data.previous ? -data.previous.cogs : undefined, change: data.changes?.cogs },
-    { label: 'Gross Profit', value: data.grossProfit, bold: true, highlight: true, prev: data.previous?.grossProfit, change: data.changes?.grossProfit },
-    { label: 'Operating Expenses', value: -data.expenses, prev: data.previous ? -data.previous.expenses : undefined, change: data.changes?.expenses },
-    { label: 'Net Profit', value: data.netProfit, bold: true, highlight: true, prev: data.previous?.netProfit, change: data.changes?.netProfit },
+    { key: 'revenue', label: 'Revenue', value: data.revenue, bold: true, prev: data.previous?.revenue, change: data.changes?.revenue },
+    { key: 'cogs', label: 'Cost of Goods Sold (COGS)', value: -data.cogs, prev: data.previous ? -data.previous.cogs : undefined, change: data.changes?.cogs },
+    { key: 'grossProfit', label: 'Gross Profit', value: data.grossProfit, bold: true, highlight: true, prev: data.previous?.grossProfit, change: data.changes?.grossProfit },
+    { key: 'expenses', label: 'Operating Expenses', value: -data.expenses, prev: data.previous ? -data.previous.expenses : undefined, change: data.changes?.expenses },
+    { key: 'netProfit', label: 'Net Profit', value: data.netProfit, bold: true, highlight: true, prev: data.previous?.netProfit, change: data.changes?.netProfit },
   ]
+  const extraRows = [
+    { key: 'totalDiscount', label: 'Total Discount', value: data.totalDiscount, format: 'currency' as const },
+    { key: 'totalTax', label: 'Total Tax', value: data.totalTax, format: 'currency' as const },
+    { key: 'salesCount', label: 'Sales Count', value: data.salesCount, format: 'number' as const },
+  ]
+
+  const openDetail = (label: string, key: string) => {
+    const rows = financialDetailRows(data, key)
+    if (rows.length) setDetail({ title: label, rows })
+  }
 
   return (
     <div className="space-y-4">
@@ -1190,137 +1308,161 @@ function PnLReport({ data }: { data: any }) {
         <div className="flex flex-wrap gap-4 text-sm">
           <div className="rounded-lg bg-blue-50 px-4 py-2">
             <span className="text-muted-foreground">Current: </span>
-            <span className="font-semibold">{data.periods.current?.from ? `${formatDisplayDate(data.periods.current.from)} – ${formatDisplayDate(data.periods.current.to)}` : ''}</span>
+            <span className="font-semibold">{data.periods.current?.from ? `${formatDisplayDate(data.periods.current.from)} - ${formatDisplayDate(data.periods.current.to)}` : ''}</span>
           </div>
           <div className="rounded-lg bg-gray-100 px-4 py-2">
             <span className="text-muted-foreground">Previous: </span>
-            <span className="font-semibold">{data.periods.previous?.from ? `${formatDisplayDate(data.periods.previous.from)} – ${formatDisplayDate(data.periods.previous.to)}` : ''}</span>
+            <span className="font-semibold">{data.periods.previous?.from ? `${formatDisplayDate(data.periods.previous.from)} - ${formatDisplayDate(data.periods.previous.to)}` : ''}</span>
           </div>
         </div>
       )}
       <Card>
         <CardContent className="p-6">
           <div className="space-y-3">
-            {rows.map((r, i) => (
-              <div key={i} className={cn('flex items-center justify-between rounded-lg p-3', r.bold ? 'bg-muted/50 font-bold' : '')}>
-                <div className="flex flex-col">
-                  <span>{r.label}</span>
-                  {hasComparison && r.prev !== undefined && (
-                    <span className="text-xs font-normal text-muted-foreground">Prev: {formatCurrency(r.prev || 0)}</span>
-                  )}
+            {rows.map((r) => {
+              const hasDetails = financialDetailRows(data, r.key).length > 0
+              return (
+                <div
+                  key={r.key}
+                  role={hasDetails ? 'button' : undefined}
+                  tabIndex={hasDetails ? 0 : undefined}
+                  className={cn('flex items-center justify-between rounded-lg p-3', r.bold ? 'bg-muted/50 font-bold' : '', hasDetails && 'cursor-pointer transition hover:bg-primary/5')}
+                  onClick={() => openDetail(r.label, r.key)}
+                  onKeyDown={(event) => {
+                    if (hasDetails && (event.key === 'Enter' || event.key === ' ')) openDetail(r.label, r.key)
+                  }}
+                >
+                  <div className="flex flex-col">
+                    <span>{r.label}</span>
+                    {hasDetails && <span className="text-xs font-normal text-primary">View source transactions</span>}
+                    {hasComparison && r.prev !== undefined && <span className="text-xs font-normal text-muted-foreground">Prev: {formatCurrency(r.prev || 0)}</span>}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {hasComparison && r.change !== undefined && <span className={cn('text-xs font-normal', r.change >= 0 ? 'text-green-600' : 'text-red-600')}>{fmtChange(r.change)}</span>}
+                    <span className={cn(r.highlight && r.value >= 0 ? 'text-green-600' : r.highlight && r.value < 0 ? 'text-red-600' : '')}>{formatCurrency(r.value || 0)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {hasComparison && r.change !== undefined && (
-                    <span className={cn('text-xs font-normal', r.change >= 0 ? 'text-green-600' : 'text-red-600')}>
-                      {fmtChange(r.change)}
-                    </span>
-                  )}
-                  <span className={cn(r.highlight && r.value >= 0 ? 'text-green-600' : r.highlight && r.value < 0 ? 'text-red-600' : '')}>
-                    {formatCurrency(r.value || 0)}
-                  </span>
+              )
+            })}
+            {data.grossMargin !== undefined && <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">Gross Margin</span><span className="font-semibold">{data.grossMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.grossMargin?.toFixed(1)}%)` : ''}</span></div>}
+            {data.netMargin !== undefined && <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">Net Margin</span><span className="font-semibold">{data.netMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.netMargin?.toFixed(1)}%)` : ''}</span></div>}
+            <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground"><span>Additional Info</span></div>
+            {extraRows.map((row) => {
+              const rows = financialDetailRows(data, row.key)
+              const hasDetails = rows.length > 0
+              return (
+                <div key={row.key} role={hasDetails ? 'button' : undefined} tabIndex={hasDetails ? 0 : undefined} className={cn('flex justify-between rounded-lg p-3 text-sm', hasDetails && 'cursor-pointer hover:bg-primary/5')} onClick={() => openDetail(row.label, row.key)} onKeyDown={(event) => { if (hasDetails && (event.key === 'Enter' || event.key === ' ')) openDetail(row.label, row.key) }}>
+                  <span>{row.label}{hasDetails && <span className="ml-2 text-xs text-primary">View source</span>}</span>
+                  <span>{row.format === 'number' ? formatNumber(Number(row.value || 0)) : formatCurrency(row.value || 0)}</span>
                 </div>
-              </div>
-            ))}
-            {/* Margins */}
-            {data.grossMargin !== undefined && (
-              <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm">
-                <span className="text-muted-foreground">Gross Margin</span>
-                <span className="font-semibold">{data.grossMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.grossMargin?.toFixed(1)}%)` : ''}</span>
-              </div>
-            )}
-            {data.netMargin !== undefined && (
-              <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm">
-                <span className="text-muted-foreground">Net Margin</span>
-                <span className="font-semibold">{data.netMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.netMargin?.toFixed(1)}%)` : ''}</span>
-              </div>
-            )}
-            <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
-              <span>Additional Info</span>
-            </div>
-            <div className="flex justify-between p-3 text-sm"><span>Total Discount</span><span>{formatCurrency(data.totalDiscount || 0)}</span></div>
-            <div className="flex justify-between p-3 text-sm"><span>Total Tax</span><span>{formatCurrency(data.totalTax || 0)}</span></div>
-            <div className="flex justify-between p-3 text-sm"><span>Sales Count</span><span>{data.salesCount || 0}</span></div>
+              )
+            })}
           </div>
         </CardContent>
       </Card>
-      {/* Auto-commentary */}
       {data.commentary && data.commentary.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Lightbulb className="h-4 w-4 text-amber-500" />
-              Analysis & Commentary
-            </CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Lightbulb className="h-4 w-4 text-amber-500" />Analysis & Commentary</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {data.commentary.map((c: string, i: number) => (
-              <div key={i} className="flex items-start gap-2 rounded-lg border-l-4 border-l-blue-500 bg-blue-50/50 p-3">
-                <Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" />
-                <p className="text-sm">{c}</p>
-              </div>
-            ))}
+            {data.commentary.map((c: string, i: number) => <div key={i} className="flex items-start gap-2 rounded-lg border-l-4 border-l-blue-500 bg-blue-50/50 p-3"><Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" /><p className="text-sm">{c}</p></div>)}
           </CardContent>
         </Card>
       )}
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
     </div>
   )
 }
 
 function BalanceSheetReport({ data }: { data: any }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const line = (label: string, value: number, key: string, bold = false) => {
+    const rows = financialDetailRows(data, key)
+    const clickable = rows.length > 0
+    return (
+      <div
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        className={cn('flex justify-between gap-4 rounded-md px-2 py-2', bold ? 'border-t pt-3 font-bold' : 'text-sm', clickable && 'cursor-pointer hover:bg-primary/5')}
+        onClick={() => clickable && setDetail({ title: label, rows })}
+        onKeyDown={(event) => { if (clickable && (event.key === 'Enter' || event.key === ' ')) setDetail({ title: label, rows }) }}
+      >
+        <span>{label}{clickable && !bold && <span className="ml-2 text-xs font-medium text-primary">View source</span>}</span>
+        <span className="text-right tabular-nums">{formatCurrency(value || 0)}</span>
+      </div>
+    )
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Assets</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between text-sm"><span>Cash</span><span>{formatCurrency(data.assets?.cash || 0)}</span></div>
-          <div className="flex justify-between text-sm"><span>Accounts Receivable</span><span>{formatCurrency(data.assets?.accountsReceivable || 0)}</span></div>
-          <div className="flex justify-between text-sm"><span>Inventory</span><span>{formatCurrency(data.assets?.inventory || 0)}</span></div>
-          <div className="flex justify-between border-t pt-2 font-bold"><span>Total Assets</span><span>{formatCurrency(data.assets?.totalAssets || 0)}</span></div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Liabilities</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between text-sm"><span>Accounts Payable</span><span>{formatCurrency(data.liabilities?.accountsPayable || 0)}</span></div>
-          <div className="flex justify-between border-t pt-2 font-bold"><span>Total Liabilities</span><span>{formatCurrency(data.liabilities?.totalLiabilities || 0)}</span></div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Equity</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between text-sm"><span>Retained Earnings</span><span>{formatCurrency(data.equity?.retainedEarnings || 0)}</span></div>
-          <div className="flex justify-between border-t pt-2 font-bold"><span>Total Equity</span><span>{formatCurrency(data.equity?.totalEquity || 0)}</span></div>
-        </CardContent>
-      </Card>
-    </div>
+    <>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Assets</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {line('Cash & Bank', data.assets?.cash || 0, 'cash')}
+            {line('Accounts Receivable', data.assets?.accountsReceivable || 0, 'accountsReceivable')}
+            {line('Inventory', data.assets?.inventory || 0, 'inventory')}
+            {line('Total Assets', data.assets?.totalAssets || 0, 'totalAssets', true)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Liabilities</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {line('Accounts Payable', data.liabilities?.accountsPayable || 0, 'accountsPayable')}
+            {line('Tax Payable', data.liabilities?.taxPayable || 0, 'taxPayable')}
+            {line('Total Liabilities', data.liabilities?.totalLiabilities || 0, 'totalLiabilities', true)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Equity</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {line('Retained Earnings', data.equity?.retainedEarnings || 0, 'retainedEarnings')}
+            {line('Total Equity', data.equity?.totalEquity || 0, 'totalEquity', true)}
+          </CardContent>
+        </Card>
+      </div>
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
   )
 }
 
 function TrialBalanceReport({ data }: { data: any }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   if (!data?.accounts) return <p className="text-center text-muted-foreground py-8">No data available.</p>
-  const totalDebit = data.accounts.reduce((a: number, x: any) => a + (x.debit || 0), 0)
-  const totalCredit = data.accounts.reduce((a: number, x: any) => a + (x.credit || 0), 0)
+  const totalDebit = data.totalDebit ?? data.accounts.reduce((a: number, x: any) => a + (x.debit || 0), 0)
+  const totalCredit = data.totalCredit ?? data.accounts.reduce((a: number, x: any) => a + (x.credit || 0), 0)
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50">
-          <tr><th className="px-4 py-3 text-left font-medium">Account</th><th className="px-4 py-3 text-right font-medium">Debit</th><th className="px-4 py-3 text-right font-medium">Credit</th></tr>
-        </thead>
-        <tbody>
-          {data.accounts.map((acc: any, i: number) => (
-            <tr key={i} className="border-t hover:bg-muted/30">
-              <td className="px-4 py-2">{acc.account}</td>
-              <td className="px-4 py-2 text-right">{acc.debit ? formatCurrency(acc.debit) : '—'}</td>
-              <td className="px-4 py-2 text-right">{acc.credit ? formatCurrency(acc.credit) : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot className="border-t-2 font-bold">
-          <tr><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{formatCurrency(totalDebit)}</td><td className="px-4 py-3 text-right">{formatCurrency(totalCredit)}</td></tr>
-        </tfoot>
-      </table>
-    </div>
+    <>
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-muted/50">
+            <tr><th className="px-4 py-3 text-left font-medium">Account</th><th className="px-4 py-3 text-right font-medium">Debit</th><th className="px-4 py-3 text-right font-medium">Credit</th></tr>
+          </thead>
+          <tbody>
+            {data.accounts.map((acc: any, i: number) => {
+              const rows = Array.isArray(acc.details) ? acc.details : financialDetailRows(data, acc.key || acc.account)
+              const clickable = rows.length > 0
+              return (
+                <tr key={i} className={cn('border-t hover:bg-muted/30', clickable && 'cursor-pointer')} onClick={() => clickable && setDetail({ title: acc.account, rows })}>
+                  <td className="px-4 py-2">
+                    <div className="font-medium">{acc.account}</div>
+                    {clickable && <div className="text-xs text-primary">View source transactions</div>}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{acc.debit ? formatCurrency(acc.debit) : '-'}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{acc.credit ? formatCurrency(acc.credit) : '-'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot className="border-t-2 font-bold">
+            <tr><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right tabular-nums">{formatCurrency(totalDebit)}</td><td className="px-4 py-3 text-right tabular-nums">{formatCurrency(totalCredit)}</td></tr>
+          </tfoot>
+        </table>
+      </div>
+      {typeof data.difference === 'number' && Math.abs(data.difference) >= 0.01 && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Difference: {formatCurrency(data.difference)}. Open the rows above to inspect the source balances and period activity.</p>}
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
   )
 }
 

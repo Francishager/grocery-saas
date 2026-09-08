@@ -80,6 +80,7 @@ router.get("/available-accounts", viewHRPayrollSetup, async (req, res) => {
       expenseAccounts: accounts.expenseAccounts,
       liabilityAccounts: accounts.liabilityAccounts,
       assetAccounts: accounts.assetAccounts,
+      transactionAccounts: accounts.transactionAccounts || [],
     });
   } catch (error) {
     console.error("Error fetching available accounts:", error);

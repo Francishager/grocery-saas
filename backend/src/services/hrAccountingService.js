@@ -20,6 +20,14 @@ const ACCOUNT_LABELS = {
   socialSecurity: "Social Security liability account",
 };
 
+const HR_ACCOUNT_TYPES = {
+  salaryExpense: new Set(["expense", "expenses"]),
+  salaryPayable: new Set(["liability"]),
+  salaryAdvance: new Set(["asset"]),
+  payeTax: new Set(["liability"]),
+  socialSecurity: new Set(["liability"]),
+};
+
 function money(value) {
   const amount = Number(value || 0);
   return Number.isFinite(amount) ? amount : 0;
@@ -72,6 +80,11 @@ function transactionAccountType(account) {
   const subType = normalizeValue(account?.subType);
   if (subType.startsWith("transaction_")) return subType.replace("transaction_", "");
   return linkedCashAccountId(account) ? "cash" : null;
+}
+
+function isTransactionLinkedAccount(account) {
+  const subType = normalizeValue(account?.subType);
+  return subType.startsWith("transaction_") || Boolean(linkedCashAccountId(account));
 }
 
 class HRAccountingService {
@@ -223,6 +236,32 @@ class HRAccountingService {
       throw error;
     }
 
+    const accountById = new Map(accountCheck.accounts.map((account) => [account.id, account]));
+    const invalidMappings = requiredAccounts.filter((key) => {
+      const accountId = validation.config[`${key}AccountId`];
+      const account = accountById.get(accountId);
+      return account && !HR_ACCOUNT_TYPES[key]?.has(normalizeValue(account.type));
+    });
+    if (invalidMappings.length) {
+      const error = new Error(`Invalid HR accounting account type for: ${invalidMappings.map((key) => ACCOUNT_LABELS[key] || key).join(", ")}. Salary payable must be a liability account, never a cash or other transaction account.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const transactionLinkedMappings = requiredAccounts.filter((key) => {
+      const accountId = validation.config[`${key}AccountId`];
+      const account = accountById.get(accountId);
+      return account && isTransactionLinkedAccount(account);
+    });
+
+    if (transactionLinkedMappings.length) {
+      const error = new Error(
+        `Invalid HR accounting account mapping for: ${transactionLinkedMappings.map((key) => ACCOUNT_LABELS[key] || key).join(", ")}. Payroll posting accounts must be normal Chart of Accounts accounts, not cash, safe, bank, mobile money, card, or other transaction accounts. Select the payment account only when paying the posted salary.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
     return { config: validation.config, accounts: accountCheck.accounts };
   }
 
@@ -349,6 +388,14 @@ class HRAccountingService {
       }
 
       const linkedCashAccountIds = [...new Set(accounts.map(linkedCashAccountId).filter(Boolean))];
+      if (["payroll", "hr_payroll"].includes(normalizeValue(sourceType)) && linkedCashAccountIds.length) {
+        const error = new Error(
+          "Payroll posting cannot use cash, safe, bank, mobile money, card, or other transaction accounts. Reconfigure HR accounting mappings to normal Chart of Accounts accounts, then use the Pay action to reduce the selected payment account."
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+
       for (const cashAccountId of linkedCashAccountIds) {
         await syncLinkedTransactionAccountBalance(db, tenantId, cashAccountId).catch(() => null);
       }
@@ -551,7 +598,12 @@ class HRAccountingService {
       if (money(socialSecurityTax) > 0) requiredAccounts.push("socialSecurity");
 
       const { config } = await this.requireConfiguredAccounts(db, tenantId, requiredAccounts, { branchId, userId });
-      const salaryPayableCredit = money(grossSalary) - money(salaryAdvanceRecovery) - money(paye) - money(socialSecurityTax);
+      const accountedDeductions = money(salaryAdvanceRecovery) + money(paye) + money(socialSecurityTax);
+      const unallocatedDeductions = money(grossSalary) - money(params.netSalaryPayable) - accountedDeductions;
+      if (unallocatedDeductions > 0.01) {
+        throw new Error("Payroll contains health or other deductions without mapped liability accounts. Configure those deductions before posting.");
+      }
+      const salaryPayableCredit = money(params.netSalaryPayable);
       if (salaryPayableCredit < -0.01) {
         throw new Error("Payroll deductions exceed gross salary. Review the payroll before posting.");
       }

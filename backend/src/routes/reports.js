@@ -5,7 +5,6 @@ import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, vis
 import { buildDecisionSupportSummary, buildSupplierStatementData } from "../utils/reportingHelpers.js";
 import {
   transformSalesData,
-  transformExpenseData,
   transformInventoryMovementData,
   transformAgingData,
   transformCashFlowData,
@@ -290,7 +289,7 @@ function scopedJournalWhere(scope, extra = {}) {
 async function journalExpenseRows(scope, dateWhere, { userId = null, requestedMethod = null, take = 1000 } = {}) {
   const entries = await prisma.journalEntry.findMany({
     where: scopedJournalWhere(scope, {
-      date: dateWhere,
+      ...(dateWhere && Object.keys(dateWhere).length ? { date: dateWhere } : {}),
       status: { not: "reversed" },
       ...(userId ? { userId } : {}),
       lines: {
@@ -367,6 +366,347 @@ function cashMovementDirection(type) {
   if (normalized.includes("transfer_in") || normalized.includes("handover_in")) return "transfer-in";
   if (normalized.includes("transfer_out") || normalized.includes("handover") || normalized.includes("transfer")) return "transfer-out";
   return normalized.includes("out") ? "out" : "in";
+}
+function sourceReference(record, fallback = "") {
+  const value = record?.receiptNo || record?.refNo || record?.reference || record?.transactionId || record?.entryNo || fallback || record?.id;
+  return value ? String(value) : "";
+}
+
+function shortReference(record) {
+  const ref = sourceReference(record);
+  return ref || (record?.id ? String(record.id).slice(0, 8) : "");
+}
+
+function branchLabel(record) {
+  return record?.branch?.name || record?.branchName || "Unassigned";
+}
+
+function sumFinancialRows(rows, key = "amount") {
+  return toMoney((rows || []).reduce((sum, row) => sum + Number(row?.[key] || 0), 0));
+}
+
+function sortFinancialRows(rows, direction = "desc") {
+  return [...(rows || [])].sort((a, b) => {
+    const left = new Date(a?.date || a?.createdAt || 0).getTime();
+    const right = new Date(b?.date || b?.createdAt || 0).getTime();
+    return direction === "asc" ? left - right : right - left;
+  });
+}
+
+function withRunningBalance(rows, openingBalance = 0) {
+  let running = Number(openingBalance || 0);
+  return sortFinancialRows(rows, "asc").map((row) => {
+    running = toMoney(running + Number(row?.debit || 0) - Number(row?.credit || 0));
+    return { ...row, balance: running };
+  });
+}
+
+function compactSaleItems(items = []) {
+  return (items || []).map((item) => ({
+    product: item?.product?.name || "Unknown item",
+    sku: item?.product?.sku || "",
+    quantity: Number(item?.quantity || 0),
+    price: Number(item?.price || 0),
+    cost: Number(item?.cost ?? item?.product?.cost ?? 0),
+    total: Number(item?.total || 0),
+    cogs: toMoney(saleLineCogs(item)),
+    grossProfit: toMoney(saleItemProfit(item)),
+  }));
+}
+
+function saleDiscountAmount(sale) {
+  return toMoney(Number(sale?.discount || 0) + Number(sale?.cashDiscount || 0));
+}
+
+function financialSaleRow(sale, sourceType = "Sale") {
+  const grossAmount = toMoney(sale?.total || 0);
+  const tax = toMoney(sale?.tax || 0);
+  const revenue = toMoney(saleNetRevenue(sale));
+  const cogs = toMoney(saleCogs(sale));
+  const discount = saleDiscountAmount(sale);
+  const items = compactSaleItems(sale?.items || []);
+  const method = normalizedPaymentMethod(sale?.paymentMethod || (sourceType === "Credit Sale" ? "credit" : "cash"));
+  const customer = sale?.customer?.name || sale?.customerName || (sourceType === "Credit Sale" ? "Unknown customer" : "Walk-in");
+  return {
+    id: `${sourceType.toLowerCase().replace(/\s+/g, "-")}-${sale?.id || sourceReference(sale)}`,
+    sourceId: sale?.id,
+    date: sale?.createdAt,
+    type: sourceType,
+    account: sourceType === "Credit Sale" ? "Accounts Receivable" : paymentAccountLabel(method),
+    description: `${sourceType} ${sourceReference(sale)}`,
+    reference: sourceReference(sale),
+    customer,
+    staff: userLabel(sale?.user || sale?.User),
+    branch: branchLabel(sale),
+    paymentMethod: method,
+    debit: grossAmount,
+    credit: revenue,
+    amount: revenue,
+    grossAmount,
+    revenue,
+    tax,
+    discount,
+    cogs,
+    grossProfit: toMoney(revenue - cogs),
+    itemCount: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+    status: saleStatus(sale),
+    details: `${items.length} line(s); gross ${grossAmount}, tax ${tax}, discount ${discount}, COGS ${cogs}`,
+    items,
+  };
+}
+
+function financialCogsRow(sale, sourceType = "Sale") {
+  const base = financialSaleRow(sale, sourceType);
+  return { ...base, id: `cogs-${base.sourceId || base.reference}`, type: "Cost of Goods Sold", account: "Cost of Goods Sold", description: `COGS for ${sourceType.toLowerCase()} ${base.reference}`, debit: base.cogs, credit: 0, amount: base.cogs, details: `Inventory cost issued for ${base.itemCount} unit(s) on ${base.reference}` };
+}
+
+function financialTaxRow(sale, sourceType = "Sale") {
+  const base = financialSaleRow(sale, sourceType);
+  if (!base.tax) return null;
+  return { ...base, id: `tax-${base.sourceId || base.reference}`, type: "Sales Tax", account: "Tax Payable", description: `Tax collected on ${sourceType.toLowerCase()} ${base.reference}`, debit: 0, credit: base.tax, amount: base.tax, details: `Tax component from gross sale ${base.grossAmount}; revenue excludes tax.` };
+}
+
+function financialDiscountRow(sale, sourceType = "Sale") {
+  const base = financialSaleRow(sale, sourceType);
+  if (!base.discount) return null;
+  return { ...base, id: `discount-${base.sourceId || base.reference}`, type: "Sales Discount", account: "Sales Discounts", description: `Discount on ${sourceType.toLowerCase()} ${base.reference}`, debit: base.discount, credit: 0, amount: base.discount, details: "Discount was applied before the net revenue figure for this sale." };
+}
+function financialExpenseDetailRow(expense) {
+  const amount = toMoney(expense?.amount || 0);
+  const isJournal = expense?.source === "journal" || String(expense?.id || "").startsWith("journal-expense-");
+  const method = normalizedPaymentMethod(expense?.paymentMethod || expense?.cashAccount?.type || "cash");
+  return {
+    id: expense?.id,
+    sourceId: expense?.journalEntryId || expense?.id,
+    date: expense?.date || expense?.createdAt,
+    type: isJournal ? "Journal Expense" : "Expense",
+    account: expense?.category || "Operating Expense",
+    description: expense?.description || expense?.category || "Expense",
+    reference: sourceReference(expense, expense?.journalEntryId),
+    branch: branchLabel(expense),
+    staff: userLabel(expense?.User || expense?.user),
+    paymentMethod: method,
+    debit: amount,
+    credit: 0,
+    amount,
+    status: expense?.status || "Posted",
+    details: `${isJournal ? "Accounting journal" : "Expense"} paid through ${expense?.cashAccount?.name || paymentAccountLabel(method)}`,
+  };
+}
+
+function financialCustomerPaymentRow(payment) {
+  const amount = toMoney(payment?.amount || 0);
+  return {
+    id: `customer-payment-${payment?.id}`,
+    sourceId: payment?.id,
+    date: payment?.createdAt,
+    type: "Customer Payment",
+    account: "Accounts Receivable",
+    description: `Customer payment - ${payment?.customer?.name || "Customer"}`,
+    reference: sourceReference(payment, payment?.sale?.receiptNo),
+    customer: payment?.customer?.name || "Unknown customer",
+    branch: branchLabel(payment),
+    paymentMethod: normalizedPaymentMethod(payment?.paymentMethod),
+    debit: amount,
+    credit: amount,
+    amount,
+    status: "Received",
+    details: payment?.sale?.receiptNo ? `Applied to ${payment.sale.receiptNo}` : (payment?.notes || "Customer balance reduction"),
+  };
+}
+
+function financialSupplierPaymentRow(payment) {
+  const amount = toMoney(payment?.amount || 0);
+  return {
+    id: `supplier-payment-${payment?.id}`,
+    sourceId: payment?.id,
+    date: payment?.createdAt,
+    type: "Supplier Payment",
+    account: "Accounts Payable",
+    description: `Supplier payment - ${payment?.supplier?.name || "Supplier"}`,
+    reference: sourceReference(payment, payment?.purchase?.refNo),
+    supplier: payment?.supplier?.name || "Unknown supplier",
+    branch: branchLabel(payment),
+    paymentMethod: normalizedPaymentMethod(payment?.paymentMethod),
+    debit: amount,
+    credit: amount,
+    amount,
+    status: "Paid",
+    details: payment?.purchase?.refNo ? `Applied to ${payment.purchase.refNo}` : (payment?.notes || "Supplier balance reduction"),
+  };
+}
+
+function financialTaxPaymentRow(payment) {
+  const amount = toMoney(payment?.amount || 0);
+  return {
+    id: `tax-payment-${payment?.id}`,
+    sourceId: payment?.id,
+    date: payment?.dateOfPayment || payment?.createdAt,
+    type: "Tax Payment",
+    account: "Tax Payable",
+    description: payment?.prn ? `Tax payment PRN ${payment.prn}` : "Tax payment",
+    reference: payment?.prn || shortReference(payment),
+    branch: branchLabel(payment),
+    paymentMethod: normalizedPaymentMethod(payment?.paymentMethod),
+    debit: amount,
+    credit: 0,
+    amount,
+    status: "Paid",
+    details: [payment?.periodFrom && payment?.periodTo ? `Period ${payment.periodFrom.toISOString().slice(0, 10)} to ${payment.periodTo.toISOString().slice(0, 10)}` : null, payment?.currency ? `Currency ${payment.currency}` : null].filter(Boolean).join(", "),
+  };
+}
+
+function financialCashMovementRow(movement) {
+  const amount = toMoney(movement?.amount || 0);
+  const rawType = String(movement?.type || "income").toLowerCase();
+  const direction = cashMovementDirection(rawType);
+  const isIn = direction === "in" || direction === "transfer-in";
+  return {
+    id: `cash-${movement?.id}`,
+    sourceId: movement?.id,
+    date: movement?.createdAt,
+    type: direction === "transfer-in" ? "Transfer In" : direction === "transfer-out" ? "Transfer Out" : isIn ? "Cash Inflow" : "Cash Outflow",
+    account: movement?.account?.name || paymentAccountLabel(movement?.account?.type || rawType),
+    accountType: movement?.account?.type || "cash",
+    description: movement?.description || rawType,
+    reference: movement?.reference || shortReference(movement),
+    staff: userLabel(movement?.User),
+    paymentMethod: normalizedPaymentMethod(movement?.account?.type || rawType),
+    debit: isIn ? amount : 0,
+    credit: isIn ? 0 : amount,
+    amount,
+    balance: toMoney(movement?.balanceAfter || 0),
+    direction,
+    rawType,
+    status: "Cleared",
+    details: `${movement?.account?.type || "cash"} account movement; after balance ${toMoney(movement?.balanceAfter || 0)}`,
+  };
+}
+
+function financialBalanceRow(entity, { type, account, amount, debitSide = true, description }) {
+  const value = toMoney(amount);
+  return {
+    id: `${type}-${entity?.id || account}`,
+    sourceId: entity?.id,
+    date: entity?.updatedAt || entity?.createdAt || new Date(),
+    type,
+    account,
+    description: description || entity?.name || account,
+    reference: entity?.sku || entity?.phone || entity?.accountNumber || shortReference(entity),
+    customer: type === "Customer Balance" ? entity?.name : undefined,
+    supplier: type === "Supplier Balance" ? entity?.name : undefined,
+    branch: branchLabel(entity),
+    paymentMethod: entity?.type || undefined,
+    debit: debitSide ? Math.max(0, value) : 0,
+    credit: debitSide ? 0 : Math.max(0, value),
+    amount: Math.abs(value),
+    balance: value,
+    details: entity?.openingBalance ? `Opening balance ${toMoney(entity.openingBalance)}` : (entity?.description || "Current balance snapshot"),
+  };
+}
+
+function financialInventoryBalanceRow(product) {
+  const quantity = Number(product?.quantity || 0);
+  const unitCost = Number(product?.cost || 0);
+  const amount = toMoney(quantity * unitCost);
+  return {
+    id: `inventory-${product?.id}`,
+    sourceId: product?.id,
+    date: product?.updatedAt || product?.createdAt,
+    type: "Inventory Balance",
+    account: "Inventory",
+    description: product?.name || "Inventory item",
+    reference: product?.sku || product?.barcode || shortReference(product),
+    branch: branchLabel(product),
+    debit: amount,
+    credit: 0,
+    amount,
+    balance: amount,
+    quantity,
+    unitCost,
+    details: `Qty ${quantity} x cost ${toMoney(unitCost)}`,
+  };
+}
+async function loadFinancialReportData(req, scope, createdAtRange = null) {
+  const dateRange = createdAtRange && Object.keys(createdAtRange).length ? createdAtRange : dateRangeFromQuery(req);
+  const createdWhere = dateRange && Object.keys(dateRange).length ? { createdAt: dateRange } : {};
+  const saleWhere = scopedWhere(scope, { ...createdWhere, ...saleVisibilityFilter(req) });
+  const expenseWhere = scopedExpenseWhere(scope, expenseDateWhere(dateRange || {}));
+  const journalDateWhere = dateRange && Object.keys(dateRange).length ? dateRange : {};
+  const taxWhere = scopedWhere(scope, dateRange && Object.keys(dateRange).length ? { dateOfPayment: dateRange } : {});
+
+  const [sales, saleRecords, expenses, journalRows, customerPayments, supplierPayments, cashTransactions, taxPayments] = await Promise.all([
+    prisma.sale.findMany({ where: saleWhere, include: { user: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
+    prisma.saleRecord.findMany({ where: saleWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, customer: { select: { id: true, name: true, phone: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
+    prisma.expense.findMany({ where: expenseWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, cashAccount: { select: { id: true, name: true, type: true } } }, orderBy: { date: "asc" }, take: 5000 }),
+    journalExpenseRows(scope, journalDateWhere, { take: 5000 }),
+    prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
+    prisma.supplierPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { supplier: { select: { id: true, name: true, phone: true } }, purchase: { select: { id: true, refNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
+    prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, ...createdWhere }, include: { account: { select: { id: true, name: true, type: true, balance: true } }, User: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
+    prisma.taxPayment.findMany({ where: taxWhere, include: { branch: { select: { id: true, name: true } } }, orderBy: { dateOfPayment: "asc" }, take: 5000 }),
+  ]);
+
+  const directExpenseReferences = new Set(expenses.flatMap((expense) => [expense.id, expense.reference].filter(Boolean)));
+  const uniqueJournalRows = journalRows.filter((expense) => !directExpenseReferences.has(expense.reference) && !directExpenseReferences.has(expense.journalEntryId));
+  const saleRows = sales.map((sale) => financialSaleRow(sale, "Sale"));
+  const receivableSaleRows = saleRecords.map((sale) => financialSaleRow(sale, "Credit Sale"));
+  const cogsRows = [...sales.map((sale) => financialCogsRow(sale, "Sale")), ...saleRecords.map((sale) => financialCogsRow(sale, "Credit Sale"))].filter((row) => row.amount > 0);
+  const taxRows = [...sales.map((sale) => financialTaxRow(sale, "Sale")), ...saleRecords.map((sale) => financialTaxRow(sale, "Credit Sale"))].filter(Boolean);
+  const discountRows = [...sales.map((sale) => financialDiscountRow(sale, "Sale")), ...saleRecords.map((sale) => financialDiscountRow(sale, "Credit Sale"))].filter(Boolean);
+  const expenseRows = [...expenses, ...uniqueJournalRows].map(financialExpenseDetailRow).filter((row) => row.amount > 0);
+  const customerPaymentRows = customerPayments.map(financialCustomerPaymentRow).filter((row) => row.amount > 0);
+  const supplierPaymentRows = supplierPayments.map(financialSupplierPaymentRow).filter((row) => row.amount > 0);
+  const cashRows = cashTransactions.map(financialCashMovementRow).filter((row) => row.amount > 0);
+  const taxPaymentRows = taxPayments.map(financialTaxPaymentRow).filter((row) => row.amount > 0);
+
+  return { sales, saleRecords, expenses, journalRows: uniqueJournalRows, saleRows, receivableSaleRows, revenueRows: [...saleRows, ...receivableSaleRows], cogsRows, taxRows, discountRows, expenseRows, customerPaymentRows, supplierPaymentRows, cashRows, taxPaymentRows };
+}
+
+function financialTotalsFromData(data) {
+  const revenue = sumFinancialRows(data.revenueRows, "revenue");
+  const posSalesRevenue = sumFinancialRows(data.saleRows, "revenue");
+  const receivableSalesRevenue = sumFinancialRows(data.receivableSaleRows, "revenue");
+  const grossSales = sumFinancialRows(data.revenueRows, "grossAmount");
+  const cogs = sumFinancialRows(data.cogsRows);
+  const expenses = sumFinancialRows(data.expenseRows);
+  const grossProfit = toMoney(revenue - cogs);
+  const netProfit = toMoney(grossProfit - expenses);
+  const totalTax = sumFinancialRows(data.taxRows);
+  const totalDiscount = sumFinancialRows(data.discountRows);
+  const customerCollections = sumFinancialRows(data.customerPaymentRows);
+  const supplierPayments = sumFinancialRows(data.supplierPaymentRows);
+  const taxPayments = sumFinancialRows(data.taxPaymentRows);
+  return { revenue, salesRevenue: revenue, posSalesRevenue, receivableSalesRevenue, grossSales, cogs, grossProfit, expenses, totalExpense: expenses, netProfit, totalTax, totalDiscount, salesCount: data.revenueRows.length, expenseCount: data.expenseRows.length, customerPayments: customerCollections, customerCollections, supplierPayments, taxPayments, totalIncome: revenue, grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0, netMargin: revenue > 0 ? (netProfit / revenue) * 100 : 0, cogsRatio: revenue > 0 ? (cogs / revenue) * 100 : 0, expenseRatio: revenue > 0 ? (expenses / revenue) * 100 : 0, averageSale: data.revenueRows.length ? revenue / data.revenueRows.length : 0 };
+}
+
+function financialDetailGroups(data) {
+  const revenue = sortFinancialRows(data.revenueRows);
+  const cogs = sortFinancialRows(data.cogsRows);
+  const expenses = sortFinancialRows(data.expenseRows);
+  const totalTax = sortFinancialRows(data.taxRows);
+  const totalDiscount = sortFinancialRows(data.discountRows);
+  const customerPayments = sortFinancialRows(data.customerPaymentRows);
+  const supplierPayments = sortFinancialRows(data.supplierPaymentRows);
+  const taxPayments = sortFinancialRows(data.taxPaymentRows);
+  return { revenue, salesRevenue: revenue, totalIncome: revenue, posSalesRevenue: sortFinancialRows(data.saleRows), receivableSalesRevenue: sortFinancialRows(data.receivableSaleRows), cogs, grossProfit: [...revenue, ...cogs], expenses, totalExpense: expenses, netProfit: [...revenue, ...cogs, ...expenses], salesCount: revenue, totalTax, taxCollected: totalTax, totalDiscount, customerPayments, customerCollections: customerPayments, supplierPayments, taxPayments };
+}
+
+async function loadFinancialBalanceSnapshot(req, scope) {
+  const [cashAccounts, customers, suppliers, products] = await Promise.all([
+    prisma.cashAccount.findMany({ where: { tenantId: scope.tenantId, isActive: true }, select: { id: true, name: true, type: true, accountNumber: true, bankName: true, balance: true, updatedAt: true, createdAt: true }, orderBy: { name: "asc" }, take: 5000 }),
+    prisma.customer.findMany({ where: scopedWhere(scope), select: { id: true, name: true, phone: true, balance: true, openingBalance: true, openingBalanceDate: true, updatedAt: true, createdAt: true, branch: { select: { name: true } } }, orderBy: { name: "asc" }, take: 5000 }),
+    prisma.supplier.findMany({ where: scopedWhere(scope), select: { id: true, name: true, phone: true, balance: true, openingBalance: true, openingBalanceDate: true, updatedAt: true, createdAt: true, branch: { select: { name: true } } }, orderBy: { name: "asc" }, take: 5000 }),
+    prisma.product.findMany({ where: scopedWhere(scope, { isActive: { not: false } }), select: { id: true, name: true, sku: true, barcode: true, quantity: true, cost: true, updatedAt: true, createdAt: true, branch: { select: { name: true } } }, orderBy: { name: "asc" }, take: 5000 }),
+  ]);
+  const cashRows = cashAccounts.map((account) => financialBalanceRow(account, { type: "Cash/Bank Balance", account: account.name, amount: account.balance, debitSide: Number(account.balance || 0) >= 0, description: account.name }));
+  const receivableRows = customers.filter((customer) => Number(customer.balance || 0) !== 0).map((customer) => financialBalanceRow(customer, { type: "Customer Balance", account: "Accounts Receivable", amount: customer.balance, debitSide: true, description: customer.name }));
+  const payableRows = suppliers.filter((supplier) => Number(supplier.balance || 0) !== 0).map((supplier) => financialBalanceRow(supplier, { type: "Supplier Balance", account: "Accounts Payable", amount: supplier.balance, debitSide: false, description: supplier.name }));
+  const inventoryRows = products.map(financialInventoryBalanceRow).filter((row) => row.amount > 0 || row.quantity !== 0);
+  return { cashRows, receivableRows, payableRows, inventoryRows, cash: sumFinancialRows(cashRows, "balance"), accountsReceivable: sumFinancialRows(receivableRows, "balance"), accountsPayable: sumFinancialRows(payableRows, "balance"), inventory: sumFinancialRows(inventoryRows) };
+}
+
+function financialSummaryLine(id, label, amount, { debit = 0, credit = 0, account = label, type = "Summary" } = {}) {
+  return { id, date: new Date(), type, account, description: label, reference: id, amount: Math.abs(toMoney(amount)), debit: toMoney(debit), credit: toMoney(credit), balance: toMoney(amount), details: "Calculated financial report line" };
 }
 
 function isPaidAtSaleCustomerPayment(payment) {
@@ -1908,12 +2248,10 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const { from, to } = req.query;
-
-    // Determine current and previous period
     let curStart, curEnd, prevStart, prevEnd;
     if (from && to) {
       curStart = new Date(from);
-      curEnd = new Date(to + "T23:59:59");
+      curEnd = toEndOfDay(to);
       const duration = curEnd - curStart;
       prevEnd = new Date(curStart.getTime() - 1);
       prevStart = new Date(prevEnd.getTime() - duration);
@@ -1925,105 +2263,75 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
       prevEnd = curStart;
     }
 
-    const saleScope = saleVisibilityFilter(req);
-    const curWhere = scopedWhere(s, { createdAt: { gte: curStart, lt: curEnd }, ...saleScope });
-    const prevWhere = scopedWhere(s, { createdAt: { gte: prevStart, lt: prevEnd }, ...saleScope });
-    const curExpWhere = scopedExpenseWhere(s, expenseDateWhere({ gte: curStart, lt: curEnd }));
-    const prevExpWhere = scopedExpenseWhere(s, expenseDateWhere({ gte: prevStart, lt: prevEnd }));
-
-    const [salesAgg, saleRecordAgg, expensesAgg, salesCount, saleRecordCount, salesWithItems, saleRecordsWithItems,
-           prevSalesAgg, prevSaleRecordAgg, prevExpensesAgg, prevSalesCount, prevSaleRecordCount, prevSalesWithItems, prevSaleRecordsWithItems] = await Promise.all([
-      prisma.sale.aggregate({ where: curWhere, _sum: { total: true, discount: true, tax: true } }),
-      prisma.saleRecord.aggregate({ where: curWhere, _sum: { total: true, discount: true, tax: true } }),
-      prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
-      prisma.sale.count({ where: curWhere }),
-      prisma.saleRecord.count({ where: curWhere }),
-      prisma.sale.findMany({ where: curWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
-      prisma.saleRecord.findMany({ where: curWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
-      prisma.sale.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true } }),
-      prisma.saleRecord.aggregate({ where: prevWhere, _sum: { total: true, discount: true, tax: true } }),
-      prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
-      prisma.sale.count({ where: prevWhere }),
-      prisma.saleRecord.count({ where: prevWhere }),
-      prisma.sale.findMany({ where: prevWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
-      prisma.saleRecord.findMany({ where: prevWhere, select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } } }),
+    const currentRange = from && to ? { gte: curStart, lte: curEnd } : { gte: curStart, lt: curEnd };
+    const [currentData, previousData] = await Promise.all([
+      loadFinancialReportData(req, s, currentRange),
+      loadFinancialReportData(req, s, { gte: prevStart, lt: prevEnd }),
     ]);
-
-    const revenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
-    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
-    const expenses = expensesAgg._sum.amount || 0;
-    const grossProfit = revenue - cogs;
-    const netProfit = grossProfit - expenses;
-
-    // Previous period
-    const prevRevenue = aggregateNetRevenue(prevSalesAgg) + aggregateNetRevenue(prevSaleRecordAgg);
-    const prevCogs = [...prevSalesWithItems, ...prevSaleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
-    const prevExpenses = prevExpensesAgg._sum.amount || 0;
-    const prevGrossProfit = prevRevenue - prevCogs;
-    const prevNetProfit = prevGrossProfit - prevExpenses;
-
+    const current = financialTotalsFromData(currentData);
+    const previousTotals = financialTotalsFromData(previousData);
     const pct = (cur, prev) => prev !== 0 ? ((cur - prev) / Math.abs(prev) * 100) : (cur > 0 ? 100 : 0);
 
-    // Margins
-    const grossMargin = revenue > 0 ? (grossProfit / revenue * 100) : 0;
-    const netMargin = revenue > 0 ? (netProfit / revenue * 100) : 0;
-    const prevGrossMargin = prevRevenue > 0 ? (prevGrossProfit / prevRevenue * 100) : 0;
-    const prevNetMargin = prevRevenue > 0 ? (prevNetProfit / prevRevenue * 100) : 0;
-
-    // Auto-commentary
     const commentary = [];
-    if (prevRevenue > 0) {
-      const revChange = pct(revenue, prevRevenue);
+    if (previousTotals.revenue > 0) {
+      const revChange = pct(current.revenue, previousTotals.revenue);
       if (revChange > 10) commentary.push(`Revenue grew ${revChange.toFixed(1)}% vs previous period.`);
       else if (revChange < -10) commentary.push(`Revenue declined ${revChange.toFixed(1)}% vs previous period.`);
     }
-    if (prevCogs !== 0) {
-      const cogsChange = pct(cogs, prevCogs);
-      const revChange = pct(revenue, prevRevenue);
-      if (cogsChange > revChange && cogsChange > 5) {
-        commentary.push(`COGS increased faster than revenue (${cogsChange.toFixed(1)}% vs ${revChange.toFixed(1)}%), squeezing gross margins.`);
-      } else if (cogsChange < revChange && cogsChange < 0) {
-        commentary.push(`COGS decreased while revenue grew, improving gross margins.`);
-      }
+    if (previousTotals.cogs !== 0) {
+      const cogsChange = pct(current.cogs, previousTotals.cogs);
+      const revChange = pct(current.revenue, previousTotals.revenue);
+      if (cogsChange > revChange && cogsChange > 5) commentary.push(`COGS increased faster than revenue (${cogsChange.toFixed(1)}% vs ${revChange.toFixed(1)}%), review price and cost changes.`);
+      else if (cogsChange < revChange && cogsChange < 0) commentary.push("COGS reduced while revenue held up, improving gross margin.");
     }
-    if (prevExpenses !== 0) {
-      const expChange = pct(expenses, prevExpenses);
-      if (expChange > 20) commentary.push(`Operating expenses surged ${expChange.toFixed(1)}% — review cost control.`);
-      else if (expChange < -15) commentary.push(`Operating expenses reduced by ${Math.abs(expChange).toFixed(1)}% — good cost discipline.`);
+    if (previousTotals.expenses !== 0) {
+      const expChange = pct(current.expenses, previousTotals.expenses);
+      if (expChange > 20) commentary.push(`Operating expenses increased ${expChange.toFixed(1)}%; open the expense line to inspect categories and staff.`);
+      else if (expChange < -15) commentary.push(`Operating expenses reduced by ${Math.abs(expChange).toFixed(1)}%.`);
     }
-    if (prevNetProfit !== 0) {
-      const profitChange = pct(netProfit, prevNetProfit);
+    if (previousTotals.netProfit !== 0) {
+      const profitChange = pct(current.netProfit, previousTotals.netProfit);
       if (profitChange > 15) commentary.push(`Net profit improved ${profitChange.toFixed(1)}%.`);
-      else if (profitChange < -15) commentary.push(`Net profit dropped ${profitChange.toFixed(1)}% — investigate causes.`);
+      else if (profitChange < -15) commentary.push(`Net profit dropped ${profitChange.toFixed(1)}%; inspect revenue, COGS, and expense source rows.`);
     }
-    const marginShift = netMargin - prevNetMargin;
-    if (Math.abs(marginShift) > 2) {
-      commentary.push(`Net margin ${marginShift > 0 ? 'improved' : 'contracted'} by ${Math.abs(marginShift).toFixed(1)}pp.`);
-    }
+    const marginShift = current.netMargin - previousTotals.netMargin;
+    if (Math.abs(marginShift) > 2) commentary.push(`Net margin ${marginShift > 0 ? "improved" : "contracted"} by ${Math.abs(marginShift).toFixed(1)} percentage points.`);
 
+    const detailGroups = financialDetailGroups(currentData);
     res.json({
-      revenue, cogs, grossProfit, expenses, netProfit,
-      totalDiscount: (salesAgg._sum.discount || 0) + (saleRecordAgg._sum.discount || 0),
-      totalTax: (salesAgg._sum.tax || 0) + (saleRecordAgg._sum.tax || 0),
-      salesCount: salesCount + saleRecordCount,
-      grossMargin, netMargin,
+      ...current,
       previous: {
-        revenue: prevRevenue, cogs: prevCogs, grossProfit: prevGrossProfit,
-        expenses: prevExpenses, netProfit: prevNetProfit, salesCount: prevSalesCount + prevSaleRecordCount,
-        grossMargin: prevGrossMargin, netMargin: prevNetMargin,
+        revenue: previousTotals.revenue,
+        cogs: previousTotals.cogs,
+        grossProfit: previousTotals.grossProfit,
+        expenses: previousTotals.expenses,
+        netProfit: previousTotals.netProfit,
+        salesCount: previousTotals.salesCount,
+        grossMargin: previousTotals.grossMargin,
+        netMargin: previousTotals.netMargin,
       },
       changes: {
-        revenue: pct(revenue, prevRevenue),
-        cogs: pct(cogs, prevCogs),
-        grossProfit: pct(grossProfit, prevGrossProfit),
-        expenses: pct(expenses, prevExpenses),
-        netProfit: pct(netProfit, prevNetProfit),
+        revenue: pct(current.revenue, previousTotals.revenue),
+        cogs: pct(current.cogs, previousTotals.cogs),
+        grossProfit: pct(current.grossProfit, previousTotals.grossProfit),
+        expenses: pct(current.expenses, previousTotals.expenses),
+        netProfit: pct(current.netProfit, previousTotals.netProfit),
       },
       commentary,
-      periods: {
-        current: { from: curStart, to: curEnd },
-        previous: { from: prevStart, to: prevEnd },
-      },
+      periods: { current: { from: curStart, to: curEnd }, previous: { from: prevStart, to: prevEnd } },
+      ratios: { grossMargin: current.grossMargin, netMargin: current.netMargin, cogsRatio: current.cogsRatio, expenseRatio: current.expenseRatio, averageSale: current.averageSale },
+      detailGroups,
+      transactions: sortFinancialRows([...detailGroups.revenue, ...detailGroups.cogs, ...detailGroups.expenses]),
+      data: [
+        financialSummaryLine("sales-revenue", "Sales Revenue", current.revenue, { credit: current.revenue, account: "Sales Revenue", type: "Income" }),
+        financialSummaryLine("cogs", "Cost of Goods Sold", current.cogs, { debit: current.cogs, account: "Cost of Goods Sold", type: "Expense" }),
+        financialSummaryLine("gross-profit", "Gross Profit", current.grossProfit, { credit: Math.max(0, current.grossProfit), debit: Math.max(0, -current.grossProfit), account: "Gross Profit", type: "Subtotal" }),
+        financialSummaryLine("operating-expenses", "Operating Expenses", current.expenses, { debit: current.expenses, account: "Operating Expenses", type: "Expense" }),
+        financialSummaryLine("net-profit", "Net Profit", current.netProfit, { credit: Math.max(0, current.netProfit), debit: Math.max(0, -current.netProfit), account: "Net Profit", type: "Result" }),
+      ],
+      summary: current,
+      reportingBasis: "Accrual basis: sales are recognized when recorded; customer repayments are cash collections, not additional income.",
+      generatedAt: new Date().toISOString(),
     });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -2031,26 +2339,27 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
 router.get("/financial/income", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const saleWhere = scopedSaleWhere(req, s);
-    const [salesAgg, saleRecordAgg, customerPayments] = await Promise.all([
-      prisma.sale.aggregate({ where: saleWhere, _sum: { total: true, tax: true } }),
-      prisma.saleRecord.aggregate({ where: saleWhere, _sum: { total: true, tax: true } }),
-      prisma.customerPayment.aggregate({ where: scopedWhere(s, df(req)), _sum: { amount: true } }),
-    ]);
-    const posSalesRevenue = aggregateNetRevenue(salesAgg);
-    const receivableSalesRevenue = aggregateNetRevenue(saleRecordAgg);
-    const salesRevenue = posSalesRevenue + receivableSalesRevenue;
-    const grossSales = Number(salesAgg._sum.total || 0) + Number(saleRecordAgg._sum.total || 0);
-    const totalTax = Number(salesAgg._sum.tax || 0) + Number(saleRecordAgg._sum.tax || 0);
+    const data = await loadFinancialReportData(req, s);
+    const totals = financialTotalsFromData(data);
+    const detailGroups = financialDetailGroups(data);
     res.json({
-      salesRevenue,
-      posSalesRevenue,
-      receivableSalesRevenue,
-      grossSales,
-      totalTax,
-      customerPayments: customerPayments._sum.amount || 0,
-      customerCollections: customerPayments._sum.amount || 0,
-      totalIncome: salesRevenue,
+      salesRevenue: totals.salesRevenue,
+      posSalesRevenue: totals.posSalesRevenue,
+      receivableSalesRevenue: totals.receivableSalesRevenue,
+      grossSales: totals.grossSales,
+      totalTax: totals.totalTax,
+      totalDiscount: totals.totalDiscount,
+      customerPayments: totals.customerPayments,
+      customerCollections: totals.customerCollections,
+      totalIncome: totals.totalIncome,
+      salesCount: totals.salesCount,
+      averageSale: totals.averageSale,
+      summary: { salesRevenue: totals.salesRevenue, posSalesRevenue: totals.posSalesRevenue, receivableSalesRevenue: totals.receivableSalesRevenue, customerCollections: totals.customerCollections, totalIncome: totals.totalIncome, salesCount: totals.salesCount },
+      detailGroups,
+      transactions: sortFinancialRows([...detailGroups.revenue, ...detailGroups.customerPayments]),
+      data: sortFinancialRows(detailGroups.revenue),
+      reportingBasis: "Accrual income report: revenue comes from sales; customer payments are shown separately as receivable collections.",
+      generatedAt: new Date().toISOString(),
     });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -2058,124 +2367,135 @@ router.get("/financial/income", authenticateToken, async (req, res) => {
 router.get("/financial/expense", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const expenses = await prisma.expense.findMany({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), include: { User: { select: { fname: true, lname: true, name: true } }, branch: { select: { name: true } }, cashAccount: { select: { name: true, type: true } } }, orderBy: { date: "asc" } });
-    const enriched = transformExpenseData(expenses.map((expense) => ({
-      ...expense,
-      user: expense.User,
-      branchName: expense.branch?.name || "Unassigned",
-      accountName: expense.cashAccount?.name || expense.paymentMethod,
-    })));
-    res.json(enriched);
+    const data = await loadFinancialReportData(req, s);
+    const totals = financialTotalsFromData(data);
+    const categoryBreakdown = {};
+    data.expenseRows.forEach((row) => addMoneyBreakdown(categoryBreakdown, row.account, row.amount));
+    const transactions = withRunningBalance(data.expenseRows.map((row) => ({ ...row, credit: 0, debit: row.amount })));
+    res.json({
+      title: "Expense Report",
+      currentBalance: totals.expenses,
+      totalExpense: totals.expenses,
+      expenseCount: totals.expenseCount,
+      summary: { totalExpense: totals.expenses, expenseCount: totals.expenseCount, byCategory: categoryBreakdown },
+      detailGroups: { expenses: sortFinancialRows(data.expenseRows), totalExpense: sortFinancialRows(data.expenseRows) },
+      transactions,
+      data: sortFinancialRows(data.expenseRows),
+      generatedAt: new Date().toISOString(),
+    });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/financial/cash-flow", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const cashTransactions = await prisma.cashTransaction.findMany({
-      where: { tenantId: s.tenantId, ...df(req) },
-      select: { type: true, amount: true },
-    });
+    const data = await loadFinancialReportData(req, s);
+    const groups = { sales: [], customerPayments: [], otherInflows: [], purchases: [], expenses: [], supplierPayments: [], otherOutflows: [], transfersIn: [], transfersOut: [] };
     const details = { sales: 0, customerPayments: 0, otherInflows: 0, purchases: 0, expenses: 0, supplierPayments: 0, otherOutflows: 0, transfersIn: 0, transfersOut: 0 };
-    for (const movement of cashTransactions) {
-      const amount = Number(movement.amount || 0);
-      const type = String(movement.type || "").toLowerCase();
-      const direction = cashMovementDirection(type);
-      if (direction === "transfer-in") details.transfersIn += amount;
-      else if (direction === "transfer-out") details.transfersOut += amount;
-      else if (direction === "in") {
-        if (type === "sale") details.sales += amount;
-        else if (type === "receipt" || type === "collection") details.customerPayments += amount;
-        else details.otherInflows += amount;
-      } else {
-        if (type === "expense") details.expenses += amount;
-        else if (type === "purchase") details.purchases += amount;
-        else if (type === "payment") details.supplierPayments += amount;
-        else details.otherOutflows += amount;
-      }
+    for (const row of data.cashRows) {
+      const type = String(row.rawType || "").toLowerCase();
+      const direction = row.direction;
+      let key = "otherInflows";
+      if (direction === "transfer-in") key = "transfersIn";
+      else if (direction === "transfer-out") key = "transfersOut";
+      else if (direction === "in") key = type === "sale" ? "sales" : (type === "receipt" || type === "collection" ? "customerPayments" : "otherInflows");
+      else key = type === "expense" ? "expenses" : (type === "purchase" ? "purchases" : (type === "payment" ? "supplierPayments" : "otherOutflows"));
+      details[key] += Number(row.amount || 0);
+      groups[key].push(row);
     }
-    const inflow = details.sales + details.customerPayments + details.otherInflows;
-    const outflow = details.purchases + details.expenses + details.supplierPayments + details.otherOutflows;
-    res.json({ inflow, outflow, netCashFlow: inflow - outflow, transfersIn: details.transfersIn, transfersOut: details.transfersOut, netAccountMovement: inflow + details.transfersIn - outflow - details.transfersOut, details });
+    const inflow = toMoney(details.sales + details.customerPayments + details.otherInflows);
+    const outflow = toMoney(details.purchases + details.expenses + details.supplierPayments + details.otherOutflows);
+    const transfersIn = toMoney(details.transfersIn);
+    const transfersOut = toMoney(details.transfersOut);
+    const netCashFlow = toMoney(inflow - outflow);
+    const netAccountMovement = toMoney(inflow + transfersIn - outflow - transfersOut);
+    const transactions = withRunningBalance(data.cashRows);
+    res.json({
+      inflow,
+      outflow,
+      netCashFlow,
+      transfersIn,
+      transfersOut,
+      netAccountMovement,
+      details,
+      summary: { inflow, outflow, netCashFlow, transfersIn, transfersOut, netAccountMovement, ...details },
+      detailGroups: {
+        inflow: sortFinancialRows([...groups.sales, ...groups.customerPayments, ...groups.otherInflows]),
+        outflow: sortFinancialRows([...groups.purchases, ...groups.expenses, ...groups.supplierPayments, ...groups.otherOutflows]),
+        netCashFlow: sortFinancialRows(data.cashRows.filter((row) => row.direction === "in" || row.direction === "out")),
+        netAccountMovement: sortFinancialRows(data.cashRows),
+        transfersIn: sortFinancialRows(groups.transfersIn),
+        transfersOut: sortFinancialRows(groups.transfersOut),
+        sales: sortFinancialRows(groups.sales),
+        customerPayments: sortFinancialRows(groups.customerPayments),
+        expenses: sortFinancialRows(groups.expenses),
+        supplierPayments: sortFinancialRows(groups.supplierPayments),
+      },
+      transactions,
+      data: sortFinancialRows(data.cashRows),
+      reportingBasis: "Cash flow basis: only actual cash, bank, card, mobile money, and transfer movements are included.",
+      generatedAt: new Date().toISOString(),
+    });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/financial/trial-balance", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const saleWhere = scopedSaleWhere(req, s);
-    const [salesAgg, saleRecordAgg, expensesAgg, products, customerBalances, supplierBalances, cashAccounts, salesWithItems, saleRecordsWithItems, taxPaymentsAgg] = await Promise.all([
-      prisma.sale.aggregate({ where: saleWhere, _sum: { total: true, tax: true } }),
-      prisma.saleRecord.aggregate({ where: saleWhere, _sum: { total: true, tax: true } }),
-      prisma.expense.aggregate({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), _sum: { amount: true } }),
-      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
-      prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
-      prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
-      prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
-      prisma.sale.findMany({
-        where: saleWhere,
-        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
-      }),
-      prisma.saleRecord.findMany({
-        where: saleWhere,
-        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
-      }),
-      prisma.taxPayment.aggregate({ where: scopedWhere(s, df(req, "dateOfPayment")), _sum: { amount: true } }),
-    ]);
-    const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
-    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
-    const salesRevenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
-    const taxCollected = Number(salesAgg._sum.tax || 0) + Number(saleRecordAgg._sum.tax || 0);
-    const taxPayable = Math.max(0, taxCollected - Number(taxPaymentsAgg._sum.amount || 0));
-    res.json({
-      accounts: [
-        { account: "Cash & Bank", debit: cashAccounts._sum.balance || 0, credit: 0 },
-        { account: "Accounts Receivable", debit: customerBalances._sum.balance || 0, credit: 0 },
-        { account: "Inventory", debit: inventoryValue, credit: 0 },
-        { account: "Accounts Payable", debit: 0, credit: supplierBalances._sum.balance || 0 },
-        { account: "Sales Revenue", debit: 0, credit: salesRevenue },
-        { account: "Tax Payable", debit: 0, credit: taxPayable },
-        { account: "Cost of Goods Sold", debit: cogs, credit: 0 },
-        { account: "Operating Expenses", debit: expensesAgg._sum.amount || 0, credit: 0 },
-      ],
-    });
+    const [data, snapshot] = await Promise.all([loadFinancialReportData(req, s), loadFinancialBalanceSnapshot(req, s)]);
+    const totals = financialTotalsFromData(data);
+    const taxPayable = Math.max(0, toMoney(totals.totalTax - totals.taxPayments));
+    const detailGroups = { ...financialDetailGroups(data), cash: sortFinancialRows(snapshot.cashRows), accountsReceivable: sortFinancialRows(snapshot.receivableRows), inventory: sortFinancialRows(snapshot.inventoryRows), accountsPayable: sortFinancialRows(snapshot.payableRows), taxPayable: sortFinancialRows([...data.taxRows, ...data.taxPaymentRows]) };
+    const accounts = [
+      { key: "cash", account: "Cash & Bank", debit: snapshot.cash, credit: 0, details: detailGroups.cash },
+      { key: "accountsReceivable", account: "Accounts Receivable", debit: snapshot.accountsReceivable, credit: 0, details: detailGroups.accountsReceivable },
+      { key: "inventory", account: "Inventory", debit: snapshot.inventory, credit: 0, details: detailGroups.inventory },
+      { key: "accountsPayable", account: "Accounts Payable", debit: 0, credit: snapshot.accountsPayable, details: detailGroups.accountsPayable },
+      { key: "salesRevenue", account: "Sales Revenue", debit: 0, credit: totals.salesRevenue, details: detailGroups.salesRevenue },
+      { key: "taxPayable", account: "Tax Payable", debit: 0, credit: taxPayable, details: detailGroups.taxPayable },
+      { key: "cogs", account: "Cost of Goods Sold", debit: totals.cogs, credit: 0, details: detailGroups.cogs },
+      { key: "expenses", account: "Operating Expenses", debit: totals.expenses, credit: 0, details: detailGroups.expenses },
+    ];
+    const totalDebit = sumFinancialRows(accounts, "debit");
+    const totalCredit = sumFinancialRows(accounts, "credit");
+    res.json({ accounts, totalDebit, totalCredit, difference: toMoney(totalDebit - totalCredit), isBalanced: Math.abs(totalDebit - totalCredit) < 0.01, detailGroups, summary: { totalDebit, totalCredit, difference: toMoney(totalDebit - totalCredit), accountCount: accounts.length }, reportingBasis: "Trial balance combines current balance-sheet accounts with period revenue and expense activity from source transactions.", generatedAt: new Date().toISOString() });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/financial/balance-sheet", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const saleWhere = scopedWhere(s, saleVisibilityFilter(req));
-    const [cashAccounts, customerBalances, products, supplierBalances, salesAgg, saleRecordAgg, expensesAgg, salesWithItems, saleRecordsWithItems, taxPaymentsAgg] = await Promise.all([
-      prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
-      prisma.customer.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
-      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, cost: true } }),
-      prisma.supplier.aggregate({ where: scopedWhere(s), _sum: { balance: true } }),
-      prisma.sale.aggregate({ where: saleWhere, _sum: { total: true, tax: true } }),
-      prisma.saleRecord.aggregate({ where: saleWhere, _sum: { total: true, tax: true } }),
-      prisma.expense.aggregate({ where: scopedExpenseWhere(s), _sum: { amount: true } }),
-      prisma.sale.findMany({
-        where: saleWhere,
-        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
-      }),
-      prisma.saleRecord.findMany({
-        where: saleWhere,
-        select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
-      }),
-      prisma.taxPayment.aggregate({ where: scopedWhere(s), _sum: { amount: true } }),
-    ]);
-    const inventoryValue = products.reduce((sum, p) => sum + (p.cost || 0) * p.quantity, 0);
-    const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
-    const salesRevenue = aggregateNetRevenue(salesAgg) + aggregateNetRevenue(saleRecordAgg);
-    const taxCollected = Number(salesAgg._sum.tax || 0) + Number(saleRecordAgg._sum.tax || 0);
-    const taxPayable = Math.max(0, taxCollected - Number(taxPaymentsAgg._sum.amount || 0));
-    const retainedEarnings = salesRevenue - cogs - (expensesAgg._sum.amount || 0);
-    const totalAssets = (cashAccounts._sum.balance || 0) + (customerBalances._sum.balance || 0) + inventoryValue;
-    const totalLiabilities = (supplierBalances._sum.balance || 0) + taxPayable;
+    const [data, snapshot] = await Promise.all([loadFinancialReportData(req, s, {}), loadFinancialBalanceSnapshot(req, s)]);
+    const totals = financialTotalsFromData(data);
+    const taxPayable = Math.max(0, toMoney(totals.totalTax - totals.taxPayments));
+    const retainedEarnings = toMoney(totals.salesRevenue - totals.cogs - totals.expenses);
+    const totalAssets = toMoney(snapshot.cash + snapshot.accountsReceivable + snapshot.inventory);
+    const totalLiabilities = toMoney(snapshot.accountsPayable + taxPayable);
+    const totalEquity = toMoney(totalAssets - totalLiabilities);
+    const detailGroups = {
+      cash: sortFinancialRows(snapshot.cashRows),
+      accountsReceivable: sortFinancialRows(snapshot.receivableRows),
+      inventory: sortFinancialRows(snapshot.inventoryRows),
+      accountsPayable: sortFinancialRows(snapshot.payableRows),
+      taxPayable: sortFinancialRows([...data.taxRows, ...data.taxPaymentRows]),
+      retainedEarnings: sortFinancialRows([...data.revenueRows, ...data.cogsRows, ...data.expenseRows]),
+      totalAssets: sortFinancialRows([...snapshot.cashRows, ...snapshot.receivableRows, ...snapshot.inventoryRows]),
+      totalLiabilities: sortFinancialRows([...snapshot.payableRows, ...data.taxRows, ...data.taxPaymentRows]),
+      totalEquity: sortFinancialRows([...data.revenueRows, ...data.cogsRows, ...data.expenseRows]),
+    };
     res.json({
-      assets: { cash: cashAccounts._sum.balance || 0, accountsReceivable: customerBalances._sum.balance || 0, inventory: inventoryValue, totalAssets },
-      liabilities: { accountsPayable: supplierBalances._sum.balance || 0, taxPayable, totalLiabilities },
-      equity: { retainedEarnings, totalEquity: totalAssets - totalLiabilities },
+      assets: { cash: snapshot.cash, accountsReceivable: snapshot.accountsReceivable, inventory: snapshot.inventory, totalAssets },
+      liabilities: { accountsPayable: snapshot.accountsPayable, taxPayable, totalLiabilities },
+      equity: { retainedEarnings, totalEquity },
+      lineItems: {
+        assets: [{ key: "cash", label: "Cash & Bank", amount: snapshot.cash }, { key: "accountsReceivable", label: "Accounts Receivable", amount: snapshot.accountsReceivable }, { key: "inventory", label: "Inventory", amount: snapshot.inventory }],
+        liabilities: [{ key: "accountsPayable", label: "Accounts Payable", amount: snapshot.accountsPayable }, { key: "taxPayable", label: "Tax Payable", amount: taxPayable }],
+        equity: [{ key: "retainedEarnings", label: "Retained Earnings", amount: retainedEarnings }],
+      },
+      detailGroups,
+      summary: { totalAssets, totalLiabilities, totalEquity, retainedEarnings },
+      reportingBasis: "Balance sheet uses current account, receivable, payable, and inventory balances. Retained earnings are derived from all recognized revenue less COGS and expenses.",
+      generatedAt: new Date().toISOString(),
     });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -2333,24 +2653,47 @@ router.get("/financial/bank-transactions", authenticateToken, async (req, res) =
         reference: t.reference || t.id.substring(0, 8),
       })),
     });
-    res.json(enriched);
+    const inflowRows = enriched.transactions.filter((row) => Number(row.debit || 0) > 0);
+    const outflowRows = enriched.transactions.filter((row) => Number(row.credit || 0) > 0);
+    res.json({
+      ...enriched,
+      detailGroups: {
+        inflow: inflowRows,
+        totalInflow: inflowRows,
+        outflow: outflowRows,
+        totalOutflow: outflowRows,
+        closingBalance: enriched.transactions,
+        transactions: enriched.transactions,
+      },
+      data: enriched.transactions,
+    });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/financial/tax", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const saleWhere = scopedSaleWhere(req, s);
-    const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where: saleWhere, select: { total: true, tax: true, discount: true, subtotal: true } }),
-      prisma.saleRecord.findMany({ where: saleWhere, select: { total: true, tax: true, discount: true, subtotal: true } }),
-    ]);
-    const allSales = [...sales, ...saleRecords];
-    const totalTax = allSales.reduce((a, x) => a + Number(x.tax || 0), 0);
-    const grossSales = allSales.reduce((a, x) => a + Number(x.total || 0), 0);
-    const totalRevenue = allSales.reduce((a, x) => a + saleNetRevenue(x), 0);
-    const totalDiscount = allSales.reduce((a, x) => a + Number(x.discount || 0), 0);
-    res.json({ grossSales, totalRevenue, totalTax, totalDiscount, salesCount: allSales.length, averageTaxRate: totalRevenue ? (totalTax / totalRevenue * 100).toFixed(2) : 0 });
+    const data = await loadFinancialReportData(req, s);
+    const totals = financialTotalsFromData(data);
+    const taxPaid = totals.taxPayments;
+    const taxPayable = Math.max(0, toMoney(totals.totalTax - taxPaid));
+    const detailGroups = { ...financialDetailGroups(data), taxPayments: sortFinancialRows(data.taxPaymentRows), taxPayable: sortFinancialRows([...data.taxRows, ...data.taxPaymentRows]) };
+    res.json({
+      grossSales: totals.grossSales,
+      totalRevenue: totals.salesRevenue,
+      totalTax: totals.totalTax,
+      taxPaid,
+      taxPayable,
+      totalDiscount: totals.totalDiscount,
+      salesCount: totals.salesCount,
+      averageTaxRate: totals.salesRevenue ? Number(((totals.totalTax / totals.salesRevenue) * 100).toFixed(2)) : 0,
+      summary: { grossSales: totals.grossSales, totalRevenue: totals.salesRevenue, totalTax: totals.totalTax, taxPaid, taxPayable, totalDiscount: totals.totalDiscount, salesCount: totals.salesCount },
+      detailGroups,
+      transactions: sortFinancialRows([...data.taxRows, ...data.taxPaymentRows]),
+      data: sortFinancialRows([...data.taxRows, ...data.taxPaymentRows]),
+      reportingBasis: "Tax report shows tax collected from sales separately from tax payments already recorded.",
+      generatedAt: new Date().toISOString(),
+    });
   } catch (err) { handleBranchError(res, err); }
 });
 

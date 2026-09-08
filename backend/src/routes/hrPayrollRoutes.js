@@ -5,7 +5,9 @@
 
 import { Router } from "express";
 import payrollService from "../services/payrollService.js";
-import { authenticateToken, requireAnyPermission, requireTenant, loadUserPermissions, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
+import prisma from "../db.js";
+import { linkedCashAccountId } from "../utils/accountingSync.js";
+import { authenticateToken, requireAnyPermission, requireTenant, loadUserPermissions, canUseTransactionAccountForPayment } from "../../middleware/auth.js";
 
 const router = Router();
 const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
@@ -243,10 +245,28 @@ router.post("/:id/pay", loadUserPermissions, requireAnyPermission(["canPayHRPayr
           "Missing required fields: amount (positive), paymentAccountId",
       });
     }
-    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod || "cash", paymentAccountId)) {
-      return res.status(403).json({ error: "You do not have permission to use this payment account", code: "NO_PAYMENT_METHOD_PERMISSION" });
+    const paymentAccount = await prisma.account.findFirst({
+      where: { id: paymentAccountId, tenantId, isActive: true },
+      select: { id: true, name: true, type: true, subType: true, description: true },
+    });
+    if (!paymentAccount) {
+      return res.status(400).json({ error: "Select an active transaction account for this salary payment." });
     }
 
+    const cashAccountId = linkedCashAccountId(paymentAccount);
+    const cashAccount = cashAccountId
+      ? await prisma.cashAccount.findFirst({
+          where: { id: cashAccountId, tenantId, isActive: true },
+          select: { id: true, name: true, type: true },
+        })
+      : null;
+    if (!cashAccount) {
+      return res.status(400).json({ error: "Selected salary payment account is not linked to an active transaction account." });
+    }
+
+    if (!canUseTransactionAccountForPayment(req, cashAccount, paymentMethod || cashAccount.type || "cash")) {
+      return res.status(403).json({ error: "You do not have permission to use this payment account", code: "NO_PAYMENT_METHOD_PERMISSION" });
+    }
     const result = await payrollService.paySalary({
       tenantId,
       payrollId: id,

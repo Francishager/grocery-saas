@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronUp } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { cn, formatCurrency } from '@/lib/utils'
 
 export interface EnrichedTransaction {
   id: string
@@ -31,6 +31,7 @@ export interface EnrichedReportData {
   summary?: Record<string, any>
   transactions: EnrichedTransaction[]
   generatedAt: string
+  detailGroups?: Record<string, any[]>
 }
 
 interface EnrichedReportProps {
@@ -78,8 +79,57 @@ const formatDateDDMMYY = (date: string | Date): string => {
   return `${day}/${month}/${year}`
 }
 
+const enrichedDetailAliases: Record<string, string[]> = {
+  totalExpense: ['totalExpense', 'expenses'],
+  expenseCount: ['expenses', 'totalExpense'],
+  totalInflow: ['inflow', 'cashInflows'],
+  totalOutflow: ['outflow', 'cashOutflows'],
+  closingBalance: ['closingBalance', 'transactions'],
+  openingBalance: ['openingBalance'],
+}
+
+const detailRowsFor = (data: EnrichedReportData, key: string) => {
+  const groups = data.detailGroups || {}
+  const keys = enrichedDetailAliases[key] || [key]
+  const rows = keys.flatMap((candidate) => Array.isArray(groups[candidate]) ? groups[candidate] : [])
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    const id = String(row?.id || row?.reference || JSON.stringify(row))
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+const looksMoney = (key: string) => /(amount|balance|debit|credit|total|revenue|profit|cost|cogs|tax|discount|paid|expense|inflow|outflow|value)$/i.test(key)
+
+function EnrichedDetailModal({ title, rows, onClose }: { title: string; rows: any[]; onClose: () => void }) {
+  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'grossAmount', 'revenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
+    .filter((key) => rows.some((row) => row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== ''))
+  const visibleColumns = columns.length ? columns : ['description', 'amount']
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true">
+      <div className="max-h-[92vh] w-full overflow-hidden rounded-t-lg bg-background shadow-xl sm:max-w-6xl sm:rounded-lg">
+        <div className="flex items-start justify-between gap-4 border-b px-4 py-3 sm:px-6">
+          <div><h3 className="text-base font-semibold">{title}</h3><p className="text-xs text-muted-foreground">{rows.length} source transaction{rows.length === 1 ? '' : 's'}</p></div>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close details"><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="max-h-[74vh] overflow-y-auto p-4 sm:p-6">
+          <div className="hidden overflow-x-auto rounded-lg border lg:block">
+            <table className="min-w-[1200px] w-full text-sm">
+              <thead className="bg-muted/50"><tr>{visibleColumns.map((column) => <th key={column} className={cn('px-4 py-3 font-medium text-muted-foreground', looksMoney(column) ? 'text-right' : 'text-left')}>{column.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</th>)}</tr></thead>
+              <tbody>{rows.map((row, index) => <tr key={`${row?.id || row?.reference || index}-${index}`} className="border-t hover:bg-muted/30">{visibleColumns.map((column) => <td key={column} className={cn('px-4 py-2 align-top', looksMoney(column) ? 'text-right tabular-nums' : '')}>{column === 'date' ? formatDateDDMMYY(row?.[column]) : looksMoney(column) ? formatCurrency(Number(row?.[column] || 0)) : formatValue(row?.[column])}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+          <div className="space-y-3 lg:hidden">{rows.map((row, index) => <div key={`${row?.id || row?.reference || index}-${index}`} className="rounded-lg border p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-medium break-words">{row?.description || row?.account || row?.type || 'Transaction'}</p><p className="text-xs text-muted-foreground">{formatDateDDMMYY(row?.date)} {row?.reference ? `- ${row.reference}` : ''}</p></div><p className="shrink-0 text-right font-semibold">{formatCurrency(Number(row?.amount ?? row?.debit ?? row?.credit ?? row?.balance ?? 0))}</p></div>{row?.details && <p className="mt-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{row.details}</p>}</div>)}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
 export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   
   if (!data || !data.transactions) {
     return (
@@ -140,14 +190,19 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
       {/* Summary Cards */}
       {data.summary && summaryKeys && summaryKeys.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {summaryKeys.map((k) => (
-            <Card key={k.key} className="border-l-4 border-l-blue-500">
-              <CardContent className="p-4">
-                <p className="text-xs font-medium text-muted-foreground uppercase">{k.label}</p>
-                <p className="mt-2 text-xl font-bold">{formatValue(data.summary[k.key], k.format)}</p>
-              </CardContent>
-            </Card>
-          ))}
+          {summaryKeys.map((k) => {
+            const rows = detailRowsFor(data, k.key)
+            const clickable = rows.length > 0
+            return (
+              <Card key={k.key} role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined} className={cn('border-l-4 border-l-blue-500', clickable && 'cursor-pointer transition hover:shadow-sm')} onClick={() => clickable && setDetail({ title: k.label, rows })} onKeyDown={(event) => { if (clickable && (event.key === 'Enter' || event.key === ' ')) setDetail({ title: k.label, rows }) }}>
+                <CardContent className="p-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase">{k.label}</p>
+                  <p className="mt-2 text-xl font-bold">{formatValue(data.summary[k.key], k.format)}</p>
+                  {clickable && <p className="mt-2 text-xs font-medium text-primary">View source transactions</p>}
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 
@@ -177,7 +232,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
               </thead>
               <tbody>
                 {data.transactions.map((txn, idx) => (
-                  <tr key={txn.id || idx} className="border-t hover:bg-muted/30 transition-colors">
+                  <tr key={txn.id || idx} className="cursor-pointer border-t hover:bg-muted/30 transition-colors" onClick={() => setDetail({ title: txn.description || txn.type || 'Transaction', rows: [txn] })}>
                     <td className="px-4 py-3 whitespace-nowrap text-xs">{formatDateDDMMYY(txn.date)}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTypeColor(txn.type)}`}>
@@ -268,6 +323,8 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
           <p className="text-muted-foreground">No transactions found for this report.</p>
         </div>
       )}
+      {detail && <EnrichedDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+
     </div>
   )
 }

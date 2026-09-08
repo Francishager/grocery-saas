@@ -4,6 +4,16 @@
  */
 
 import prisma from "../db.js";
+import { linkedCashAccountId } from "../utils/accountingSync.js";
+
+function normalizeValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isTransactionLinkedAccount(account) {
+  const subType = normalizeValue(account?.subType);
+  return subType.startsWith("transaction_") || Boolean(linkedCashAccountId(account));
+}
 const PAYE_TAX_ACCOUNT = {
   code: "2110",
   name: "PAYE Tax Payable",
@@ -325,6 +335,19 @@ class HRConfigurationService {
       });
     }
 
+    [
+      ["salaryExpenseAccountId", "Salary Expense Account", salaryExpenseAccountId],
+      ["salaryPayableAccountId", "Salary Payable Account", salaryPayableAccountId],
+      ["salaryAdvanceAccountId", "Employee Advance / Loan Account", salaryAdvanceAccountId],
+    ].forEach(([field, label, accountId]) => {
+      const account = accountMap.get(accountId);
+      if (account && isTransactionLinkedAccount(account)) {
+        errors.push({
+          field,
+          error: `${label} must be a normal Chart of Accounts account, not a transaction/payment account. Select Cash, Safe, Bank, Mobile Money, or Card only when paying.`,
+        });
+      }
+    });
     return {
       valid: errors.length === 0,
       errors,
@@ -374,7 +397,7 @@ class HRConfigurationService {
         orderBy: { code: "asc" },
       });
 
-      return accounts;
+      return accounts.filter((account) => !isTransactionLinkedAccount(account));
     } catch (error) {
       console.error("Error fetching available accounts:", error);
       throw error;
@@ -399,10 +422,24 @@ class HRConfigurationService {
         "asset"
       );
 
+      const transactionAccounts = await prisma.account.findMany({
+        where: {
+          tenantId,
+          type: "asset",
+          isActive: true,
+          OR: [
+            { subType: { startsWith: "transaction_" } },
+            { description: { contains: "cashAccount:" } },
+          ],
+        },
+        orderBy: { code: "asc" },
+      });
+
       return {
         expenseAccounts,
         liabilityAccounts,
         assetAccounts,
+        transactionAccounts,
       };
     } catch (error) {
       console.error("Error fetching accounts by type:", error);

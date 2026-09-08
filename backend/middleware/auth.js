@@ -14,7 +14,7 @@ const TENANT_STATUS_MESSAGES = {
 };
 const PAYMENT_METHOD_PERMISSION_MAP = {
   cash: 'canUseCash',
-  safe: 'canUseCash',
+  safe: 'canUseSafeAccount',
   mobile_money: 'canUseMobileMoney',
   bank_transfer: 'canUseBank',
   bank: 'canUseBank',
@@ -26,7 +26,7 @@ const normalizePermissionValue = (value) => String(value || '').trim().toLowerCa
 
 const paymentMethodForAccountType = (accountType) => {
   const type = normalizePermissionValue(accountType);
-  if (type === 'safe') return 'cash';
+  if (type === 'safe') return 'safe';
   if (type === 'bank') return 'bank';
   if (type === 'mobile_money') return 'mobile_money';
   if (type === 'card') return 'card';
@@ -498,13 +498,14 @@ export const requireCashAccount = async (req, res, next) => {
  */
 export const getPaymentMethodPermissions = (req, permissionRecordOrList = null) => {
   if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) {
-    return { canUseCash: true, canUseMobileMoney: true, canUseBank: true, canUseCard: true };
+    return { canUseCash: true, canUseSafeAccount: true, canUseMobileMoney: true, canUseBank: true, canUseCard: true };
   }
 
   const hasPermission = (key) => hasResolvedPermission(req, key, permissionRecordOrList);
 
   return {
     canUseCash: hasPermission('canUseCash'),
+    canUseSafeAccount: hasPermission('canUseSafeAccount'),
     canUseMobileMoney: hasPermission('canUseMobileMoney'),
     canUseBank: hasPermission('canUseBank'),
     canUseCard: hasPermission('canUseCard'),

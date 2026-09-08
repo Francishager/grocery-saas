@@ -4,6 +4,7 @@ import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { nextEmployeeNumber } from "../src/utils/employeeNumber.js";
+import { linkedCashAccountId } from "../src/utils/accountingSync.js";
 
 const router = Router();
 
@@ -51,6 +52,15 @@ function journalLineBalanceDelta(account, debit, credit) {
   return isDebitNormalAccount(account) ? debit - credit : credit - debit;
 }
 
+function normalizeAccountValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isTransactionLinkedAccount(account) {
+  const subType = normalizeAccountValue(account?.subType);
+  return subType.startsWith("transaction_") || Boolean(linkedCashAccountId(account));
+}
+
 function hrAccountingSetupError(missing = []) {
   const required = missing.length ? missing.join(", ") : "Staff Salaries & Wages, Salaries Payable, and Employee Advances/Loans";
   return `HR accounting accounts are not configured. Create the required Chart of Accounts first and map them in HR > HR Accounting before posting. Missing: ${required}.`;
@@ -85,6 +95,36 @@ async function getRequiredHRAccounts(tx, tenantId, requiredFields) {
     throw error;
   }
 
+  const expectedTypes = {
+    salaryExpenseAccountId: new Set(["expense", "expenses"]),
+    salaryPayableAccountId: new Set(["liability"]),
+    salaryAdvanceAccountId: new Set(["asset"]),
+    payeTaxAccountId: new Set(["liability"]),
+    socialSecurityAccountId: new Set(["liability"]),
+  };
+  const invalidTypes = requiredFields.filter((field) => {
+    const account = accountsById.get(config[field]);
+    return account && !expectedTypes[field]?.has(String(account.type || "").trim().toLowerCase());
+  });
+  if (invalidTypes.length) {
+    const error = new Error(`Invalid HR accounting account type for: ${invalidTypes.map((field) => HR_ACCOUNT_LABELS[field] || field).join(", ")}. Salary payable must be a liability account, never a cash or other transaction account.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const transactionLinkedFields = requiredFields.filter((field) => {
+    const account = accountsById.get(config[field]);
+    return account && isTransactionLinkedAccount(account);
+  });
+
+  if (transactionLinkedFields.length) {
+    const error = new Error(
+      `Invalid HR accounting account mapping for: ${transactionLinkedFields.map((field) => HR_ACCOUNT_LABELS[field] || field).join(", ")}. Payroll posting accounts must be normal Chart of Accounts accounts, not cash, safe, bank, mobile money, card, or other transaction accounts. Select the payment account only when paying the posted salary.`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
   return { config, accountsById };
 }
 
@@ -109,7 +149,15 @@ function payrollPostingLines(payroll, config, employeeName) {
   const recordedDeductions = money(payroll.totalDeductions);
   const itemizedDeductions = salaryAdvanceRecovery + paye + socialSecurityTax + healthInsurance + otherDeductions;
   const unclassifiedDeductions = Math.max(0, recordedDeductions - itemizedDeductions);
-  const salaryPayableAmount = grossSalary - salaryAdvanceRecovery - paye - socialSecurityTax;
+  const salaryPayableAmount = money(payroll.netSalary);
+  const accountedDeductions = salaryAdvanceRecovery + paye + socialSecurityTax;
+  const unallocatedDeductions = grossSalary - salaryPayableAmount - accountedDeductions;
+
+  if (unallocatedDeductions > 0.01) {
+    const error = new Error("Payroll contains health or other deductions without mapped liability accounts. Configure those deductions before posting.");
+    error.statusCode = 400;
+    throw error;
+  }
 
   if (salaryPayableAmount < -0.01) {
     const error = new Error("Payroll deductions exceed gross salary. Review the payroll before posting to accounting.");
@@ -927,6 +975,35 @@ router.put("/payroll/:id/pay", authenticateToken, requirePermission("canManageHR
         throw error;
       }
 
+      const paymentCashAccountId = linkedCashAccountId(paymentAccount);
+      const paymentCashAccount = paymentCashAccountId
+        ? await tx.cashAccount.findFirst({ where: { id: paymentCashAccountId, tenantId, isActive: true } })
+        : null;
+      if (!paymentCashAccount) {
+        const error = new Error("Salary payments must use a linked transaction account such as Cash, Safe, Bank, Mobile Money, or Card.");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const normalizedPaymentMethod = normalizeAccountValue(paymentMethod || paymentCashAccount.type || "cash");
+      const paymentCashType = normalizeAccountValue(paymentCashAccount.type);
+      const methodMatchesAccount =
+        (normalizedPaymentMethod === "cash" && paymentCashType === "cash") ||
+        (normalizedPaymentMethod === "safe" && paymentCashType === "safe") ||
+        (["bank", "bank_transfer", "cheque"].includes(normalizedPaymentMethod) && paymentCashType === "bank") ||
+        (normalizedPaymentMethod === "mobile_money" && paymentCashType === "mobile_money") ||
+        (normalizedPaymentMethod === "card" && paymentCashType === "card");
+      if (!methodMatchesAccount) {
+        const error = new Error("Selected salary payment account does not match the selected payment method.");
+        error.statusCode = 400;
+        throw error;
+      }
+      if (money(paymentCashAccount.balance) < paymentAmount) {
+        const error = new Error(`Insufficient balance in ${paymentCashAccount.name}. Available: ${money(paymentCashAccount.balance).toFixed(2)}, required: ${paymentAmount.toFixed(2)}.`);
+        error.statusCode = 400;
+        throw error;
+      }
+
       const payment = await tx.payrollPayment.create({
         data: {
           tenantId,
@@ -963,6 +1040,27 @@ router.put("/payroll/:id/pay", authenticateToken, requirePermission("canManageHR
             description: `Salary payment from ${paymentAccount.name}`,
           },
         ],
+      });
+
+      const updatedCashAccount = await tx.cashAccount.update({
+        where: { id: paymentCashAccount.id },
+        data: { balance: { decrement: paymentAmount } },
+      });
+      await tx.account.update({
+        where: { id: paymentAccount.id },
+        data: { balance: updatedCashAccount.balance },
+      });
+      await tx.cashTransaction.create({
+        data: {
+          tenantId,
+          accountId: paymentCashAccount.id,
+          type: "hr_journal_out",
+          amount: paymentAmount,
+          balanceAfter: updatedCashAccount.balance,
+          reference: referenceNo || payment.id,
+          description: `Salary payment - ${employeeName} - ${current.period}`,
+          userId,
+        },
       });
 
       const updatedPayment = await tx.payrollPayment.update({
