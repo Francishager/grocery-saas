@@ -2957,12 +2957,17 @@ router.get("/customers/credit-notes", authenticateToken, async (req, res) => {
     const where = scopedWhere(s, { ...df(req), status: { not: "cancelled" }, ...(customerId ? { customerId } : {}) });
     const creditNotes = await prisma.creditNote.findMany({
       where,
-      include: { customer: { select: { name: true, phone: true } } },
+      include: {
+        customer: { select: { name: true, phone: true } },
+        sale: { select: { receiptNo: true, total: true, balance: true, createdAt: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
     const data = creditNotes.map((cn) => ({
       noteNo: cn.noteNo,
       customer: cn.customer?.name || "N/A",
+      originalSale: cn.sale?.receiptNo || "Unlinked",
+      originalSaleTotal: cn.sale?.total || 0,
       amount: cn.amount,
       reason: cn.reason,
       status: cn.status,
@@ -3420,12 +3425,17 @@ router.get("/suppliers/debit-notes", authenticateToken, async (req, res) => {
     const where = scopedWhere(s, { ...df(req), status: { not: "cancelled" }, ...(supplierId ? { supplierId } : {}) });
     const debitNotes = await prisma.debitNote.findMany({
       where,
-      include: { supplier: { select: { name: true, phone: true } } },
+      include: {
+        supplier: { select: { name: true, phone: true } },
+        purchase: { select: { refNo: true, total: true, balance: true, createdAt: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
     const data = debitNotes.map((dn) => ({
       noteNo: dn.noteNo,
       supplier: dn.supplier?.name || "N/A",
+      originalPurchase: dn.purchase?.refNo || "Unlinked",
+      originalPurchaseTotal: dn.purchase?.total || 0,
       amount: dn.amount,
       reason: dn.reason,
       status: dn.status,

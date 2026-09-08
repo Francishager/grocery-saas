@@ -518,6 +518,7 @@ router.get('/credit-notes', authenticateToken, requirePermission('canViewReceiva
         orderBy: { createdAt: 'desc' },
         include: {
           customer: { select: { id: true, name: true, phone: true } },
+          sale: { select: { id: true, receiptNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       }),
@@ -547,6 +548,7 @@ router.get('/credit-notes/:id', authenticateToken, requirePermission('canViewRec
       where: scopedWhere(scope, { id: req.params.id }),
       include: {
         customer: { select: { id: true, name: true, phone: true, email: true } },
+        sale: { select: { id: true, receiptNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
         branch: { select: { id: true, name: true } },
       },
     })
@@ -573,13 +575,19 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
     const noteAmount = toMoney(amount)
     if (noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
     const normalizedReason = validateReason(reason, CREDIT_REASONS, 'credit note')
-    if (CREDIT_STOCK_REASONS.has(normalizedReason) && !saleId) {
-      return res.status(400).json({ error: 'Select the original customer sale before creating a return or cancellation credit note' })
+    if (!saleId) {
+      return res.status(400).json({ error: 'Select the original customer sale before creating a credit note' })
     }
 
-    // Verify customer belongs to tenant
+    // Verify customer and original sale belong to this tenant scope
     const customer = await prisma.customer.findFirst({ where: { id: customerId, tenantId } })
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const originalSale = await prisma.saleRecord.findFirst({
+      where: scopedWhere(scope, { id: saleId, customerId, status: { not: 'cancelled' } }),
+      select: { id: true },
+    })
+    if (!originalSale) return res.status(404).json({ error: 'Original customer sale was not found' })
 
     const noteNo = await generateNoteNo('CN', prisma.creditNote, tenantId)
 
@@ -599,6 +607,7 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
         },
         include: {
           customer: { select: { id: true, name: true, phone: true } },
+          sale: { select: { id: true, receiptNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       })
@@ -645,6 +654,7 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
         data: updates,
         include: {
           customer: { select: { id: true, name: true, phone: true } },
+          sale: { select: { id: true, receiptNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       })
@@ -673,6 +683,7 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
         data: { status: 'cancelled' },
         include: {
           customer: { select: { id: true, name: true, phone: true } },
+          sale: { select: { id: true, receiptNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       })
@@ -719,6 +730,7 @@ router.get('/debit-notes', authenticateToken, requirePermission('canViewPayable'
         orderBy: { createdAt: 'desc' },
         include: {
           supplier: { select: { id: true, name: true, phone: true } },
+          purchase: { select: { id: true, refNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       }),
@@ -748,6 +760,7 @@ router.get('/debit-notes/:id', authenticateToken, requirePermission('canViewPaya
       where: scopedWhere(scope, { id: req.params.id }),
       include: {
         supplier: { select: { id: true, name: true, phone: true, email: true } },
+        purchase: { select: { id: true, refNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
         branch: { select: { id: true, name: true } },
       },
     })
@@ -774,13 +787,19 @@ router.post('/debit-notes', authenticateToken, requirePermission('canCreatePayab
     const noteAmount = toMoney(amount)
     if (noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
     const normalizedReason = validateReason(reason, DEBIT_REASONS, 'debit note')
-    if (DEBIT_STOCK_REASONS.has(normalizedReason) && !purchaseId) {
-      return res.status(400).json({ error: 'Select the original supplier purchase before creating a return, delivery, quality, or cancellation debit note' })
+    if (!purchaseId) {
+      return res.status(400).json({ error: 'Select the original supplier purchase before creating a debit note' })
     }
 
-    // Verify supplier belongs to tenant
+    // Verify supplier and original purchase belong to this tenant scope
     const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId } })
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' })
+
+    const originalPurchase = await prisma.supplierPurchase.findFirst({
+      where: scopedWhere(scope, { id: purchaseId, supplierId }),
+      select: { id: true },
+    })
+    if (!originalPurchase) return res.status(404).json({ error: 'Original supplier purchase was not found' })
 
     const noteNo = await generateNoteNo('DN', prisma.debitNote, tenantId)
 
@@ -800,6 +819,7 @@ router.post('/debit-notes', authenticateToken, requirePermission('canCreatePayab
         },
         include: {
           supplier: { select: { id: true, name: true, phone: true } },
+          purchase: { select: { id: true, refNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       })
@@ -863,6 +883,7 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
         data: updates,
         include: {
           supplier: { select: { id: true, name: true, phone: true } },
+          purchase: { select: { id: true, refNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       })
@@ -897,6 +918,7 @@ router.patch('/debit-notes/:id/cancel', authenticateToken, requirePermission('ca
         data: { status: 'cancelled' },
         include: {
           supplier: { select: { id: true, name: true, phone: true } },
+          purchase: { select: { id: true, refNo: true, total: true, balance: true, paymentStatus: true, createdAt: true } },
           branch: { select: { id: true, name: true } },
         },
       })

@@ -1051,6 +1051,7 @@ model SaleRecord {
   notes         String?
   items         SaleRecordItem[]
   payments      CustomerPayment[]
+  creditNotes   CreditNote[]
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   User          User              @relation(fields: [userId], references: [id])
@@ -1296,6 +1297,7 @@ model SupplierPurchase {
   notes         String?
   items         SupplierPurchaseItem[]
   payments      SupplierPayment[]
+  debitNotes    DebitNote[]
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
   User          User                   @relation(fields: [userId], references: [id])
@@ -3453,7 +3455,8 @@ model CreditNote {
   branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
-  saleId     String? // Linked sale record (optional)
+  saleId     String? // Linked sale record (required for new notes)
+  sale       SaleRecord? @relation(fields: [saleId], references: [id], onDelete: SetNull)
   amount     Float
   reason     String // sales_return, price_adjustment, overcharge, cancellation, other
   status     String   @default("issued") // issued, applied, cancelled
@@ -3478,7 +3481,8 @@ model DebitNote {
   branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   supplierId String
   supplier   Supplier @relation(fields: [supplierId], references: [id])
-  purchaseId String? // Linked purchase (optional)
+  purchaseId String? // Linked purchase (required for new notes)
+  purchase   SupplierPurchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
   amount     Float
   reason     String // purchase_return, short_delivery, quality_issue, price_adjustment, other
   status     String   @default("issued") // issued, applied, cancelled

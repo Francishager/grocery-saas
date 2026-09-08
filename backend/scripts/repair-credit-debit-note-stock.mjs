@@ -5,6 +5,8 @@ const prisma = new PrismaClient()
 
 const CREDIT_RETURN_STATUS = 'stock_adjusted'
 const CREDIT_RETURN_METHOD = 'credit_note_stock'
+const CREDIT_LINK_REASONS = ['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other']
+const DEBIT_LINK_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'price_adjustment', 'cancellation', 'other']
 const CREDIT_STOCK_REASONS = ['sales_return', 'cancellation']
 const DEBIT_STOCK_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'cancellation']
 const argValue = (name) => {
@@ -40,6 +42,11 @@ const money = (value) => {
 }
 
 const sameMoney = (a, b) => Math.abs(money(a) - money(b)) <= 0.01
+const paymentStatusForBalance = (total, amountPaid, balance, adjustmentTotal = 0) => {
+  if (balance <= 0) return 'paid'
+  if (amountPaid > 0 || adjustmentTotal > 0 || balance < total) return 'partial'
+  return 'unpaid'
+}
 const returnNoForCreditNote = (noteNo) => `RET-${noteNo}`
 const isStockItem = (item) => item.product?.itemType !== 'service'
 const noteMatchesRef = (note, ref) => Boolean(ref && (note.id === ref || note.noteNo === ref))
@@ -326,6 +333,115 @@ async function findDebitNotePurchase(note) {
   }
 }
 
+async function refreshLinkedSaleBalance(client, noteTenantId, saleId) {
+  if (!saleId) return null
+  const sale = await client.saleRecord.findFirst({
+    where: { id: saleId, tenantId: noteTenantId, status: { not: 'cancelled' } },
+    select: { id: true, total: true, amountPaid: true },
+  })
+  if (!sale) return null
+
+  const creditNotes = await client.creditNote.aggregate({
+    where: { tenantId: noteTenantId, saleId, status: { not: 'cancelled' } },
+    _sum: { amount: true },
+  })
+  const adjustmentTotal = money(creditNotes._sum.amount)
+  const total = money(sale.total)
+  const amountPaid = money(sale.amountPaid)
+  const balance = Math.max(0, money(total - amountPaid - adjustmentTotal))
+
+  return client.saleRecord.update({
+    where: { id: sale.id },
+    data: {
+      balance,
+      paymentStatus: paymentStatusForBalance(total, amountPaid, balance, adjustmentTotal),
+    },
+  })
+}
+
+async function refreshLinkedPurchaseBalance(client, noteTenantId, purchaseId) {
+  if (!purchaseId) return null
+  const purchase = await client.supplierPurchase.findFirst({
+    where: { id: purchaseId, tenantId: noteTenantId },
+    select: { id: true, total: true, amountPaid: true },
+  })
+  if (!purchase) return null
+
+  const debitNotes = await client.debitNote.aggregate({
+    where: { tenantId: noteTenantId, purchaseId, status: { not: 'cancelled' } },
+    _sum: { amount: true },
+  })
+  const adjustmentTotal = money(debitNotes._sum.amount)
+  const total = money(purchase.total)
+  const amountPaid = money(purchase.amountPaid)
+  const balance = Math.max(0, money(total - amountPaid - adjustmentTotal))
+
+  return client.supplierPurchase.update({
+    where: { id: purchase.id },
+    data: {
+      balance,
+      paymentStatus: paymentStatusForBalance(total, amountPaid, balance, adjustmentTotal),
+    },
+  })
+}
+
+async function repairCreditNoteLinks(summary) {
+  const notes = await prisma.creditNote.findMany({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      ...(manualCreditNoteRef ? { OR: [{ id: manualCreditNoteRef }, { noteNo: manualCreditNoteRef }] } : {}),
+      saleId: null,
+      reason: { in: CREDIT_LINK_REASONS },
+      status: { not: 'cancelled' },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  for (const note of notes) {
+    const { sale, skipped, candidates } = await findCreditNoteSale(note)
+    if (!sale) {
+      summary.creditNoteLinks.skipped.push(noteSkip(note, skipped, { customerId: note.customerId, candidates }))
+      continue
+    }
+
+    if (!dryRun) {
+      await prisma.$transaction(async (tx) => {
+        await tx.creditNote.update({ where: { id: note.id }, data: { saleId: sale.id } })
+        await refreshLinkedSaleBalance(tx, note.tenantId, sale.id)
+      })
+    }
+    summary.creditNoteLinks.repaired += 1
+  }
+}
+
+async function repairDebitNoteLinks(summary) {
+  const notes = await prisma.debitNote.findMany({
+    where: {
+      ...(tenantId ? { tenantId } : {}),
+      ...(manualDebitNoteRef ? { OR: [{ id: manualDebitNoteRef }, { noteNo: manualDebitNoteRef }] } : {}),
+      purchaseId: null,
+      reason: { in: DEBIT_LINK_REASONS },
+      status: { not: 'cancelled' },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  for (const note of notes) {
+    const { purchase, skipped, candidates } = await findDebitNotePurchase(note)
+    if (!purchase) {
+      summary.debitNoteLinks.skipped.push(noteSkip(note, skipped, { supplierId: note.supplierId, candidates }))
+      continue
+    }
+
+    if (!dryRun) {
+      await prisma.$transaction(async (tx) => {
+        await tx.debitNote.update({ where: { id: note.id }, data: { purchaseId: purchase.id } })
+        await refreshLinkedPurchaseBalance(tx, note.tenantId, purchase.id)
+      })
+    }
+    summary.debitNoteLinks.repaired += 1
+  }
+}
 async function repairCreditNotes(summary) {
   const notes = await prisma.creditNote.findMany({
     where: {
@@ -404,6 +520,7 @@ async function repairCreditNotes(summary) {
         if (!note.saleId) {
           await tx.creditNote.update({ where: { id: note.id }, data: { saleId: sale.id } })
         }
+        await refreshLinkedSaleBalance(tx, note.tenantId, sale.id)
       })
     }
 
@@ -493,6 +610,7 @@ async function repairDebitNotes(summary) {
         if (!note.purchaseId) {
           await tx.debitNote.update({ where: { id: note.id }, data: { purchaseId: purchase.id } })
         }
+        await refreshLinkedPurchaseBalance(tx, note.tenantId, purchase.id)
       })
     }
 
@@ -511,10 +629,14 @@ async function main() {
       purchase: manualPurchaseRef || null,
       items: Array.from(manualItems.entries()).map(([productId, quantity]) => ({ productId, quantity })),
     },
+    creditNoteLinks: { repaired: 0, skipped: [] },
+    debitNoteLinks: { repaired: 0, skipped: [] },
     creditNotes: { repaired: 0, alreadyFixed: 0, skipped: [] },
     debitNotes: { repaired: 0, alreadyFixed: 0, skipped: [] },
   }
 
+  await repairCreditNoteLinks(summary)
+  await repairDebitNoteLinks(summary)
   await repairCreditNotes(summary)
   await repairDebitNotes(summary)
   console.log(JSON.stringify(summary, null, 2))

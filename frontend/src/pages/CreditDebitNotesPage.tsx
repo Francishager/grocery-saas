@@ -23,6 +23,8 @@ interface Note {
   createdAt: string
   customer?: { id: string; name: string; phone?: string }
   supplier?: { id: string; name: string; phone?: string }
+  sale?: { id: string; receiptNo?: string; total?: number; balance?: number; paymentStatus?: string; createdAt?: string }
+  purchase?: { id: string; refNo?: string; total?: number; balance?: number; paymentStatus?: string; createdAt?: string }
   branch?: { id: string; name: string }
 }
 
@@ -150,7 +152,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   }, [])
 
   const fetchLinkedDocs = useCallback(async () => {
-    if (!showModal || editNote || !entityId || !stockReturnMode) {
+    if (!showModal || editNote || !entityId || !reason) {
       setLinkedDocs([])
       setLinkedDocId('')
       setReturnItems([])
@@ -168,7 +170,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       const responseRows = activeTab === 'credit' ? data.sales : data.purchases
       const sourceRows = Array.isArray(responseRows) ? responseRows : Array.isArray(data) ? data : []
       const docs: LinkedDoc[] = sourceRows
-        .filter((row: any) => row?.id && Array.isArray(row.items) && row.items.length > 0 && row.status !== 'cancelled' && money(row.balance ?? row.total) > 0)
+        .filter((row: any) => row?.id && Array.isArray(row.items) && row.items.length > 0 && row.status !== 'cancelled')
         .map((row: any) => ({
           id: row.id,
           refNo: row.receiptNo || row.refNo || row.id.slice(-8),
@@ -198,7 +200,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
     } finally {
       setLoadingLinkedDocs(false)
     }
-  }, [activeTab, editNote, entityId, showModal, stockReturnMode, toast])
+  }, [activeTab, editNote, entityId, reason, showModal, toast])
 
   useEffect(() => {
     fetchLinkedDocs()
@@ -272,12 +274,12 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       toast({ variant: 'destructive', title: 'Please select a reason' })
       return
     }
-    if (!editNote && stockReturnMode) {
+    if (!editNote) {
       if (!linkedDocId) {
         toast({ variant: 'destructive', title: `Select the original ${activeTab === 'credit' ? 'sale' : 'purchase'}` })
         return
       }
-      if (!returnItems.some(item => Number(item.quantity || 0) > 0)) {
+      if (stockReturnMode && !returnItems.some(item => Number(item.quantity || 0) > 0)) {
         toast({ variant: 'destructive', title: 'Select at least one product quantity to return' })
         return
       }
@@ -299,10 +301,10 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
         }
         if (activeTab === 'credit') {
           payload.customerId = entityId
-          if (stockReturnMode) payload.saleId = linkedDocId
+          payload.saleId = linkedDocId
         } else {
           payload.supplierId = entityId
-          if (stockReturnMode) payload.purchaseId = linkedDocId
+          payload.purchaseId = linkedDocId
         }
         await api.create(payload)
         toast({ title: `${activeTab === 'credit' ? 'Credit' : 'Debit'} note created` })
@@ -405,6 +407,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                   <tr>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Note No</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">{entityLabel}</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Original</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Amount</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Reason</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Branch</th>
@@ -418,6 +421,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                     <tr key={note.id} className="border-t hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium">{note.noteNo}</td>
                       <td className="px-4 py-3">{note.customer?.name || note.supplier?.name || '—'}</td>
+                      <td className="px-4 py-3">{note.sale?.receiptNo || note.purchase?.refNo || 'Unlinked'}</td>
                       <td className="px-4 py-3 text-right font-medium">{formatCurrency(note.amount)}</td>
                       <td className="px-4 py-3">
                         <span className="capitalize">{note.reason.replace(/_/g, ' ')}</span>
@@ -506,7 +510,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                 readOnly={stockReturnMode && !editNote}
               />
             </div>
-            {!editNote && stockReturnMode && (
+            {!editNote && (
               <div className="space-y-3 rounded-md border p-3">
                 <div>
                   <Label>Original {activeTab === 'credit' ? 'Sale' : 'Purchase'} <span className="text-red-500">*</span></Label>
@@ -527,7 +531,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                     </SelectContent>
                   </Select>
                 </div>
-                {returnItems.length > 0 && (
+                {stockReturnMode && returnItems.length > 0 && (
                   <div className="space-y-2">
                     <div className="hidden grid-cols-[minmax(0,1fr)_96px_112px] gap-3 text-xs font-medium text-muted-foreground sm:grid">
                       <span>Product</span>
@@ -583,7 +587,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
             <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button 
               onClick={handleSubmit} 
-              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId || (stockReturnMode && (!linkedDocId || !returnItems.some(item => Number(item.quantity || 0) > 0))))) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
+              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId || !linkedDocId || (stockReturnMode && !returnItems.some(item => Number(item.quantity || 0) > 0)))) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editNote ? 'Update' : 'Create'}

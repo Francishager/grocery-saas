@@ -242,7 +242,7 @@ const CATEGORIES: ReportCategory[] = [
         ]
       },
       { id: 'customersCreditNotes', label: 'Credit Notes Report', apiFn: reportsApiV2.customersCreditNotes, renderType: 'table',
-        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), textCol('originalSale', 'Original Sale'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
       },
     ]
   },
@@ -277,7 +277,7 @@ const CATEGORIES: ReportCategory[] = [
         ]
       },
       { id: 'suppliersDebitNotes', label: 'Debit Notes Report', apiFn: reportsApiV2.suppliersDebitNotes, renderType: 'table',
-        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), textCol('originalPurchase', 'Original Purchase'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
       },
       { id: 'suppliersLedger', label: 'Supplier Ledger', apiFn: reportsApiV2.suppliersLedger, renderType: 'ledger', ledgerType: 'supplier', entityType: 'supplier', showBranchFilter: true,
         columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit'), currencyCol('balance', 'Balance')]
@@ -303,7 +303,7 @@ const CATEGORIES: ReportCategory[] = [
         columns: [textCol('customer', 'Customer'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
       },
       { id: 'receivablesCreditNotes', label: 'Credit Notes Report', apiFn: reportsApiV2.customersCreditNotes, renderType: 'table',
-        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), textCol('originalSale', 'Original Sale'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
       },
     ]
   },
@@ -326,7 +326,7 @@ const CATEGORIES: ReportCategory[] = [
         columns: [textCol('supplier', 'Supplier'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
       },
       { id: 'payablesDebitNotes', label: 'Debit Notes Report', apiFn: reportsApiV2.suppliersDebitNotes, renderType: 'table',
-        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), textCol('originalPurchase', 'Original Purchase'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
       },
     ]
   },
