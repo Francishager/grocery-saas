@@ -49,11 +49,13 @@ interface LinkedDoc {
 }
 
 const CREDIT_REASONS = ['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other']
-const DEBIT_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'price_adjustment', 'other']
+const DEBIT_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'price_adjustment', 'cancellation', 'other']
+const CREDIT_STOCK_REASONS = ['sales_return', 'cancellation']
+const DEBIT_STOCK_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'cancellation']
 
 const isStockReturnReason = (tab: NoteType, value: string) => (
-  (tab === 'credit' && CREDIT_REASONS.includes(value)) ||
-  (tab === 'debit' && value === 'purchase_return')
+  (tab === 'credit' && CREDIT_STOCK_REASONS.includes(value)) ||
+  (tab === 'debit' && DEBIT_STOCK_REASONS.includes(value))
 )
 
 const defaultStockReturnReason = (tab: NoteType) => tab === 'credit' ? 'sales_return' : 'purchase_return'
@@ -166,7 +168,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       const responseRows = activeTab === 'credit' ? data.sales : data.purchases
       const sourceRows = Array.isArray(responseRows) ? responseRows : Array.isArray(data) ? data : []
       const docs: LinkedDoc[] = sourceRows
-        .filter((row: any) => row?.id && Array.isArray(row.items) && row.items.length > 0 && row.status !== 'cancelled')
+        .filter((row: any) => row?.id && Array.isArray(row.items) && row.items.length > 0 && row.status !== 'cancelled' && money(row.balance ?? row.total) > 0)
         .map((row: any) => ({
           id: row.id,
           refNo: row.receiptNo || row.refNo || row.id.slice(-8),
@@ -316,7 +318,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   }
 
   const handleCancel = async (note: Note) => {
-    if (!confirm(`Cancel ${note.noteNo}? This will reverse the balance adjustment.`)) return
+    if (!confirm(`Cancel ${note.noteNo}? This will reverse the balance adjustment and any stock movement.`)) return
     try {
       const api = activeTab === 'credit' ? creditNotesApi : debitNotesApi
       await api.cancel(note.id)

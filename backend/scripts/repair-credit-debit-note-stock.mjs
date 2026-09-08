@@ -5,6 +5,8 @@ const prisma = new PrismaClient()
 
 const CREDIT_RETURN_STATUS = 'stock_adjusted'
 const CREDIT_RETURN_METHOD = 'credit_note_stock'
+const CREDIT_STOCK_REASONS = ['sales_return', 'cancellation']
+const DEBIT_STOCK_REASONS = ['purchase_return', 'short_delivery', 'quality_issue', 'cancellation']
 const argValue = (name) => {
   const arg = process.argv.find((value) => value.startsWith(name))
   return arg ? arg.split('=').slice(1).join('=') : null
@@ -329,7 +331,7 @@ async function repairCreditNotes(summary) {
     where: {
       ...(tenantId ? { tenantId } : {}),
       ...(manualCreditNoteRef ? { OR: [{ id: manualCreditNoteRef }, { noteNo: manualCreditNoteRef }] } : {}),
-      reason: 'sales_return',
+      reason: { in: CREDIT_STOCK_REASONS },
       status: { not: 'cancelled' },
     },
     orderBy: { createdAt: 'asc' },
@@ -414,7 +416,7 @@ async function repairDebitNotes(summary) {
     where: {
       ...(tenantId ? { tenantId } : {}),
       ...(manualDebitNoteRef ? { OR: [{ id: manualDebitNoteRef }, { noteNo: manualDebitNoteRef }] } : {}),
-      reason: 'purchase_return',
+      reason: { in: DEBIT_STOCK_REASONS },
       status: { not: 'cancelled' },
     },
     orderBy: { createdAt: 'asc' },

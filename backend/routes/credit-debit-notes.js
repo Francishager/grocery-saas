@@ -8,8 +8,10 @@ const router = express.Router()
 const prisma = new PrismaClient()
 
 const tenantIdOf = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id
-const CREDIT_STOCK_REASONS = new Set(['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other'])
-const DEBIT_STOCK_REASONS = new Set(['purchase_return'])
+const CREDIT_REASONS = new Set(['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other'])
+const DEBIT_REASONS = new Set(['purchase_return', 'short_delivery', 'quality_issue', 'price_adjustment', 'cancellation', 'other'])
+const CREDIT_STOCK_REASONS = new Set(['sales_return', 'cancellation'])
+const DEBIT_STOCK_REASONS = new Set(['purchase_return', 'short_delivery', 'quality_issue', 'cancellation'])
 const CREDIT_NOTE_STOCK_RETURN_STATUS = 'stock_adjusted'
 const CREDIT_NOTE_STOCK_RETURN_METHOD = 'credit_note_stock'
 
@@ -28,6 +30,23 @@ function httpError(statusCode, message) {
 function toMoney(value, fallback = 0) {
   const amount = Number(value)
   return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : fallback
+}
+
+function normalizeReason(reason) {
+  return String(reason || '').trim().toLowerCase()
+}
+
+function validateReason(reason, allowedReasons, label) {
+  const normalized = normalizeReason(reason)
+  if (!normalized) throw httpError(400, 'reason is required')
+  if (!allowedReasons.has(normalized)) throw httpError(400, `Invalid ${label} reason`)
+  return normalized
+}
+
+function paymentStatusForBalance(total, amountPaid, balance, adjustmentTotal = 0) {
+  if (balance <= 0) return 'paid'
+  if (amountPaid > 0 || adjustmentTotal > 0 || balance < total) return 'partial'
+  return 'unpaid'
 }
 
 function positiveQuantity(value, label = 'Quantity') {
@@ -62,7 +81,7 @@ function creditNoteReturnNo(noteNo) {
 
 async function resolveCreditReturnItems(client, scope, { customerId, saleId, items }) {
   if (!saleId) {
-    throw httpError(400, 'Select the original customer sale before creating a sales return credit note')
+    throw httpError(400, 'Select the original customer sale before creating a return or cancellation credit note')
   }
 
   const sale = await client.saleRecord.findFirst({
@@ -81,24 +100,58 @@ async function resolveCreditReturnItems(client, scope, { customerId, saleId, ite
   const useAllItems = requested.size === 0
   const returnItems = []
 
+  const existingNotes = await client.creditNote.findMany({
+    where: {
+      tenantId: scope.tenantId,
+      saleId,
+      status: { not: 'cancelled' },
+      reason: { in: [...CREDIT_STOCK_REASONS] },
+    },
+    select: { noteNo: true },
+  })
+  const existingReturnNos = existingNotes.map((note) => creditNoteReturnNo(note.noteNo))
+  const existingReturns = existingReturnNos.length
+    ? await client.saleReturn.findMany({
+        where: {
+          tenantId: scope.tenantId,
+          returnNo: { in: existingReturnNos },
+          refundMethod: CREDIT_NOTE_STOCK_RETURN_METHOD,
+          status: CREDIT_NOTE_STOCK_RETURN_STATUS,
+        },
+        include: { items: true },
+      })
+    : []
+  const returnedByProduct = new Map()
+  for (const stockReturn of existingReturns) {
+    for (const item of stockReturn.items || []) {
+      returnedByProduct.set(item.productId, Number(returnedByProduct.get(item.productId) || 0) + Number(item.quantity || 0))
+    }
+  }
+
   for (const item of sale.items || []) {
     if (item.product?.itemType === 'service') continue
+    const soldBaseQty = itemBaseQuantity(item)
+    const returnedForProduct = Number(returnedByProduct.get(item.productId) || 0)
+    const consumedFromLine = Math.min(soldBaseQty, returnedForProduct)
+    returnedByProduct.set(item.productId, Math.max(0, returnedForProduct - consumedFromLine))
+    const remainingBaseQty = Math.max(0, soldBaseQty - consumedFromLine)
+    if (remainingBaseQty <= 0) continue
+
     const requestedQty = useAllItems ? Number(item.quantity || 0) : Number(requested.get(item.productId) || 0)
     if (requestedQty <= 0) continue
-    if (requestedQty > Number(item.quantity || 0)) {
-      throw httpError(400, `Returned quantity for ${item.product?.name || 'item'} cannot exceed sold quantity`)
+    const requestedBaseQty = itemBaseQuantity(item, requestedQty)
+    if (requestedBaseQty > remainingBaseQty) {
+      throw httpError(400, `Returned quantity for ${item.product?.name || 'item'} exceeds remaining returnable quantity`)
     }
 
-    const baseQty = itemBaseQuantity(item, requestedQty)
-    if (baseQty <= 0) continue
     const lineUnitTotal = Number(item.quantity || 0) > 0 ? toMoney(item.total) / Number(item.quantity) : toMoney(item.price)
     const lineTotal = toMoney(lineUnitTotal * requestedQty)
     returnItems.push({
       productId: item.productId,
-      quantity: baseQty,
-      price: baseQty > 0 ? toMoney(lineTotal / baseQty) : 0,
+      quantity: requestedBaseQty,
+      price: requestedBaseQty > 0 ? toMoney(lineTotal / requestedBaseQty) : 0,
       total: lineTotal,
-      reason: 'Credit note sales return',
+      reason: 'Credit note stock reversal',
     })
   }
 
@@ -108,7 +161,6 @@ async function resolveCreditReturnItems(client, scope, { customerId, saleId, ite
 
   return { sale, returnItems }
 }
-
 async function createCreditNoteStockReturn(client, scope, note, items) {
   if (!CREDIT_STOCK_REASONS.has(String(note.reason || '').toLowerCase())) return null
 
@@ -150,6 +202,31 @@ async function createCreditNoteStockReturn(client, scope, note, items) {
   })
 }
 
+async function updateLinkedSaleBalanceFromCreditNotes(client, scope, saleId) {
+  if (!saleId) return null
+  const sale = await client.saleRecord.findFirst({
+    where: scopedWhere(scope, { id: saleId, status: { not: 'cancelled' } }),
+    select: { id: true, total: true, amountPaid: true },
+  })
+  if (!sale) return null
+
+  const creditNotes = await client.creditNote.aggregate({
+    where: { tenantId: scope.tenantId, saleId, status: { not: 'cancelled' } },
+    _sum: { amount: true },
+  })
+  const adjustmentTotal = toMoney(creditNotes._sum.amount)
+  const total = toMoney(sale.total)
+  const amountPaid = toMoney(sale.amountPaid)
+  const balance = Math.max(0, toMoney(total - amountPaid - adjustmentTotal))
+
+  return client.saleRecord.update({
+    where: { id: sale.id },
+    data: {
+      balance,
+      paymentStatus: paymentStatusForBalance(total, amountPaid, balance, adjustmentTotal),
+    },
+  })
+}
 async function reverseCreditNoteStockReturn(client, tenantId, noteNo) {
   const stockReturn = await client.saleReturn.findFirst({
     where: { tenantId, returnNo: creditNoteReturnNo(noteNo), status: CREDIT_NOTE_STOCK_RETURN_STATUS },
@@ -179,7 +256,7 @@ async function reverseCreditNoteStockReturn(client, tenantId, noteNo) {
 
 async function resolveDebitReturnItems(client, scope, { supplierId, purchaseId, items }) {
   if (!purchaseId) {
-    throw httpError(400, 'Select the original supplier purchase before creating a purchase return debit note')
+    throw httpError(400, 'Select the original supplier purchase before creating a return, delivery, quality, or cancellation debit note')
   }
 
   const purchase = await client.supplierPurchase.findFirst({
@@ -198,12 +275,51 @@ async function resolveDebitReturnItems(client, scope, { supplierId, purchaseId, 
   const useAllItems = requested.size === 0
   const returnItems = []
 
+  const existingNotes = await client.debitNote.findMany({
+    where: {
+      tenantId: scope.tenantId,
+      purchaseId,
+      status: { not: 'cancelled' },
+      reason: { in: [...DEBIT_STOCK_REASONS] },
+    },
+    select: { id: true },
+  })
+  const existingNoteIds = new Set(existingNotes.map((note) => note.id))
+  const existingLogs = existingNoteIds.size
+    ? await client.auditLog.findMany({
+        where: {
+          tenantId: scope.tenantId,
+          model: 'Product',
+          action: 'update',
+          AND: [
+            { changes: { path: ['stockMovement', 'source'], equals: 'debit_note' } },
+          ],
+        },
+      })
+    : []
+  const returnedByProduct = new Map()
+  for (const log of existingLogs) {
+    if (!existingNoteIds.has(log.changes?.stockMovement?.debitNoteId)) continue
+    const productId = log.recordId
+    const quantity = Number(log.changes?.stockMovement?.quantity || 0)
+    if (productId && quantity > 0) {
+      returnedByProduct.set(productId, Number(returnedByProduct.get(productId) || 0) + quantity)
+    }
+  }
+
   for (const item of purchase.items || []) {
     if (item.product?.itemType === 'service') continue
-    const requestedQty = useAllItems ? Number(item.quantity || 0) : Number(requested.get(item.productId) || 0)
+    const purchasedQty = Number(item.quantity || 0)
+    const returnedForProduct = Number(returnedByProduct.get(item.productId) || 0)
+    const consumedFromLine = Math.min(purchasedQty, returnedForProduct)
+    returnedByProduct.set(item.productId, Math.max(0, returnedForProduct - consumedFromLine))
+    const remainingQty = Math.max(0, purchasedQty - consumedFromLine)
+    if (remainingQty <= 0) continue
+
+    const requestedQty = useAllItems ? remainingQty : Number(requested.get(item.productId) || 0)
     if (requestedQty <= 0) continue
-    if (requestedQty > Number(item.quantity || 0)) {
-      throw httpError(400, `Returned quantity for ${item.product?.name || 'item'} cannot exceed purchased quantity`)
+    if (requestedQty > remainingQty) {
+      throw httpError(400, `Returned quantity for ${item.product?.name || 'item'} exceeds remaining returnable quantity`)
     }
     if (Number(item.product?.quantity || 0) < requestedQty) {
       throw httpError(400, `Insufficient stock for ${item.product?.name || 'item'} to return to supplier`)
@@ -223,7 +339,6 @@ async function resolveDebitReturnItems(client, scope, { supplierId, purchaseId, 
 
   return { purchase, returnItems }
 }
-
 async function debitNoteStockLogs(client, tenantId, noteId, source = 'debit_note') {
   return client.auditLog.findMany({
     where: {
@@ -345,6 +460,31 @@ async function reverseDebitNoteStockReturn(client, scope, note, req) {
   return logs
 }
 
+async function updateLinkedPurchaseBalanceFromDebitNotes(client, scope, purchaseId) {
+  if (!purchaseId) return null
+  const purchase = await client.supplierPurchase.findFirst({
+    where: scopedWhere(scope, { id: purchaseId }),
+    select: { id: true, total: true, amountPaid: true },
+  })
+  if (!purchase) return null
+
+  const debitNotes = await client.debitNote.aggregate({
+    where: { tenantId: scope.tenantId, purchaseId, status: { not: 'cancelled' } },
+    _sum: { amount: true },
+  })
+  const adjustmentTotal = toMoney(debitNotes._sum.amount)
+  const total = toMoney(purchase.total)
+  const amountPaid = toMoney(purchase.amountPaid)
+  const balance = Math.max(0, toMoney(total - amountPaid - adjustmentTotal))
+
+  return client.supplierPurchase.update({
+    where: { id: purchase.id },
+    data: {
+      balance,
+      paymentStatus: paymentStatusForBalance(total, amountPaid, balance, adjustmentTotal),
+    },
+  })
+}
 // ============================================================
 // CREDIT NOTES (Customer-facing)
 // ============================================================
@@ -430,10 +570,11 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
     const { customerId, saleId, amount, reason, notes, branchId, items = [] } = req.body
 
     if (!customerId) return res.status(400).json({ error: 'customerId is required' })
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
-    if (!reason) return res.status(400).json({ error: 'reason is required' })
-    if (CREDIT_STOCK_REASONS.has(String(reason).toLowerCase()) && !saleId) {
-      return res.status(400).json({ error: 'Select the original customer sale before creating a sales return credit note' })
+    const noteAmount = toMoney(amount)
+    if (noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+    const normalizedReason = validateReason(reason, CREDIT_REASONS, 'credit note')
+    if (CREDIT_STOCK_REASONS.has(normalizedReason) && !saleId) {
+      return res.status(400).json({ error: 'Select the original customer sale before creating a return or cancellation credit note' })
     }
 
     // Verify customer belongs to tenant
@@ -450,8 +591,8 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
           branchId: branchId || scope.branchId || null,
           customerId,
           saleId: saleId || null,
-          amount: Number(amount),
-          reason,
+          amount: noteAmount,
+          reason: normalizedReason,
           notes: notes || null,
           userId: req.user.id,
           status: 'issued',
@@ -462,6 +603,7 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
         },
       })
       await createCreditNoteStockReturn(tx, scope, createdNote, items)
+      await updateLinkedSaleBalanceFromCreditNotes(tx, scope, createdNote.saleId)
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
       return createdNote
     })
@@ -483,16 +625,20 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
 
     const { amount, reason, notes } = req.body
     const updates = {}
-    if (amount !== undefined && amount > 0) {
-      updates.amount = Number(amount)
+    if (amount !== undefined) {
+      const nextAmount = toMoney(amount)
+      if (nextAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+      updates.amount = nextAmount
     }
-    if (reason !== undefined) updates.reason = reason
+    const normalizedReason = reason !== undefined ? validateReason(reason, CREDIT_REASONS, 'credit note') : normalizeReason(existing.reason)
+    if (reason !== undefined) updates.reason = normalizedReason
     if (notes !== undefined) updates.notes = notes
 
     const note = await prisma.$transaction(async (tx) => {
-      const nextReason = reason !== undefined ? reason : existing.reason
-      if (existing.reason === 'sales_return' && nextReason !== 'sales_return') {
-        await reverseCreditNoteStockReturn(tx, existing.tenantId, existing.noteNo)
+      const existingAffectsStock = CREDIT_STOCK_REASONS.has(normalizeReason(existing.reason))
+      const nextAffectsStock = CREDIT_STOCK_REASONS.has(normalizedReason)
+      if (existingAffectsStock !== nextAffectsStock) {
+        throw httpError(400, 'Cancel this note and create a new one when changing between stock-return and money-only reasons')
       }
       const updatedNote = await tx.creditNote.update({
         where: { id: req.params.id },
@@ -502,6 +648,7 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
           branch: { select: { id: true, name: true } },
         },
       })
+      await updateLinkedSaleBalanceFromCreditNotes(tx, scope, existing.saleId)
       await reconcileCustomerReceivableBalance(tx, scope, existing.customerId)
       return updatedNote
     })
@@ -529,6 +676,7 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
           branch: { select: { id: true, name: true } },
         },
       })
+      await updateLinkedSaleBalanceFromCreditNotes(tx, scope, existing.saleId)
       await reconcileCustomerReceivableBalance(tx, scope, existing.customerId)
       return cancelledNote
     })
@@ -623,10 +771,11 @@ router.post('/debit-notes', authenticateToken, requirePermission('canCreatePayab
     const { supplierId, purchaseId, amount, reason, notes, branchId, items = [] } = req.body
 
     if (!supplierId) return res.status(400).json({ error: 'supplierId is required' })
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
-    if (!reason) return res.status(400).json({ error: 'reason is required' })
-    if (DEBIT_STOCK_REASONS.has(String(reason).toLowerCase()) && !purchaseId) {
-      return res.status(400).json({ error: 'Select the original supplier purchase before creating a purchase return debit note' })
+    const noteAmount = toMoney(amount)
+    if (noteAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+    const normalizedReason = validateReason(reason, DEBIT_REASONS, 'debit note')
+    if (DEBIT_STOCK_REASONS.has(normalizedReason) && !purchaseId) {
+      return res.status(400).json({ error: 'Select the original supplier purchase before creating a return, delivery, quality, or cancellation debit note' })
     }
 
     // Verify supplier belongs to tenant
@@ -643,8 +792,8 @@ router.post('/debit-notes', authenticateToken, requirePermission('canCreatePayab
           branchId: branchId || scope.branchId || null,
           supplierId,
           purchaseId: purchaseId || null,
-          amount: Number(amount),
-          reason,
+          amount: noteAmount,
+          reason: normalizedReason,
           notes: notes || null,
           userId: req.user.id,
           status: 'issued',
@@ -656,11 +805,12 @@ router.post('/debit-notes', authenticateToken, requirePermission('canCreatePayab
       })
 
       await createDebitNoteStockReturn(tx, scope, createdNote, items, req)
+      await updateLinkedPurchaseBalanceFromDebitNotes(tx, scope, createdNote.purchaseId)
 
       // Update supplier balance (debit note reduces payable)
       await tx.supplier.update({
         where: { id: supplierId },
-        data: { balance: { decrement: Number(amount) } },
+        data: { balance: { decrement: noteAmount } },
       })
 
       return createdNote
@@ -682,20 +832,24 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
 
     const { amount, reason, notes } = req.body
     const updates = {}
-    if (amount !== undefined && amount > 0) {
-      updates.amount = Number(amount)
+    if (amount !== undefined) {
+      const nextAmount = toMoney(amount)
+      if (nextAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
+      updates.amount = nextAmount
     }
-    if (reason !== undefined) updates.reason = reason
+    const normalizedReason = reason !== undefined ? validateReason(reason, DEBIT_REASONS, 'debit note') : normalizeReason(existing.reason)
+    if (reason !== undefined) updates.reason = normalizedReason
     if (notes !== undefined) updates.notes = notes
 
     const note = await prisma.$transaction(async (tx) => {
-      const nextReason = reason !== undefined ? reason : existing.reason
-      if (existing.reason === 'purchase_return' && nextReason !== 'purchase_return') {
-        await reverseDebitNoteStockReturn(tx, scope, existing, req)
+      const existingAffectsStock = DEBIT_STOCK_REASONS.has(normalizeReason(existing.reason))
+      const nextAffectsStock = DEBIT_STOCK_REASONS.has(normalizedReason)
+      if (existingAffectsStock !== nextAffectsStock) {
+        throw httpError(400, 'Cancel this note and create a new one when changing between stock-return and money-only reasons')
       }
       if (amount !== undefined && Number(amount) > 0) {
         // Adjust supplier balance for the difference
-        const diff = Number(amount) - existing.amount
+        const diff = updates.amount - existing.amount
         if (diff !== 0) {
           await tx.supplier.update({
             where: { id: existing.supplierId },
@@ -704,7 +858,7 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
         }
       }
 
-      return tx.debitNote.update({
+      const updatedNote = await tx.debitNote.update({
         where: { id: req.params.id },
         data: updates,
         include: {
@@ -712,6 +866,8 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
           branch: { select: { id: true, name: true } },
         },
       })
+      await updateLinkedPurchaseBalanceFromDebitNotes(tx, scope, existing.purchaseId)
+      return updatedNote
     })
     res.json(note)
   } catch (error) {
@@ -736,7 +892,7 @@ router.patch('/debit-notes/:id/cancel', authenticateToken, requirePermission('ca
         data: { balance: { increment: existing.amount } },
       })
 
-      return tx.debitNote.update({
+      const cancelledNote = await tx.debitNote.update({
         where: { id: req.params.id },
         data: { status: 'cancelled' },
         include: {
@@ -744,6 +900,8 @@ router.patch('/debit-notes/:id/cancel', authenticateToken, requirePermission('ca
           branch: { select: { id: true, name: true } },
         },
       })
+      await updateLinkedPurchaseBalanceFromDebitNotes(tx, scope, existing.purchaseId)
+      return cancelledNote
     })
     res.json(note)
   } catch (error) {
