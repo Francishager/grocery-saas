@@ -18,7 +18,29 @@ const PAYMENT_METHOD_PERMISSION_MAP = {
   mobile_money: 'canUseMobileMoney',
   bank_transfer: 'canUseBank',
   bank: 'canUseBank',
+  cheque: 'canUseBank',
   card: 'canUseCard',
+};
+
+const normalizePermissionValue = (value) => String(value || '').trim().toLowerCase();
+
+const paymentMethodForAccountType = (accountType) => {
+  const type = normalizePermissionValue(accountType);
+  if (type === 'safe') return 'cash';
+  if (type === 'bank') return 'bank';
+  if (type === 'mobile_money') return 'mobile_money';
+  if (type === 'card') return 'card';
+  return type;
+};
+
+const accountUsagePermissionKey = (accountType, isOwnCashAccount = false) => {
+  const type = normalizePermissionValue(accountType);
+  if (type === 'cash') return isOwnCashAccount ? 'canUseOwnCashAccount' : 'canUseOtherStaffCashAccount';
+  if (type === 'safe') return 'canUseSafeAccount';
+  if (type === 'bank') return 'canUseBankAccount';
+  if (type === 'mobile_money') return 'canUseMobileMoneyAccount';
+  if (type === 'card') return 'canUseCardAccount';
+  return null;
 };
 
 export const isPlatformAdminUser = (user = {}) => (
@@ -341,6 +363,12 @@ export const hasAccountingPermission = (req) => {
     'canEditAccounting',
     'canDeleteAccounting',
     'canViewTransactionAccount',
+    'canUseOwnCashAccount',
+    'canUseOtherStaffCashAccount',
+    'canUseSafeAccount',
+    'canUseBankAccount',
+    'canUseMobileMoneyAccount',
+    'canUseCardAccount',
     'canUseAnyTransactionAccount',
     'canUseOtherCashAccount',
     'canCreateTransactionAccount',
@@ -519,6 +547,28 @@ export const checkPaymentMethodPermission = (req, paymentMethod) => {
   return Boolean(getPaymentMethodPermissions(req)[permKey]);
 };
 
+export const canUseTransactionAccountForPayment = (req, cashAccount, paymentMethod = null) => {
+  if (!req?.user || !cashAccount) return false;
+  if (PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser) return true;
+
+  const accountType = normalizePermissionValue(cashAccount.type);
+  const normalizedMethod = normalizePermissionValue(paymentMethod) || paymentMethodForAccountType(accountType);
+  if (normalizedMethod && !checkPaymentMethodPermission(req, normalizedMethod)) return false;
+
+  const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId;
+  const isOwnCashAccount = accountType === 'cash' && assignedCashAccountId &&
+    String(cashAccount.id) === String(assignedCashAccountId);
+
+  const specificPermission = accountUsagePermissionKey(accountType, Boolean(isOwnCashAccount));
+  if (specificPermission && hasResolvedPermission(req, specificPermission)) return true;
+
+  if (isOwnCashAccount && hasResolvedPermission(req, 'canUseCash')) return true;
+  if (accountType === 'cash' && hasResolvedPermission(req, 'canUseOtherCashAccount')) return true;
+  if (accountType === 'safe' && hasResolvedPermission(req, 'canUseOtherCashAccount')) return true;
+
+  return hasResolvedPermission(req, 'canUseAnyTransactionAccount');
+};
+
 export const canUsePaymentMethodOrAssignedCash = (req, paymentMethod, cashAccountId = null) => {
   const normalizedMethod = String(paymentMethod || '').trim().toLowerCase();
   const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId;
@@ -534,8 +584,25 @@ export const canUsePaymentMethodOrAssignedCash = (req, paymentMethod, cashAccoun
   const isOwnCashAccount = selectedCashAccountId && assignedCashAccountId &&
     String(selectedCashAccountId) === String(assignedCashAccountId);
 
+  if (isOwnCashAccount) {
+    return Boolean(
+      hasResolvedPermission(req, 'canUseOwnCashAccount') ||
+      hasResolvedPermission(req, 'canUseCash') ||
+      hasResolvedPermission(req, 'canUseAnyTransactionAccount')
+    );
+  }
+
+  if (normalizedMethod === 'safe') {
+    return Boolean(
+      hasResolvedPermission(req, 'canUseSafeAccount') ||
+      hasResolvedPermission(req, 'canUseOtherCashAccount') ||
+      hasResolvedPermission(req, 'canUseAnyTransactionAccount')
+    );
+  }
+
   return Boolean(
-    isOwnCashAccount ||
+    hasResolvedPermission(req, 'canUseOtherStaffCashAccount') ||
+    hasResolvedPermission(req, 'canUseSafeAccount') ||
     hasResolvedPermission(req, 'canUseOtherCashAccount') ||
     hasResolvedPermission(req, 'canUseAnyTransactionAccount')
   );
@@ -591,6 +658,7 @@ export default {
   loadUserPermissions,
   checkPaymentMethodPermission,
   canUsePaymentMethodOrAssignedCash,
+  canUseTransactionAccountForPayment,
   getPaymentMethodPermissions,
   canUseCashTransactions,
   isPlatformAdminUser,

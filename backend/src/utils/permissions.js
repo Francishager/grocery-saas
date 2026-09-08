@@ -148,6 +148,12 @@ const PERMISSION_TO_FEATURES = {
   canViewTransactionAccount: ['accounting', 'expenses'],
   canUseAnyTransactionAccount: ['accounting', 'expenses'],
   canUseOtherCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canUseOwnCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseOtherStaffCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canUseSafeAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canUseBankAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseMobileMoneyAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseCardAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
   canCreateTransactionAccount: ['accounting', 'expenses'],
   canEditTransactionAccount: ['accounting', 'expenses'],
   canDeleteTransactionAccount: ['accounting', 'expenses'],
@@ -242,7 +248,8 @@ export const ALL_PERMISSION_KEYS = [
   // Accounting
   "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting",
   // Transaction Accounts & Cash Movements
-  "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount",
+  "canViewTransactionAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
+  "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
   "canCreateTransactionAccount", "canEditTransactionAccount", "canDeleteTransactionAccount", "canCreateWithdrawal",
   // Payment Methods (for spending — expenses, payables)
   "canUseCash", "canUseMobileMoney", "canUseBank", "canUseCard",
@@ -865,13 +872,29 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'View transaction accounts',
     description: 'Open cash, safe, bank, mobile money, and card transaction account balances.',
   },
-  canUseAnyTransactionAccount: {
-    name: 'Use any transaction account',
-    description: 'Select permitted cash, safe, bank, mobile money, or card accounts beyond the user assigned account.',
+  canUseOwnCashAccount: {
+    name: 'Use own assigned cash till',
+    description: 'Use only the cash till assigned to this staff member for cash collections, expenses, payables, withdrawals, and cash journal movements.',
   },
-  canUseOtherCashAccount: {
-    name: 'Use other cash accounts',
-    description: 'Select another staff cash till or safe account for cash payments, collections, withdrawals, and cash journal movements.',
+  canUseOtherStaffCashAccount: {
+    name: 'Use other staff cash tills',
+    description: 'Use a cash till assigned to another staff member. This does not allow safe, bank, mobile money, or card accounts.',
+  },
+  canUseSafeAccount: {
+    name: 'Use safe accounts',
+    description: 'Use safe or vault transaction accounts for payments, collections, withdrawals, and journal movements.',
+  },
+  canUseBankAccount: {
+    name: 'Use bank accounts',
+    description: 'Use bank transaction accounts for bank or cheque payments, collections, and journal movements.',
+  },
+  canUseMobileMoneyAccount: {
+    name: 'Use mobile money accounts',
+    description: 'Use mobile money transaction accounts for mobile money collections, payments, and journal movements.',
+  },
+  canUseCardAccount: {
+    name: 'Use card accounts',
+    description: 'Use card or POS clearing transaction accounts for card payments and journal movements.',
   },
   canCreateTransactionAccount: {
     name: 'Create transaction accounts',
@@ -909,7 +932,16 @@ const PERMISSION_DETAIL_OVERRIDES = {
 
 function permissionCategoryForKey(key) {
   if (key === 'canViewDashboard') return 'dashboard';
-  if (key.includes('TransactionAccount') || key === 'canUseOtherCashAccount' || key === 'canCreateWithdrawal') return 'transactions';
+  if (key.includes('TransactionAccount') || [
+    'canUseOwnCashAccount',
+    'canUseOtherStaffCashAccount',
+    'canUseSafeAccount',
+    'canUseBankAccount',
+    'canUseMobileMoneyAccount',
+    'canUseCardAccount',
+    'canUseOtherCashAccount',
+    'canCreateWithdrawal',
+  ].includes(key)) return 'transactions';
   if (key.startsWith('canUse')) return 'payment_methods';
   if (key.includes('Report') || key === 'canExportReport') return 'reports';
   if (key.includes('Receipt')) return 'receipts';

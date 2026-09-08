@@ -641,6 +641,12 @@ model UserPermission {
   canViewTransactionAccount    Boolean  @default(false)
   canUseAnyTransactionAccount  Boolean  @default(false)
   canUseOtherCashAccount       Boolean  @default(false)
+  canUseOwnCashAccount         Boolean  @default(false)
+  canUseOtherStaffCashAccount  Boolean  @default(false)
+  canUseSafeAccount            Boolean  @default(false)
+  canUseBankAccount            Boolean  @default(false)
+  canUseMobileMoneyAccount     Boolean  @default(false)
+  canUseCardAccount            Boolean  @default(false)
   canCreateTransactionAccount  Boolean  @default(false)
   canEditTransactionAccount    Boolean  @default(false)
   canDeleteTransactionAccount  Boolean  @default(false)
@@ -1111,6 +1117,7 @@ model CustomerPayment {
   phoneNumber    String?
   transactionId  String?
   reference      String? // Transaction reference
+  idempotencyKey String?     @unique
   notes          String?
   createdAt      DateTime    @default(now())
 

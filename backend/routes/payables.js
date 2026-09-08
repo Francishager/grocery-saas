@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
@@ -33,7 +33,7 @@ async function resolvePaymentCashAccount(client, scope, req, paymentMethod, cash
     if (!account) {
       throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
     }
-    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)) {
+    if (!canUseTransactionAccountForPayment(req, account, paymentMethod)) {
       throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} payments from this account`), { statusCode: 403 })
     }
     if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
@@ -49,7 +49,7 @@ async function resolvePaymentCashAccount(client, scope, req, paymentMethod, cash
     if (
       account &&
       cashAccountMatchesPaymentMethod(account, paymentMethod) &&
-      canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)
+      canUseTransactionAccountForPayment(req, account, paymentMethod)
     ) {
       return account
     }

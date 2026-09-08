@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, canUsePaymentMethodOrAssignedCash, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
@@ -38,7 +38,7 @@ async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cash
     if (!account) {
       throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
     }
-    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)) {
+    if (!canUseTransactionAccountForPayment(req, account, paymentMethod)) {
       throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} ${actionLabel} from this account`), { statusCode: 403 })
     }
     if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
@@ -54,7 +54,7 @@ async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cash
     if (
       account &&
       cashAccountMatchesPaymentMethod(account, paymentMethod) &&
-      canUsePaymentMethodOrAssignedCash(req, paymentMethod, account.id)
+      canUseTransactionAccountForPayment(req, account, paymentMethod)
     ) {
       return account
     }
@@ -1225,6 +1225,10 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
 
     const resolvedPaymentMethod = paymentMethod || 'cash'
+    const rawPaymentRequestKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim()
+    const paymentRequestKey = rawPaymentRequestKey.replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160)
+    const paymentReference = String(reference || (paymentRequestKey ? `CP-${paymentRequestKey.slice(0, 80)}` : '')).trim() || null
+    const normalizedTransactionId = String(transactionId || '').trim() || null
 
     // Gate payment method by permission
     if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
@@ -1253,7 +1257,42 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       // then apply any remainder to the customer's balance (resulting in a negative balance i.e. credit).
     }
 
-    const payment = await prisma.$transaction(async (tx) => {
+    const duplicateMarkers = [
+      paymentRequestKey ? { idempotencyKey: paymentRequestKey } : null,
+      paymentReference ? { reference: paymentReference } : null,
+      ['mobile_money', 'card'].includes(resolvedPaymentMethod) && normalizedTransactionId ? { transactionId: normalizedTransactionId } : null,
+    ].filter(Boolean)
+
+    if (duplicateMarkers.length > 0) {
+      const existingPayment = await prisma.customerPayment.findFirst({
+        where: scopedWhere(scope, {
+          customerId,
+          saleId: saleId || null,
+          amount: paidAmount,
+          paymentMethod: resolvedPaymentMethod,
+          OR: duplicateMarkers,
+        }),
+        orderBy: { createdAt: 'desc' },
+      })
+      if (existingPayment) return res.status(200).json({ ...existingPayment, duplicate: true })
+    }
+
+    const recentDuplicate = await prisma.customerPayment.findFirst({
+      where: scopedWhere(scope, {
+        customerId,
+        saleId: saleId || null,
+        amount: paidAmount,
+        paymentMethod: resolvedPaymentMethod,
+        notes: notes || null,
+        createdAt: { gte: new Date(Date.now() - 15000) },
+      }),
+      orderBy: { createdAt: 'desc' },
+    })
+    if (recentDuplicate) return res.status(200).json({ ...recentDuplicate, duplicate: true })
+
+    let payment
+    try {
+      payment = await prisma.$transaction(async (tx) => {
       const createdPayment = await tx.customerPayment.create({
         data: {
           tenantId: scope.tenantId,
@@ -1264,13 +1303,14 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           paymentMethod: resolvedPaymentMethod,
           mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
           phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
-          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
-          reference,
+          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? normalizedTransactionId : null,
+          reference: paymentReference,
+          idempotencyKey: paymentRequestKey || null,
           notes
         }
       })
 
-      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'withdrawals')
+      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'payments')
       const updatedAccount = await tx.cashAccount.update({
         where: { id: accountToUse.id },
         data: { balance: { increment: paidAmount } }
@@ -1283,7 +1323,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           type: 'receipt',
           amount: paidAmount,
           balanceAfter: updatedAccount.balance,
-          reference: reference || createdPayment.id,
+          reference: paymentReference || createdPayment.id,
           description: `Customer payment: ${customer.name || customer.email}`,
           userId: req.user.id
         }
@@ -1314,6 +1354,13 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
 
       return createdPayment
     })
+    } catch (transactionError) {
+      if (transactionError?.code === 'P2002' && paymentRequestKey) {
+        const existingPayment = await prisma.customerPayment.findUnique({ where: { idempotencyKey: paymentRequestKey } })
+        if (existingPayment) return res.status(200).json({ ...existingPayment, duplicate: true })
+      }
+      throw transactionError
+    }
 
     res.status(201).json(payment)
   } catch (error) {

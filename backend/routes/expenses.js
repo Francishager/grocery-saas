@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions, canUsePaymentMethodOrAssignedCash, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
 import { requireAnyFeature, requireFeature } from '../middleware/featureCheck.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
@@ -220,6 +220,12 @@ router.post('/expenses', authenticateToken, loadUserPermissions, requirePermissi
           code: 'PAYMENT_ACCOUNT_MISMATCH'
         })
       }
+      if (!canUseTransactionAccountForPayment(req, account, resolvedPaymentMethod)) {
+        return res.status(403).json({
+          error: `You do not have permission to use ${account.name} for ${resolvedPaymentMethod} payments. Please contact your administrator.`,
+          code: 'NO_TRANSACTION_ACCOUNT_PERMISSION'
+        })
+      }
       resolvedCashAccountId = account.id
     } else {
       // Try to use the user's assigned account only when it matches the selected method.
@@ -258,6 +264,12 @@ router.post('/expenses', authenticateToken, loadUserPermissions, requirePermissi
     })
     if (!spendingAccount) {
       return res.status(400).json({ error: 'Cash account not found' })
+    }
+    if (!canUseTransactionAccountForPayment(req, spendingAccount, resolvedPaymentMethod)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${spendingAccount.name} for ${resolvedPaymentMethod} payments. Please contact your administrator.`,
+        code: 'NO_TRANSACTION_ACCOUNT_PERMISSION'
+      })
     }
     if (spendingAccount.balance < amountValue) {
       return res.status(400).json({
@@ -351,8 +363,8 @@ router.put('/expenses/:id', authenticateToken, loadUserPermissions, requirePermi
           where: { id: cashAccountId, tenantId: req.tenant.id, isActive: true }
         })
         if (!account) return res.status(400).json({ error: 'Invalid or inactive cash account' })
-        if (!canUsePaymentMethodOrAssignedCash(req, normalizePaymentMethod(paymentMethod || existingExpense.paymentMethod), account.id)) {
-          return res.status(403).json({ error: 'You do not have permission to use this payment account', code: 'NO_PAYMENT_METHOD_PERMISSION' })
+        if (!canUseTransactionAccountForPayment(req, account, normalizePaymentMethod(paymentMethod || existingExpense.paymentMethod))) {
+          return res.status(403).json({ error: 'You do not have permission to use this payment account', code: 'NO_TRANSACTION_ACCOUNT_PERMISSION' })
         }
         resolvedCashAccountId = account.id
       } else {
@@ -428,7 +440,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 })
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseOwnCashAccount', 'canUseOtherStaffCashAccount', 'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
   try {
     // Include assigned users so we can surface staff + branch on the API response
     const rawAccounts = await prisma.cashAccount.findMany({
@@ -461,42 +473,10 @@ router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyP
       'canEditTransactionAccount',
       'canDeleteTransactionAccount',
     ].some((permission) => requestPermissions.includes(permission))
-    const canUseAnyTransactionAccount = requestPermissions.includes('*') || [
-      'canUseAnyTransactionAccount',
-      'canEditTransactionAccount',
-      'canDeleteTransactionAccount',
-    ].some((permission) => requestPermissions.includes(permission))
-    const canUseOtherCashAccount = requestPermissions.includes('*') || [
-      'canUseOtherCashAccount',
-      'canUseAnyTransactionAccount',
-      'canEditTransactionAccount',
-      'canDeleteTransactionAccount',
-    ].some((permission) => requestPermissions.includes(permission))
-    const paymentPermissions = getPaymentMethodPermissions(req)
     const assignedCashAccountId = req.userCashAccountId || req.user?.cashAccountId
     const visibleAccounts = rawAccounts.filter((account) => {
       if (canSeeAllTransactionAccounts) return true
-
-      const permissionKey = account.type === 'cash' || account.type === 'safe'
-        ? 'canUseCash'
-        : account.type === 'mobile_money'
-          ? 'canUseMobileMoney'
-          : account.type === 'bank'
-            ? 'canUseBank'
-            : account.type === 'card'
-              ? 'canUseCard'
-              : null
-      const hasPaymentPermission = Boolean(permissionKey && paymentPermissions[permissionKey])
-      const isOwnAssignedAccount = assignedCashAccountId && account.id === assignedCashAccountId
-      if (account.type === 'cash' || account.type === 'safe') {
-        return Boolean(hasPaymentPermission && (isOwnAssignedAccount || canUseOtherCashAccount))
-      }
-      if (canUseAnyTransactionAccount) return hasPaymentPermission
-
-      return Boolean(
-        isOwnAssignedAccount &&
-        hasPaymentPermission
-      )
+      return canUseTransactionAccountForPayment(req, account, account.type)
     })
 
     const accounts = visibleAccounts.map((account) => {

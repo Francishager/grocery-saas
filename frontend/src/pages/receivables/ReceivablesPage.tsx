@@ -158,6 +158,8 @@ export default function ReceivablesPage() {
   const [showSaleModal, setShowSaleModal] = useState(false)
   const [savingSale, setSavingSale] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [savingPayment, setSavingPayment] = useState(false)
+  const savingPaymentRef = React.useRef(false)
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
@@ -184,12 +186,14 @@ export default function ReceivablesPage() {
   const creditEnabled = hasPermission('canViewReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
-  const canUseOtherCashAccount = hasPermission('canUseOtherCashAccount')
-  const canUseAnyTransactionAccount = (
-    hasPermission('canUseAnyTransactionAccount') ||
-    hasPermission('canEditTransactionAccount') ||
-    hasPermission('canDeleteTransactionAccount')
-  )
+  const hasLegacyAnyTransactionAccount = hasPermission('canUseAnyTransactionAccount')
+  const hasLegacyOtherCashAccount = hasPermission('canUseOtherCashAccount')
+  const canUseOwnCashAccount = hasPermission('canUseOwnCashAccount') || hasPermission('canUseCash') || hasLegacyAnyTransactionAccount
+  const canUseOtherStaffCashAccount = hasPermission('canUseOtherStaffCashAccount') || hasLegacyOtherCashAccount || hasLegacyAnyTransactionAccount
+  const canUseSafeAccount = hasPermission('canUseSafeAccount') || hasLegacyOtherCashAccount || hasLegacyAnyTransactionAccount
+  const canUseBankAccount = hasPermission('canUseBankAccount') || hasLegacyAnyTransactionAccount
+  const canUseMobileMoneyAccount = hasPermission('canUseMobileMoneyAccount') || hasLegacyAnyTransactionAccount
+  const canUseCardAccount = hasPermission('canUseCardAccount') || hasLegacyAnyTransactionAccount
 
   // Fuel Cards state
   const [fuelCards, setFuelCards] = useState<FuelCard[]>([])
@@ -544,6 +548,33 @@ export default function ReceivablesPage() {
 
   const getAccountTypeForPaymentMethod = (method: string): string => getAccountTypesForPaymentMethod(method).join(' / ')
 
+  const canUsePaymentMethod = (method: string): boolean => {
+    if (method === 'cash' || method === 'safe') return hasPermission('canUseCash')
+    if (method === 'mobile_money') return hasPermission('canUseMobileMoney')
+    if (method === 'bank_transfer' || method === 'bank' || method === 'cheque') return hasPermission('canUseBank')
+    if (method === 'card') return hasPermission('canUseCard')
+    return false
+  }
+
+  const canUseAccountForPaymentMethod = (acc: any, method: string): boolean => {
+    const accountType = String(acc?.type || '').toLowerCase()
+    const isAssignedAccount = assignedCashAccountId && String(acc?.id) === String(assignedCashAccountId)
+    if (!canUsePaymentMethod(method)) return false
+    if (accountType === 'cash') return Boolean(isAssignedAccount ? canUseOwnCashAccount : canUseOtherStaffCashAccount)
+    if (accountType === 'safe') return canUseSafeAccount
+    if (accountType === 'bank') return canUseBankAccount
+    if (accountType === 'mobile_money') return canUseMobileMoneyAccount
+    if (accountType === 'card') return canUseCardAccount
+    return false
+  }
+
+  const paymentMethodOptions = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'mobile_money', label: 'Mobile Money' },
+    { value: 'bank_transfer', label: 'Bank Transfer' },
+    { value: 'card', label: 'Card' },
+  ].filter((option) => canUsePaymentMethod(option.value))
+
   const loadCashAccounts = async (forPaymentMethod: string = paymentMethod) => {
     try {
       const response = await apiFetch('/api/expenses/cash-accounts')
@@ -553,15 +584,15 @@ export default function ReceivablesPage() {
         
         const filteredAccounts = (data || []).filter((acc: any) => {
           if (!accountTypes.includes(acc.type)) return false
-          if (forPaymentMethod !== 'cash') return true
-          const isAssignedAccount = assignedCashAccountId && String(acc.id) === String(assignedCashAccountId)
-          return Boolean(isAssignedAccount || canUseOtherCashAccount || canUseAnyTransactionAccount)
+          return canUseAccountForPaymentMethod(acc, forPaymentMethod)
         })
         
         setCashAccounts(filteredAccounts)
         
-        // Auto-select first account if only one matches the payment method
-        if (filteredAccounts?.length === 1) {
+        const assignedAccount = filteredAccounts.find((acc: any) => assignedCashAccountId && String(acc.id) === String(assignedCashAccountId))
+        if (assignedAccount) {
+          setSelectedCashAccountId(assignedAccount.id)
+        } else if (filteredAccounts?.length === 1) {
           setSelectedCashAccountId(filteredAccounts[0].id)
         } else if (filteredAccounts?.length === 0) {
           setSelectedCashAccountId(null)
@@ -710,6 +741,8 @@ export default function ReceivablesPage() {
   }
 
   const recordPayment = async () => {
+    if (savingPaymentRef.current) return
+
     const targetCustomer = selectedSale?.customer || selectedCustomer
     if (!targetCustomer) {
       toast({ variant: 'destructive', title: 'Select a customer first' })
@@ -723,16 +756,34 @@ export default function ReceivablesPage() {
       toast({ variant: 'destructive', title: 'Select a cash account to record the payment' })
       return
     }
+    if (!canUsePaymentMethod(paymentMethod)) {
+      toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
+      return
+    }
+    const selectedAccount = cashAccounts.find((account) => String(account.id) === String(selectedCashAccountId))
+    if (!selectedAccount || !canUseAccountForPaymentMethod(selectedAccount, paymentMethod)) {
+      toast({ variant: 'destructive', title: 'Choose a permitted transaction account' })
+      return
+    }
 
+    const randomId = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const idempotencyKey = `customer-payment-${targetCustomer.id}-${selectedSale?.id || 'customer'}-${randomId}`
+
+    savingPaymentRef.current = true
+    setSavingPayment(true)
     try {
       const response = await apiFetch('/api/receivables/payments', {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({
           customerId: targetCustomer.id,
           saleId: selectedSale?.id,
           amount: parseFloat(paymentAmount),
           paymentMethod,
           cashAccountId: selectedCashAccountId || undefined,
+          idempotencyKey,
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
           transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
@@ -767,9 +818,11 @@ export default function ReceivablesPage() {
         description: error instanceof Error ? error.message : 'Failed to record payment',
         variant: 'destructive'
       })
+    } finally {
+      savingPaymentRef.current = false
+      setSavingPayment(false)
     }
   }
-
   const recordWithdrawal = async () => {
     if (!canCreateWithdrawal) {
       toast({
@@ -2027,10 +2080,13 @@ export default function ReceivablesPage() {
                     <SelectValue placeholder="Select payment method" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="mobile_money">Mobile Money</SelectItem>
-                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
+                    {paymentMethodOptions.length > 0 ? (
+                      paymentMethodOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -2126,12 +2182,13 @@ export default function ReceivablesPage() {
                 Cancel
               </Button>
               <Button onClick={recordPayment} disabled={
+                savingPayment ||
                 !paymentAmount || parseFloat(paymentAmount) <= 0 ||
                 !selectedCashAccountId ||
                 (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
                 (paymentMethod === 'card' ? !transactionId.trim() : false)
               }>
-                Record Payment
+                {savingPayment ? 'Recording...' : 'Record Payment'}
               </Button>
             </div>
           </div>
@@ -2189,10 +2246,13 @@ export default function ReceivablesPage() {
                     <SelectValue placeholder="Select payment method" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="mobile_money">Mobile Money</SelectItem>
-                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
+                    {paymentMethodOptions.length > 0 ? (
+                      paymentMethodOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

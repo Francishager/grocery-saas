@@ -88,7 +88,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewServiceBusiness:'Can view service business', canCreateServiceBusiness:'Can create service business entries', canEditServiceBusiness:'Can edit service business entries', canDeleteServiceBusiness:'Can delete service business entries', canViewServiceBusinessReport:'Can view service business reports',
   canViewCommunication:'Can view communication', canCreateCommunication:'Can create communication', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
   canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canDeleteAccounting:'Can delete accounting entries',
-  canViewTransactionAccount:'Can view transaction accounts', canUseAnyTransactionAccount:'Can use any transaction account', canUseOtherCashAccount:'Can use other cash accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
+  canViewTransactionAccount:'Can view transaction accounts', canUseOwnCashAccount:'Can use own cash till', canUseOtherStaffCashAccount:'Can use other staff cash tills', canUseSafeAccount:'Can use safe accounts', canUseBankAccount:'Can use bank accounts', canUseMobileMoneyAccount:'Can use mobile money accounts', canUseCardAccount:'Can use card accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
   canCreateWithdrawal:'Can record customer withdrawals',
   canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock', canViewPriceHistory:'Can view price history',
   canUseCash:'Can use assigned cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
@@ -100,8 +100,9 @@ const ACCOUNTING_ACCESS_KEYS = [
 ]
 
 const TRANSACTION_PERMISSION_KEYS = [
-  'canViewTransactionAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount',
-  'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canCreateWithdrawal',
+  'canViewTransactionAccount', 'canUseOwnCashAccount', 'canUseOtherStaffCashAccount',
+  'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount',
+  'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canCreateWithdrawal',
 ]
 
 const PAYMENT_METHOD_PERMISSION_KEYS = ['canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard']

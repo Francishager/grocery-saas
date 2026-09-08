@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission, getPaymentMethodPermissions } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, getPaymentMethodPermissions, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
@@ -127,15 +127,8 @@ async function paymentMethodPermissionsForRequest(req) {
 }
 
 const canUseTransactionAccount = async (req, cashAccount) => {
-  const permissionKey = transactionAccountPermissionKey(cashAccount?.type);
-  if (!permissionKey) return false;
-  const permissions = await paymentMethodPermissionsForRequest(req);
-  if (!permissions[permissionKey]) return false;
-
-  const ownCashAccountId = await requestUserCashAccountId(req);
-  if (ownCashAccountId && ownCashAccountId === cashAccount?.id) return true;
-  if (["cash", "safe"].includes(normalizeValue(cashAccount?.type)) && hasRequestPermission(req, "canUseOtherCashAccount")) return true;
-  return hasBroadTransactionAccountAccess(req);
+  if (!req.userCashAccountId) req.userCashAccountId = await requestUserCashAccountId(req);
+  return canUseTransactionAccountForPayment(req, cashAccount, normalizeValue(cashAccount?.type));
 };
 
 const normalizeJournalLines = (lines) => {

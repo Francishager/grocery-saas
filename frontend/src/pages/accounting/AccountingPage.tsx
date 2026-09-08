@@ -203,16 +203,20 @@ const transactionAccountMatchesMethod = (account: Account, paymentMethod?: strin
 const canSelectPaymentTransactionAccount = (
   account: Account,
   assignedCashAccountId: string | null,
-  canUseOtherCashAccount: boolean,
-  canUseAnyTransactionAccount: boolean,
+  hasPermission: (permission: string) => boolean,
 ) => {
   const transactionType = getTransactionAccountType(account)
   const linkedAccountId = linkedCashAccountId(account)
-  if (linkedAccountId && assignedCashAccountId && linkedAccountId === assignedCashAccountId) return true
-  if (transactionType === 'cash' || transactionType === 'safe') {
-    return canUseOtherCashAccount || canUseAnyTransactionAccount
-  }
-  return canUseAnyTransactionAccount
+  const isOwnCashAccount = transactionType === 'cash' && linkedAccountId && assignedCashAccountId && linkedAccountId === assignedCashAccountId
+  const hasLegacyAnyAccount = hasPermission('canUseAnyTransactionAccount')
+  const hasLegacyOtherCash = hasPermission('canUseOtherCashAccount')
+  if (isOwnCashAccount) return hasPermission('canUseOwnCashAccount') || hasPermission('canUseCash') || hasLegacyAnyAccount
+  if (transactionType === 'cash') return hasPermission('canUseOtherStaffCashAccount') || hasLegacyOtherCash || hasLegacyAnyAccount
+  if (transactionType === 'safe') return hasPermission('canUseSafeAccount') || hasLegacyOtherCash || hasLegacyAnyAccount
+  if (transactionType === 'bank') return hasPermission('canUseBankAccount') || hasLegacyAnyAccount
+  if (transactionType === 'mobile_money') return hasPermission('canUseMobileMoneyAccount') || hasLegacyAnyAccount
+  if (transactionType === 'card') return hasPermission('canUseCardAccount') || hasLegacyAnyAccount
+  return false
 }
 
 const accountMatchesTypeFilter = (account: Account, typeFilter?: string) => {
@@ -300,8 +304,6 @@ export default function AccountingPage() {
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
   const canDeleteAccountingEntries = hasPermission('canDeleteAccounting')
-  const canUseAnyTransactionAccount = hasPermission('canUseAnyTransactionAccount')
-  const canUseOtherCashAccount = hasPermission('canUseOtherCashAccount')
   const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -434,16 +436,13 @@ export default function AccountingPage() {
     return !permissionKey || hasPermission(permissionKey)
   }
 
-  const canChooseOtherTransactionAccounts = useMemo(() => (
-    canUseAnyTransactionAccount || canUseOtherCashAccount
-  ), [canUseAnyTransactionAccount, canUseOtherCashAccount])
 
   const visibleAccounts = useMemo(() => (
     accounts.filter(account => {
       if (!account.isActive) return false
       const transactionType = getTransactionAccountType(account)
       if (!transactionType) return true
-      return canUsePaymentMethod(transactionType)
+      return canUsePaymentMethod(transactionType) && canSelectPaymentTransactionAccount(account, assignedCashAccountId, hasPermission)
     })
   ), [accounts, hasPermission])
 
@@ -465,9 +464,9 @@ export default function AccountingPage() {
     transactionAccounts
       .filter(account => account.id !== jeAccount)
       .filter(account => transactionAccountMatchesMethod(account, jePaymentMethod))
-      .filter(account => canSelectPaymentTransactionAccount(account, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount))
+      .filter(account => canSelectPaymentTransactionAccount(account, assignedCashAccountId, hasPermission))
       .map(account => ({ value: account.id, label: `${account.name} - ${accountBalanceLabel(account)}`, account }))
-  ), [transactionAccounts, jeAccount, jePaymentMethod, assignedCashAccountId, canUseOtherCashAccount, canUseAnyTransactionAccount])
+  ), [transactionAccounts, jeAccount, jePaymentMethod, assignedCashAccountId, hasPermission])
   const flatAccounts = useMemo(() => flattenAccountTree(accounts), [accounts])
   const accountById = useMemo(() => new Map(flatAccounts.map(account => [account.id, account])), [flatAccounts])
   const selectedHistoryAccountIds = useMemo(() => collectAccountIds(selectedHistoryAccount), [selectedHistoryAccount])
@@ -595,7 +594,7 @@ export default function AccountingPage() {
     } else if (!nextAccount && jePaymentAccount) {
       setJePaymentAccount('')
     }
-  }, [assignedCashAccountId, canChooseOtherTransactionAccounts, jePaymentAccount, jePaymentMethod, paymentAccountOptions])
+  }, [assignedCashAccountId, jePaymentAccount, jePaymentMethod, paymentAccountOptions])
 
   const handleCreateAccount = async () => {
     if (!canCreateAccountingEntries) {
@@ -1506,7 +1505,7 @@ export default function AccountingPage() {
                     {jePaymentMethod && (
                       <div>
                         <Label>{PAYMENT_METHOD_LABELS[jePaymentMethod] || 'Select Account'}</Label>
-                        <Select value={jePaymentAccount} onValueChange={setJePaymentAccount} disabled={!canChooseOtherTransactionAccounts && paymentAccountOptions.length <= 1}>
+                        <Select value={jePaymentAccount} onValueChange={setJePaymentAccount} disabled={paymentAccountOptions.length <= 1}>
                           <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
                           <SelectContent>
                             {paymentAccountOptions.length > 0
