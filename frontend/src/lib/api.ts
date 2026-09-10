@@ -4,6 +4,8 @@ import { cacheTenantFormattingSettings } from './utils'
 const API_URL = getApiBaseUrl()
 
 interface RequestOptions {
+  cache?: RequestCache
+  signal?: AbortSignal
   params?: Record<string, string | number | boolean | undefined>
   body?: unknown
   headers?: Record<string, string>
@@ -71,7 +73,7 @@ async function request<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { params, body, headers, skipAuth } = options
+  const { params, body, headers, skipAuth, cache, signal } = options
   const url = buildUrl(path, params)
   const token = getAuthToken()
 
@@ -87,6 +89,8 @@ async function request<T>(
 
   const response = await fetch(url, {
     method,
+    cache,
+    signal,
     headers: fetchHeaders,
     body: body ? JSON.stringify(body) : undefined,
   })
@@ -257,23 +261,23 @@ export const authApi = {
 
 // Dashboard endpoints
 export const dashboardApi = {
-  getKpis: () =>
-    api.get<DashboardKpis>('/api/dashboard/kpis'),
+  getKpis: (signal?: AbortSignal) =>
+    api.get<DashboardKpis>('/api/dashboard/kpis', { cache: 'no-store', signal }),
 
-  getSalesChart: () =>
-    api.get<SalesChartData>('/api/dashboard/sales-chart'),
+  getSalesChart: (signal?: AbortSignal) =>
+    api.get<SalesChartData>('/api/dashboard/sales-chart', { cache: 'no-store', signal }),
 
-  getProfitLoss: () =>
-    api.get<ProfitLossData>('/api/dashboard/profit-loss'),
+  getProfitLoss: (signal?: AbortSignal) =>
+    api.get<ProfitLossData>('/api/dashboard/profit-loss', { cache: 'no-store', signal }),
 
-  getTopProducts: () =>
-    api.get<TopProduct[]>('/api/dashboard/top-products'),
+  getTopProducts: (signal?: AbortSignal) =>
+    api.get<TopProduct[]>('/api/dashboard/top-products', { cache: 'no-store', signal }),
 
-  getPaymentMethods: () =>
-    api.get<PaymentMethodData[]>('/api/dashboard/payment-methods'),
+  getPaymentMethods: (signal?: AbortSignal) =>
+    api.get<PaymentMethodData[]>('/api/dashboard/payment-methods', { cache: 'no-store', signal }),
 
-  getDailyPerformance: () =>
-    api.get<DailyPerformanceData>('/api/dashboard/daily-performance'),
+  getDailyPerformance: (signal?: AbortSignal) =>
+    api.get<DailyPerformanceData>('/api/dashboard/daily-performance', { cache: 'no-store', signal }),
 }
 
 // Inventory endpoints
@@ -1023,8 +1027,8 @@ export interface DashboardKpis {
   productCount: number
   lowStockCount: number
   customerCount: number
-  receivablesOutstanding: number
-  receivablesCount: number
+  receivablesOutstanding: number | null
+  receivablesCount: number | null
 }
 
 export interface SalesChartData {

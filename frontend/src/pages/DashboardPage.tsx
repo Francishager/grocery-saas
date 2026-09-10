@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown } from 'lucide-react'
-import { apiFetch, dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossData, type TopProduct, type PaymentMethodData, type DailyPerformanceData } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
+import { RefreshCw } from 'lucide-react'
+import { useDashboardData } from '@/hooks/useDashboardData'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency, formatDisplayDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
@@ -8,35 +10,27 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 import { useOnlineStatus } from '@/db/hooks'
-import { getLocalDashboardKpis, getLocalDashboardCharts } from '@/db/hybrid'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
 export default function DashboardPage() {
-  const { hasPermission } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
-  const [kpis, setKpis] = useState<DashboardKpis | null>(null)
-  const [salesChart, setSalesChart] = useState<SalesChartData | null>(null)
-  const [profitLoss, setProfitLoss] = useState<ProfitLossData | null>(null)
-  const [topProducts, setTopProducts] = useState<TopProduct[]>([])
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodData[]>([])
-  const [dailyPerf, setDailyPerf] = useState<DailyPerformanceData | null>(null)
   const [billingReminder, setBillingReminder] = useState<any>(null)
   const [showBillingPrompt, setShowBillingPrompt] = useState(false)
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: '', paymentMethod: 'mobile_money' })
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [isOfflineData, setIsOfflineData] = useState(false)
   const { toast } = useToast()
   const online = useOnlineStatus()
+  const dashboardEnabled = Boolean(user) && hasPermission('canViewDashboard') && hasFeature('dashboard')
+  const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
+  const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
+    loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey)
 
   useEffect(() => {
     if (hasPermission('canViewDashboard') && hasFeature('dashboard')) {
-      loadDashboard()
       loadBillingReminder()
-    } else {
-      setLoading(false)
     }
   }, [hasPermission, hasFeature])
 
@@ -139,64 +133,6 @@ export default function DashboardPage() {
     }
   }
 
-  const loadDashboard = async () => {
-    if (!online) {
-      // Offline — load from IndexedDB
-      setIsOfflineData(true)
-      try {
-        const [localKpis, localCharts] = await Promise.all([
-          getLocalDashboardKpis(),
-          getLocalDashboardCharts(),
-        ])
-        setKpis(localKpis)
-        setSalesChart(localCharts.salesChart)
-        setProfitLoss(localCharts.profitLoss)
-        setTopProducts(localCharts.topProducts)
-        setPaymentMethods(localCharts.paymentMethods)
-      } catch (e) {
-        toast({ variant: 'destructive', title: 'Failed to load offline data' })
-      } finally {
-        setLoading(false)
-      }
-      return
-    }
-
-    try {
-      const [k, sc, pl, tp, pm, dp] = await Promise.all([
-        dashboardApi.getKpis(),
-        dashboardApi.getSalesChart(),
-        dashboardApi.getProfitLoss(),
-        dashboardApi.getTopProducts(),
-        dashboardApi.getPaymentMethods(),
-        dashboardApi.getDailyPerformance(),
-      ])
-      setKpis(k)
-      setSalesChart(sc)
-      setProfitLoss(pl)
-      setTopProducts(tp as any || [])
-      setPaymentMethods(pm as any || [])
-      setDailyPerf(dp as any || null)
-      setIsOfflineData(false)
-    } catch (error: any) {
-      // API failed — fall back to local data
-      setIsOfflineData(true)
-      try {
-        const [localKpis, localCharts] = await Promise.all([
-          getLocalDashboardKpis(),
-          getLocalDashboardCharts(),
-        ])
-        setKpis(localKpis)
-        setSalesChart(localCharts.salesChart)
-        setProfitLoss(localCharts.profitLoss)
-        setTopProducts(localCharts.topProducts)
-        setPaymentMethods(localCharts.paymentMethods)
-      } catch {
-        toast({ variant: 'destructive', title: 'Failed to load dashboard', description: error.message })
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
 
   if (!hasPermission('canViewDashboard')) {
     return (
@@ -234,7 +170,10 @@ export default function DashboardPage() {
   if (!kpis) {
     return (
       <div className="text-center py-12">
-        <p className="text-muted-foreground">Could not load dashboard data</p>
+        <p role="alert" className="text-muted-foreground">{dashboardError || 'Could not load dashboard data'}</p>
+        <button type="button" onClick={() => void refresh()} className="mt-3 inline-flex items-center gap-2 text-sm font-medium">
+          <RefreshCw className="h-4 w-4" /> Retry
+        </button>
       </div>
     )
   }
@@ -284,10 +223,15 @@ export default function DashboardPage() {
             <p className="text-xs text-orange-600 flex items-center gap-1 mt-1"><WifiOff className="h-3 w-3" /> Showing offline data</p>
           )}
         </div>
-        <p className="text-sm text-muted-foreground">
-          {formatDisplayDate(new Date())}
-        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <p className="hidden text-sm text-muted-foreground sm:block">{formatDisplayDate(new Date())}</p>
+          <button type="button" onClick={() => void refresh()} aria-label="Refresh dashboard" title="Refresh dashboard"
+            className="flex h-9 w-9 items-center justify-center rounded-md border hover:bg-muted">
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
+      {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
 
       {billingReminder && (billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
         <div className={`rounded-xl border p-4 ${billingReminder.isOverdue ? 'border-red-300 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
@@ -402,8 +346,8 @@ export default function DashboardPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold">{formatCurrency(k.receivablesOutstanding)}</div>
-            <p className="text-xs text-muted-foreground">{k.receivablesCount} outstanding</p>
+            <div className="text-xl font-bold">{k.receivablesOutstanding == null ? 'Unavailable offline' : formatCurrency(k.receivablesOutstanding)}</div>
+            <p className="text-xs text-muted-foreground">{k.receivablesCount == null ? 'Connect to refresh' : `${k.receivablesCount} customers with outstanding balances`}</p>
           </CardContent>
         </Card>
         )}

@@ -189,8 +189,9 @@ export async function getLocalDashboardKpis(): Promise<any> {
     taxCollected: monthSales.reduce((sum, s) => sum + (s.tax || 0), 0),
     customerCount: customers,
     productCount: products.length,
-    receivablesOutstanding: 0,
-    receivablesCount: 0,
+    // The offline store does not contain the complete receivables ledger.
+    receivablesOutstanding: null,
+    receivablesCount: null,
     lowStockCount,
     revenueChange: null,
   }
