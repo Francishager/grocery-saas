@@ -7,6 +7,8 @@ import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } fr
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
+import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
+import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -16,6 +18,7 @@ import {
 
 const router = express.Router()
 const prisma = new PrismaClient()
+const salesView = createReceivableSalesView(prisma)
 
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)
@@ -146,13 +149,6 @@ const withUser = (record) => {
 
 const userName = (user) => [user?.fname, user?.lname].filter(Boolean).join(' ') || 'Staff'
 
-const isReceivableSale = (sale) => (
-  sale?.status !== 'cancelled' &&
-  sale?.affectsCreditSales !== false &&
-  !sale?.documentType &&
-  !sale?.noteNo
-)
-
 const sortLedgerRows = (rows) => rows.sort((a, b) => {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
   const aTime = a.date ? new Date(a.date).getTime() : 0
@@ -234,7 +230,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
 
     const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: scopedWhere(scope, {
           customerId: id,
           balance: { gt: 0 },
@@ -910,7 +906,7 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
     })
 
     const [sales, total] = await Promise.all([
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where,
         skip,
         take: Number(limit),
@@ -926,16 +922,16 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
         },
         orderBy: { createdAt: 'desc' }
       }),
-      prisma.saleRecord.count({ where })
+      salesView.count({ where })
     ])
 
     res.json({
-      sales: sales.filter(isReceivableSale).map(withUser),
+      sales: sales.map(withUser),
       pagination: {
         page: Number(page),
         limit: Number(limit),
-        total: sales.filter(isReceivableSale).length,
-        pages: Math.ceil(sales.filter(isReceivableSale).length / Number(limit))
+        total,
+        pages: Math.ceil(total / Number(limit))
       }
     })
   } catch (error) {
@@ -1513,7 +1509,6 @@ router.post('/withdrawals', authenticateToken, requirePermission('canCreateWithd
 router.get('/receivables/summary', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
-    const receivableWhere = scopedWhere(scope)
     const saleWhere = scopedWhere(scope, {
       balance: { gt: 0 },
       paymentStatus: { not: 'paid' }
@@ -1521,13 +1516,10 @@ router.get('/receivables/summary', authenticateToken, requirePermission('canView
 
     const [totalReceivables, overdueCount, agingSales] = await Promise.all([
       // Total amount owed
-      prisma.customer.aggregate({
-        where: receivableWhere,
-        _sum: { balance: true }
-      }),
+      outstandingCustomerSummary(prisma, scope),
       
       // Overdue customers count
-      prisma.saleRecord.count({
+      salesView.count({
         where: scopedWhere(scope, {
           balance: { gt: 0 },
           dueDate: { lt: new Date() }
@@ -1535,7 +1527,7 @@ router.get('/receivables/summary', authenticateToken, requirePermission('canView
       }),
 
       // Aging report
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: saleWhere,
         include: { customer: { select: { id: true, name: true, phone: true } } },
         orderBy: { balance: 'desc' }

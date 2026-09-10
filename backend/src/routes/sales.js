@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../db.js";
+import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
 import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
@@ -8,6 +9,7 @@ import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
 
 const router = Router();
+const salesView = createReceivableSalesView(prisma);
 
 const saleRoles = ["owner", "manager", "attendant"];
 
@@ -156,7 +158,7 @@ async function getCustomerCreditInfo(scope, customerId) {
   if (!customer) return null;
 
   const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
-    prisma.saleRecord.findMany({
+    salesView.findMany({
       where: scopedWhere(scope, {
         customerId,
         balance: { gt: 0 },

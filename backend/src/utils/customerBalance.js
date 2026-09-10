@@ -37,7 +37,8 @@ export function effectiveCreditNoteRows(notes = []) {
     let effectiveAmount = recordedAmount;
     let saleCreditLimit = null;
     if (note?.saleId) {
-      saleCreditLimit = receivableSaleOutstandingBeforeCreditNotes(note.sale);
+      // Payments remain customer funds after a return; only the sale's net value caps credit notes.
+      saleCreditLimit = !note.sale || note.sale.status === "cancelled" ? 0 : receivableSaleNetTotal(note.sale);
       const alreadyCredited = toMoney(creditedBySale.get(note.saleId));
       const remainingSaleCredit = roundMoney(Math.max(0, saleCreditLimit - alreadyCredited));
       effectiveAmount = Math.min(recordedAmount, remainingSaleCredit);
@@ -215,4 +216,14 @@ export async function reconcileCustomerReceivableBalance(client, scope, customer
   });
 
   return { customer, ...result };
+}
+
+export async function outstandingCustomerSummary(client, scope) {
+  const customers = await client.customer.findMany({
+    where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}) },
+    select: { id: true, openingBalance: true },
+  });
+  const balances = await getCustomerReceivableBalanceMap(client, scope, customers);
+  const outstanding = [...balances.values()].filter((row) => row.balance > 0);
+  return { _sum: { balance: roundMoney(outstanding.reduce((sum, row) => sum + row.balance, 0)) }, _count: outstanding.length };
 }

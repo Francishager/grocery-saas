@@ -1,5 +1,8 @@
 import { Router } from "express";
 import prisma from "../db.js";
+import { createReceivableSalesView } from '../utils/receivableSalesView.js';
+import { outstandingCustomerSummary } from '../utils/customerBalance.js';
+import { loadOutstandingReceivableRows } from '../utils/outstandingReceivables.js';
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, visibleSalesUserId } from "../utils/branchAccess.js";
 import { buildDecisionSupportSummary, buildSupplierStatementData } from "../utils/reportingHelpers.js";
@@ -12,6 +15,7 @@ import {
 } from "../utils/enrichedReportTransform.js";
 
 const router = Router();
+const salesView = createReceivableSalesView(prisma);
 
 // ==================== HELPERS ====================
 const toMoney = (value, fallback = 0) => {
@@ -646,7 +650,7 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
 
   const [sales, saleRecords, expenses, journalRows, customerPayments, supplierPayments, cashTransactions, taxPayments] = await Promise.all([
     prisma.sale.findMany({ where: saleWhere, include: { user: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
-    prisma.saleRecord.findMany({ where: saleWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, customer: { select: { id: true, name: true, phone: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
+    salesView.findMany({ where: saleWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, customer: { select: { id: true, name: true, phone: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
     prisma.expense.findMany({ where: expenseWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, cashAccount: { select: { id: true, name: true, type: true } } }, orderBy: { date: "asc" }, take: 5000 }),
     journalExpenseRows(scope, journalDateWhere, { take: 5000 }),
     prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" }, take: 5000 }),
@@ -776,7 +780,7 @@ router.get("/sales", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } }, user: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } }, User: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } }, User: { select: { fname: true, lname: true } } }, orderBy: { createdAt: "desc" } }),
     ]);
     const allSales = [...sales, ...saleRecords];
     const grossSales = allSales.reduce((a, x) => a + Number(x.total || 0), 0);
@@ -815,13 +819,13 @@ router.get("/profit", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [salesAgg, saleRecordAgg, expensesAgg, salesWithItems, saleRecordsWithItems] = await Promise.all([
       prisma.sale.aggregate({ where, _sum: { total: true, tax: true } }),
-      prisma.saleRecord.aggregate({ where, _sum: { total: true, tax: true } }),
+      salesView.aggregate({ where, _sum: { total: true, tax: true } }),
       prisma.expense.aggregate({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), _sum: { amount: true } }),
       prisma.sale.findMany({
         where,
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where,
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
@@ -888,7 +892,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
         take,
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: saleRecordWhere,
         include: {
           customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
@@ -1445,7 +1449,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
         take,
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: { ...scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...(userId ? { userId } : {}), ...(customerId ? { customerId } : {}) }) },
         include: { customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } }, User: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } } },
         orderBy: { createdAt: "asc" },
@@ -1646,9 +1650,9 @@ router.get("/sales/summary", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [agg, recordAgg, count, recordCount] = await Promise.all([
       prisma.sale.aggregate({ where, _sum: { total: true, discount: true, tax: true, subtotal: true }, _avg: { total: true } }),
-      prisma.saleRecord.aggregate({ where, _sum: { total: true, discount: true, tax: true, subtotal: true }, _avg: { total: true } }),
+      salesView.aggregate({ where, _sum: { total: true, discount: true, tax: true, subtotal: true }, _avg: { total: true } }),
       prisma.sale.count({ where }),
-      prisma.saleRecord.count({ where }),
+      salesView.count({ where }),
     ]);
     const totalCount = count + recordCount;
     const grossSales = Number(agg._sum.total || 0) + Number(recordAgg._sum.total || 0);
@@ -1667,7 +1671,7 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
         include: { items: { include: { product: { select: { cost: true } } } } },
         orderBy: { createdAt: 'asc' }
       }),
-      prisma.saleRecord.findMany({ 
+      salesView.findMany({
         where,
         include: { items: { include: { product: { select: { cost: true } } } } },
         orderBy: { createdAt: 'asc' }
@@ -1714,7 +1718,7 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
-      prisma.saleRecord.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, paymentStatus: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      salesView.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, paymentStatus: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
     const allSales = [...sales, ...saleRecords].map(sale => ({
       ...sale,
@@ -1734,7 +1738,7 @@ router.get("/sales/monthly", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
-      prisma.saleRecord.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, paymentStatus: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      salesView.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, paymentStatus: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
     ]);
     const allSales = [...sales, ...saleRecords].map(sale => ({
       ...sale,
@@ -1754,7 +1758,7 @@ router.get("/sales/by-product", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -1777,7 +1781,7 @@ router.get("/sales/by-category", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: { include: { category: true } } } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: { include: { category: true } } } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: { include: { category: true } } } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -1795,7 +1799,7 @@ router.get("/sales/by-category", authenticateToken, async (req, res) => {
 router.get("/sales/by-customer", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const records = await prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: true } });
+    const records = await salesView.findMany({ where: scopedSaleWhere(req, s), include: { customer: true } });
     const map = {};
     records.forEach((r) => {
       const name = r.customer?.name || "Walk-in";
@@ -1812,7 +1816,7 @@ router.get("/sales/by-user", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { user: { select: { fname: true, lname: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { User: { select: { fname: true, lname: true } } } }),
+      salesView.findMany({ where, include: { User: { select: { fname: true, lname: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -1831,7 +1835,7 @@ router.get("/sales/by-branch", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { branch: { select: { name: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { branch: { select: { name: true } } } }),
+      salesView.findMany({ where, include: { branch: { select: { name: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -1857,7 +1861,7 @@ router.get("/sales/discounts", authenticateToken, async (req, res) => {
         },
         orderBy: { createdAt: "desc" },
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: scopedSaleWhere(req, s, discountWhere),
         include: {
           items: { include: { product: { select: { name: true } } } },
@@ -2221,7 +2225,7 @@ router.get("/inventory/fast-moving", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -2242,7 +2246,7 @@ router.get("/inventory/slow-moving", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
     ]);
     const soldMap = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -2713,7 +2717,7 @@ router.get("/customers/list", authenticateToken, async (req, res) => {
 router.get("/customers/sales", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const records = await prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: true } });
+    const records = await salesView.findMany({ where: scopedSaleWhere(req, s), include: { customer: true } });
     const map = {};
     records.forEach((r) => {
       const name = r.customer?.name || "Walk-in";
@@ -2762,26 +2766,18 @@ router.get("/customers/balance", authenticateToken, async (req, res) => {
 router.get("/customers/receivables", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [records, customers] = await Promise.all([
-      prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s, { balance: { gt: 0 } }), include: { customer: true }, orderBy: { createdAt: "desc" } }),
-      prisma.customer.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, balance: true, openingBalance: true, openingBalanceDate: true, createdAt: true } }),
-    ]);
-    const saleBalanceByCustomer = new Map();
-    records.forEach((r) => saleBalanceByCustomer.set(r.customerId, (saleBalanceByCustomer.get(r.customerId) || 0) + Number(r.balance || 0)));
-    const openingRows = customers.map((c) => {
-      const historicalBalance = Math.max(0, Number(c.balance || 0) - (saleBalanceByCustomer.get(c.id) || 0));
-      return { customer: c.name, total: historicalBalance, amountPaid: 0, balance: historicalBalance, source: "Opening Balance", createdAt: openingBalanceDate(c) };
-    }).filter((row) => row.balance > 0);
-    const data = records.map((r) => ({ customer: r.customer?.name || "Walk-in", total: r.total, amountPaid: r.amountPaid, balance: r.balance }));
-    const combined = [...openingRows, ...data];
-    res.json({ data: combined, summary: { count: combined.length, totalReceivable: combined.reduce((a, r) => a + r.balance, 0) } });
+    const rows = await loadOutstandingReceivableRows(prisma, salesView, s, saleVisibilityFilter(req));
+    const range = df(req).createdAt;
+    const data = rows.filter((row) => !range || ((!range.gte || new Date(row.date) >= range.gte)
+      && (!range.lte || new Date(row.date) <= range.lte)));
+    res.json({ data, summary: { count: data.length, totalReceivable: data.reduce((sum, row) => sum + row.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/customers/top", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const records = await prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: true } });
+    const records = await salesView.findMany({ where: scopedSaleWhere(req, s), include: { customer: true } });
     const map = {};
     records.forEach((r) => {
       const name = r.customer?.name || "Walk-in";
@@ -4018,7 +4014,7 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
     const saleWhere = scopedSaleWhere(req, s);
     const [sales, saleRecords, purchases, products, expenses, suppliers, salesWithItems, saleRecordsWithItems] = await Promise.all([
       prisma.sale.findMany({ where: saleWhere, select: { total: true, tax: true } }),
-      prisma.saleRecord.findMany({ where: saleWhere, select: { total: true, tax: true } }),
+      salesView.findMany({ where: saleWhere, select: { total: true, tax: true } }),
       prisma.supplierPurchase.findMany({ where: scopedWhere(s, df(req)), select: { total: true } }),
       prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), select: { quantity: true, minStock: true, expiryDate: true } }),
       prisma.expense.findMany({ where: scopedExpenseWhere(s, expenseDateWhere(dateRangeFromQuery(req))), select: { amount: true } }),
@@ -4027,7 +4023,7 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
         where: saleWhere,
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: saleWhere,
         select: { items: { select: { quantity: true, cost: true, conversionFactor: true, product: { select: { cost: true } } } } },
       }),
@@ -4054,84 +4050,22 @@ router.get("/decision-support", authenticateToken, async (req, res) => {
 router.get("/receivables/outstanding", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [invoices, customers] = await Promise.all([
-      prisma.invoice.findMany({ where: scopedWhere(s, { status: { in: ["unpaid", "partial", "overdue"] } }), include: { customer: true }, orderBy: { dueDate: "asc" } }),
-      prisma.customer.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, balance: true, openingBalanceDate: true, createdAt: true } }),
-    ]);
-    const invoiceBalanceByCustomer = new Map();
-    invoices.forEach((inv) => invoiceBalanceByCustomer.set(inv.customerId, (invoiceBalanceByCustomer.get(inv.customerId) || 0) + Number(inv.balance || 0)));
-    const openingRows = customers.map((c) => {
-      const historicalBalance = Math.max(0, Number(c.balance || 0) - (invoiceBalanceByCustomer.get(c.id) || 0));
-      return { customer: c.name, status: "opening_balance", balance: historicalBalance, dueDate: openingBalanceDate(c) };
-    }).filter((row) => row.balance > 0);
-    const data = invoices.map((inv) => ({ customer: inv.customer?.name || "Unknown", status: inv.status, balance: inv.balance, dueDate: inv.dueDate }));
-    const combined = [...openingRows, ...data];
-    res.json({ data: combined, summary: { count: combined.length, totalOutstanding: combined.reduce((a, inv) => a + inv.balance, 0) } });
+    const data = await loadOutstandingReceivableRows(prisma, salesView, s, saleVisibilityFilter(req));
+    res.json({ data, summary: { count: data.length, totalOutstanding: data.reduce((sum, row) => sum + row.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/receivables/aging", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [customers, openingBalances] = await Promise.all([
-      prisma.customer.findMany({ 
-        where: scopedWhere(s, { balance: { gt: 0 } }), 
-        include: { 
-          sales: { 
-            where: { balance: { gt: 0 }, ...df(req) }, 
-            select: { id: true, receiptNo: true, balance: true, dueDate: true, createdAt: true, total: true, amountPaid: true, paymentStatus: true } 
-          } 
-        },
-        orderBy: { name: 'asc' }
-      }),
-      prisma.customer.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true } }),
-    ]);
-    
-    const allTransactions = [];
-    const now = new Date();
-    
-    // Add opening balance transactions
-    openingBalances.forEach((c) => {
-      allTransactions.push({
-        id: `opening-${c.id}`,
-        date: c.openingBalanceDate || new Date(0),
-        dueDate: c.openingBalanceDate || new Date(0),
-        type: 'Opening Balance',
-        description: `Opening Balance - ${c.name}`,
-        details: `Opening balance for customer`,
-        debit: Number(c.openingBalance || 0),
-        credit: 0,
-        balance: Number(c.openingBalance || 0),
-        reference: '-',
-      });
-    });
-    
-    // Add sales invoices
-    customers.forEach((cust) => {
-      cust.sales.forEach((sale) => {
-        allTransactions.push({
-          id: sale.id,
-          date: sale.createdAt,
-          dueDate: sale.dueDate || sale.createdAt,
-          type: 'Invoice',
-          description: `Sales Invoice - ${cust.name}`,
-          details: `Ref: ${sale.receiptNo}, Status: ${sale.paymentStatus}, Paid: ${Number(sale.amountPaid || 0)}, Balance: ${Number(sale.balance || 0)}`,
-          debit: receivableSaleNetTotal(sale),
-          credit: Number(sale.amountPaid || 0),
-          balance: Number(sale.balance || 0),
-          status: sale.paymentStatus,
-          reference: sale.receiptNo,
-        });
-      });
-    });
-    
-    allTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    const totalOutstanding = customers.reduce((sum, c) => sum + Number(c.balance || 0), 0);
-    const enriched = transformAgingData(allTransactions, false);
+    const rows = await loadOutstandingReceivableRows(prisma, salesView, s, saleVisibilityFilter(req));
+    const range = df(req).createdAt;
+    const data = rows.filter((row) => !range || ((!range.gte || new Date(row.date) >= range.gte)
+      && (!range.lte || new Date(row.date) <= range.lte)));
+    const totalOutstanding = data.reduce((sum, row) => sum + row.balance, 0);
+    const enriched = transformAgingData(data, false);
     enriched.currentBalance = totalOutstanding;
     enriched.summary.totalOutstanding = totalOutstanding;
-    
     res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });
@@ -4150,8 +4084,8 @@ router.get("/receivables/overdue", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const now = new Date();
     const [records, openSales, customers] = await Promise.all([
-      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 }, dueDate: { lt: now } }), include: { customer: true }, orderBy: { dueDate: "asc" } }),
-      prisma.saleRecord.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 } }), select: { customerId: true, balance: true } }),
+      salesView.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 }, dueDate: { lt: now } }), include: { customer: true }, orderBy: { dueDate: "asc" } }),
+      salesView.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 } }), select: { customerId: true, balance: true } }),
       prisma.customer.findMany({
         where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }),
         select: { id: true, name: true, balance: true, openingBalance: true, openingBalanceDate: true, createdAt: true },
@@ -4326,7 +4260,7 @@ router.get("/performance/branch", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { branch: { select: { name: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { branch: { select: { name: true } } } }),
+      salesView.findMany({ where, include: { branch: { select: { name: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -4345,7 +4279,7 @@ router.get("/performance/product", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -4368,7 +4302,7 @@ router.get("/performance/category", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: { include: { category: true } } } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: { include: { category: true } } } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: { include: { category: true } } } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -4406,7 +4340,7 @@ router.get("/performance/top-products", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -4428,7 +4362,7 @@ router.get("/performance/least-products", authenticateToken, async (req, res) =>
     const where = scopedSaleWhere(req, s);
     const [sales, saleRecords] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } }),
+      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
     ]);
     const map = {};
     [...sales, ...saleRecords].forEach((sale) => {
@@ -5131,19 +5065,19 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       customers, curReceivables, curCashAccounts,
     ] = await Promise.all([
       prisma.sale.aggregate({ where: curSaleWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
-      prisma.saleRecord.aggregate({ where: curSaleWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
+      salesView.aggregate({ where: curSaleWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
       prisma.sale.aggregate({ where: prevSaleWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
-      prisma.saleRecord.aggregate({ where: prevSaleWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
+      salesView.aggregate({ where: prevSaleWhere, _sum: { total: true, discount: true, tax: true }, _count: true }),
       prisma.expense.aggregate({ where: curExpWhere, _sum: { amount: true } }),
       prisma.expense.aggregate({ where: prevExpWhere, _sum: { amount: true } }),
       prisma.sale.findMany({ where: curSaleWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
-      prisma.saleRecord.findMany({ where: curSaleWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      salesView.findMany({ where: curSaleWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
       prisma.sale.findMany({ where: prevSaleWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
-      prisma.saleRecord.findMany({ where: prevSaleWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
+      salesView.findMany({ where: prevSaleWhere, select: { items: { select: { quantity: true, productId: true, total: true, cost: true, conversionFactor: true, product: { select: { cost: true, name: true, category: { select: { name: true } } } } } } } }),
       prisma.sale.findMany({ where: curSaleWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.saleRecord.findMany({ where: curSaleWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      salesView.findMany({ where: curSaleWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.sale.findMany({ where: prevSaleWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.saleRecord.findMany({ where: prevSaleWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+      salesView.findMany({ where: prevSaleWhere, select: { total: true, tax: true, paymentMethod: true, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.purchase.aggregate({ where: curWhere, _sum: { total: true } }),
       prisma.supplierPurchase.aggregate({ where: curWhere, _sum: { total: true } }),
       prisma.purchase.aggregate({ where: prevWhere, _sum: { total: true } }),
@@ -5152,7 +5086,7 @@ router.get("/analysis/executive-summary", authenticateToken, async (req, res) =>
       prisma.product.count({ where: scopedWhere(s, { isActive: { not: false }, quantity: { lte: 10 } }) }),
       prisma.product.count({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null, lte: new Date(Date.now() + 60 * 86400000) } }) }),
       prisma.customer.count({ where: scopedWhere(s) }),
-      prisma.customer.aggregate({ where: scopedWhere(s, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
+      outstandingCustomerSummary(prisma, s),
       prisma.cashAccount.aggregate({ where: { tenantId: s.tenantId, isActive: true }, _sum: { balance: true } }),
     ]);
 

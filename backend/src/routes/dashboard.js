@@ -1,9 +1,12 @@
 import { Router } from "express";
 import prisma from "../db.js";
+import { createReceivableSalesView } from '../utils/receivableSalesView.js';
+import { outstandingCustomerSummary } from '../utils/customerBalance.js';
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
 
 const router = Router();
+const salesView = createReceivableSalesView(prisma);
 
 function saleLineCogs(item) {
   const rawCost = item?.cost;
@@ -157,9 +160,9 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       saleRecordsWithItemsThisMonth,
     ] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
-      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
+      salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true } }),
-      prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true } }),
+      salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true } }),
       prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth })), _sum: { amount: true } }),
@@ -168,12 +171,12 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, expiryDate: { not: null, lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000) } }) }),
       prisma.customer.count({ where: scopedWhere(scope) }),
-      prisma.customer.aggregate({ where: scopedWhere(scope, { balance: { gt: 0 } }), _sum: { balance: true }, _count: true }),
+      outstandingCustomerSummary(prisma, scope),
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         select: { items: { select: saleItemCostSelect } },
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         select: { items: { select: saleItemCostSelect } },
       }),
@@ -230,7 +233,7 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
 
       const [saleAgg, saleRecordAgg, expAgg, journalExp] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
-        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
+        salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
         journalExpenseTotal(scope, { gte: start, lt: end }),
       ]);
@@ -261,14 +264,14 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
 
       const [saleAgg, saleRecordAgg, expAgg, journalExp, salesWithItems, saleRecordsWithItems] = await Promise.all([
         prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
-        prisma.saleRecord.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
+        salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true } }),
         prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
         journalExpenseTotal(scope, { gte: start, lt: end }),
         prisma.sale.findMany({
           where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }),
           select: { items: { select: saleItemCostSelect } },
         }),
-        prisma.saleRecord.findMany({
+        salesView.findMany({
           where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }),
           select: { items: { select: saleItemCostSelect } },
         }),
@@ -302,7 +305,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
         select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
         orderBy: { createdAt: "asc" },
       }),
-      prisma.saleRecord.findMany({
+      salesView.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth }, ...visibleSales }),
         select: { total: true, createdAt: true, items: { select: saleItemCostSelect } },
         orderBy: { createdAt: "asc" },
@@ -384,7 +387,7 @@ router.get("/top-products", authenticateToken, requirePermission("canViewDashboa
         _sum: { quantity: true, total: true },
         _count: true,
       }),
-      prisma.saleRecordItem.groupBy({
+      salesView.itemGroupBy({
         by: ["productId"],
         where: { sale: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }) },
         _sum: { quantity: true, total: true },
@@ -424,7 +427,7 @@ router.get("/payment-methods", authenticateToken, requirePermission("canViewDash
         _sum: { total: true },
         _count: true,
       }),
-      prisma.saleRecord.groupBy({
+      salesView.groupBy({
         by: ["paymentMethod"],
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         _sum: { total: true },

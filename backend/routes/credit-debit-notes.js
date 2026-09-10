@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
-import { reconcileCustomerReceivableBalance, receivableSaleNetTotal, receivableSaleOutstandingBeforeCreditNotes } from '../src/utils/customerBalance.js'
+import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../src/utils/customerBalance.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -68,7 +68,7 @@ async function remainingSaleCreditCapacity(client, scope, saleId, excludeNoteId 
   })
 
   const alreadyCredited = toMoney(creditNotes._sum.amount)
-  const receivableLimit = receivableSaleOutstandingBeforeCreditNotes(sale)
+  const receivableLimit = saleNetTotal(sale)
   return {
     sale,
     alreadyCredited,
