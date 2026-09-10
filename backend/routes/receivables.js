@@ -10,7 +10,8 @@ import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
-  reconcileCustomerReceivableBalance
+  reconcileCustomerReceivableBalance,
+  effectiveCreditNoteRows
 } from '../src/utils/customerBalance.js'
 
 const router = express.Router()
@@ -396,7 +397,10 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       }),
       prisma.creditNote.findMany({
         where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
-        include: { branch: { select: { id: true, name: true } } },
+        include: {
+          branch: { select: { id: true, name: true } },
+          sale: { select: { id: true, receiptNo: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } }
+        },
         orderBy: { createdAt: 'asc' },
         take: limit
       }),
@@ -548,18 +552,19 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       })
     })
 
-    creditNotes.forEach((note) => {
+    effectiveCreditNoteRows(creditNotes).filter((note) => note.effectiveAmount > 0).forEach((note) => {
       rows.push({
         id: note.id,
         source: 'credit_note',
         type: 'Credit Note',
         date: note.createdAt,
         reference: note.noteNo,
-        description: note.notes || note.reason || 'Customer credit note',
+        description: `${note.notes || note.reason || 'Customer credit note'}${note.effectiveAmount !== toMoney(note.amount) ? ` (adjusted from recorded ${note.amount})` : ''}`,
         debit: 0,
-        credit: toMoney(note.amount),
-        amount: toMoney(note.amount),
-        balanceImpact: -toMoney(note.amount),
+        credit: toMoney(note.effectiveAmount),
+        amount: toMoney(note.effectiveAmount),
+        recordedAmount: toMoney(note.amount),
+        balanceImpact: -toMoney(note.effectiveAmount),
         affectsBalance: true,
         paymentMethod: null,
         status: note.status,

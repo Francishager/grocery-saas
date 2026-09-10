@@ -2,7 +2,7 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
-import { reconcileCustomerReceivableBalance } from '../src/utils/customerBalance.js'
+import { reconcileCustomerReceivableBalance, receivableSaleNetTotal, receivableSaleOutstandingBeforeCreditNotes } from '../src/utils/customerBalance.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -37,9 +37,7 @@ function saleLineGrossTotal(sale) {
 }
 
 function saleNetTotal(sale) {
-  const total = toMoney(sale?.total)
-  if (total > 0) return total
-  return toMoney(saleLineGrossTotal(sale) - toMoney(sale?.discount) - toMoney(sale?.cashDiscount) + toMoney(sale?.tax))
+  return receivableSaleNetTotal(sale)
 }
 
 function netAmountForReturnedItems(sale, returnItems = []) {
@@ -70,10 +68,14 @@ async function remainingSaleCreditCapacity(client, scope, saleId, excludeNoteId 
   })
 
   const alreadyCredited = toMoney(creditNotes._sum.amount)
+  const receivableLimit = receivableSaleOutstandingBeforeCreditNotes(sale)
   return {
     sale,
     alreadyCredited,
-    remaining: Math.max(0, toMoney(saleNetTotal(sale) - alreadyCredited)),
+    netTotal: saleNetTotal(sale),
+    amountPaid: toMoney(sale.amountPaid),
+    receivableLimit,
+    remaining: Math.max(0, toMoney(receivableLimit - alreadyCredited)),
   }
 }
 
@@ -251,7 +253,7 @@ async function updateLinkedSaleBalanceFromCreditNotes(client, scope, saleId) {
   if (!saleId) return null
   const sale = await client.saleRecord.findFirst({
     where: scopedWhere(scope, { id: saleId, status: { not: 'cancelled' } }),
-    select: { id: true, total: true, amountPaid: true },
+    select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
   })
   if (!sale) return null
 
@@ -259,9 +261,10 @@ async function updateLinkedSaleBalanceFromCreditNotes(client, scope, saleId) {
     where: { tenantId: scope.tenantId, saleId, status: { not: 'cancelled' } },
     _sum: { amount: true },
   })
-  const total = toMoney(sale.total)
+  const total = saleNetTotal(sale)
   const amountPaid = toMoney(sale.amountPaid)
-  const adjustmentTotal = Math.min(total, toMoney(creditNotes._sum.amount))
+  const adjustmentLimit = Math.max(0, toMoney(total - amountPaid))
+  const adjustmentTotal = Math.min(adjustmentLimit, toMoney(creditNotes._sum.amount))
   const balance = Math.max(0, toMoney(total - amountPaid - adjustmentTotal))
 
   return client.saleRecord.update({

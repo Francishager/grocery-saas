@@ -5,6 +5,53 @@ const toMoney = (value, fallback = 0) => {
 
 const roundMoney = (value) => Math.round(toMoney(value) * 100) / 100;
 
+const hasNumericValue = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+
+function saleLineNetSubtotal(sale) {
+  return (sale?.items || []).reduce((sum, item) => {
+    const quantity = toMoney(item?.quantity);
+    const price = toMoney(item?.price);
+    if (quantity > 0 && price > 0) return roundMoney(sum + price * quantity - toMoney(item?.discount) - toMoney(item?.cashDiscount));
+    return roundMoney(sum + toMoney(item?.total));
+  }, 0);
+}
+
+export function receivableSaleNetTotal(sale) {
+  const storedTotal = toMoney(sale?.total);
+  const hasAccountingParts = [sale?.subtotal, sale?.discount, sale?.cashDiscount, sale?.tax].some(hasNumericValue);
+  const subtotal = hasNumericValue(sale?.subtotal) ? toMoney(sale.subtotal) : saleLineNetSubtotal(sale);
+  const computedNetTotal = roundMoney(Math.max(0, subtotal - toMoney(sale?.discount) - toMoney(sale?.cashDiscount) + toMoney(sale?.tax)));
+  if (hasAccountingParts && subtotal > 0) return computedNetTotal;
+  return storedTotal > 0 ? storedTotal : computedNetTotal;
+}
+
+export function receivableSaleOutstandingBeforeCreditNotes(sale) {
+  if (!sale || sale.status === "cancelled") return 0;
+  return roundMoney(Math.max(0, receivableSaleNetTotal(sale) - toMoney(sale?.amountPaid)));
+}
+
+export function effectiveCreditNoteRows(notes = []) {
+  const creditedBySale = new Map();
+  return (Array.isArray(notes) ? notes : []).map((note) => {
+    const recordedAmount = toMoney(note?.amount);
+    let effectiveAmount = recordedAmount;
+    let saleCreditLimit = null;
+    if (note?.saleId) {
+      saleCreditLimit = receivableSaleOutstandingBeforeCreditNotes(note.sale);
+      const alreadyCredited = toMoney(creditedBySale.get(note.saleId));
+      const remainingSaleCredit = roundMoney(Math.max(0, saleCreditLimit - alreadyCredited));
+      effectiveAmount = Math.min(recordedAmount, remainingSaleCredit);
+      creditedBySale.set(note.saleId, roundMoney(alreadyCredited + effectiveAmount));
+    }
+    return {
+      ...note,
+      recordedAmount,
+      effectiveAmount: roundMoney(Math.max(0, effectiveAmount)),
+      saleCreditLimit,
+      saleNetTotal: note?.sale ? receivableSaleNetTotal(note.sale) : null,
+    };
+  });
+}
 const groupSumMap = (groups, field) => new Map(
   groups.map((group) => [group.customerId, toMoney(group._sum?.[field])])
 );
@@ -19,30 +66,16 @@ async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = []) {
       customerId: true,
       saleId: true,
       amount: true,
-      sale: { select: { id: true, total: true, status: true } },
+      createdAt: true,
+      sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } },
     },
     orderBy: { createdAt: "asc" },
   });
 
   const totalsByCustomer = new Map();
-  const totalsBySale = new Map();
-
-  for (const note of notes) {
-    const amount = toMoney(note.amount);
-    if (note.saleId) {
-      if (!note.sale || note.sale.status === "cancelled") continue;
-      const current = totalsBySale.get(note.saleId) || { customerId: note.customerId, saleTotal: toMoney(note.sale.total), amount: 0 };
-      current.amount = roundMoney(current.amount + amount);
-      totalsBySale.set(note.saleId, current);
-      continue;
-    }
-
-    totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + amount));
-  }
-
-  for (const saleGroup of totalsBySale.values()) {
-    const effectiveAmount = Math.min(toMoney(saleGroup.saleTotal), toMoney(saleGroup.amount));
-    totalsByCustomer.set(saleGroup.customerId, roundMoney(toMoney(totalsByCustomer.get(saleGroup.customerId)) + effectiveAmount));
+  for (const note of effectiveCreditNoteRows(notes)) {
+    if (note.effectiveAmount <= 0) continue;
+    totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + note.effectiveAmount));
   }
 
   return totalsByCustomer;
@@ -57,10 +90,9 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId: { in: customerIds } };
   const [sales, payments, withdrawals, creditNotes, creditReturns] = await Promise.all([
-    client.saleRecord.groupBy({
-      by: ["customerId"],
+    client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      _sum: { total: true },
+      select: { customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
     }),
     client.customerPayment.groupBy({
       by: ["customerId"],
@@ -81,7 +113,10 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
     }),
   ]);
 
-  const salesMap = groupSumMap(sales, "total");
+  const salesMap = new Map();
+  for (const sale of sales) {
+    salesMap.set(sale.customerId, roundMoney(toMoney(salesMap.get(sale.customerId)) + receivableSaleNetTotal(sale)));
+  }
   const paymentsMap = groupSumMap(payments, "amount");
   const withdrawalsMap = groupSumMap(withdrawals, "amount");
   const creditNotesMap = creditNotes;
@@ -129,9 +164,9 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId };
   const [sales, payments, withdrawals, creditNotes, creditReturns] = await Promise.all([
-    client.saleRecord.aggregate({
+    client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      _sum: { total: true },
+      select: { total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
     }),
     client.customerPayment.aggregate({
       where: tenantCustomerWhere,
@@ -150,7 +185,7 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   ]);
 
   const openingBalance = Math.max(0, toMoney(customer.openingBalance));
-  const receivableSales = toMoney(sales._sum.total);
+  const receivableSales = sales.reduce((sum, sale) => roundMoney(sum + receivableSaleNetTotal(sale)), 0);
   const customerPayments = toMoney(payments._sum.amount);
   const customerWithdrawals = toMoney(withdrawals._sum.amount);
   const creditNoteTotal = toMoney(creditNotes.get(customerId));
