@@ -134,6 +134,13 @@ const readResponseError = async (response: Response, fallback: string) => {
   return data?.error || data?.message || fallback
 }
 
+const isReceivableSale = (sale: any) => (
+  sale?.status !== 'cancelled' &&
+  sale?.affectsCreditSales !== false &&
+  !sale?.documentType &&
+  !sale?.noteNo
+)
+
 const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
   <div className="flex items-start justify-between gap-4 border-b py-2 last:border-b-0">
     <span className="text-sm text-muted-foreground">{label}</span>
@@ -287,7 +294,7 @@ export default function ReceivablesPage() {
         const response = await apiFetch('/api/receivables/sales')
         if (response.ok) {
           const data = await response.json()
-          setSales(data.sales || [])
+          setSales((data.sales || []).filter(isReceivableSale))
         } else {
           try { setSales(await getLocalReceivableSales()) } catch { setSales([]) }
         }

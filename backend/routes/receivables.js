@@ -146,6 +146,13 @@ const withUser = (record) => {
 
 const userName = (user) => [user?.fname, user?.lname].filter(Boolean).join(' ') || 'Staff'
 
+const isReceivableSale = (sale) => (
+  sale?.status !== 'cancelled' &&
+  sale?.affectsCreditSales !== false &&
+  !sale?.documentType &&
+  !sale?.noteNo
+)
+
 const sortLedgerRows = (rows) => rows.sort((a, b) => {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
   const aTime = a.date ? new Date(a.date).getTime() : 0
@@ -923,12 +930,12 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
     ])
 
     res.json({
-      sales: sales.map(withUser),
+      sales: sales.filter(isReceivableSale).map(withUser),
       pagination: {
         page: Number(page),
         limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit))
+        total: sales.filter(isReceivableSale).length,
+        pages: Math.ceil(sales.filter(isReceivableSale).length / Number(limit))
       }
     })
   } catch (error) {

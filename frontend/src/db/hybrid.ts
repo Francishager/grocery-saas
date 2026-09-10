@@ -324,7 +324,13 @@ export async function getLocalReceivableCustomers(search?: string, status?: stri
 
 export async function getLocalReceivableSales(): Promise<any[]> {
   const sales = await db.sales.toArray()
-  return sales.filter(s => s.status !== 'cancelled' && (s.paymentMethod === 'credit' || s.status === 'credit'))
+  return sales.filter(s => (
+    s.status !== 'cancelled' &&
+    (s as any).affectsCreditSales !== false &&
+    !(s as any).documentType &&
+    !(s as any).noteNo &&
+    (s.paymentMethod === 'credit' || s.status === 'credit')
+  ))
 }
 
 export async function getLocalReceivablePayments(): Promise<any[]> {
