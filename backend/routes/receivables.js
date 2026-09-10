@@ -892,6 +892,7 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
     const where = scopedWhere(scope, {
       ...salesUserWhere(req, userId || staffId),
       ...(customerId && { customerId }),
+      status: { not: 'cancelled' },
       ...(paymentStatus && { paymentStatus }),
       ...(startDate && endDate && {
         createdAt: {
