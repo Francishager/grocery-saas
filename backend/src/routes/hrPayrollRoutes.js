@@ -40,8 +40,8 @@ router.post("/calculate", useSalaryCalculator, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const result = await payrollService.calculateSalaryPreview({
-      tenantId,
       ...req.body,
+      tenantId,
     });
 
     if (!result.success) {

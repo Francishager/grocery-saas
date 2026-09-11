@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import UgandaSalaryCalculator, { type SalaryPreview } from "@/components/hr/UgandaSalaryCalculator"
 
 type Account = {
   id: string
@@ -71,24 +72,11 @@ type SalaryAdvance = {
   journalEntryId?: string | null
 }
 
-type SalaryPreview = {
-  employee?: Employee | null
-  input: Record<string, any>
-  calculation: {
-    grossSalary: number
-    taxableIncome: number
-    paye: number
-    payeScheduleLabel?: string
-    employeeSocialSecurity: number
-    employerSocialSecurity: number
-    totalSocialSecurity: number
-    employeeStatutoryDeductions: number
-    manualDeductions: number
-    totalDeductions: number
-    netSalary: number
-    employerCost: number
-    rules?: any
-  }
+function payrollPreviewKey(form: Record<string, any>, period: string) {
+  return JSON.stringify([period, form.employeeId, ...[
+    "basicSalary", "allowances", "bonus", "overtime", "otherEarnings",
+    "paye", "socialSecurityTax", "healthInsurance", "otherDeductions", "salaryAdvanceRecovery",
+  ].map((key) => Number(form[key] || 0))])
 }
 
 const HR_ACCOUNTING_VIEWS = new Set(["overview", "mappings", "calculator", "payroll", "payments", "advances"])
@@ -397,24 +385,7 @@ export default function HRAccountingConfigPage() {
     salaryAdvanceRecovery: "",
     notes: "",
   })
-  const [calculatorForm, setCalculatorForm] = useState({
-    employeeId: "",
-    period: defaultPayrollPeriod(),
-    basicSalary: "",
-    allowances: "",
-    bonus: "",
-    overtime: "",
-    otherEarnings: "",
-    healthInsurance: "",
-    otherDeductions: "",
-    salaryAdvanceRecovery: "",
-    payeMode: "auto",
-    socialSecurityMode: "auto",
-    residencyStatus: "resident",
-    multipleEmployment: false,
-  })
-  const [salaryPreview, setSalaryPreview] = useState<SalaryPreview | null>(null)
-  const [salaryPreviewLoading, setSalaryPreviewLoading] = useState(false)
+  const [payrollPreviewOverride, setPayrollPreviewOverride] = useState<{ key: string; preview: SalaryPreview } | null>(null)
   const [paymentForm, setPaymentForm] = useState({
     payrollId: "",
     amount: "",
@@ -446,13 +417,17 @@ export default function HRAccountingConfigPage() {
     () => employees.find((employee) => employee.id === payrollForm.employeeId),
     [employees, payrollForm.employeeId]
   )
-  const selectedCalculatorEmployee = useMemo(
-    () => employees.find((employee) => employee.id === calculatorForm.employeeId),
-    [employees, calculatorForm.employeeId]
-  )
+  const matchesSalaryPreview = payrollPreviewOverride?.key === payrollPreviewKey(payrollForm, payrollPeriod)
   const salaryCalculator = useMemo(
-    () => calculateUgandaPayroll(payrollForm, selectedEmployee, payrollPeriod),
+    () => {
+      const base = calculateUgandaPayroll(payrollForm, selectedEmployee, payrollPeriod)
+      if (!matchesSalaryPreview || !payrollPreviewOverride) return base
+      const calculation = payrollPreviewOverride.preview.calculation
+      return { ...base, ...calculation, scheduleLabel: calculation.payeScheduleLabel || base.scheduleLabel }
+    },
     [
+      matchesSalaryPreview,
+      payrollPreviewOverride,
       payrollForm.basicSalary,
       payrollForm.allowances,
       payrollForm.bonus,
@@ -554,7 +529,7 @@ export default function HRAccountingConfigPage() {
       setLoading(true)
       setError("")
       const tasks = [loadEmployees()]
-      if (canViewPayrollData) {
+      if (canViewPayrollData && activeTab !== "calculator") {
         tasks.push(loadConfiguration(), loadPayroll(), loadAdvances())
       }
       await Promise.all(tasks)
@@ -568,7 +543,7 @@ export default function HRAccountingConfigPage() {
   useEffect(() => {
     loadAll()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [activeTab])
 
   useEffect(() => {
     if (!canViewPayrollData || activeTab === "calculator") return
@@ -577,6 +552,7 @@ export default function HRAccountingConfigPage() {
   }, [payrollPeriod, activeTab, canViewPayrollData])
 
   useEffect(() => {
+    if (matchesSalaryPreview) return
     setPayrollForm((prev) => {
       const nextPaye = salaryCalculator.hasTin ? String(salaryCalculator.paye) : "0"
       const nextSocialSecurity = salaryCalculator.hasSocialSecurityNumber ? String(salaryCalculator.employeeSocialSecurity) : "0"
@@ -588,6 +564,7 @@ export default function HRAccountingConfigPage() {
       }
     })
   }, [
+    matchesSalaryPreview,
     salaryCalculator.hasTin,
     salaryCalculator.hasSocialSecurityNumber,
     salaryCalculator.paye,
@@ -699,70 +676,40 @@ export default function HRAccountingConfigPage() {
     }))
   }
 
-  const handleCalculatorEmployeeChange = (employeeId: string) => {
-    const employee = employees.find((item) => item.id === employeeId)
-    setSalaryPreview(null)
-    setCalculatorForm((prev) => ({
-      ...prev,
-      employeeId,
-      basicSalary: employee ? String(employee.basicSalary || employee.salary || "") : prev.basicSalary,
-      payeMode: employeeId ? "auto" : prev.payeMode,
-      socialSecurityMode: employeeId ? "auto" : prev.socialSecurityMode,
-    }))
-  }
-
-  const calculateSalaryPreview = async () => {
-    if (!calculatorForm.period) {
-      setError("Select salary period")
-      return
+  const useSalaryPreviewInPayroll = (preview: SalaryPreview) => {
+    const input = preview.input
+    const calculation = preview.calculation
+    const nextForm = {
+      ...payrollForm,
+      employeeId: String(input.employeeId || ""),
+      basicSalary: String(input.basicSalary || 0),
+      allowances: String(input.allowances || 0),
+      bonus: String(input.bonus || 0),
+      overtime: String(input.overtime || 0),
+      otherEarnings: String(input.otherEarnings || 0),
+      paye: String(calculation.paye || 0),
+      socialSecurityTax: String(calculation.employeeSocialSecurity || 0),
+      healthInsurance: String(input.healthInsurance || 0),
+      otherDeductions: String(roundMoney(Number(input.otherDeductions || 0) + Number(calculation.localServiceTax || 0) + Number(calculation.rentToEmployer || 0))),
+      salaryAdvanceRecovery: String(input.salaryAdvanceRecovery || 0),
+      notes: [
+        payrollForm.notes,
+        `Uganda salary calculation (${input.period}, ${input.residencyStatus}).`,
+        `Non-cash benefits: UGX ${input.nonCashBenefits}; taxable housing: UGX ${calculation.housingBenefit || 0}.`,
+        `Other deductions include LST: UGX ${calculation.localServiceTax || 0}; rent: UGX ${calculation.rentToEmployer || 0}.`,
+      ].filter(Boolean).join(" "),
     }
-
-    try {
-      setSalaryPreviewLoading(true)
-      setError("")
-      const response = await fetchJson("/api/hr/payroll/calculate", {
-        method: "POST",
-        body: JSON.stringify({
-          ...calculatorForm,
-          basicSalary: Number(calculatorForm.basicSalary || selectedCalculatorEmployee?.basicSalary || 0),
-          allowances: Number(calculatorForm.allowances || 0),
-          bonus: Number(calculatorForm.bonus || 0),
-          overtime: Number(calculatorForm.overtime || 0),
-          otherEarnings: Number(calculatorForm.otherEarnings || 0),
-          healthInsurance: Number(calculatorForm.healthInsurance || 0),
-          otherDeductions: Number(calculatorForm.otherDeductions || 0),
-          salaryAdvanceRecovery: Number(calculatorForm.salaryAdvanceRecovery || 0),
-        }),
-      })
-      setSalaryPreview(response as SalaryPreview)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to calculate salary")
-    } finally {
-      setSalaryPreviewLoading(false)
-    }
-  }
-
-  const useSalaryPreviewInPayroll = () => {
-    if (!salaryPreview) return
-    setPayrollPeriod(String(salaryPreview.input.period || calculatorForm.period))
-    setPayrollForm((prev) => ({
-      ...prev,
-      employeeId: String(salaryPreview.input.employeeId || calculatorForm.employeeId || ""),
-      basicSalary: String(salaryPreview.input.basicSalary || ""),
-      allowances: String(salaryPreview.input.allowances || ""),
-      bonus: String(salaryPreview.input.bonus || ""),
-      overtime: String(salaryPreview.input.overtime || ""),
-      otherEarnings: String(salaryPreview.input.otherEarnings || ""),
-      paye: String(salaryPreview.calculation.paye || 0),
-      socialSecurityTax: String(salaryPreview.calculation.employeeSocialSecurity || 0),
-      healthInsurance: String(salaryPreview.input.healthInsurance || ""),
-      otherDeductions: String(salaryPreview.input.otherDeductions || ""),
-      salaryAdvanceRecovery: String(salaryPreview.input.salaryAdvanceRecovery || ""),
-    }))
+    setPayrollPeriod(String(input.period))
+    setPayrollForm(nextForm)
+    setPayrollPreviewOverride({ key: payrollPreviewKey(nextForm, String(input.period)), preview })
     navigate("/tenant/hr/accounting/payroll")
   }
 
   const createPayroll = async () => {
+    if (payrollPreviewOverride && !matchesSalaryPreview) {
+      setError("Salary inputs changed. Recalculate the salary before creating payroll.")
+      return
+    }
     if (!payrollForm.employeeId || !payrollPeriod) {
       setError("Select employee and payroll period")
       return
@@ -788,6 +735,7 @@ export default function HRAccountingConfigPage() {
         }),
       })
       setPayrollForm((prev) => ({ ...prev, employeeId: "", notes: "" }))
+      setPayrollPreviewOverride(null)
       notifySuccess("Payroll record created")
       await loadPayroll()
     } catch (err) {
@@ -927,14 +875,14 @@ export default function HRAccountingConfigPage() {
             <Calculator className="h-7 w-7 text-primary" />
             HR Accounting
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          {activeTab !== "calculator" && <p className="mt-1 text-sm text-muted-foreground">
             Configure salary accounts, post payroll, pay salaries, and manage employee advances with real accounting entries.
-          </p>
+          </p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={isConfigured ? "default" : "secondary"} className="h-8">
+          {activeTab !== "calculator" && <Badge variant={isConfigured ? "default" : "secondary"} className="h-8">
             {isConfigured ? "Configured" : "Needs setup"}
-          </Badge>
+          </Badge>}
           <Button variant="outline" onClick={loadAll} disabled={saving}>
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -1114,199 +1062,7 @@ export default function HRAccountingConfigPage() {
       )}
 
       {activeTab === "calculator" && (
-        <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Calculator className="h-4 w-4" />
-                Salary Calculator
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="grid gap-4 lg:grid-cols-4">
-                <div>
-                  <Label>Period</Label>
-                  <Input
-                    type="month"
-                    value={calculatorForm.period}
-                    onChange={(event) => {
-                      setSalaryPreview(null)
-                      setCalculatorForm((prev) => ({ ...prev, period: event.target.value }))
-                    }}
-                  />
-                </div>
-                <div className="lg:col-span-2">
-                  <Label>Employee</Label>
-                  <EmployeeSelect value={calculatorForm.employeeId} onChange={handleCalculatorEmployeeChange} employees={employees} />
-                </div>
-                <div>
-                  <Label>Residency</Label>
-                  <select
-                    value={calculatorForm.residencyStatus}
-                    onChange={(event) => {
-                      setSalaryPreview(null)
-                      setCalculatorForm((prev) => ({ ...prev, residencyStatus: event.target.value }))
-                    }}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="resident">Resident</option>
-                    <option value="non_resident">Non-resident</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <div>
-                  <Label>PAYE</Label>
-                  <select
-                    value={calculatorForm.payeMode}
-                    onChange={(event) => {
-                      setSalaryPreview(null)
-                      setCalculatorForm((prev) => ({ ...prev, payeMode: event.target.value }))
-                    }}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="auto">Use employee profile</option>
-                    <option value="on">Include PAYE</option>
-                    <option value="off">Exclude PAYE</option>
-                  </select>
-                </div>
-                <div>
-                  <Label>Social Security</Label>
-                  <select
-                    value={calculatorForm.socialSecurityMode}
-                    onChange={(event) => {
-                      setSalaryPreview(null)
-                      setCalculatorForm((prev) => ({ ...prev, socialSecurityMode: event.target.value }))
-                    }}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="auto">Use employee profile</option>
-                    <option value="on">Include social security</option>
-                    <option value="off">Exclude social security</option>
-                  </select>
-                </div>
-                <label className="flex min-h-9 items-center gap-3 rounded-md border px-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={calculatorForm.multipleEmployment}
-                    onChange={(event) => {
-                      setSalaryPreview(null)
-                      setCalculatorForm((prev) => ({ ...prev, multipleEmployment: event.target.checked }))
-                    }}
-                    className="h-4 w-4"
-                  />
-                  Multiple employment
-                </label>
-              </div>
-
-              {selectedCalculatorEmployee && (
-                <div className="grid gap-3 rounded-md border bg-muted/30 p-3 text-sm md:grid-cols-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Employee</p>
-                    <p className="font-medium">{employeeName(selectedCalculatorEmployee)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">TIN</p>
-                    <p className="font-medium">{selectedCalculatorEmployee.taxId || "Not recorded"}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Social Security No.</p>
-                    <p className="font-medium">{selectedCalculatorEmployee.socialSecurityNumber || "Not recorded"}</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid gap-4 md:grid-cols-5">
-                {[
-                  ["basicSalary", "Basic Salary"],
-                  ["allowances", "Allowances"],
-                  ["bonus", "Bonus"],
-                  ["overtime", "Overtime"],
-                  ["otherEarnings", "Other Earnings"],
-                  ["salaryAdvanceRecovery", "Advance Recovery"],
-                  ["healthInsurance", "Health Insurance"],
-                  ["otherDeductions", "Other Deductions"],
-                ].map(([key, label]) => (
-                  <div key={key}>
-                    <Label>{label}</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={(calculatorForm as any)[key]}
-                      onChange={(event) => {
-                        setSalaryPreview(null)
-                        setCalculatorForm((prev) => ({ ...prev, [key]: event.target.value }))
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={calculateSalaryPreview} disabled={salaryPreviewLoading}>
-                  {salaryPreviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-                  Calculate
-                </Button>
-                {salaryPreview && canCreatePayroll && (
-                  <Button variant="outline" onClick={useSalaryPreviewInPayroll}>
-                    <ReceiptText className="h-4 w-4" />
-                    Use in Payroll Posting
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {salaryPreview && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between gap-3 text-base">
-                  <span>Calculation Result</span>
-                  <Badge variant="secondary">{salaryPreview.calculation.payeScheduleLabel || "Uganda payroll"}</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    ["Gross Salary", salaryPreview.calculation.grossSalary],
-                    ["Taxable Income", salaryPreview.calculation.taxableIncome],
-                    ["PAYE", salaryPreview.calculation.paye],
-                    ["Employee Social Security", salaryPreview.calculation.employeeSocialSecurity],
-                    ["Employer Social Security", salaryPreview.calculation.employerSocialSecurity],
-                    ["Other Deductions", salaryPreview.calculation.manualDeductions],
-                    ["Net Salary", salaryPreview.calculation.netSalary],
-                    ["Employer Cost", salaryPreview.calculation.employerCost],
-                  ].map(([label, value]) => (
-                    <div key={String(label)} className="min-w-0 rounded-md border p-3">
-                      <p className="text-xs text-muted-foreground">{String(label)}</p>
-                      <p className="mt-1 break-words text-base font-semibold">{money(value as number)}</p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid gap-3 text-sm md:grid-cols-3">
-                  <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">PAYE Basis</p>
-                    <p className="mt-1 font-medium">
-                      {salaryPreview.input.taxEnabled ? salaryPreview.calculation.payeScheduleLabel || "Applied" : "Not applied"}
-                    </p>
-                  </div>
-                  <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">Social Security Basis</p>
-                    <p className="mt-1 font-medium">
-                      {salaryPreview.input.socialSecurityEnabled ? "5% employee, 10% employer" : "Not applied"}
-                    </p>
-                  </div>
-                  <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">Statutory Deductions</p>
-                    <p className="mt-1 font-medium">{money(salaryPreview.calculation.employeeStatutoryDeductions)}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        <UgandaSalaryCalculator employees={employees} canCreatePayroll={canCreatePayroll} onUseInPayroll={useSalaryPreviewInPayroll} />
       )}
 
       {activeTab === "payroll" && (
@@ -1387,7 +1143,13 @@ export default function HRAccountingConfigPage() {
                 <Label>Notes</Label>
                 <Input value={payrollForm.notes} onChange={(event) => setPayrollForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Optional payroll note" />
               </div>
-                <Button onClick={createPayroll} disabled={saving || !isConfigured}>Create Payroll</Button>
+                {payrollPreviewOverride && !matchesSalaryPreview && (
+                  <div className="flex flex-wrap items-center gap-3 text-sm" role="alert">
+                    <span>Salary inputs changed. Recalculation required.</span>
+                    <Button variant="outline" onClick={() => navigate("/tenant/hr/accounting/calculator")}><Calculator className="h-4 w-4" />Recalculate Salary</Button>
+                  </div>
+                )}
+                <Button onClick={createPayroll} disabled={saving || !isConfigured || Boolean(payrollPreviewOverride && !matchesSalaryPreview)}>Create Payroll</Button>
               </CardContent>
             </Card>
           )}
