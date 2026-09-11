@@ -323,13 +323,13 @@ function EmployeeSelect({
   )
 }
 
-export default function HRAccountingConfigPage() {
+export default function HRAccountingConfigPage({ view }: { view?: string } = {}) {
   const { tab } = useParams()
   const navigate = useNavigate()
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
   const assignedCashAccountId = userCashAccountId(user)
-  const activeTab = HR_ACCOUNTING_VIEWS.has(String(tab)) ? String(tab) : "overview"
+  const activeTab = HR_ACCOUNTING_VIEWS.has(String(view ?? tab)) ? String(view ?? tab) : "overview"
   const isOwner = user?.role === "owner" || user?.role === "saas_admin"
   const canUseLegacyPayroll = hasPermission("canManageHRPayroll")
   const canManagePayrollSettings = isOwner || canUseLegacyPayroll || hasPermission("canManageHRPayrollSettings")

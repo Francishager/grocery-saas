@@ -9,10 +9,24 @@ import { calculateUgandaSalaryPreview } from '../../backend/src/utils/ugandaSala
 
 const require = createRequire(import.meta.url);
 const { build } = require('esbuild');
+const ts = require('typescript');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('salary calculator modes, options, validation, payroll transfer and responsive layouts', async () => {
+  const app = ts.createSourceFile('App.tsx', readFileSync(path.join(root, 'src/App.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const accountingRoutes = [];
+  function collectRoutes(node) {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(app) === 'Route') {
+      const pathAttribute = node.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(app) === 'path');
+      if (pathAttribute?.initializer && ts.isStringLiteral(pathAttribute.initializer) && pathAttribute.initializer.text.startsWith('hr/accounting')) {
+        accountingRoutes.push(node.getText(app));
+      }
+    }
+    ts.forEachChild(node, collectRoutes);
+  }
+  collectRoutes(app);
+  assert.equal(accountingRoutes.length, 3);
   const adapters = {
     '@/lib/api': `export const apiFetch=(url,options)=>fetch(url,options);`,
     '@/contexts/JWTAuthContext': `export const useJWTAuth=()=>({user:{id:'staff',role:'owner'},hasPermission:()=>true});`,
@@ -20,8 +34,9 @@ test('salary calculator modes, options, validation, payroll transfer and respons
   };
   const bundle = await build({
     stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {MemoryRouter,Routes,Route} from 'react-router-dom';
-      import Page from './src/pages/HRAccountingConfigPage';
-      createRoot(document.getElementById('root')).render(<MemoryRouter initialEntries={['/tenant/hr/accounting/calculator']}><Routes><Route path='/tenant/hr/accounting/:tab' element={<Page/>}/></Routes></MemoryRouter>);`, resolveDir: root, loader: 'tsx' },
+      import HRAccountingConfigPage from './src/pages/HRAccountingConfigPage';
+      const FeatureGuard = ({children}) => children;
+      createRoot(document.getElementById('root')).render(<MemoryRouter initialEntries={['/tenant/hr/accounting/calculator']}><Routes><Route path='/tenant'>${accountingRoutes.join('\n')}</Route></Routes></MemoryRouter>);`, resolveDir: root, loader: 'tsx' },
     bundle: true, write: false, format: 'iife', platform: 'browser', alias: { '@': path.join(root, 'src') }, define: { 'import.meta.env': '{}' },
     plugins: [{ name: 'test-data', setup(builder) {
       builder.onResolve({ filter: /^@\// }, (args) => adapters[args.path] ? { path: args.path, namespace: 'fixture' } : undefined);
@@ -65,7 +80,8 @@ test('salary calculator modes, options, validation, payroll transfer and respons
       const css = readdirSync(assets).find((file) => file.startsWith('index-') && file.endsWith('.css'));
       await page.addStyleTag({ content: readFileSync(path.join(assets, css), 'utf8') });
       await page.addScriptTag({ content: bundle.outputFiles[0].text });
-      await page.getByLabel('Year', { exact: true }).waitFor();
+      await page.getByLabel('Year', { exact: true }).waitFor({ timeout: 5000 });
+      assert.equal(await page.getByText('Payroll This Period', { exact: true }).count(), 0);
       assert(!requests.includes('/api/hr/payroll'), 'Calculator must not require payroll records');
       assert(!requests.includes('/api/hr/config'), 'Calculator must not require mappings');
       await page.getByLabel('Year', { exact: true }).selectOption('2026');
