@@ -9,6 +9,7 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
 import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
 import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
+import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -1387,10 +1388,6 @@ router.post('/withdrawals', authenticateToken, requirePermission('canCreateWithd
       allowOwnerAll: false
     })
     const { customerId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
-    const withdrawalAmount = toMoney(amount)
-    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
-    if (withdrawalAmount <= 0) return res.status(400).json({ error: 'Withdrawal amount must be greater than zero' })
-
     const resolvedPaymentMethod = paymentMethod || 'cash'
     if (resolvedPaymentMethod === 'credit') {
       return res.status(400).json({ error: 'Withdrawal must use cash, mobile money, bank transfer, or card' })
@@ -1403,102 +1400,18 @@ router.post('/withdrawals', authenticateToken, requirePermission('canCreateWithd
       })
     }
 
-    const customer = await prisma.customer.findFirst({
-      where: scopedWhere(scope, { id: customerId })
-    })
-    if (!customer) return res.status(404).json({ error: 'Customer not found' })
-    if (customer.status !== 'active') return res.status(400).json({ error: 'Customer is not active' })
-
-    const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, customerId)
-    const currentCustomerBalance = balanceSnapshot?.balance ?? toMoney(customer.balance)
-    const balanceAfterWithdrawal = Math.round((currentCustomerBalance + withdrawalAmount) * 100) / 100
-    if (balanceAfterWithdrawal > 0) {
-      const creditLimitAmount = toMoney(customer.creditLimit)
-      if (creditLimitAmount <= 0) {
-        return res.status(400).json({
-          error: `Set a credit limit for ${customer.name || 'this customer'} before recording a withdrawal that creates customer debt.`,
-          code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED'
-        })
-      }
-      if (balanceAfterWithdrawal > creditLimitAmount) {
-        return res.status(400).json({
-          error: `Credit limit exceeded. Available credit is ${Math.max(0, creditLimitAmount - currentCustomerBalance).toFixed(2)}.`,
-          code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED'
-        })
-      }
-    }
-
-    const withdrawal = await prisma.$transaction(async (tx) => {
-      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
-      if (toMoney(accountToUse.balance) < withdrawalAmount) {
-        throw Object.assign(
-          new Error(`Insufficient balance in ${accountToUse.name}. Available: ${toMoney(accountToUse.balance).toFixed(2)}.`),
-          { statusCode: 400, code: 'INSUFFICIENT_ACCOUNT_BALANCE' }
-        )
-      }
-
-      const withdrawalReference = reference || `WD-${Date.now()}`
-      const createdWithdrawal = await tx.customerWithdrawal.create({
-        data: {
-          tenantId: scope.tenantId,
-          branchId: scope.branchId,
-          customerId,
-          userId: req.user.id,
-          cashAccountId: accountToUse.id,
-          amount: withdrawalAmount,
-          paymentMethod: resolvedPaymentMethod,
-          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
-          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
-          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
-          reference: withdrawalReference,
-          notes
-        },
-        include: {
-          customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
-          branch: { select: { id: true, name: true } },
-          cashAccount: { select: { id: true, name: true, type: true, balance: true } },
-          user: userSelect
-        }
-      })
-
-      const updatedAccount = await tx.cashAccount.update({
-        where: { id: accountToUse.id },
-        data: { balance: { decrement: withdrawalAmount } }
-      })
-
-      await tx.cashTransaction.create({
-        data: {
-          tenantId: scope.tenantId,
-          accountId: accountToUse.id,
-          type: 'withdrawal',
-          amount: withdrawalAmount,
-          balanceAfter: updatedAccount.balance,
-          reference: withdrawalReference || createdWithdrawal.id,
-          description: `Customer withdrawal: ${customer.name || customer.email}`,
-          userId: req.user.id
-        }
-      })
-
-      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, accountToUse.id)
-      const reconciled = await reconcileCustomerReceivableBalance(tx, scope, customerId)
-
-      return {
-        ...createdWithdrawal,
-        cashAccount: {
-          ...createdWithdrawal.cashAccount,
-          balance: updatedAccount.balance
-        },
-        customer: {
-          ...createdWithdrawal.customer,
-          balance: reconciled?.balance ?? createdWithdrawal.customer.balance
-        }
-      }
+    const withdrawal = await recordCustomerWithdrawal(prisma, {
+      scope, customerId, amount, userId: req.user.id, paymentMethod: resolvedPaymentMethod,
+      reference, notes, mobileProvider, phoneNumber, transactionId,
+      resolveAccount: (tx) => resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'withdrawals')
     })
 
     res.status(201).json(withdrawal)
   } catch (error) {
     console.error('Record withdrawal error:', error)
-    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    if (error.statusCode) return res.status(error.statusCode).json({
+      error: error.message, code: error.code, availableFunds: error.availableFunds, currentBalance: error.currentBalance
+    })
     handleBranchError(res, error, 'Failed to record withdrawal')
   }
 })

@@ -123,6 +123,9 @@ const parseAmount = (value: string | number | undefined) => {
   return Number.isFinite(amount) ? amount : 0
 }
 
+const availableCustomerFunds = (customer: Pick<Customer, 'balance'> | null | undefined) =>
+  Math.max(0, -parseAmount(customer?.balance))
+
 const searchText = (...values: unknown[]) =>
   values
     .filter((value) => value !== null && value !== undefined)
@@ -175,6 +178,8 @@ export default function ReceivablesPage() {
   const [savingPayment, setSavingPayment] = useState(false)
   const savingPaymentRef = React.useRef(false)
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false)
+  const [savingWithdrawal, setSavingWithdrawal] = useState(false)
+  const savingWithdrawalRef = React.useRef(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<Customer | null>(null)
@@ -844,6 +849,7 @@ export default function ReceivablesPage() {
     }
   }
   const recordWithdrawal = async () => {
+    if (savingWithdrawalRef.current) return
     if (!canCreateWithdrawal) {
       toast({
         variant: 'destructive',
@@ -857,8 +863,18 @@ export default function ReceivablesPage() {
       toast({ variant: 'destructive', title: 'Select a customer first' })
       return
     }
-    if (!withdrawalAmount || parseFloat(withdrawalAmount) <= 0) {
+    const amount = Number(withdrawalAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
       toast({ variant: 'destructive', title: 'Enter a valid withdrawal amount' })
+      return
+    }
+    if (!online || targetCustomer.status !== 'active') {
+      toast({ variant: 'destructive', title: 'Withdrawals require an active customer and an online connection' })
+      return
+    }
+    const availableFunds = availableCustomerFunds(targetCustomer)
+    if (amount > availableFunds) {
+      toast({ variant: 'destructive', title: 'Insufficient customer funds', description: `${targetCustomer.name} has ${formatCurrency(availableFunds)} available to withdraw.` })
       return
     }
     if (!selectedCashAccountId) {
@@ -866,12 +882,19 @@ export default function ReceivablesPage() {
       return
     }
 
+    const account = cashAccounts.find((item) => String(item.id) === String(selectedCashAccountId))
+    if (!account || amount > parseAmount(account.balance)) {
+      toast({ variant: 'destructive', title: 'Insufficient balance in the selected account' })
+      return
+    }
+    savingWithdrawalRef.current = true
+    setSavingWithdrawal(true)
     try {
       const response = await apiFetch('/api/receivables/withdrawals', {
         method: 'POST',
         body: JSON.stringify({
           customerId: targetCustomer.id,
-          amount: parseFloat(withdrawalAmount),
+          amount,
           paymentMethod,
           cashAccountId: selectedCashAccountId || undefined,
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
@@ -882,7 +905,12 @@ export default function ReceivablesPage() {
       })
 
       if (!response.ok) {
-        throw new Error(await readResponseError(response, 'Failed to record withdrawal'))
+        const error = await response.json().catch(() => ({}))
+        if (typeof error.currentBalance === 'number' && Number.isFinite(error.currentBalance)) {
+          setSelectedCustomer((current) => current?.id === targetCustomer.id ? { ...current, balance: error.currentBalance } : current)
+          setCustomers((current) => current.map((customer) => customer.id === targetCustomer.id ? { ...customer, balance: error.currentBalance } : customer))
+        }
+        throw new Error(error.error || error.message || 'Failed to record withdrawal')
       }
 
       toast({
@@ -908,6 +936,9 @@ export default function ReceivablesPage() {
         description: error instanceof Error ? error.message : 'Failed to record withdrawal',
         variant: 'destructive'
       })
+    } finally {
+      savingWithdrawalRef.current = false
+      setSavingWithdrawal(false)
     }
   }
 
@@ -1412,7 +1443,9 @@ export default function ReceivablesPage() {
   const withdrawalValue = parseAmount(withdrawalAmount)
   const withdrawalAccountBalance = Number(selectedWithdrawalAccount?.balance || 0)
   const withdrawalAccountBalanceAfter = selectedWithdrawalAccount ? withdrawalAccountBalance - withdrawalValue : null
-  const withdrawalCustomerBalanceAfter = Number(selectedCustomer?.balance || 0) + withdrawalValue
+  const withdrawalAvailableFunds = availableCustomerFunds(selectedCustomer)
+  const withdrawalCustomerFundsAfter = Math.max(0, withdrawalAvailableFunds - withdrawalValue)
+  const withdrawalLimit = selectedWithdrawalAccount ? Math.min(withdrawalAvailableFunds, Math.max(0, withdrawalAccountBalance)) : withdrawalAvailableFunds
 
   return (
     <div className="space-y-6">
@@ -1527,7 +1560,7 @@ export default function ReceivablesPage() {
                       <p className="font-semibold text-red-600">{formatCurrency(customer.balance || 0)}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground">Available</p>
+                      <p className="text-muted-foreground">Available Credit</p>
                       <p className="font-semibold text-green-600">
                         {formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}
                       </p>
@@ -1550,6 +1583,8 @@ export default function ReceivablesPage() {
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={!online || savingWithdrawal || customer.status !== 'active' || availableCustomerFunds(customer) <= 0}
+                        title={availableCustomerFunds(customer) > 0 ? `Customer funds: ${formatCurrency(availableCustomerFunds(customer))}` : 'No customer funds available to withdraw'}
                         onClick={() => {
                           setSelectedCustomer(customer)
                           setSelectedSale(null)
@@ -2235,11 +2270,12 @@ export default function ReceivablesPage() {
                 recordWithdrawal()
               }}
             >
+              <fieldset disabled={savingWithdrawal} className="space-y-4">
               <div>
                 <Label>Customer</Label>
                 <p className="font-medium">{selectedCustomer.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  Current Balance: {formatCurrency(Number(selectedCustomer.balance || 0))}
+                  Available Customer Funds: {formatCurrency(withdrawalAvailableFunds)}
                 </p>
               </div>
 
@@ -2248,13 +2284,20 @@ export default function ReceivablesPage() {
                 <Input
                   id="withdrawalAmount"
                   type="number"
-                  min="0"
+                  min="0.01"
                   step="0.01"
-                  max={selectedWithdrawalAccount ? withdrawalAccountBalance : undefined}
+                  max={withdrawalLimit}
+                  required
+                  aria-describedby="withdrawalFundsLimit"
+                  aria-invalid={withdrawalValue > withdrawalAvailableFunds}
                   value={withdrawalAmount}
                   onChange={(event) => setWithdrawalAmount(event.target.value)}
                   placeholder="0.00"
                 />
+                <p id="withdrawalFundsLimit" className={withdrawalValue > withdrawalAvailableFunds ? 'mt-1 text-sm text-red-600' : 'mt-1 text-sm text-muted-foreground'}>
+                  {withdrawalValue > withdrawalAvailableFunds ? 'Withdrawal exceeds available customer funds. ' : 'Maximum withdrawal: '}
+                  {formatCurrency(withdrawalLimit)}
+                </p>
               </div>
 
               <div>
@@ -2360,8 +2403,8 @@ export default function ReceivablesPage() {
 
               <div className="rounded-md border p-4 text-sm">
                 <div className="flex justify-between gap-4">
-                  <span>Customer Balance After</span>
-                  <span className="font-semibold text-red-600">{formatCurrency(withdrawalCustomerBalanceAfter)}</span>
+                  <span>Customer Funds Remaining</span>
+                  <span className="font-semibold whitespace-nowrap">{formatCurrency(withdrawalCustomerFundsAfter)}</span>
                 </div>
                 <div className="flex justify-between gap-4 text-muted-foreground">
                   <span>Account Balance After</span>
@@ -2391,16 +2434,18 @@ export default function ReceivablesPage() {
                 <Button
                   type="submit"
                   disabled={
-                    !withdrawalAmount || parseFloat(withdrawalAmount) <= 0 ||
+                    savingWithdrawal || !online || selectedCustomer.status !== 'active' ||
+                    withdrawalValue <= 0 || withdrawalValue > withdrawalAvailableFunds ||
                     !selectedCashAccountId ||
                     (withdrawalAccountBalanceAfter !== null && withdrawalAccountBalanceAfter < 0) ||
                     (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
                     (paymentMethod === 'card' ? !transactionId.trim() : false)
                   }
                 >
-                  Record Withdrawal
+                  {savingWithdrawal ? 'Recording...' : 'Record Withdrawal'}
                 </Button>
               </div>
+              </fieldset>
             </form>
           </div>
         </div>
