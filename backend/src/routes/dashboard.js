@@ -156,13 +156,6 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       supplierPurchasesThisMonth,
       expensesThisMonth,
       journalExpensesThisMonth,
-      products,
-      lowStockProducts,
-      expiringProducts,
-      customers,
-      receivables,
-      salesWithItemsThisMonth,
-      saleRecordsWithItemsThisMonth,
     ] = await Promise.all([
       prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
       salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
@@ -172,11 +165,20 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
       prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth })), _sum: { amount: true } }),
       journalExpenseTotal(scope, { gte: startOfMonth }),
+    ]);
+
+    const [
+      products,
+      lowStockProducts,
+      expiringProducts,
+      customers,
+      salesWithItemsThisMonth,
+      saleRecordsWithItemsThisMonth,
+    ] = await Promise.all([
       prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
       prisma.product.count({ where: scopedWhere(scope, { isActive: true, expiryDate: { not: null, lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000) } }) }),
       prisma.customer.count({ where: scopedWhere(scope) }),
-      outstandingCustomerSummary(prisma, scope),
       prisma.sale.findMany({
         where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
         select: { items: { select: saleItemCostSelect } },
@@ -186,6 +188,10 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
         select: { items: { select: saleItemCostSelect } },
       }),
     ]);
+
+    // The reconciliation reads several related tables; keep it out of the broad
+    // dashboard fan-out so hosted databases do not exhaust their connection pool.
+    const receivables = await outstandingCustomerSummary(prisma, scope);
 
     const revenueThisMonth = aggregateRevenue(salesThisMonth) + aggregateRevenue(saleRecordsThisMonth);
     const revenueLastMonth = aggregateRevenue(salesLastMonth) + aggregateRevenue(saleRecordsLastMonth);
