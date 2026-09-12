@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Check, ChevronsUpDown, Plus, Search, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
@@ -184,6 +184,9 @@ export default function InventoryPage() {
   const [categoryQuery, setCategoryQuery] = useState('')
   const [items, setItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
+  const [inventoryError, setInventoryError] = useState<string | null>(null)
+  const inventoryRequestRef = useRef(0)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
@@ -238,7 +241,20 @@ export default function InventoryPage() {
     [categories]
   )
 
-  const { paginatedItems, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(filteredItems, 10)
+  const { paginatedItems, currentPage, totalPages, totalItems, goToPage, resetPage, pageSize } = usePagination(filteredItems, 10)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppliedSearch(searchQuery.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
+
+  useEffect(() => {
+    resetPage()
+  }, [appliedSearch, branchFilter, activeType, showUncategorizedOnly, movementPreset, customMovementDate, resetPage])
+
+  useEffect(() => {
+    if (currentPage > Math.max(1, totalPages)) goToPage(Math.max(1, totalPages))
+  }, [currentPage, totalPages, goToPage])
 
   useEffect(() => {
     if (lockedType) setItemTypeFilter(lockedType as 'all' | 'product')
@@ -260,7 +276,8 @@ export default function InventoryPage() {
 
   useEffect(() => {
     loadInventory()
-  }, [branchFilter, itemTypeFilter, movementPreset, customMovementDate])
+    return () => { inventoryRequestRef.current += 1 }
+  }, [appliedSearch, branchFilter, activeType, movementPreset, customMovementDate, online, canManageInventory])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -317,41 +334,42 @@ export default function InventoryPage() {
   }
 
   const loadInventory = async () => {
+    const requestId = ++inventoryRequestRef.current
+    const typeFilter = activeType === 'all' ? undefined : activeType
     setLoading(true)
+    setInventoryError(null)
     try {
       if (online) {
-        const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
         const data = await inventoryApi.listWithDailyMovements(
-          searchQuery,
+          appliedSearch,
           canManageInventory ? branchFilter : undefined,
           typeFilter,
           movementParams
         )
+        if (requestId !== inventoryRequestRef.current) return
         setItems(Array.isArray(data?.products) ? data.products : [])
         setMovementSummary({ ...emptyMovementSummary, ...(data?.movementSummary || {}) })
       } else {
-        const typeFilter = itemTypeFilter === 'all' ? undefined : itemTypeFilter
-        const local = await getLocalProducts(searchQuery, canManageInventory ? branchFilter : undefined, typeFilter)
+        const local = await getLocalProducts(appliedSearch, canManageInventory ? branchFilter : undefined, typeFilter)
+        if (requestId !== inventoryRequestRef.current) return
         setItems(local)
         setMovementSummary(emptyMovementSummary)
       }
     } catch (error: any) {
-      // API failed — fall back to local
-      try {
-        const local = await getLocalProducts(searchQuery, canManageInventory ? branchFilter : undefined, itemTypeFilter === 'all' ? undefined : itemTypeFilter)
-        setItems(local)
-        setMovementSummary(emptyMovementSummary)
-      } catch {
-        toast({ variant: 'destructive', title: 'Failed to load inventory', description: error?.message || 'Unknown error' })
-      }
+      if (requestId !== inventoryRequestRef.current) return
+      setItems([])
+      setMovementSummary(emptyMovementSummary)
+      setInventoryError(error?.message || 'Unable to load products. Please try again.')
     } finally {
-      setLoading(false)
+      if (requestId === inventoryRequestRef.current) setLoading(false)
     }
   }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    loadInventory()
+    resetPage()
+    if (appliedSearch === searchQuery.trim()) loadInventory()
+    else setAppliedSearch(searchQuery.trim())
   }
 
   const saveSellingUnits = async (productId: string) => {
@@ -825,8 +843,26 @@ export default function InventoryPage() {
   const movementContext = (row: InventoryMovementDetail) =>
     [row.paymentMethod || row.refundMethod, row.status, row.reason].filter(Boolean).join(' / ') || '-'
 
+  const searching = Boolean(searchQuery.trim() || appliedSearch)
+  const movementSummaryCards = (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {movementCards.map((card) => (
+        <button
+          key={card.id}
+          type="button"
+          onClick={() => openMovementCardModal(card)}
+          className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
+          <p className="mt-1 text-xl font-bold">{formatQty(card.value)}</p>
+          <p className="text-[11px] text-muted-foreground">{movementPeriodLabel}</p>
+        </button>
+      ))}
+    </div>
+  )
+
   return (
-    <div className="space-y-6 p-4 md:p-6">
+    <div className="min-w-0 space-y-6 p-4 md:p-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -858,15 +894,29 @@ export default function InventoryPage() {
       <UsageLimitBanner resource="products" label="Products" currentCount={items.length} />
 
       {/* Search + Filters */}
-      <form onSubmit={handleSearch} className="flex flex-wrap gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search items..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
+      <form onSubmit={handleSearch} role="search" aria-label="Product search" className="flex min-w-0 flex-wrap gap-2">
+        <div className="flex w-full min-w-0 gap-2 sm:w-auto sm:min-w-72 sm:flex-1">
+          <div className="relative min-w-0 flex-1">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="Search products"
+              aria-controls="inventory-results"
+              autoComplete="off"
+              enterKeyHint="search"
+              placeholder="Search items..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="min-w-0 pl-9 pr-10"
+            />
+            {searchQuery && (
+              <button type="button" aria-label="Clear product search" title="Clear search"
+                className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md hover:bg-muted"
+                onClick={() => { setSearchQuery(''); setAppliedSearch(''); resetPage() }}>
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <Button type="submit" variant="secondary">Search</Button>
         </div>
         {!lockedType && (
         <div className="flex gap-1">
@@ -952,9 +1002,6 @@ export default function InventoryPage() {
         >
           {showUncategorizedOnly ? '✓ Uncategorized Only' : 'Show Uncategorized'}
         </button>
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
       </form>
 
       {!online && (
@@ -964,20 +1011,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {movementCards.map((card) => (
-          <button
-            key={card.id}
-            type="button"
-            onClick={() => openMovementCardModal(card)}
-            className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
-            <p className="mt-1 text-xl font-bold">{formatQty(card.value)}</p>
-            <p className="text-[11px] text-muted-foreground">{movementPeriodLabel}</p>
-          </button>
-        ))}
-      </div>
+      {!searching && movementSummaryCards}
 
       {/* Add/Edit Form */}
       {showForm && (
@@ -1356,24 +1390,30 @@ export default function InventoryPage() {
       )}
 
       {/* Items Table */}
-      <Card>
+      <Card id="inventory-results" role="region" aria-label="Product search results" aria-busy={loading} className="min-w-0">
         <CardHeader>
-          <CardTitle>
-            {itemTypeFilter === 'all' ? 'All Items' : itemTypeFilter === 'product' ? 'Products' : itemTypeFilter === 'service' ? 'Services' : 'Rentals'} ({items.length})
+          <CardTitle role="heading" aria-level={2}>
+            {activeType === 'all' ? 'All Items' : 'Products'} ({totalItems})
           </CardTitle>
+          <p role="status" className="break-words text-sm text-muted-foreground">{loading ? 'Loading products...' : appliedSearch ? `Results for "${appliedSearch}"` : ''}</p>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {inventoryError ? (
+            <div role="alert" className="space-y-3 py-6 text-center">
+              <p className="break-words text-sm text-destructive">{inventoryError}</p>
+              <Button variant="outline" onClick={() => loadInventory()}>Retry</Button>
+            </div>
+          ) : loading && items.length === 0 ? (
             <div className="flex items-center justify-center h-32">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
             </div>
-          ) : items.length === 0 ? (
+          ) : totalItems === 0 ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground mb-4">No items found</p>
-              <Button onClick={openNewForm}>
+              {canCreateCurrent && !searching && !showUncategorizedOnly && <Button onClick={openNewForm}>
                 <Plus className="mr-2 h-4 w-4" />
                 {lockedType === 'product' ? 'Add First Product' : 'Add First Item'}
-              </Button>
+              </Button>}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1422,7 +1462,7 @@ export default function InventoryPage() {
                       </td>
                       )}
                       <td className="py-3 pr-4 whitespace-nowrap">{item.product_id || '-'}</td>
-                      <td className="py-3 pr-4 font-medium whitespace-nowrap">{item.product_name}</td>
+                      <td className="min-w-40 max-w-xs break-words py-3 pr-4 font-medium [overflow-wrap:anywhere]">{item.product_name}</td>
                       <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
                       </td>
@@ -1602,7 +1642,7 @@ export default function InventoryPage() {
                   <div key={item.id} className="rounded-lg border p-3 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">{item.product_name}</p>
+                        <p className="break-words font-medium [overflow-wrap:anywhere]">{item.product_name}</p>
                         <p className="text-xs text-muted-foreground">{item.product_id || '-'}</p>
                       </div>
                       <div className="relative shrink-0">
@@ -1671,7 +1711,7 @@ export default function InventoryPage() {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-1 text-sm">
+                    <div className="grid grid-cols-2 gap-1 text-sm [&>div]:min-w-0 [&>div]:break-words">
                       <div>
                         <span className="text-muted-foreground">Category: </span>
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
@@ -1762,15 +1802,19 @@ export default function InventoryPage() {
               </div>
             </div>
           )}
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={totalItems}
-            pageSize={pageSize}
-            onPageChange={goToPage}
-          />
+          <fieldset disabled={loading}>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalItems}
+              pageSize={pageSize}
+              onPageChange={goToPage}
+            />
+          </fieldset>
         </CardContent>
       </Card>
+
+      {searching && movementSummaryCards}
 
       {priceHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
