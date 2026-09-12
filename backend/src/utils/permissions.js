@@ -3,6 +3,7 @@
 // =====================================================
 const PERMISSION_TO_FEATURES = {
   canViewDashboard: [],
+  canUseBusinessAI: ['dashboard'],
   canCreateSale: ['sales', 'sales.pos', 'sales.orders'],
   canViewSale: ['sales', 'sales.pos', 'sales.orders'],
   canEditSale: ['sales', 'sales.pos', 'sales.orders'],
@@ -180,6 +181,7 @@ const OWNER_CORE_PERMISSIONS = new Set([
 
 export const ALL_PERMISSION_KEYS = [
   "canViewDashboard",
+  "canUseBusinessAI",
   // Sales
   "canCreateSale", "canViewSale", "canEditSale", "canDeleteSale", "canRefundSale",
   // Inventory
@@ -296,6 +298,10 @@ export const PERMISSION_CATEGORIES = [
 ];
 
 const PERMISSION_DETAIL_OVERRIDES = {
+  canUseBusinessAI: {
+    name: 'Use AI business advisor',
+    description: 'Chat about marketing and sales growth using only business data this user is already permitted to view.',
+  },
   canViewDashboard: {
     name: 'View business dashboard',
     description: 'Open the main dashboard and see business summary cards, charts, and alerts.',
@@ -931,7 +937,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
 };
 
 function permissionCategoryForKey(key) {
-  if (key === 'canViewDashboard') return 'dashboard';
+  if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';
   if (key.includes('TransactionAccount') || [
     'canUseOwnCashAccount',
     'canUseOtherStaffCashAccount',

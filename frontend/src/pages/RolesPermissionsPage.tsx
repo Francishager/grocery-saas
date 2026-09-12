@@ -33,6 +33,7 @@ type PermissionSchema = {
 
 const PERM_LABELS: Record<string, string> = {
   canViewDashboard:'Can view dashboard',
+  canUseBusinessAI:'Can use AI business advisor',
   canCreateSale:'Can create sales', canViewSale:'Can view sales', canEditSale:'Can edit sales', canDeleteSale:'Can delete sales', canRefundSale:'Can refund sales',
   canCreateProduct:'Can create products', canViewProduct:'Can view products', canEditProduct:'Can edit products', canDeleteProduct:'Can delete products',
   canCreatePurchase:'Can create purchases', canViewPurchase:'Can view purchases', canEditPurchase:'Can edit purchases', canDeletePurchase:'Can delete purchases',

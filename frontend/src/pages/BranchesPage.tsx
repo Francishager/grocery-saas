@@ -119,7 +119,7 @@ export default function BranchesPage() {
       toast({
         variant: 'destructive',
         title: 'Branch limit reached',
-        description: `You have reached the maximum of ${branchLimit} branches. Contact your SaaS admin to increase the limit.`,
+        description: `You have reached the maximum of ${branchLimit} branches. Contact JibuSales Admin to increase the limit.`,
       })
       return
     }
@@ -255,7 +255,7 @@ export default function BranchesPage() {
             />
           </div>
           {branchUsagePct >= 100 && (
-            <p className="mt-2 text-xs text-red-700">Branch limit reached. Contact your SaaS admin to increase the limit.</p>
+            <p className="mt-2 text-xs text-red-700">Branch limit reached. Contact JibuSales Admin to increase the limit.</p>
           )}
           {branchUsagePct >= 80 && branchUsagePct < 100 && (
             <p className="mt-2 text-xs text-yellow-700">Approaching branch limit. You can create {branchLimit - stats.total} more branch(es).</p>

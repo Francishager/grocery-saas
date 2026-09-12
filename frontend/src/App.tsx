@@ -20,6 +20,7 @@ import UnauthorizedPage from '@/pages/auth/UnauthorizedPage'
 import DashboardPage from '@/pages/DashboardPage'
 import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
+import BusinessAdvisorPage from '@/pages/BusinessAdvisorPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import BranchesPage from '@/pages/BranchesPage'
@@ -162,6 +163,7 @@ function App() {
         >
           <Route index element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="dashboard" element={<FeatureGuard feature="dashboard"><DashboardPage /></FeatureGuard>} />
+          <Route path="ai-advisor" element={<FeatureGuard feature="dashboard" permission="canUseBusinessAI"><BusinessAdvisorPage /></FeatureGuard>} />
           <Route path="sales" element={<FeatureGuard feature="sales"><SalesPage /></FeatureGuard>} />
           <Route path="inventory" element={<Navigate to="/tenant/inventory/products" replace />} />
           <Route path="inventory/:tab" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />

@@ -131,7 +131,7 @@ export default function HRModuleSettingsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-muted-foreground">SaaS Admin</p>
+          <p className="text-sm font-medium text-muted-foreground">JibuSales Admin</p>
           <h1 className="text-2xl font-semibold text-foreground">HR Module Settings</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Control HR feature availability for each business. User access remains inside the tenant Roles & Permissions page.

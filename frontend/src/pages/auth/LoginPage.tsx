@@ -69,7 +69,7 @@ export default function LoginPage() {
         toast({
           variant: 'destructive',
           title: 'Wrong Login Page',
-          description: 'SaaS Administrators should login at /saas/login',
+          description: 'JibuSales Admin should login at /saas/login',
         })
         return
       }

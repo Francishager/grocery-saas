@@ -475,6 +475,7 @@ model UserPermission {
   user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Dashboard
   canViewDashboard             Boolean  @default(false)
+  canUseBusinessAI             Boolean  @default(false)
   // Sales
   canCreateSale                Boolean  @default(false)
   canViewSale                  Boolean  @default(false)

@@ -124,7 +124,7 @@ router.post('/send-platform', authenticateToken, async (req, res) => {
   try {
     const isPlatformAdmin = ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user.role)
     if (!isPlatformAdmin) {
-      return res.status(403).json({ error: 'Platform admin access required' })
+      return res.status(403).json({ error: 'JibuSales Admin access required' })
     }
 
     const { title, body, data } = req.body

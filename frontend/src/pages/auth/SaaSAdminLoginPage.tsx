@@ -45,13 +45,13 @@ export default function SaaSAdminLoginPage() {
         toast({
           variant: 'destructive',
           title: 'Access Denied',
-          description: 'This login is for SaaS Administrators only. Business owners should login at /login',
+          description: 'This login is for JibuSales Admin only. Business owners should login at /login',
         })
         return
       }
 
       toast({
-        title: 'Welcome, SaaS Admin',
+        title: 'Welcome, JibuSales Admin',
         description: 'Logged in successfully',
       })
 
@@ -76,9 +76,9 @@ export default function SaaSAdminLoginPage() {
               <Shield className="h-8 w-8 text-white" />
             </div>
           </div>
-          <CardTitle className="text-2xl text-white">SaaS Admin Portal</CardTitle>
+          <CardTitle className="text-2xl text-white">JibuSales Admin Portal</CardTitle>
           <CardDescription className="text-slate-400">
-            Platform Administration Access
+            JibuSales Administration Access
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -111,7 +111,7 @@ export default function SaaSAdminLoginPage() {
             </div>
             <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Sign In as SaaS Admin
+              Sign In as JibuSales Admin
             </Button>
           </form>
           

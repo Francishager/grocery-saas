@@ -58,7 +58,7 @@ export function UsageLimitBanner({ resource, label, currentCount }: UsageLimitBa
         <div className="h-2 bg-white rounded-full overflow-hidden">
           <div className="h-full bg-red-500" style={{ width: '100%' }} />
         </div>
-        <p className="mt-2 text-xs text-red-700">{displayLabel} limit reached. Contact your SaaS admin to increase the limit.</p>
+        <p className="mt-2 text-xs text-red-700">{displayLabel} limit reached. Contact JibuSales Admin to increase the limit.</p>
       </div>
     )
   }

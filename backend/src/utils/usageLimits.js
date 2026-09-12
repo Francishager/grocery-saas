@@ -62,7 +62,7 @@ export async function checkUsageLimit(tenantId, resource) {
   }
 
   if (count >= limit) {
-    const err = new Error(`${resource.charAt(0).toUpperCase() + resource.slice(1)} limit reached (${count}/${limit}). Contact your SaaS admin to increase the limit.`)
+    const err = new Error(`${resource.charAt(0).toUpperCase() + resource.slice(1)} limit reached (${count}/${limit}). Contact JibuSales Admin to increase the limit.`)
     err.statusCode = 403
     err.code = 'LIMIT_REACHED'
     throw err

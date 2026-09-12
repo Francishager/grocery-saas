@@ -46,7 +46,7 @@ export default function PlatformStaffPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Platform Staff</h1>
-        <p className="text-sm text-gray-500">Create and manage staff for the SaaS Admin account.</p>
+        <p className="text-sm text-gray-500">Create and manage staff for the JibuSales Admin account.</p>
       </div>
       <div className="rounded-lg border bg-white p-4">
         <h2 className="text-lg font-semibold">Create Platform Staff</h2>

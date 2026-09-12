@@ -349,7 +349,7 @@ function getEmailContent(locale, { ownerFname, businessName, businessId, tempPas
     <p><b>Temporary Password:</b> ${tempPassword}</p>
     <p>Use this OTP to set your password before first login: <b>${otp}</b> (expires in 24 hours).</p>
     <p>Account link: <a href="${loginUrl}">${loginUrl}</a></p>
-    <p>Regards,<br/>SaaS Admin</p>`;
+    <p>Regards,<br/>JibuSales Admin</p>`;
   return { subject, html };
 }
 

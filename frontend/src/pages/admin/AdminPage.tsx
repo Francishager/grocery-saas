@@ -50,7 +50,7 @@ export default function AdminPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Admin Dashboard</h1>
         <p className="text-muted-foreground">
-          Platform administration and analytics
+          JibuSales Administration and analytics
         </p>
       </div>
 

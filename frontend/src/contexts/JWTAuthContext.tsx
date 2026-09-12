@@ -258,7 +258,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
               }
               const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
               if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
-                return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.'))
+                return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your JibuSales Admin to reactivate it.'))
               }
               setUser(cachedUser)
               setTokens(cachedTokens)
@@ -283,7 +283,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
               }
               const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
               if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
-                return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.'))
+                return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your JibuSales Admin to reactivate it.'))
               }
               setUser(cachedUser)
               setTokens(cachedTokens)

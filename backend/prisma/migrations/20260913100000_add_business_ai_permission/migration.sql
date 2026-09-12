@@ -1,0 +1,1 @@
+ALTER TABLE "user_permissions" ADD COLUMN IF NOT EXISTS "canUseBusinessAI" BOOLEAN NOT NULL DEFAULT false;

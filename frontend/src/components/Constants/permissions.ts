@@ -55,7 +55,7 @@ export const permissionCategories = [
 // All permissions
 export const permissions: Permission[] = [
   // Platform Management (SaaS Admin only - no business data access)
-  { id: 'platform_admin', name: 'Platform Admin', description: 'Full platform administration access', category: 'platform', isPlatformLevel: true },
+  { id: 'platform_admin', name: 'JibuSales Admin', description: 'Full platform administration access', category: 'platform', isPlatformLevel: true },
   { id: 'view_all_tenants', name: 'View All Tenants', description: 'View all business tenants', category: 'tenants', isPlatformLevel: true },
   { id: 'manage_tenants', name: 'Manage Tenants', description: 'Create, edit, delete business tenants', category: 'tenants', isPlatformLevel: true },
   { id: 'suspend_tenants', name: 'Suspend Tenants', description: 'Suspend or activate business tenants', category: 'tenants', isPlatformLevel: true },
@@ -298,8 +298,8 @@ export const platformPermissions = permissions
 export const roles: Role[] = [
   {
     id: 'saas_admin',
-    name: 'SaaS Admin',
-    description: 'Platform administrator - manages tenants but cannot access business data',
+    name: 'JibuSales Admin',
+    description: 'JibuSales Admin - manages tenants but cannot access business data',
     isSystem: true,
     isPlatformRole: true,
     permissions: [

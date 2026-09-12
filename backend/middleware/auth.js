@@ -10,7 +10,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 const BLOCKED_TENANT_STATUSES = new Set(['suspended', 'cancelled']);
 const TENANT_STATUS_MESSAGES = {
-  suspended: 'This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.',
+  suspended: 'This business account is suspended due to subscription. Contact JibuSales support or your JibuSales Admin to reactivate it.',
   cancelled: 'This business account has been cancelled. Contact JibuSales support for help.',
 };
 const PAYMENT_METHOD_PERMISSION_MAP = {
@@ -202,7 +202,7 @@ export const requirePlatformAdmin = (req, res, next) => {
   
   if (!isPlatformAdmin) {
     return res.status(403).json({ 
-      message: 'Platform administrator access required',
+      message: 'JibuSales Admin access required',
       code: 'PLATFORM_ADMIN_REQUIRED',
     });
   }
@@ -253,7 +253,7 @@ export const blockPlatformAdmin = (req, res, next) => {
   
   if (isPlatformAdmin) {
     return res.status(403).json({ 
-      message: 'Platform administrators cannot access business data',
+      message: 'JibuSales Admin cannot access business data',
       code: 'PLATFORM_ADMIN_BLOCKED',
     });
   }

@@ -96,7 +96,7 @@ export function SaaSAdminLayout() {
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-sm font-semibold">{user?.name || 'Admin'}</p>
                   <p className="truncate text-xs text-slate-400">{user?.email || ''}</p>
-                  <p className="text-xs text-slate-400">Platform Admin</p>
+                  <p className="text-xs text-slate-400">JibuSales Admin</p>
                 </div>
               </div>
               <div className="border-t border-slate-700 pt-2">
