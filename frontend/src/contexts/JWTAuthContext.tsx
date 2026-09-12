@@ -12,6 +12,7 @@ export interface User {
   phone?: string
   role: string
   permissions: string[]
+  workingHoursAccess?: { restricted: boolean; allowed?: boolean; timezone?: string }
   avatar?: string
   institutionId?: string
   branchId?: string
@@ -252,6 +253,9 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cachedTokens = cache.tokens
             // Silent
             if (cachedUser?.email?.toLowerCase() === email.toLowerCase()) {
+              if (cachedUser.tenantId && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(cachedUser.role)) {
+                return Promise.reject(new Error('Staff sign-in requires an internet connection to verify working hours.'))
+              }
               const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
               if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
                 return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.'))
@@ -274,6 +278,9 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cachedTokens = JSON.parse(cachedTokensStr)
             // Silent
             if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+              if (cachedUser.tenantId && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(cachedUser.role)) {
+                return Promise.reject(new Error('Staff sign-in requires an internet connection to verify working hours.'))
+              }
               const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
               if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
                 return Promise.reject(new Error('This business account is suspended due to subscription. Contact JibuSales support or your SaaS administrator to reactivate it.'))
@@ -367,7 +374,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
       if (!response.ok) {
         const data = await response.clone().json().catch(() => ({}))
-        if (response.status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND'].includes(data?.code)) {
+        if (response.status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND', 'OUTSIDE_WORKING_HOURS'].includes(data?.code)) {
           sessionStorage.setItem(
             'tenant_account_blocked_message',
             data?.message || data?.error || 'This business account is not active.'
@@ -457,31 +464,67 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Refresh user data from server on mount (syncs avatar, permissions, etc. across devices)
+  // Recheck live staff access; a saved token must not outlive an assigned working window.
   useEffect(() => {
     if (!tokens?.accessToken || !user) return
-
+    const staffSession = Boolean(user.tenantId) && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(user.role)
+    let initialCheck = true
+    let cancelled = false
+    let pending = false
+    let controller: AbortController | null = null
+    const revokeAccess = (message: string) => {
+      sessionStorage.setItem('tenant_account_blocked_message', message)
+      setError(message)
+      setUser(null)
+      setTokens(null)
+      persistAuth(null, null)
+      localStorage.removeItem(offlineCacheKey)
+      featureAccessService.reset()
+    }
     const refreshUser = async () => {
+      if (pending || cancelled) return
+      pending = true
+      controller = new AbortController()
+      const timeout = window.setTimeout(() => controller?.abort(), 15000)
       try {
         const response = await fetch(`${resolvedApiEndpoint}/me`, {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
+          signal: controller.signal,
         })
-        if (response.ok) {
-          const data = await response.json()
-          if (data.user) {
-            setUser(data.user)
-            persistAuth(data.user, tokens)
-          }
+        const data = await response.json().catch(() => ({}))
+        if (cancelled) return
+        if (response.ok && data.user) {
+          setUser(data.user)
+          persistAuth(data.user, tokens)
+          initialCheck = false
+        } else if (response.status === 401 || response.status === 403) {
+          revokeAccess(data.message || data.error || 'Please sign in again.')
+        } else if (staffSession && (initialCheck || user.workingHoursAccess?.restricted)) {
+          revokeAccess('Unable to verify your working hours. Reconnect and sign in again.')
         }
       } catch {
-        // Silently ignore - stale localStorage data is still usable
+        if (!cancelled && staffSession && (initialCheck || user.workingHoursAccess?.restricted)) {
+          revokeAccess('An internet connection is required to verify your working hours. Reconnect and sign in again.')
+        }
+      } finally {
+        window.clearTimeout(timeout)
+        pending = false
       }
     }
-
     refreshUser()
     refreshOnboardingStatus()
+    const interval = staffSession ? window.setInterval(refreshUser, 30000) : null
+    window.addEventListener('focus', refreshUser)
+    window.addEventListener('online', refreshUser)
+    return () => {
+      cancelled = true
+      controller?.abort()
+      if (interval !== null) window.clearInterval(interval)
+      window.removeEventListener('focus', refreshUser)
+      window.removeEventListener('online', refreshUser)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Run once on mount
+  }, [tokens?.accessToken, user?.id, user?.role, user?.workingHoursAccess?.restricted, resolvedApiEndpoint])
 
   // Auto refresh tokens before expiry
   useEffect(() => {

@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../src/db.js';
 import { resolveEffectivePermissions, ROLE_DEFAULTS } from '../src/utils/permissions.js';
 import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
+import { workingHoursAccessPayload } from '../src/utils/workingHours.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -98,12 +99,18 @@ export const authenticateToken = async (req, res, next) => {
     // - saas_admin: wildcard "*" (bypasses all checks)
     // - owner: feature-aware access based on the tenant subscription and overrides
     // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
-    const tenantId = decoded.tenantId || decoded.tenant_id || decoded.business_id;
+    const currentUser = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, role: true, tenantId: true, isActive: true, workingHours: true },
+    });
+    if (!currentUser?.isActive) return res.status(401).json({ message: 'User not found or inactive', code: 'USER_INACTIVE' });
+    decoded = { ...decoded, ...currentUser };
+    const tenantId = currentUser.tenantId;
     let tenant = null;
     if (tenantId) {
       tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { id: true, name: true, slug: true, status: true },
+        select: { id: true, name: true, slug: true, status: true, timezone: true, workingHours: true },
       });
       if (!tenant && !isPlatformAdminUser(decoded)) {
         return res.status(403).json({
@@ -114,6 +121,8 @@ export const authenticateToken = async (req, res, next) => {
       }
       const tenantBlock = tenantAccountAccessPayload(tenant, decoded);
       if (tenantBlock) return res.status(403).json(tenantBlock);
+      const hoursBlock = workingHoursAccessPayload(currentUser, tenant);
+      if (hoursBlock) return res.status(403).json(hoursBlock);
     }
 
     let userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });

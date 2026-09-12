@@ -255,6 +255,7 @@ model Tenant {
   // =====================
   currency      String  @default("UGX")
   timezone      String  @default("Africa/Kampala")
+  workingHours  Json?
   dateFormat    String  @default("DD/MM/YY")
   taxRate       Float   @default(0) // e.g. 18 for 18% VAT
   taxEnabled    Boolean @default(false) // toggle tax on/off
@@ -397,6 +398,7 @@ model User {
   ownedTenant Tenant? @relation("TenantOwner")
 
   isActive               Boolean      @default(true)
+  workingHours           Json?
   lastLogin              DateTime?
   otpCode                String?
   otpExpires             DateTime?

@@ -1,0 +1,2 @@
+ALTER TABLE "tenants" ADD COLUMN IF NOT EXISTS "workingHours" JSONB;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "workingHours" JSONB;

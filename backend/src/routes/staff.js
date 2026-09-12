@@ -1,9 +1,11 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
+import { validateWorkingHours, workingHoursAdmin } from "../utils/workingHours.js";
 import {
   ALL_PERMISSION_KEYS as PERM_KEYS,
   PERMISSION_CATEGORIES,
@@ -204,9 +206,17 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
     if (!existing) return res.status(404).json({ error: "Staff not found" });
 
     const data = {};
-    const { name, fname, lname, phone, role, isActive, branchId, password, cashAccountId } = req.body;
+    const { name, fname, lname, phone, role, isActive, branchId, password, cashAccountId, workingHours } = req.body;
+    if (workingHours !== undefined) {
+      if (existing.id === req.user.id && !workingHoursAdmin(req.user)) {
+        return res.status(403).json({ error: 'Only the business owner can change your own working hours.' });
+      }
+      if (existing.role === 'owner') return res.status(400).json({ error: 'Business owners always have access and do not need a working-hours restriction.' });
+      data.workingHours = validateWorkingHours(workingHours, { custom: true }) ?? Prisma.DbNull;
+    }
 
     if (role !== undefined) {
+      if ((role === 'owner' || existing.role === 'owner') && !workingHoursAdmin(req.user)) return res.status(403).json({ error: 'Only the business owner can change owner access.' });
       if (!staffRoles.has(role) && role !== "owner") return res.status(400).json({ error: "Invalid staff role" });
       data.role = role;
     }
@@ -266,6 +276,7 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
     res.json({ message: "Staff updated", staff: staffResponse(user) });
   } catch (err) {
     if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err instanceof RangeError) return res.status(400).json({ error: err.message });
     console.error("Update staff error:", err);
     res.status(500).json({ error: "Failed to update staff" });
   }

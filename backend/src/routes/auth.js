@@ -8,6 +8,7 @@ import { authenticateToken, tenantAccountAccessPayload } from "../../middleware/
 import { sendMail } from "../../mailer.js";
 import { resolveEffectivePermissions } from "../utils/permissions.js";
 import { getTenantFeatures } from "../../middleware/featureCheck.js";
+import { workingHoursAccessPayload, staffWorkingHoursAccess } from "../utils/workingHours.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -44,6 +45,7 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     cashAccount: user.cashAccount || null,
     isPlatformUser,
     permissions,
+    workingHoursAccess: staffWorkingHoursAccess(user, user.tenant),
   };
 }
 
@@ -68,6 +70,8 @@ router.post("/login", async (req, res) => {
 
     const tenantBlock = tenantAccountAccessPayload(user.tenant, user);
     if (tenantBlock) return res.status(403).json(tenantBlock);
+    const hoursBlock = workingHoursAccessPayload(user, user.tenant);
+    if (hoursBlock) return res.status(403).json(hoursBlock);
 
     // Force password reset if otpCode is present (first login after admin invite)
     if (user.otpCode && user.otpExpires && new Date(user.otpExpires) > new Date()) {
@@ -175,6 +179,8 @@ router.post("/refresh", async (req, res) => {
 
     const tenantBlock = tenantAccountAccessPayload(user.tenant, user);
     if (tenantBlock) return res.status(403).json(tenantBlock);
+    const hoursBlock = workingHoursAccessPayload(user, user.tenant);
+    if (hoursBlock) return res.status(403).json(hoursBlock);
 
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
     const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();

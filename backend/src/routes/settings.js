@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import multer from "multer";
 import cloudinary from "cloudinary";
+import { validateWorkingHours, validateTimezone, workingHoursAdmin } from "../utils/workingHours.js";
 
 const router = Router();
 const SYSTEM_DATE_FORMAT = "DD/MM/YY";
@@ -30,7 +32,7 @@ router.get("/", authenticateToken, requirePermission("canViewSettings"), async (
         id: true, name: true, slug: true, email: true, phone: true, address: true,
         logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
-        createdAt: true, updatedAt: true,
+        createdAt: true, updatedAt: true, workingHours: true,
       },
     });
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
@@ -72,12 +74,24 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
 
     const { name, email, phone, address, currency, timezone, dateFormat, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
     const data = {};
+    if (req.body.workingHours !== undefined) {
+      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canEditStaff')) {
+        return res.status(403).json({ error: 'Staff access management permission is required to change working hours.' });
+      }
+      data.workingHours = validateWorkingHours(req.body.workingHours) ?? Prisma.DbNull;
+    }
     if (name !== undefined) data.name = name;
     if (email !== undefined) data.email = email;
     if (phone !== undefined) data.phone = phone || null;
     if (address !== undefined) data.address = address || null;
     if (currency !== undefined) data.currency = currency;
-    if (timezone !== undefined) data.timezone = timezone;
+    if (timezone !== undefined) {
+      data.timezone = validateTimezone(timezone);
+      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canEditStaff')) {
+        const current = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } });
+        if (current?.timezone !== timezone) return res.status(403).json({ error: 'Staff access management permission is required to change the business timezone.' });
+      }
+    }
     data.dateFormat = SYSTEM_DATE_FORMAT;
     if (taxRate !== undefined) data.taxRate = parseFloat(taxRate) || 0;
     if (taxEnabled !== undefined) data.taxEnabled = Boolean(taxEnabled);
@@ -92,12 +106,13 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
         id: true, name: true, slug: true, email: true, phone: true, address: true,
         logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
-        createdAt: true, updatedAt: true,
+        createdAt: true, updatedAt: true, workingHours: true,
       },
     });
     res.json({ message: "Settings updated", tenant: withSystemDateFormat(tenant) });
   } catch (err) {
     if (err?.code === "P2002") return res.status(409).json({ error: "Email already in use" });
+    if (err instanceof RangeError) return res.status(400).json({ error: err.message });
     console.error("Update settings error:", err);
     res.status(500).json({ error: "Failed to update settings" });
   }

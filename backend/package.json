@@ -6,6 +6,7 @@
   "type": "module",
   "build": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js build",
   "scripts": {
+    "prestart": "node src/scripts/ensure-working-hours-schema.js",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "db:generate": "prisma generate",

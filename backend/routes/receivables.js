@@ -165,6 +165,9 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, search, status } = req.query
+    if (!Number.isSafeInteger(Number(page)) || Number(page) < 1 || !Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 500) {
+      return res.status(400).json({ error: 'Page must be a positive integer and page size must be between 1 and 500.' })
+    }
     const skip = (Number(page) - 1) * Number(limit)
 
     const where = scopedWhere(scope, {
@@ -183,7 +186,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
         where,
         skip,
         take: Number(limit),
-        orderBy: { createdAt: 'desc' }
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
       }),
       prisma.customer.count({ where })
     ])

@@ -1,3 +1,4 @@
+import { Pagination } from '@/components/Pagination'
 import React, { useState, useEffect } from 'react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -157,6 +158,10 @@ export default function ReceivablesPage() {
   const online = useOnlineStatus()
   
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [customerPage, setCustomerPage] = useState(1)
+  const [customerPageSize, setCustomerPageSize] = useState(10)
+  const [customerTotal, setCustomerTotal] = useState(0)
+  const customerRequestId = React.useRef(0)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [customerOptions, setCustomerOptions] = useState<Customer[]>([])
   const [products, setProducts] = useState<InventoryItem[]>([])
@@ -249,9 +254,7 @@ export default function ReceivablesPage() {
       return
     }
 
-    if (activeTab === 'customers') {
-      loadCustomers()
-    }
+
     if (activeTab === 'sales') { loadSales(); setLoading(false) }
     if (activeTab === 'payments') { loadPayments(); setLoading(false) }
     if (activeTab === 'fuel-cards') loadFuelCards()
@@ -259,37 +262,49 @@ export default function ReceivablesPage() {
     loadReceivablesSummary()
   }, [creditEnabled, activeTab, searchTerm, statusFilter])
 
+  useEffect(() => {
+    if (creditEnabled && activeTab === 'customers') loadCustomers()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditEnabled, activeTab, searchTerm, statusFilter, customerPage, customerPageSize, online])
+
   const loadCustomers = async (
     showPageLoading = true,
     overrides?: { search?: string; status?: string }
   ) => {
+    const requestId = ++customerRequestId.current
+    const page = overrides ? 1 : customerPage
     try {
       if (showPageLoading) setLoading(true)
+      let rows: Customer[]
+      let total: number
       if (online) {
         const params = new URLSearchParams({
+          page: String(page), limit: String(customerPageSize),
           ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
           ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
         })
         const response = await apiFetch(`/api/receivables/customers?${params}`)
-        if (response.ok) {
-          const data = await response.json()
-          setCustomers(data.customers)
-        } else {
-          throw new Error(await readResponseError(response, 'Failed to load customers'))
-        }
+        if (!response.ok) throw new Error(await readResponseError(response, 'Failed to load customers'))
+        const data = await response.json()
+        rows = data.customers || []
+        total = Number(data.pagination?.total ?? rows.length)
       } else {
         const local = await getLocalReceivableCustomers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
-        setCustomers(local)
+        total = local.length
+        rows = local.slice((page - 1) * customerPageSize, page * customerPageSize)
       }
+      if (requestId !== customerRequestId.current) return
+      setCustomers(rows)
+      setCustomerTotal(total)
+      const validPage = Math.max(1, Math.min(page, Math.ceil(total / customerPageSize)))
+      if (validPage !== customerPage) setCustomerPage(validPage)
     } catch (error) {
-      try {
-        const local = await getLocalReceivableCustomers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
-        setCustomers(local)
-      } catch {
-        toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to load customers', variant: 'destructive' })
-      }
+      if (requestId !== customerRequestId.current) return
+      setCustomers([])
+      setCustomerTotal(0)
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to load customers', variant: 'destructive' })
     } finally {
-      if (showPageLoading) setLoading(false)
+      if (showPageLoading && requestId === customerRequestId.current) setLoading(false)
     }
   }
 
@@ -1484,7 +1499,7 @@ export default function ReceivablesPage() {
         </div>
       </div>
 
-      <UsageLimitBanner resource="customers" label="Customers" currentCount={customers.length} />
+      <UsageLimitBanner resource="customers" label="Customers" currentCount={summary?.totalCustomers ?? customerTotal} />
 
       {/* Filters — only for customers, sales, payments */}
       <div className={cn('flex flex-wrap items-center gap-4 py-4', tab !== 'customers' && tab !== 'sales' && tab !== 'payments' && 'hidden')}>
@@ -1493,11 +1508,11 @@ export default function ReceivablesPage() {
           <Input
             placeholder="Search..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { setSearchTerm(e.target.value); setCustomerPage(1) }}
             className="max-w-sm"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setCustomerPage(1) }}>
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
@@ -1512,21 +1527,31 @@ export default function ReceivablesPage() {
 
       {/* Content */}
       {activeTab === 'customers' && (
-        <div className="grid gap-4">
+        <div className="grid min-w-0 gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">{customerTotal} customers{!online ? ' saved on this device' : ''}</p>
+            <label className="flex items-center gap-2 text-sm">Per page
+              <select aria-label="Customers per page" className="h-9 rounded-md border bg-background px-2" value={customerPageSize} onChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(1) }}>
+                {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+          </div>
           {loading ? (
             <div className="col-span-full text-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
+          ) : customers.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No customers found.</p>
           ) : (
             customers.map((customer) => (
               <Card key={customer.id}>
                 <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-4">
                       <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                         <Users className="h-5 w-5 text-primary" />
                       </div>
-                      <div>
+                      <div className="min-w-0 break-words">
                         <h3>{renderCustomerNameButton(customer, customer.name)}</h3>
                         <p className="text-sm text-muted-foreground">{customer.phone}</p>
                         <p className="text-sm text-muted-foreground">{customer.email}</p>
@@ -1567,7 +1592,7 @@ export default function ReceivablesPage() {
                     </div>
                   </div>
                   
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       onClick={() => {
@@ -1617,6 +1642,9 @@ export default function ReceivablesPage() {
               </Card>
             ))
           )}
+          <fieldset disabled={loading}>
+            <Pagination currentPage={customerPage} totalPages={Math.ceil(customerTotal / customerPageSize)} totalItems={customerTotal} pageSize={customerPageSize} onPageChange={setCustomerPage} />
+          </fieldset>
         </div>
       )}
 

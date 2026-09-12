@@ -27,6 +27,8 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
           className="h-8 w-8"
           disabled={currentPage <= 1}
           onClick={() => onPageChange(1)}
+          aria-label="First page"
+          title="First page"
         >
           <ChevronsLeft className="h-4 w-4" />
         </Button>
@@ -36,6 +38,8 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
           className="h-8 w-8"
           disabled={currentPage <= 1}
           onClick={() => onPageChange(currentPage - 1)}
+          aria-label="Previous page"
+          title="Previous page"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -48,6 +52,8 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
           className="h-8 w-8"
           disabled={currentPage >= totalPages}
           onClick={() => onPageChange(currentPage + 1)}
+          aria-label="Next page"
+          title="Next page"
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -57,6 +63,8 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
           className="h-8 w-8"
           disabled={currentPage >= totalPages}
           onClick={() => onPageChange(totalPages)}
+          aria-label="Last page"
+          title="Last page"
         >
           <ChevronsRight className="h-4 w-4" />
         </Button>

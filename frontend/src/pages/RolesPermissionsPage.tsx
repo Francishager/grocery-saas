@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
+import WorkingHoursEditor, { type WorkingHours } from '@/components/WorkingHoursEditor'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 type PermissionDefinition = {
   id: string
@@ -354,6 +356,29 @@ export default function RolesPermissionsPage() {
   const [permSearch, setPermSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+  const { user, hasPermission } = useJWTAuth()
+  const [hoursByUser, setHoursByUser] = useState<Record<string, WorkingHours | null>>({})
+  const [savingHours, setSavingHours] = useState<string | null>(null)
+  const [businessTimezone, setBusinessTimezone] = useState('Africa/Kampala')
+  const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canEditStaff')
+  const staffHours = (member: any) => hoursByUser[member.id] !== undefined ? hoursByUser[member.id] : member.workingHours || null
+  const saveHours = async (member: any) => {
+    if (savingHours) return
+    setSavingHours(member.id)
+    try {
+      await staffApi.update(member.id, { workingHours: staffHours(member) })
+      toast({ title: 'Working hours saved' })
+      await loadStaff()
+    } catch (error: any) {
+      toast({ title: 'Working hours not saved', description: error?.message, variant: 'destructive' })
+    } finally { setSavingHours(null) }
+  }
+
+  useEffect(() => {
+    apiFetch('/api/settings/business-profile').then(async (response) => {
+      if (response.ok) setBusinessTimezone((await response.json()).timezone || 'Africa/Kampala')
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => { loadStaff(); loadBranches(); loadPermSchema(); loadCashAccounts() }, [])
   useEffect(() => {
@@ -706,6 +731,16 @@ export default function RolesPermissionsPage() {
                         onSearch={setPermSearch}
                       />
                       <Button onClick={() => handleSavePermissions(s.id)} size="sm" className="mt-3">Save Permissions</Button>
+                      {s.role !== 'owner' && (
+                        <div className="mt-5 space-y-3">
+                          <WorkingHoursEditor custom value={staffHours(s)} timezone={businessTimezone}
+                            onChange={(workingHours) => setHoursByUser((previous) => ({ ...previous, [s.id]: workingHours }))}
+                            disabled={!canManageHours || Boolean(savingHours) || (s.id === user?.id && user?.role !== 'owner' && user?.role !== 'saas_admin')} />
+                          <Button size="sm" onClick={() => saveHours(s)} disabled={!canManageHours || Boolean(savingHours) || (s.id === user?.id && user?.role !== 'owner' && user?.role !== 'saas_admin')}>
+                            {savingHours === s.id ? 'Saving...' : 'Save Working Hours'}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

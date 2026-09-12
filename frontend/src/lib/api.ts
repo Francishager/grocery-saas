@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from './apiConfig'
 import { cacheTenantFormattingSettings } from './utils'
+import type { WorkingHours } from '@/components/WorkingHoursEditor'
 
 const API_URL = getApiBaseUrl()
 
@@ -40,7 +41,7 @@ function clearStoredAuth() {
 }
 
 function isTenantAccountBlockedResponse(status: number, data: any) {
-  return status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND'].includes(data?.code)
+  return status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND', 'OUTSIDE_WORKING_HOURS'].includes(data?.code)
 }
 
 function rememberTenantAccountBlockedMessage(data: any) {
@@ -877,7 +878,7 @@ export const staffApi = {
   create: (data: StaffPayload) =>
     api.post<{ message: string; staff: StaffMember; password?: string }>('/api/staff', { body: data }),
 
-  update: (id: string, data: Partial<StaffPayload> & { isActive?: boolean }) =>
+  update: (id: string, data: Partial<StaffPayload> & { isActive?: boolean; workingHours?: WorkingHours | null }) =>
     api.patch<{ message: string; staff: StaffMember }>(`/api/staff/${id}`, { body: data }),
 
   deactivate: (id: string) =>

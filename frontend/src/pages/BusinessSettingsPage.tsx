@@ -10,6 +10,8 @@ import { useToast } from '@/hooks/use-toast'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalSettings } from '@/db/hybrid'
 import { db } from '@/db/index'
+import WorkingHoursEditor, { defaultWorkingHours } from '@/components/WorkingHoursEditor'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 export default function BusinessSettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -17,6 +19,8 @@ export default function BusinessSettingsPage() {
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
   const online = useOnlineStatus()
+  const { user, hasPermission } = useJWTAuth()
+  const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canEditStaff')
 
   useEffect(() => { loadSettings() }, [])
 
@@ -52,7 +56,9 @@ export default function BusinessSettingsPage() {
     }
     setSaving(true)
     try {
-      const result = await settingsApi.update({ ...settings, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT })
+      const payload = { ...settings, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
+      if (!canManageHours) delete payload.workingHours
+      const result = await settingsApi.update(payload)
       const updatedSettings = result?.tenant || { ...settings, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
       cacheTenantFormattingSettings(updatedSettings)
       setSettings(updatedSettings)
@@ -133,7 +139,7 @@ export default function BusinessSettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Timezone</Label>
-                <select value={settings.timezone || 'Africa/Kampala'} onChange={e => setSettings((s: any) => ({ ...s, timezone: e.target.value }))}
+                <select disabled={!canManageHours} value={settings.timezone || 'Africa/Kampala'} onChange={e => setSettings((s: any) => ({ ...s, timezone: e.target.value }))}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   <option value="Africa/Kampala">Africa/Kampala</option>
                   <option value="Africa/Nairobi">Africa/Nairobi</option>
@@ -144,7 +150,9 @@ export default function BusinessSettingsPage() {
                 </select>
               </div>
             </div>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</Button>
+            <WorkingHoursEditor value={settings.workingHours || defaultWorkingHours()} timezone={settings.timezone || 'Africa/Kampala'} onChange={(workingHours) => setSettings((previous: any) => ({ ...previous, workingHours }))} disabled={!canManageHours || saving || !online} />
+            <p className="text-xs text-muted-foreground">Business owner access remains unrestricted.</p>
+            <Button onClick={handleSave} disabled={saving || !online}>{saving ? 'Saving...' : 'Save Changes'}</Button>
           </CardContent>
         </Card>
       )}
