@@ -7,12 +7,13 @@ import { requestBusinessAdvice } from '../src/services/businessAdvisor.js';
 const req = (permissions = ['*'], features = ['dashboard', 'sales', 'inventory', 'receivables', 'hr', 'reports']) => ({ user: { id: 'owner', tenantId: 'test-tenant', role: 'owner', permissions }, tenantFeatures: new Set(features), query: {} });
 const input = extra => validateArtifactInput({ requestId: 'test-1', kind: 'flyer', brief: 'Promote our rice naturally.', artwork: 'none', ...extra });
 const copy = { headline: 'Good rice. Great meals.', subheading: 'Rice for everyday cooking', body: 'Visit our store for your next family meal.', cta: 'Visit us today', caption: 'Make something delicious tonight.', hashtags: ['#Rice'], imagePrompt: 'A bowl of rice with vegetables on a dining table' };
-const profile = { tenant: { findUnique: async query => { assert.deepEqual(Object.keys(query.select).sort(), ['businessType', 'currency', 'name']); return { name: 'Synthetic Rice Shop', businessType: 'Retail', currency: 'UGX' }; } } };
+const profile = { tenant: { findUnique: async query => { assert.deepEqual(Object.keys(query.select).sort(), ['businessType', 'currency', 'logo', 'name']); return { name: 'Synthetic Rice Shop', businessType: 'Retail', currency: 'UGX', logo: 'https://res.cloudinary.com/demo/image/upload/logo.png' }; } } };
 const context = { period: { from: '2026-09-01', to: '2026-09-13' }, scope: { branch: 'All permitted branches' }, sources: ['Recorded sales'], limitations: ['Limited snapshot'], asOf: '2026-09-13' };
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
 
 test('visual requests reject untrusted ownership, data payloads, invalid kinds and invalid lengths', () => {
   assert.equal(input({}).days, 30);
+  assert.equal(input({ artwork: 'generated' }).artwork, 'auto');
   for (const body of [null, [], { ...input({}), tenantId: 'other' }, { ...input({}), context: {} }, { ...input({}), kind: 'invoice' }, { ...input({}), days: 365 }, { ...input({}), brief: 'x'.repeat(3001) }]) assert.throws(() => validateArtifactInput(body), error => error.statusCode === 400);
   assert.throws(() => parseCreativeCopy('not json'), error => error.statusCode === 502);
   assert.equal(parseCreativeCopy('```json\n' + JSON.stringify(copy) + '\n```').headline, copy.headline);
@@ -28,8 +29,8 @@ test('marketing receives only the business profile and selected product, never p
   });
   const facts = JSON.parse(prompt.messages[0].content).facts;
   assert.deepEqual(Object.keys(facts).sort(), ['brand', 'product']); assert.equal(facts.product.price, 4500);
-  assert(!JSON.stringify(prompt).includes('cloudinary')); assert.equal(output.data.brand.currency, 'UGX'); assert.equal(output.image, undefined);
-  assert.match(prompt.systemPrompt, /natural human/); assert.equal(output.data.warnings.length, 1);
+  assert(!JSON.stringify(prompt.messages[0].content).includes('cloudinary')); assert.equal(output.data.brand.currency, 'UGX'); assert.equal(output.data.brand.logo, 'https://res.cloudinary.com/demo/image/upload/logo.png'); assert.equal(output.image, undefined);
+  assert.match(prompt.systemPrompt, /natural human/); assert.match(prompt.systemPrompt, /Follow explicit offers/); assert.equal(output.data.warnings.length, 1);
   assert.equal(prompt.jsonMode, true);
 });
 
@@ -70,12 +71,15 @@ test('HR reporting excludes draft and approved payroll from paid/outstanding sal
   assert.equal(report.metrics[0].value, 250000); assert.equal(report.metrics[1].value, 350000);
 });
 
-test('missing artwork produces an honest downloadable text design and aborted generation fails', async () => {
-  const deps = { advise: async () => ({ reply: JSON.stringify(copy) }), generateImage: async () => { throw new Error('Provider denied'); } };
-  const output = await buildArtifactData(profile, req(), input({ artwork: 'generated' }), undefined, deps);
-  assert.equal(output.image, undefined); assert.match(output.data.warnings[0], /Artwork was unavailable/);
-  const controller = new AbortController(); controller.abort();
-  await assert.rejects(() => buildArtifactData(profile, req(), input({ artwork: 'generated' }), controller.signal, deps), error => error.statusCode === 504);
+test('creative visuals never generate generic illustrations and still keep real product photos', async () => {
+  let generated = false;
+  const db = { ...profile, product: { findFirst: async () => ({ name: 'Pink rice', price: 4500, baseUnit: 'kg', itemType: 'product', image: 'https://res.cloudinary.com/demo/image/upload/rice.png' }) } };
+  const output = await buildArtifactData(db, req(), input({ artwork: 'generated', productId: 'product-1', brief: 'Give customers a 10% discount on pink rice this Friday.' }), undefined, {
+    advise: async args => { assert.match(args.systemPrompt, /Follow explicit offers/); assert.match(args.messages[0].content, /10% discount/); return { reply: JSON.stringify({ ...copy, caption: 'Enjoy 10% off pink rice this Friday.' }) }; },
+    loadImage: async () => ({ image: png, imageMime: 'image/png', imageSource: 'product' }),
+    generateImage: async () => { generated = true; throw new Error('Should not generate'); },
+  });
+  assert.equal(generated, false); assert.equal(output.imageMime, 'image/png'); assert.equal(output.data.imageSource, 'product'); assert.match(output.data.copy.caption, /10% off/);
 });
 
 test('generated artwork validates raster format, bounds and redacts provider failures', async () => {

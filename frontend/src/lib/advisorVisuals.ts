@@ -4,7 +4,7 @@ export type VisualReport = { title: string; metrics: { label: string; value: num
   tables: { title: string; columns: { key: string; label: string; format?: string }[]; rows: Record<string, any>[] }[];
   sources: string[]; limitations: string[]; asOf: string; period: { from: string; to: string }; scope: { branch: string; sales?: string } }
 export type AdvisorVisual = { id: string; conversationId: string; kind: 'report' | 'flyer' | 'social'; title: string; status: string; imageMime?: string; createdAt: string;
-  data?: { brand: { name: string; currency: string }; copy: CreativeCopy; product?: { name: string; price: number; unit: string }; format: string; palette: string; platform: string;
+  data?: { brand: { name: string; currency: string; logo?: string | null }; copy: CreativeCopy; product?: { name: string; price: number; unit: string }; format: string; palette: string; platform: string;
     report?: VisualReport; warnings: string[]; imageSource?: string; brief: string; tone?: string; reportType?: string; productId?: string } }
 const palettes: Record<string, { accent: string; pale: string; secondary: string }> = {
   green: { accent: '#11634c', pale: '#eff8f3', secondary: '#e3b648' },
@@ -58,7 +58,7 @@ async function loadImage(url?: string) {
   if (!url) return null
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image(); const timer = window.setTimeout(() => reject(new Error('The artwork could not be loaded. Reopen the preview and try again.')), 15000)
-    image.onload = () => { window.clearTimeout(timer); resolve(image) }; image.onerror = () => { window.clearTimeout(timer); reject(new Error('The artwork could not be loaded.')) }; image.src = url
+    image.crossOrigin = 'anonymous'; image.onload = () => { window.clearTimeout(timer); resolve(image) }; image.onerror = () => { window.clearTimeout(timer); reject(new Error('The image could not be loaded.')) }; image.src = url
   })
 }
 function cover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
@@ -66,18 +66,31 @@ function cover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number
   const sw = width / scale, sh = height / scale
   ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, x, y, width, height)
 }
+function contain(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
+  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight)
+  const drawWidth = image.naturalWidth * scale, drawHeight = image.naturalHeight * scale
+  ctx.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight)
+}
+async function loadOptionalImage(url?: string | null) {
+  try { return await loadImage(url || undefined) } catch { return null }
+}
+function drawBrandMark(ctx: CanvasRenderingContext2D, data: AdvisorVisual['data'], logo: HTMLImageElement | null, x: number, y: number, width: number, height: number, color: string) {
+  if (logo) { contain(ctx, logo, x, y, Math.min(width, 260), height); return y + height }
+  return fitted(ctx, data?.brand.name || 'Business', x, y, width, height, 38, color)
+}
 
 export async function renderAdvisorVisual(artifact: AdvisorVisual, imageUrl?: string): Promise<HTMLCanvasElement[]> {
   await document.fonts.ready
   if (!artifact.data || artifact.status !== 'complete') throw new Error('This visual is not ready yet.')
   const data = artifact.data, palette = palettes[data.palette] || palettes.green
   const currency = data.brand.currency || 'UGX'
+  const brandLogo = await loadOptionalImage(data.brand.logo)
   if (artifact.kind !== 'report') {
     const width = 1080, height = data.format === 'story' ? 1920 : data.format === 'square' ? 1080 : 1350
     const { element, ctx } = canvas(width, height)
     ctx.fillStyle = palette.pale; ctx.fillRect(0, 0, width, height)
     ctx.fillStyle = palette.accent; ctx.fillRect(0, 0, width, 16)
-    let y = fitted(ctx, data.brand.name, 60, 46, 960, 100, 38, palette.accent) + 24
+    let y = drawBrandMark(ctx, data, brandLogo, 60, 46, 960, 96, palette.accent) + 30
     const image = await loadImage(imageUrl)
     if (image) { const imageHeight = height * (data.format === 'square' ? 0.27 : 0.34); cover(ctx, image, 0, y, width, imageHeight); y += imageHeight + 34 }
     else y += height * 0.07
@@ -91,7 +104,6 @@ export async function renderAdvisorVisual(artifact: AdvisorVisual, imageUrl?: st
     if (data.copy.body) fitted(ctx, data.copy.body, 60, y, 960, Math.max(48, height - y - 165), 28, '#16241f', false)
     ctx.fillStyle = palette.accent; ctx.fillRect(60, height - 130, 960, 76)
     fitted(ctx, data.copy.cta || 'Visit us today', 88, height - 116, 904, 48, 32, '#ffffff')
-    if (data.imageSource === 'generated') text(ctx, 'Illustrative image', 60, height - 36, 960, 15, false, '#46554d')
     return [element]
   }
 
@@ -102,7 +114,8 @@ export async function renderAdvisorVisual(artifact: AdvisorVisual, imageUrl?: st
   const newPage = () => {
     const page = canvas(width, height); ctx = page.ctx; pages.push(page.element)
     ctx.fillStyle = palette.accent; ctx.fillRect(0, 0, width, 16)
-    y = text(ctx, data.brand.name, margin, 52, usable, 27, true, palette.accent) + 16
+    y = drawBrandMark(ctx, data, brandLogo, margin, 52, usable, 58, palette.accent) + 16
+    if (data.brand.logo) y = text(ctx, data.brand.name, margin, y, usable, 23, true, palette.accent) + 10
     y = text(ctx, report.title, margin, y, usable, 44, true) + 12
     y = text(ctx, `${displayDate(report.period.from)} - ${displayDate(report.period.to)} | ${report.scope.branch}`, margin, y, usable, 21, false, '#46554d') + 12
     if (report.scope.sales) y = text(ctx, report.scope.sales, margin, y, usable, 19, false, '#46554d') + 12
