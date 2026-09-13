@@ -165,10 +165,14 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, search, status } = req.query
-    if (!Number.isSafeInteger(Number(page)) || Number(page) < 1 || !Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 500) {
-      return res.status(400).json({ error: 'Page must be a positive integer and page size must be between 1 and 500.' })
+    // Reports and customer selectors in deployed clients request up to 10,000 rows.
+    if (!Number.isSafeInteger(Number(page)) || Number(page) < 1 || !Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 10000) {
+      return res.status(400).json({ error: 'Page must be a positive integer and page size must be between 1 and 10000.' })
     }
     const skip = (Number(page) - 1) * Number(limit)
+    if (!Number.isSafeInteger(skip) || skip > 2147483647) {
+      return res.status(400).json({ error: 'Requested page is out of range.' })
+    }
 
     const where = scopedWhere(scope, {
       ...(status && status !== 'all' && { status }),
