@@ -16,6 +16,7 @@ test('visual requests reject untrusted ownership, data payloads, invalid kinds a
   assert.equal(input({ artwork: 'generated' }).artwork, 'auto');
   for (const body of [null, [], { ...input({}), tenantId: 'other' }, { ...input({}), context: {} }, { ...input({}), kind: 'invoice' }, { ...input({}), days: 365 }, { ...input({}), brief: 'x'.repeat(3001) }]) assert.throws(() => validateArtifactInput(body), error => error.statusCode === 400);
   assert.throws(() => parseCreativeCopy('not json'), error => error.statusCode === 502);
+  assert.throws(() => parseCreativeCopy(JSON.stringify({ headline: 'Sale', caption: 'Buy' })), error => error.code === 'LOW_QUALITY_CREATIVE');
   assert.equal(parseCreativeCopy('```json\n' + JSON.stringify(copy) + '\n```').headline, copy.headline);
 });
 
@@ -30,7 +31,7 @@ test('marketing receives only the business profile and selected product, never p
   const facts = JSON.parse(prompt.messages[0].content).facts;
   assert.deepEqual(Object.keys(facts).sort(), ['brand', 'product']); assert.equal(facts.product.price, 4500);
   assert(!JSON.stringify(prompt.messages[0].content).includes('cloudinary')); assert.equal(output.data.brand.currency, 'UGX'); assert.equal(output.data.brand.logo, 'https://res.cloudinary.com/demo/image/upload/logo.png'); assert.equal(output.image, undefined);
-  assert.match(prompt.systemPrompt, /natural human/); assert.match(prompt.systemPrompt, /Follow explicit offers/); assert.equal(output.data.warnings.length, 1);
+  assert.match(prompt.systemPrompt, /professional graphic designer/); assert.match(prompt.systemPrompt, /Follow explicit offers/); assert.equal(output.data.warnings.length, 1);
   assert.equal(prompt.jsonMode, true);
 });
 
