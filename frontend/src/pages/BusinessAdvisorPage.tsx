@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { MessageSquare, Send, Plus, Square, RotateCcw, Folder, FolderPlus, BriefcaseBusiness, Search, PanelLeft, Pencil, Trash2, Lock, Globe, Brain, Copy, Check } from 'lucide-react'
+import { MessageSquare, Send, Plus, Square, RotateCcw, Folder, FolderPlus, BriefcaseBusiness, Search, PanelLeft, PanelLeftClose, Pencil, Trash2, Lock, Globe, Brain, Copy, Check } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -42,6 +42,7 @@ export default function BusinessAdvisorPage() {
   const [hasMore, setHasMore] = useState(false)
   const [older, setOlder] = useState(false)
   const [sidebar, setSidebar] = useState(false)
+  const [sidebarMinimized, setSidebarMinimized] = useState(() => localStorage.getItem('aiAdvisorSidebarMinimized') === '1')
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState(false)
@@ -111,6 +112,7 @@ export default function BusinessAdvisorPage() {
     return () => { window.clearTimeout(timer); listVersion.current++ }
   }, [identity, allowed, online, filter, search])
   useEffect(() => { if (logRef.current && !loading) logRef.current.scrollTop = logRef.current.scrollHeight }, [pending, current?.id])
+  useEffect(() => { localStorage.setItem('aiAdvisorSidebarMinimized', sidebarMinimized ? '1' : '0') }, [sidebarMinimized])
 
   function newChat() {
     if (pending) return
@@ -213,6 +215,7 @@ export default function BusinessAdvisorPage() {
   return <section className="mx-auto flex h-[calc(100dvh-7rem)] min-h-[28rem] w-full max-w-[1600px] flex-col p-3 md:min-h-[34rem] md:p-5" aria-label="AI business advisor">
     <header className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
       <div className="flex min-w-0 items-center gap-2"><Button size="icon" variant="ghost" className="md:hidden" aria-label="Show conversations" aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><PanelLeft className="h-5 w-5" /></Button>
+        <Button size="icon" variant="ghost" className="hidden md:inline-flex" aria-label={sidebarMinimized ? 'Show conversations' : 'Minimize conversations'} aria-pressed={sidebarMinimized} title={sidebarMinimized ? 'Show conversations' : 'Minimize conversations'} onClick={() => setSidebarMinimized(value => !value)}>{sidebarMinimized ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}</Button>
         <MessageSquare className="h-5 w-5 shrink-0 text-primary" /><h1 className="text-xl font-semibold">AI Advisor</h1></div>
       <div className="flex flex-wrap items-center gap-2"><label className="text-xs">Period <select aria-label="Business data period" value={days} disabled={pending} onChange={event => setDays(Number(event.target.value))} className="h-9 rounded-md border bg-background px-2">{[7, 30, 90].map(value => <option key={value} value={value}>{value} days</option>)}</select></label>
         <AdvisorCreativeStudio key={identity} conversationId={current?.id} disabled={!canSend} days={days} ensureConversation={ensureCreativeConversation} />
@@ -221,7 +224,7 @@ export default function BusinessAdvisorPage() {
     {!online && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor needs an internet connection.</p>}
     {configured === false && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor is not configured yet. Contact JibuSales Admin.</p>}
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-      <aside aria-label="Saved conversations" className={`${sidebar ? 'flex' : 'hidden'} max-h-[30dvh] shrink-0 flex-col gap-3 overflow-y-auto border-b py-3 md:flex md:max-h-none md:w-64 md:border-b-0 md:border-r md:pr-3 xl:w-72`}>
+      <aside aria-label="Saved conversations" className={`${sidebar ? 'flex' : 'hidden'} ${sidebarMinimized ? 'md:hidden' : 'md:flex'} max-h-[30dvh] shrink-0 flex-col gap-3 overflow-y-auto border-b py-3 md:max-h-none md:w-64 md:border-b-0 md:border-r md:pr-3 xl:w-72`}>
         <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Projects & folders</h2><div className="flex gap-1">
           <Button variant="ghost" size="icon" title="New folder" aria-label="New folder" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'folder', name: '', instructions: '', parentId: '' }) }}><FolderPlus className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" title="New project" aria-label="New project" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'project', name: '', instructions: '', parentId: selectedCollection?.kind === 'folder' ? filter : '' }) }}><Plus className="h-4 w-4" /></Button></div></div>
@@ -233,7 +236,7 @@ export default function BusinessAdvisorPage() {
           {!chats.length && <p className="px-2 text-xs text-muted-foreground">No conversations</p>}
           {hasMore && <Button variant="ghost" size="sm" onClick={() => void loadLibrary(page + 1, true)}>More conversations</Button>}</div>
       </aside>
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 pt-3 md:pl-5">
+      <main className={`flex min-h-0 min-w-0 flex-1 flex-col gap-3 pt-3 ${sidebarMinimized ? 'md:pl-0' : 'md:pl-5'}`}>
         <div className="flex min-w-0 items-start justify-between gap-2"><h2 className="min-w-0 break-words text-base font-semibold [overflow-wrap:anywhere]">{current?.title || selectedCollection?.name || 'New conversation'}</h2>
           {current && <div className="flex shrink-0"><Button size="icon" variant="ghost" title={copied ? 'Conversation copied' : 'Copy conversation'} aria-label="Copy conversation" disabled={pending || !online || copying} onClick={() => void copyConversation()}>{copied ? <Check className="h-4 w-4 text-emerald-700" /> : <Copy className="h-4 w-4" />}</Button><Button size="icon" variant="ghost" title="Edit conversation" aria-label="Edit conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'chat', id: current.id, name: current.title, instructions: '', parentId: current.collectionId || '' }) }}><Pencil className="h-4 w-4" /></Button>
             <Button size="icon" variant="ghost" title="Delete conversation" aria-label="Delete conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setDeleting({ type: 'chat', id: current.id, name: current.title }) }}><Trash2 className="h-4 w-4" /></Button></div>}</div>
