@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Plus, Trash2, Pin, PinOff } from 'lucide-react'
+import { Mail, MessageCircle, Plus, Trash2, Pin, PinOff } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { apiFetch } from '@/lib/api'
  
@@ -103,6 +103,23 @@ function saveNotesLS(userId: string, notes: StickyNote[]) {
   } catch {}
 }
  
+
+function formatNoteForSharing(note: StickyNote): string {
+  const body = note.lines
+    .map((line) => {
+      const text = line.text.trim()
+      if (!text && line.type !== 'task') return ''
+      if (line.type === 'numbered') return `${line.number || 1}. ${text}`
+      if (line.type === 'task') return `${line.done ? '[x]' : '[ ]'} ${text}`
+      return text
+    })
+    .join('\n')
+    .trim()
+
+  const title = note.title.trim()
+  return [title, body].filter(Boolean).join('\n\n') || 'Sticky note'
+}
+
 export function StickyNoteWidget() {
   const { user } = useJWTAuth()
   const userId = user?.id || 'guest'
@@ -411,6 +428,19 @@ export function StickyNoteWidget() {
     setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n)))
   }
 
+
+  const shareNoteToWhatsApp = () => {
+    if (!activeNote) return
+    const text = formatNoteForSharing(activeNote)
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener,noreferrer')
+  }
+
+  const shareNoteByEmail = () => {
+    if (!activeNote) return
+    const subject = activeNote.title.trim() || 'Sticky note'
+    const body = formatNoteForSharing(activeNote)
+    window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body)
+  }
   const colorObj = COLORS.find((c) => c.name === activeNote?.color) || COLORS[0]
   const sortedNotes = [...notes].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1
@@ -497,6 +527,15 @@ export function StickyNoteWidget() {
         <button onClick={() => activeNote && deleteNote(activeNote.id)} className="p-1 rounded hover:bg-black/10 transition-colors" style={{ color: colorObj.accent }} title="Delete note">
           <Trash2 className="h-4 w-4" />
         </button>
+
+        <div className="flex gap-0.5 ml-1 border-l border-black/10 pl-1">
+          <button onClick={shareNoteToWhatsApp} className="p-1 rounded hover:bg-black/10 transition-colors" style={{ color: colorObj.accent }} title="Share to WhatsApp">
+            <MessageCircle className="h-4 w-4" />
+          </button>
+          <button onClick={shareNoteByEmail} className="p-1 rounded hover:bg-black/10 transition-colors" style={{ color: colorObj.accent }} title="Share by email">
+            <Mail className="h-4 w-4" />
+          </button>
+        </div>
 
         {/* Line type buttons — apply to focused line */}
         <div className="flex gap-0.5 ml-1 border-l border-black/10 pl-1">
