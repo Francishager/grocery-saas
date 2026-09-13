@@ -145,6 +145,13 @@ const isReceivableSale = (sale: any) => (
   !sale?.noteNo
 )
 
+const canRecordSalePayment = (sale: any) => (
+  isReceivableSale(sale) &&
+  sale?.status !== 'refunded' &&
+  sale?.paymentStatus !== 'paid' &&
+  Math.round(parseAmount(sale?.balance) * 100) > 0
+)
+
 const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
   <div className="flex items-start justify-between gap-4 border-b py-2 last:border-b-0">
     <span className="text-sm text-muted-foreground">{label}</span>
@@ -782,6 +789,15 @@ export default function ReceivablesPage() {
 
   const recordPayment = async () => {
     if (savingPaymentRef.current) return
+
+    if (selectedSale && !canRecordSalePayment(sales.find((sale) => sale.id === selectedSale.id) || selectedSale)) {
+      toast({ title: 'No payment due', description: 'This sale has no outstanding payment to record.' })
+      setShowPaymentModal(false)
+      setSelectedSale(null)
+      setSelectedCustomer(null)
+      setPaymentAmount('')
+      return
+    }
 
     const targetCustomer = selectedSale?.customer || selectedCustomer
     if (!targetCustomer) {
@@ -1697,7 +1713,7 @@ export default function ReceivablesPage() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {sale.customer && (
+                    {sale.customer && canRecordSalePayment(sale) && (
                       <Button
                         size="sm"
                         onClick={() => {
@@ -2274,6 +2290,7 @@ export default function ReceivablesPage() {
               </Button>
               <Button onClick={recordPayment} disabled={
                 savingPayment ||
+                (selectedSale && !canRecordSalePayment(sales.find((sale) => sale.id === selectedSale.id) || selectedSale)) ||
                 !paymentAmount || parseFloat(paymentAmount) <= 0 ||
                 !selectedCashAccountId ||
                 (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
