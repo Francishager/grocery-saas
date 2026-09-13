@@ -18,10 +18,12 @@ try {
       await tx.$executeRaw`ALTER TABLE "user_permissions" ADD COLUMN IF NOT EXISTS "canUseBusinessAI" BOOLEAN NOT NULL DEFAULT false`;
     }, { timeout: 30000 });
   }
-  const advisorSql = await readFile(new URL('../../prisma/migrations/20260913120000_advisor_memory/migration.sql', import.meta.url), 'utf8');
   await prisma.$transaction(async tx => {
     await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '15s'");
-    for (const statement of advisorSql.split(';').map(value => value.trim()).filter(Boolean)) await tx.$executeRawUnsafe(statement);
+    for (const migration of ['20260913120000_advisor_memory', '20260913150000_advisor_creative_tools']) {
+      const sql = await readFile(new URL(`../../prisma/migrations/${migration}/migration.sql`, import.meta.url), 'utf8');
+      for (const statement of sql.split(';').map(value => value.trim()).filter(Boolean)) await tx.$executeRawUnsafe(statement);
+    }
   }, { timeout: 30000 });
   console.log('Business access and advisor memory schema ready.');
 } catch (error) {

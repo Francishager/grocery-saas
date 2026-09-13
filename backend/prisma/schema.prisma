@@ -493,6 +493,7 @@ model AdvisorConversation {
   busyUntil DateTime?
   activeRequestId String?
   turns AdvisorTurn[]
+  artifacts AdvisorArtifact[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([tenantId, userId, updatedAt])
@@ -510,10 +511,33 @@ model AdvisorTurn {
   status String @default("pending")
   context Json?
   truncated Boolean @default(false)
+  feedback Int?
+  feedbackUpdatedAt DateTime?
   createdAt DateTime @default(now())
   @@unique([conversationId, requestId])
   @@unique([conversationId, sequence])
   @@map("advisor_turns")
+}
+
+model AdvisorArtifact {
+  id String @id @default(cuid())
+  conversationId String
+  conversation AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requestId String
+  inputHash String
+  kind String
+  title String
+  status String @default("pending")
+  leaseToken String?
+  busyUntil DateTime?
+  data Json?
+  image Bytes?
+  imageMime String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([conversationId, requestId])
+  @@index([conversationId, createdAt])
+  @@map("advisor_artifacts")
 }
 
 enum UserRole {

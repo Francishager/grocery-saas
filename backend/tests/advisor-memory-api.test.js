@@ -6,27 +6,29 @@ import { pathToFileURL } from 'node:url';
 import { EventEmitter } from 'node:events';
 import * as advice from '../src/services/businessAdvisor.js';
 import { beginAdvisorTurn, failAdvisorTurn, loadAdvisorMemory } from '../src/services/advisorMemory.js';
+import { createArtifact, validateArtifactInput } from '../src/services/advisorArtifacts.js';
 const require = createRequire(import.meta.url);
 const dataUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 let rows, req, providerCalls, failProvider, counter = 0;
 const matches = (row, where = {}) => Object.entries(where).every(([key, value]) => {
   if (key === 'OR') return value.some(part => matches(row, part));
   if (key === 'turns') return rows.advisorTurn.some(turn => turn.conversationId === row.id && matches(turn, value.some));
+  if (key === 'conversation') return rows.advisorConversation.some(chat => chat.id === row.conversationId && matches(chat, value));
   if (key === 'conversationId_requestId') return row.conversationId === value.conversationId && row.requestId === value.requestId;
   if (value && typeof value === 'object' && !(value instanceof Date)) return Object.entries(value).every(([operator, other]) => operator === 'mode' ||
     (operator === 'not' ? row[key] !== other : operator === 'lt' ? row[key] < other : operator === 'gt' ? row[key] > other : operator === 'in' ? other.includes(row[key]) : operator === 'contains' ? String(row[key] || '').toLowerCase().includes(other.toLowerCase()) : false));
   return row[key] === value;
 });
 const db = {};
-for (const name of ['advisorCollection', 'advisorConversation', 'advisorTurn']) {
+for (const name of ['advisorCollection', 'advisorConversation', 'advisorTurn', 'advisorArtifact']) {
   const decorate = row => row ? structuredClone({ ...row, ...(name === 'advisorConversation' ? {
     collection: rows.advisorCollection.find(collection => collection.id === row.collectionId) || null,
     turns: rows.advisorTurn.filter(turn => turn.conversationId === row.id && turn.status === 'complete').slice(-2).reverse(),
   } : {}) }) : null;
   const update = (row, data) => { for (const [key, value] of Object.entries(data)) row[key] = value?.increment ? row[key] + value.increment : value; return decorate(row); };
   db[name] = {
-    findFirst: async ({ where }) => decorate(rows[name].find(row => matches(row, where))),
-    findUnique: async ({ where }) => decorate(rows[name].find(row => matches(row, where))),
+    findFirst: async ({ where, select }) => selectRow(decorate(rows[name].find(row => matches(row, where))), select),
+    findUnique: async ({ where, select }) => selectRow(decorate(rows[name].find(row => matches(row, where))), select),
     findMany: async ({ where, orderBy, skip = 0, take }) => {
       const result = rows[name].filter(row => matches(row, where));
       const order = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
@@ -34,7 +36,7 @@ for (const name of ['advisorCollection', 'advisorConversation', 'advisorTurn']) 
       return result.slice(skip, take === undefined ? undefined : skip + take).map(decorate);
     },
     create: async ({ data }) => {
-      const row = { id: `${name}-${++counter}`, createdAt: new Date(), updatedAt: new Date(), memory: '', memoryThrough: 0, nextSequence: 1, busyUntil: null, activeRequestId: null, ...data };
+      const row = { id: `${name}-${++counter}`, createdAt: new Date(), updatedAt: new Date(), memory: '', memoryThrough: 0, nextSequence: 1, busyUntil: null, activeRequestId: null, status: 'pending', ...data };
       rows[name].push(row); return decorate(row);
     },
     update: async ({ where, data }) => update(rows[name].find(row => matches(row, where)), data),
@@ -42,11 +44,13 @@ for (const name of ['advisorCollection', 'advisorConversation', 'advisorTurn']) 
     deleteMany: async ({ where }) => {
       const removed = rows[name].filter(row => matches(row, where)); rows[name] = rows[name].filter(row => !matches(row, where));
       if (name === 'advisorConversation') rows.advisorTurn = rows.advisorTurn.filter(turn => !removed.some(row => row.id === turn.conversationId));
+      if (name === 'advisorConversation') rows.advisorArtifact = rows.advisorArtifact.filter(item => !removed.some(row => row.id === item.conversationId));
       if (name === 'advisorCollection') { rows.advisorConversation.forEach(chat => { if (removed.some(row => row.id === chat.collectionId)) chat.collectionId = null; }); rows.advisorCollection.forEach(collection => { if (removed.some(row => row.id === collection.parentId)) collection.parentId = null; }); }
       return { count: removed.length };
     },
   };
 }
+function selectRow(row, select) { return row && select ? Object.fromEntries(Object.keys(select).map(key => [key, row[key]])) : row; }
 db.$transaction = action => action(db);
 globalThis.advisorApiFixture = { db, advice: { ...advice,
   requestBusinessAdvice: async args => { providerCalls.push(args); if (failProvider) throw advice.advisorError(503, 'Try again.', 'AI_UNAVAILABLE'); return { reply: '**Saved advice**', truncated: false }; },
@@ -66,12 +70,12 @@ const routeUrl = new URL('../src/routes/businessAdvisor.js', import.meta.url);
 const source = (await readFile(routeUrl, 'utf8')).replace(/(from\s+)(["'])([^"']+)\2/g, (_, prefix, quote, specifier) => prefix + JSON.stringify(fixtures[specifier.split('/').at(-1)] || (specifier.startsWith('.') ? new URL(specifier, routeUrl).href : pathToFileURL(require.resolve(specifier)).href)));
 const router = (await import(dataUrl(source))).default;
 beforeEach(() => {
-  rows = { advisorCollection: [], advisorConversation: [], advisorTurn: [] }; providerCalls = []; failProvider = false;
+  rows = { advisorCollection: [], advisorConversation: [], advisorTurn: [], advisorArtifact: [] }; providerCalls = []; failProvider = false;
   req = { user: { id: `owner-${++counter}`, tenantId: 'tenant-a', role: 'owner', permissions: ['canUseBusinessAI'] }, tenantFeatures: new Set(['dashboard']), query: {} };
 });
 async function call(method, path, { body = {}, params = {}, query = {}, user = req.user, tenantFeatures = req.tenantFeatures } = {}) {
   const result = { status: 200 };
-  const res = Object.assign(new EventEmitter(), { set() { return this; }, status(code) { result.status = code; return this; }, json(body) { result.body = body; this.writableEnded = true; return this; } });
+  const res = Object.assign(new EventEmitter(), { set() { return this; }, status(code) { result.status = code; return this; }, json(body) { result.body = body; this.writableEnded = true; return this; }, send(body) { result.body = body; this.writableEnded = true; return this; } });
   const route = router.stack.find(layer => layer.route?.path === path && layer.route.methods[method]);
   assert(route, `${method} ${path} is registered`);
   const stack = [...router.stack.filter(layer => !layer.route), ...route.route.stack];
@@ -169,4 +173,71 @@ test('advisor routes enforce module access and reject client-supplied context or
   const chat = await createChat();
   assert.equal((await call('post', '/chat', { body: { conversationId: chat.id, requestId: 'x', message: 'Hi', context: { payroll: 1 } } })).status, 400);
   assert.equal(rows.advisorTurn.length, 0);
+});
+
+test('reply feedback persists, toggles and clears, and rejects invalid ratings or incomplete replies', async () => {
+  const chat = await createChat(); const turn = (await send(chat)).body.turn;
+  const params = { id: chat.id, turnId: turn.id };
+  for (const feedback of [1, -1, null]) {
+    assert.equal((await call('put', '/conversations/:id/turns/:turnId/feedback', { params, body: { feedback } })).status, 200);
+    assert.equal((await call('get', '/conversations/:id', { params: { id: chat.id } })).body.turns[0].feedback, feedback);
+    assert(rows.advisorTurn[0].feedbackUpdatedAt instanceof Date);
+  }
+  for (const feedback of [0, 2, '1', {}, undefined]) assert.equal((await call('put', '/conversations/:id/turns/:turnId/feedback', { params, body: { feedback } })).status, 400);
+  rows.advisorTurn[0].status = 'failed';
+  assert.equal((await call('put', '/conversations/:id/turns/:turnId/feedback', { params, body: { feedback: 1 } })).status, 404);
+});
+
+test('another user, tenant, conversation or changed permission scope cannot rate a reply', async () => {
+  const chat = await createChat(); const turn = (await send(chat)).body.turn;
+  const params = { id: chat.id, turnId: turn.id }, body = { feedback: 1 };
+  for (const user of [{ ...req.user, id: 'other' }, { ...req.user, tenantId: 'other' }]) assert.equal((await call('put', '/conversations/:id/turns/:turnId/feedback', { params, body, user })).status, 404);
+  const second = await createChat();
+  assert.equal((await call('put', '/conversations/:id/turns/:turnId/feedback', { params: { ...params, id: second.id }, body })).status, 404);
+  req.user.permissions.push('canViewHR');
+  assert.equal((await call('put', '/conversations/:id/turns/:turnId/feedback', { params, body })).status, 403);
+  assert.equal(rows.advisorTurn[0].feedback, undefined);
+});
+
+const artifactResult = { data: { kind: 'flyer', copy: { headline: 'Fresh rice', body: 'A real product', caption: 'Visit us', hashtags: [] }, warnings: [], report: null }, image: Buffer.from('private-image'), imageMime: 'image/png' };
+const artifactInput = () => validateArtifactInput({ requestId: 'visual-1', kind: 'flyer', brief: 'Promote rice' });
+test('visual generation retries are idempotent, private, and never expose image bytes or internal hashes in metadata', async () => {
+  const chat = await createChat(); let calls = 0;
+  const build = async () => { calls++; return structuredClone(artifactResult); };
+  const first = await createArtifact(db, req, chat.id, artifactInput(), undefined, { build });
+  const again = await createArtifact(db, req, chat.id, artifactInput(), undefined, { build });
+  assert.equal(first.id, again.id); assert.equal(calls, 1); assert.equal(rows.advisorArtifact.length, 1);
+  assert.equal(again.image, undefined); assert.equal(again.inputHash, undefined);
+  await assert.rejects(() => createArtifact(db, req, chat.id, { ...artifactInput(), brief: 'Changed request' }, undefined, { build }), error => error.code === 'ARTIFACT_CONFLICT');
+  for (const user of [{ ...req.user, id: 'other' }, { ...req.user, tenantId: 'other' }]) {
+    assert.equal((await call('get', '/artifacts/:id/image', { params: { id: first.id }, user })).status, 404);
+    assert.equal((await call('get', '/conversations/:id/artifacts', { params: { id: chat.id }, user })).status, 404);
+    assert.equal((await call('patch', '/artifacts/:id', { params: { id: first.id }, user, body: { headline: 'Stolen' } })).status, 404);
+    assert.equal((await call('delete', '/artifacts/:id', { params: { id: first.id }, user })).status, 404);
+  }
+  assert.equal((await call('get', '/artifacts/:id/image', { params: { id: first.id } })).body.toString(), 'private-image');
+  req.user.permissions.push('canViewHR');
+  assert.equal((await call('get', '/artifacts/:id/image', { params: { id: first.id } })).status, 403);
+});
+
+test('failed visual generation releases its lease; concurrent retries cannot create duplicates', async () => {
+  const chat = await createChat();
+  await assert.rejects(() => createArtifact(db, req, chat.id, artifactInput(), undefined, { build: async () => { throw new Error('Provider down'); } }));
+  assert.equal(rows.advisorArtifact[0].status, 'failed');
+  let finish;
+  const first = createArtifact(db, req, chat.id, artifactInput(), undefined, { build: () => new Promise(resolve => { finish = resolve; }) });
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(() => createArtifact(db, req, chat.id, artifactInput(), undefined, { build: async () => artifactResult }), error => error.code === 'ARTIFACT_BUSY');
+  finish(structuredClone(artifactResult)); await first;
+  assert.equal(rows.advisorArtifact.length, 1); assert.equal(rows.advisorArtifact[0].status, 'complete');
+});
+
+test('visual wording is editable but financial figures and ownership are not; chat deletion removes its visuals', async () => {
+  const chat = await createChat();
+  const artifact = await createArtifact(db, req, chat.id, artifactInput(), undefined, { build: async () => structuredClone(artifactResult) });
+  assert.equal((await call('patch', '/artifacts/:id', { params: { id: artifact.id }, body: { headline: 'New headline', caption: 'Natural wording' } })).status, 200);
+  assert.equal(rows.advisorArtifact[0].data.copy.headline, 'New headline');
+  for (const body of [{ report: { metrics: [] } }, { tenantId: 'other' }, { headline: '' }, { caption: 'x'.repeat(2401) }]) assert.equal((await call('patch', '/artifacts/:id', { params: { id: artifact.id }, body })).status, 400);
+  await call('delete', '/conversations/:id', { params: { id: chat.id } });
+  assert.equal(rows.advisorArtifact.length, 0);
 });

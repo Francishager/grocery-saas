@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { MessageSquare, Send, Plus, Square, RotateCcw, Folder, FolderPlus, BriefcaseBusiness, Search, PanelLeft, Pencil, Trash2, Lock, Globe, Brain } from 'lucide-react'
+import { MessageSquare, Send, Plus, Square, RotateCcw, Folder, FolderPlus, BriefcaseBusiness, Search, PanelLeft, Pencil, Trash2, Lock, Globe, Brain, Copy, Check } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -7,12 +7,15 @@ import { useOnlineStatus } from '@/db/hooks'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import AdvisorMarkdown from '@/components/AdvisorMarkdown'
+import AdvisorReplyActions from '@/components/AdvisorReplyActions'
+import AdvisorCreativeStudio from '@/components/AdvisorCreativeStudio'
+import { copyText } from '@/lib/advisorVisuals'
 
 type Collection = { id: string; name: string; kind: 'project' | 'folder'; parentId: string | null; instructions: string }
 type Chat = { id: string; title: string; collectionId: string | null; updatedAt: string; locked?: boolean }
 type Snapshot = { business: { name: string }; period: { from: string; to: string }; scope: { branch: string }; sources: string[]; limitations: string[];
   research?: { status: string; kind?: string; notice?: string; sources: { title: string; url: string }[] }; memory?: { previousConversations: number } }
-type Turn = { id: string; requestId: string; sequence: number; input: string; output?: string; status: string; context?: Snapshot; truncated?: boolean }
+type Turn = { id: string; requestId: string; sequence: number; input: string; output?: string; status: string; context?: Snapshot; truncated?: boolean; feedback?: number | null }
 type Editor = { type: 'project' | 'folder' | 'chat'; id?: string; name: string; instructions: string; parentId: string }
 const suggestions = ['Create a practical growth plan for this business.', 'Which customers need repayment follow-up?', 'How can we improve staff productivity and retention?', 'What should we promote or restock?']
 const date = (value: string) => new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
@@ -51,6 +54,8 @@ export default function BusinessAdvisorPage() {
   const [deleting, setDeleting] = useState<{ type: 'chat' | 'collection'; id: string; name: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [dialogError, setDialogError] = useState('')
+  const [copying, setCopying] = useState(false)
+  const [copied, setCopied] = useState(false)
   const requestRef = useRef<AbortController | null>(null)
   const readRef = useRef<AbortController | null>(null)
   const listVersion = useRef(0)
@@ -110,6 +115,31 @@ export default function BusinessAdvisorPage() {
   function newChat() {
     if (pending) return
     readRef.current?.abort(); setCurrent(null); setTurns([]); setDraft(''); setError(''); setOlder(false); setLoading(false); setSidebar(false); setParams({}, { replace: true })
+  }
+  async function ensureCreativeConversation(title: string, signal: AbortSignal) {
+    if (current) return current.id
+    const version = generation.current
+    const data = await request('/conversations', { method: 'POST', signal, body: JSON.stringify({ title, collectionId: filter || null }) })
+    if (version !== generation.current || signal.aborted) throw new Error('The account changed. Reopen AI Advisor.')
+    setCurrent(data.conversation); setParams({ chat: data.conversation.id }, { replace: true }); void loadLibrary()
+    return data.conversation.id as string
+  }
+  async function copyConversation() {
+    if (!current || copying) return
+    const version = generation.current
+    setCopying(true); setError('')
+    try {
+      let data = await request(`/conversations/${encodeURIComponent(current.id)}`)
+      let all: Turn[] = data.turns
+      while (data.hasMore && data.turns.length && version === generation.current) {
+        data = await request(`/conversations/${encodeURIComponent(current.id)}?before=${data.turns[0].sequence}`)
+        all = [...data.turns, ...all]
+      }
+      if (version !== generation.current) return
+      await copyText([current.title, ...all.flatMap(turn => [`You: ${turn.input}`, ...(turn.output ? [`JibuSales AI: ${turn.output}`] : [])])].join('\n\n'))
+      setCopied(true); window.setTimeout(() => setCopied(false), 2000)
+    } catch (error: any) { if (version === generation.current) setError(error.message) }
+    finally { if (version === generation.current) setCopying(false) }
   }
   async function send(content = draft, retry?: Turn) {
     const message = (retry?.input || content).trim()
@@ -184,7 +214,8 @@ export default function BusinessAdvisorPage() {
     <header className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
       <div className="flex min-w-0 items-center gap-2"><Button size="icon" variant="ghost" className="md:hidden" aria-label="Show conversations" aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><PanelLeft className="h-5 w-5" /></Button>
         <MessageSquare className="h-5 w-5 shrink-0 text-primary" /><h1 className="text-xl font-semibold">AI Advisor</h1></div>
-      <div className="flex items-center gap-2"><label className="text-xs">Period <select aria-label="Business data period" value={days} disabled={pending} onChange={event => setDays(Number(event.target.value))} className="h-9 rounded-md border bg-background px-2">{[7, 30, 90].map(value => <option key={value} value={value}>{value} days</option>)}</select></label>
+      <div className="flex flex-wrap items-center gap-2"><label className="text-xs">Period <select aria-label="Business data period" value={days} disabled={pending} onChange={event => setDays(Number(event.target.value))} className="h-9 rounded-md border bg-background px-2">{[7, 30, 90].map(value => <option key={value} value={value}>{value} days</option>)}</select></label>
+        <AdvisorCreativeStudio key={identity} conversationId={current?.id} disabled={!canSend} days={days} ensureConversation={ensureCreativeConversation} />
         <Button variant="outline" size="sm" disabled={pending} onClick={newChat}><Plus className="mr-1 h-4 w-4" />New chat</Button></div>
     </header>
     {!online && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor needs an internet connection.</p>}
@@ -204,7 +235,7 @@ export default function BusinessAdvisorPage() {
       </aside>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 pt-3 md:pl-5">
         <div className="flex min-w-0 items-start justify-between gap-2"><h2 className="min-w-0 break-words text-base font-semibold [overflow-wrap:anywhere]">{current?.title || selectedCollection?.name || 'New conversation'}</h2>
-          {current && <div className="flex shrink-0"><Button size="icon" variant="ghost" title="Edit conversation" aria-label="Edit conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'chat', id: current.id, name: current.title, instructions: '', parentId: current.collectionId || '' }) }}><Pencil className="h-4 w-4" /></Button>
+          {current && <div className="flex shrink-0"><Button size="icon" variant="ghost" title={copied ? 'Conversation copied' : 'Copy conversation'} aria-label="Copy conversation" disabled={pending || !online || copying} onClick={() => void copyConversation()}>{copied ? <Check className="h-4 w-4 text-emerald-700" /> : <Copy className="h-4 w-4" />}</Button><Button size="icon" variant="ghost" title="Edit conversation" aria-label="Edit conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'chat', id: current.id, name: current.title, instructions: '', parentId: current.collectionId || '' }) }}><Pencil className="h-4 w-4" /></Button>
             <Button size="icon" variant="ghost" title="Delete conversation" aria-label="Delete conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setDeleting({ type: 'chat', id: current.id, name: current.title }) }}><Trash2 className="h-4 w-4" /></Button></div>}</div>
         <div ref={logRef} role="log" aria-label="Advisor conversation" aria-live="polite" aria-busy={pending || loading} className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
           {older && <Button size="sm" variant="outline" disabled={loading || pending} onClick={() => current && void openChat(current.id, turns[0]?.sequence)}>Earlier messages</Button>}
@@ -213,7 +244,8 @@ export default function BusinessAdvisorPage() {
             <div className="mt-4 grid gap-2 lg:grid-cols-2">{suggestions.map(suggestion => <button type="button" key={suggestion} disabled={!canSend} onClick={() => void send(suggestion)} className="rounded-md border p-3 text-left text-sm hover:bg-muted disabled:opacity-50">{suggestion}</button>)}</div></div>}
           {turns.map(turn => <div key={turn.id} className="space-y-4">
             <article aria-label="Your message" className="ml-auto w-fit max-w-[95%] rounded-md bg-muted px-4 py-3 sm:max-w-[85%]"><p className="mb-1 text-xs font-semibold">You</p><div className="whitespace-pre-wrap break-words text-sm leading-6 [overflow-wrap:anywhere]">{turn.input}</div></article>
-            {turn.output && <article aria-label="Advisor reply" className="min-w-0 border-b pb-5"><p className="mb-2 text-xs font-semibold text-muted-foreground">JibuSales AI</p><AdvisorMarkdown>{turn.output}</AdvisorMarkdown>
+            {turn.output && <article aria-label="Advisor reply" className="min-w-0 border-b pb-5"><p className="mb-2 text-xs font-semibold text-muted-foreground">JibuSales AI</p><div data-advisor-content><AdvisorMarkdown>{turn.output}</AdvisorMarkdown></div>
+              {current && turn.status === 'complete' && <AdvisorReplyActions conversationId={current.id} turn={turn} disabled={!online || pending} onFeedback={feedback => setTurns(previous => previous.map(row => row.id === turn.id ? { ...row, feedback } : row))} />}
               {turn.truncated && <p className="mt-2 text-xs text-muted-foreground">Ask the advisor to continue for more detail.</p>}
               {!!turn.context?.research?.sources?.length && <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="Research sources">{turn.context.research.sources.map(source => /^https:\/\//i.test(source.url) && <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="break-words text-primary underline">{source.title}</a>)}</div>}
               {turn.context?.research?.status === 'unavailable' && <p className="mt-2 text-xs text-amber-700">External research unavailable for this reply.</p>}
@@ -244,7 +276,7 @@ export default function BusinessAdvisorPage() {
         <div className="flex flex-wrap justify-between gap-2">{editor.id && editor.type !== 'chat' ? <Button type="button" variant="outline" disabled={saving} onClick={() => { setDeleting({ type: 'collection', id: editor.id!, name: editor.name }); setEditor(null) }}><Trash2 className="mr-2 h-4 w-4" />Delete</Button> : <span />}
           <Button type="submit" disabled={saving || !editor.name.trim()}>{saving ? 'Saving...' : 'Save'}</Button></div></form>}
     </DialogContent></Dialog>
-    <Dialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(null) }}><DialogContent className="rounded-lg"><DialogHeader><DialogTitle>Delete {deleting?.type === 'chat' ? 'conversation' : 'project or folder'}?</DialogTitle><DialogDescription>{deleting?.type === 'chat' ? 'This permanently deletes the conversation and its saved memory.' : 'Chats are kept under All chats. Projects inside this folder are kept.'}</DialogDescription></DialogHeader>
+    <Dialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(null) }}><DialogContent className="rounded-lg"><DialogHeader><DialogTitle>Delete {deleting?.type === 'chat' ? 'conversation' : 'project or folder'}?</DialogTitle><DialogDescription>{deleting?.type === 'chat' ? 'This permanently deletes the conversation, saved memory, ratings and visuals.' : 'Chats are kept under All chats. Projects inside this folder are kept.'}</DialogDescription></DialogHeader>
       <p className="break-words text-sm">{deleting?.name}</p>{dialogError && <p role="alert" className="text-sm text-destructive">{dialogError}</p>}<div className="flex justify-end gap-2"><Button variant="outline" disabled={saving} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={saving} onClick={() => void remove()}>Delete</Button></div>
     </DialogContent></Dialog>
   </section>

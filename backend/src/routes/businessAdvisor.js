@@ -7,6 +7,7 @@ import { createAdvisorLimiter, requestBusinessAdvice, validateAdvisorRequest, ad
 import { privateWhere, advisorScopeKey, ownedConversation, ownedCollection, beginAdvisorTurn, finishAdvisorTurn, failAdvisorTurn, loadAdvisorMemory } from '../services/advisorMemory.js';
 import { addAdvisorPeopleContext } from '../services/advisorPeopleContext.js';
 import { fetchAdvisorResearch } from '../services/advisorResearch.js';
+import { artifactSelect, createArtifact, creativeOptions, ownedArtifact, validateArtifactInput } from '../services/advisorArtifacts.js';
 
 const router = Router();
 const acquire = createAdvisorLimiter();
@@ -164,4 +165,61 @@ router.post('/chat', async (req, res) => {
     clearTimeout(timer); release?.(); res.off('close', disconnect);
   }
 });
+
+router.put('/conversations/:id/turns/:turnId/feedback', action(async (req, res) => {
+  validateKeys(req.body, ['feedback']);
+  if (![1, -1, null].includes(req.body.feedback)) throw advisorError(400, 'Choose thumbs up, thumbs down, or clear the rating.', 'INVALID_FEEDBACK');
+  await ownedConversation(prisma, req, req.params.id, await advisorScopeKey(prisma, req));
+  const result = await prisma.advisorTurn.updateMany({ where: { id: req.params.turnId, conversationId: req.params.id, status: 'complete' }, data: { feedback: req.body.feedback, feedbackUpdatedAt: new Date() } });
+  if (!result.count) throw advisorError(404, 'Completed reply not found.', 'REPLY_NOT_FOUND');
+  res.json({ feedback: req.body.feedback });
+}));
+router.get('/creative-options', action(async (req, res) => res.json(await creativeOptions(prisma, req))));
+router.get('/conversations/:id/artifacts', action(async (req, res) => {
+  await ownedConversation(prisma, req, req.params.id, await advisorScopeKey(prisma, req));
+  const page = Number(req.query.page || 1);
+  if (!Number.isSafeInteger(page) || page < 1 || page > 100000) throw advisorError(400, 'Invalid page.', 'INVALID_ARTIFACT');
+  const rows = await prisma.advisorArtifact.findMany({ where: { conversationId: req.params.id }, select: artifactSelect, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 21, skip: (page - 1) * 20 });
+  res.json({ artifacts: rows.slice(0, 20), hasMore: rows.length > 20 });
+}));
+router.post('/conversations/:id/artifacts', async (req, res) => {
+  const controller = new AbortController();
+  const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+  res.on('close', disconnect);
+  let release;
+  const timer = setTimeout(() => controller.abort(), 180000);
+  try {
+    const input = validateArtifactInput(req.body);
+    release = acquire(req.user.tenantId, req.user.id);
+    const artifact = await createArtifact(prisma, req, req.params.id, input, controller.signal);
+    if (!res.destroyed) res.status(201).json({ artifact });
+  } catch (error) { errorResponse(res, error); }
+  finally { clearTimeout(timer); release?.(); res.off('close', disconnect); }
+});
+router.get('/artifacts/:id/image', action(async (req, res) => {
+  const artifact = await ownedArtifact(prisma, req, req.params.id);
+  if (artifact.status !== 'complete' || !artifact.imageMime) throw advisorError(404, 'Image not available.', 'IMAGE_NOT_FOUND');
+  const row = await prisma.advisorArtifact.findUnique({ where: { id: artifact.id }, select: { image: true, imageMime: true } });
+  if (!row?.image) throw advisorError(404, 'Image not available.', 'IMAGE_NOT_FOUND');
+  res.set('X-Content-Type-Options', 'nosniff'); res.set('Content-Type', row.imageMime); res.send(Buffer.from(row.image));
+}));
+router.patch('/artifacts/:id', action(async (req, res) => {
+  validateKeys(req.body, ['headline', 'subheading', 'body', 'cta', 'caption']);
+  const artifact = await ownedArtifact(prisma, req, req.params.id);
+  if (artifact.status !== 'complete') throw advisorError(409, 'Wait for this visual to finish.', 'ARTIFACT_BUSY');
+  const copy = { ...artifact.data.copy };
+  for (const [key, max] of Object.entries({ headline: 100, subheading: 180, body: 320, cta: 70, caption: 2400 })) {
+    if (req.body[key] !== undefined) {
+      if (typeof req.body[key] !== 'string' || req.body[key].length > max || (key === 'headline' && !req.body[key].trim())) throw advisorError(400, `Invalid ${key}. Maximum ${max} characters.`, 'INVALID_ARTIFACT');
+      copy[key] = req.body[key].trim();
+    }
+  }
+  await prisma.advisorArtifact.updateMany({ where: { id: artifact.id, status: 'complete' }, data: { data: { ...artifact.data, copy }, ...(artifact.kind !== 'report' ? { title: copy.headline } : {}) } });
+  res.json({ artifact: await prisma.advisorArtifact.findUnique({ where: { id: artifact.id }, select: artifactSelect }) });
+}));
+router.delete('/artifacts/:id', action(async (req, res) => {
+  const artifact = await ownedArtifact(prisma, req, req.params.id);
+  await prisma.advisorArtifact.deleteMany({ where: { id: artifact.id } });
+  res.json({ success: true });
+}));
 export default router;
