@@ -13,6 +13,8 @@ const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
 
 test('visual requests reject untrusted ownership, data payloads, invalid kinds and invalid lengths', () => {
   assert.equal(input({}).days, 30);
+  assert.equal(input({}).layout, 'auto');
+  assert.throws(() => input({ layout: '<svg />' }), error => error.statusCode === 400);
   assert.equal(input({ artwork: 'generated' }).artwork, 'auto');
   for (const body of [null, [], { ...input({}), tenantId: 'other' }, { ...input({}), context: {} }, { ...input({}), kind: 'invoice' }, { ...input({}), days: 365 }, { ...input({}), brief: 'x'.repeat(3001) }]) assert.throws(() => validateArtifactInput(body), error => error.statusCode === 400);
   assert.throws(() => parseCreativeCopy('not json'), error => error.statusCode === 502);
@@ -81,6 +83,33 @@ test('creative visuals never generate generic illustrations and still keep real 
     generateImage: async () => { generated = true; throw new Error('Should not generate'); },
   });
   assert.equal(generated, false); assert.equal(output.imageMime, 'image/png'); assert.equal(output.data.imageSource, 'product'); assert.match(output.data.copy.caption, /10% off/);
+  assert.equal(output.data.copy.offer, '10% discount');
+});
+
+test('creative quality gate revises once and preserves user layout and exact offer', async () => {
+  let attempts = 0;
+  const output = await buildArtifactData(profile, req(), input({ layout: 'editorial', brief: 'Save 15% on rice this Friday.' }), undefined, {
+    advise: async args => {
+      attempts++;
+      if (attempts === 1) return { reply: JSON.stringify({ ...copy, offer: 'Save 50%' }) };
+      assert.match(args.systemPrompt, /Revise before delivery/);
+      return { reply: JSON.stringify({ ...copy, offer: 'Save 15%', layout: 'offer' }) };
+    },
+  });
+  assert.equal(attempts, 2);
+  assert.equal(output.data.layout, 'editorial');
+  assert.equal(output.data.copy.offer, 'Save 15%');
+  assert.equal(output.data.version, 2);
+});
+
+test('quality failures never save truncated offers or retry indefinitely', async () => {
+  let attempts = 0;
+  await assert.rejects(() => buildArtifactData(profile, req(), input({}), undefined, {
+    advise: async () => { attempts++; return { reply: JSON.stringify({ ...copy, body: 'x'.repeat(321) }) }; },
+  }), error => error.code === 'LOW_QUALITY_CREATIVE');
+  assert.equal(attempts, 2);
+  assert.throws(() => parseCreativeCopy(JSON.stringify({ ...copy, headline: '**Placeholder headline**' })), error => error.code === 'LOW_QUALITY_CREATIVE');
+  assert.equal(parseCreativeCopy(JSON.stringify({ ...copy, headline: 'Rice', cta: '' }), { kind: 'report' }).headline, 'Rice');
 });
 
 test('generated artwork validates raster format, bounds and redacts provider failures', async () => {

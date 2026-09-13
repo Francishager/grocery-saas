@@ -1,11 +1,13 @@
-export type CreativeCopy = { headline: string; subheading: string; body: string; cta: string; caption: string; hashtags: string[] }
+import { drawCreative } from './advisorCreativeLayout'
+
+export type CreativeCopy = { headline: string; subheading: string; body: string; cta: string; caption: string; hashtags: string[]; offer?: string }
 export type VisualReport = { title: string; metrics: { label: string; value: number; format: string }[];
   charts: { title: string; format: string; rows: { label: string; value: number }[] }[];
   tables: { title: string; columns: { key: string; label: string; format?: string }[]; rows: Record<string, any>[] }[];
   sources: string[]; limitations: string[]; asOf: string; period: { from: string; to: string }; scope: { branch: string; sales?: string } }
 export type AdvisorVisual = { id: string; conversationId: string; kind: 'report' | 'flyer' | 'social'; title: string; status: string; imageMime?: string; createdAt: string;
   data?: { brand: { name: string; currency: string; logo?: string | null }; copy: CreativeCopy; product?: { name: string; price: number; unit: string }; format: string; palette: string; platform: string;
-    report?: VisualReport; warnings: string[]; imageSource?: string; brief: string; tone?: string; reportType?: string; productId?: string } }
+    report?: VisualReport; warnings: string[]; imageSource?: string; brief: string; tone?: string; reportType?: string; productId?: string; layout?: string } }
 const palettes: Record<string, { accent: string; pale: string; secondary: string; ink: string; soft: string }> = {
   green: { accent: '#11634c', pale: '#eff8f3', secondary: '#e3b648', ink: '#11251d', soft: '#d8eee4' },
   blue: { accent: '#1f5aa6', pale: '#eff5fc', secondary: '#dd6158', ink: '#132238', soft: '#dbeafe' },
@@ -54,29 +56,12 @@ function canvas(width: number, height: number) {
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
   return { element, ctx }
 }
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
-  const r = Math.min(radius, width / 2, height / 2)
-  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + width - r, y); ctx.quadraticCurveTo(x + width, y, x + width, y + r)
-  ctx.lineTo(x + width, y + height - r); ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height)
-  ctx.lineTo(x + r, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath()
-}
-function fillRound(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number, color: string) {
-  ctx.fillStyle = color; roundRect(ctx, x, y, width, height, radius); ctx.fill()
-}
-function strokeRound(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number, color: string, lineWidth = 2) {
-  ctx.strokeStyle = color; ctx.lineWidth = lineWidth; roundRect(ctx, x, y, width, height, radius); ctx.stroke()
-}
 async function loadImage(url?: string) {
   if (!url) return null
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image(); const timer = window.setTimeout(() => reject(new Error('The artwork could not be loaded. Reopen the preview and try again.')), 15000)
     image.crossOrigin = 'anonymous'; image.onload = () => { window.clearTimeout(timer); resolve(image) }; image.onerror = () => { window.clearTimeout(timer); reject(new Error('The image could not be loaded.')) }; image.src = url
   })
-}
-function cover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
-  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
-  const sw = width / scale, sh = height / scale
-  ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, x, y, width, height)
 }
 function contain(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
   const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight)
@@ -98,51 +83,10 @@ export async function renderAdvisorVisual(artifact: AdvisorVisual, imageUrl?: st
   const currency = data.brand.currency || 'UGX'
   const brandLogo = await loadOptionalImage(data.brand.logo)
   if (artifact.kind !== 'report') {
-    const width = 1080, height = data.format === 'story' ? 1920 : data.format === 'square' ? 1080 : 1350
-    const { element, ctx } = canvas(width, height)
-    const bg = ctx.createLinearGradient(0, 0, width, height)
-    bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.55, palette.pale); bg.addColorStop(1, palette.soft)
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, width, height)
-    ctx.fillStyle = palette.accent; ctx.fillRect(0, 0, width, 18)
-    ctx.globalAlpha = 0.14; ctx.fillStyle = palette.secondary; ctx.beginPath(); ctx.ellipse(width - 130, 150, 300, 190, -0.35, 0, Math.PI * 2); ctx.fill()
-    ctx.globalAlpha = 0.10; ctx.fillStyle = palette.accent; ctx.beginPath(); ctx.ellipse(80, height - 170, 270, 180, -0.5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1
-
-    fillRound(ctx, 54, 48, 972, 132, 28, 'rgba(255,255,255,0.88)')
-    strokeRound(ctx, 54, 48, 972, 132, 28, 'rgba(17,37,29,0.08)', 2)
-    drawBrandMark(ctx, data, brandLogo, 82, 70, 330, 82, palette.accent)
-    const brandTextX = brandLogo ? 378 : 82
-    if (brandLogo) fitted(ctx, data.brand.name, brandTextX, 78, 438, 46, 28, palette.ink, true)
-    fitted(ctx, data.platform ? data.platform.toUpperCase() : 'BUSINESS UPDATE', brandTextX, brandLogo ? 124 : 122, 390, 30, 16, '#5d6b64', false)
-
-    const image = await loadImage(imageUrl)
-    const hasImage = Boolean(image)
-    const heroTop = 220, heroHeight = hasImage ? Math.min(height * (data.format === 'story' ? 0.34 : 0.31), 560) : 0
-    if (image) {
-      fillRound(ctx, 54, heroTop, 972, heroHeight, 34, '#ffffff')
-      ctx.save(); roundRect(ctx, 74, heroTop + 20, 932, heroHeight - 40, 26); ctx.clip(); cover(ctx, image, 74, heroTop + 20, 932, heroHeight - 40); ctx.restore()
-      strokeRound(ctx, 54, heroTop, 972, heroHeight, 34, 'rgba(17,37,29,0.10)', 2)
-    }
-
-    const contentTop = hasImage ? heroTop + heroHeight + 44 : 240
-    const footerTop = height - 170
-    const panelHeight = footerTop - contentTop - 34
-    fillRound(ctx, 54, contentTop, 972, panelHeight, 32, 'rgba(255,255,255,0.92)')
-    strokeRound(ctx, 54, contentTop, 972, panelHeight, 32, 'rgba(17,37,29,0.08)', 2)
-    let y = contentTop + 44
-    y = fitted(ctx, data.copy.headline, 92, y, 896, Math.min(panelHeight * 0.36, 230), hasImage ? 64 : 78, palette.accent) + 18
-    if (data.product) {
-      const productText = data.product.name + ' | ' + visualValue(data.product.price, 'currency', currency) + ' / ' + data.product.unit
-      fillRound(ctx, 92, y, 896, 64, 18, palette.pale)
-      fitted(ctx, productText, 118, y + 14, 844, 38, 25, palette.ink, true); y += 86
-    }
-    if (data.copy.subheading) y = fitted(ctx, data.copy.subheading, 92, y, 896, Math.min(110, panelHeight * 0.18), 34, palette.ink, false) + 18
-    const bodySpace = Math.max(72, footerTop - y - 74)
-    if (data.copy.body) fitted(ctx, data.copy.body, 92, y, 896, bodySpace, 28, '#25352e', false)
-
-    fillRound(ctx, 54, footerTop, 972, 104, 28, palette.accent)
-    fitted(ctx, data.copy.cta || 'Visit us today', 94, footerTop + 24, 660, 56, 34, '#ffffff', true)
-    ctx.fillStyle = palette.secondary; ctx.beginPath(); ctx.arc(934, footerTop + 52, 34, 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(924, footerTop + 35); ctx.lineTo(952, footerTop + 52); ctx.lineTo(924, footerTop + 69); ctx.closePath(); ctx.fill()
+    const height = data.format === 'story' ? 1920 : data.format === 'square' ? 1080 : 1350
+    const { element, ctx } = canvas(1080, height)
+    const productImage = await loadImage(imageUrl)
+    drawCreative(ctx, data, productImage, brandLogo, palette, height)
     return [element]
   }
 

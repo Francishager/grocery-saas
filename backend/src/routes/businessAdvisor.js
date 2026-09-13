@@ -204,11 +204,11 @@ router.get('/artifacts/:id/image', action(async (req, res) => {
   res.set('X-Content-Type-Options', 'nosniff'); res.set('Content-Type', row.imageMime); res.send(Buffer.from(row.image));
 }));
 router.patch('/artifacts/:id', action(async (req, res) => {
-  validateKeys(req.body, ['headline', 'subheading', 'body', 'cta', 'caption']);
+  validateKeys(req.body, ['headline', 'subheading', 'body', 'cta', 'caption', 'offer']);
   const artifact = await ownedArtifact(prisma, req, req.params.id);
   if (artifact.status !== 'complete') throw advisorError(409, 'Wait for this visual to finish.', 'ARTIFACT_BUSY');
   const copy = { ...artifact.data.copy };
-  for (const [key, max] of Object.entries({ headline: 100, subheading: 180, body: 320, cta: 70, caption: 2400 })) {
+  for (const [key, max] of Object.entries({ headline: 100, subheading: 180, body: 320, cta: 70, caption: 2400, offer: 70 })) {
     if (req.body[key] !== undefined) {
       if (typeof req.body[key] !== 'string' || req.body[key].length > max || (key === 'headline' && !req.body[key].trim())) throw advisorError(400, `Invalid ${key}. Maximum ${max} characters.`, 'INVALID_ARTIFACT');
       copy[key] = req.body[key].trim();

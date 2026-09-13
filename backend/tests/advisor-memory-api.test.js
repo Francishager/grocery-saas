@@ -235,8 +235,10 @@ test('failed visual generation releases its lease; concurrent retries cannot cre
 test('visual wording is editable but financial figures and ownership are not; chat deletion removes its visuals', async () => {
   const chat = await createChat();
   const artifact = await createArtifact(db, req, chat.id, artifactInput(), undefined, { build: async () => structuredClone(artifactResult) });
-  assert.equal((await call('patch', '/artifacts/:id', { params: { id: artifact.id }, body: { headline: 'New headline', caption: 'Natural wording' } })).status, 200);
+  assert.equal((await call('patch', '/artifacts/:id', { params: { id: artifact.id }, body: { headline: 'New headline', caption: 'Natural wording', offer: 'Save 10%' } })).status, 200);
   assert.equal(rows.advisorArtifact[0].data.copy.headline, 'New headline');
+  assert.equal(rows.advisorArtifact[0].data.copy.offer, 'Save 10%');
+  assert.equal((await call('patch', '/artifacts/:id', { params: { id: artifact.id }, body: { offer: 'x'.repeat(71) } })).status, 400);
   for (const body of [{ report: { metrics: [] } }, { tenantId: 'other' }, { headline: '' }, { caption: 'x'.repeat(2401) }]) assert.equal((await call('patch', '/artifacts/:id', { params: { id: artifact.id }, body })).status, 400);
   await call('delete', '/conversations/:id', { params: { id: chat.id } });
   assert.equal(rows.advisorArtifact.length, 0);
