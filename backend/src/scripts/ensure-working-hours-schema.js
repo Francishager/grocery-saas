@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { readFile } from 'node:fs/promises';
 
 // Additive and idempotent: existing businesses inherit unrestricted access (NULL).
 try {
@@ -17,7 +18,12 @@ try {
       await tx.$executeRaw`ALTER TABLE "user_permissions" ADD COLUMN IF NOT EXISTS "canUseBusinessAI" BOOLEAN NOT NULL DEFAULT false`;
     }, { timeout: 30000 });
   }
-  console.log('Business access schema ready.');
+  const advisorSql = await readFile(new URL('../../prisma/migrations/20260913120000_advisor_memory/migration.sql', import.meta.url), 'utf8');
+  await prisma.$transaction(async tx => {
+    await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '15s'");
+    for (const statement of advisorSql.split(';').map(value => value.trim()).filter(Boolean)) await tx.$executeRawUnsafe(statement);
+  }, { timeout: 30000 });
+  console.log('Business access and advisor memory schema ready.');
 } catch (error) {
   console.error('Unable to prepare business access schema. Apply pending access migrations before starting the backend.', error.code || '');
   process.exitCode = 1;

@@ -75,8 +75,8 @@ export async function logTenantActivity(opts) {
  */
 export function auditMiddleware() {
   return async (req, res, next) => {
-    // AI chat is read-only; never copy private prompts or generated replies into audit history.
-    if (req.originalUrl.split('?')[0] === '/api/ai/chat') return next();
+    // Chat content has its own private store; do not duplicate it in shared audit logs.
+    if (req.originalUrl.split('?')[0].startsWith('/api/ai/')) return next();
     // Only audit mutating methods
     if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
 

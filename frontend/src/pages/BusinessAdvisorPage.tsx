@@ -1,162 +1,251 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { MessageSquare, Send, Plus, Square, RotateCcw, TrendingUp, Megaphone, Package, Users } from 'lucide-react'
+import { MessageSquare, Send, Plus, Square, RotateCcw, Folder, FolderPlus, BriefcaseBusiness, Search, PanelLeft, Pencil, Trash2, Lock, Globe, Brain } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import AdvisorMarkdown from '@/components/AdvisorMarkdown'
 
-type Snapshot = {
-  business: { name: string; currency: string; timezone: string }
-  period: { days: number; from: string; to: string }
-  scope: { branch: string; sales: string }
-  asOf: string
-  sources: string[]
-  limitations: string[]
+type Collection = { id: string; name: string; kind: 'project' | 'folder'; parentId: string | null; instructions: string }
+type Chat = { id: string; title: string; collectionId: string | null; updatedAt: string; locked?: boolean }
+type Snapshot = { business: { name: string }; period: { from: string; to: string }; scope: { branch: string }; sources: string[]; limitations: string[];
+  research?: { status: string; kind?: string; notice?: string; sources: { title: string; url: string }[] }; memory?: { previousConversations: number } }
+type Turn = { id: string; requestId: string; sequence: number; input: string; output?: string; status: string; context?: Snapshot; truncated?: boolean }
+type Editor = { type: 'project' | 'folder' | 'chat'; id?: string; name: string; instructions: string; parentId: string }
+const suggestions = ['Create a practical growth plan for this business.', 'Which customers need repayment follow-up?', 'How can we improve staff productivity and retention?', 'What should we promote or restock?']
+const date = (value: string) => new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
+const inputClass = 'w-full min-w-0 rounded-md border bg-background px-3 py-2 text-sm'
+async function request(path: string, options: RequestInit = {}) {
+  const response = await apiFetch(`/api/ai${path}`, options)
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || data.message || 'Unable to load AI Advisor.')
+  return data
 }
-type Message = { role: 'user' | 'assistant'; content: string; context?: Snapshot; truncated?: boolean }
-const suggestions = [
-  { icon: TrendingUp, text: 'How can I increase sales this week?' },
-  { icon: Megaphone, text: 'Create a practical 7-day marketing plan for my business.' },
-  { icon: Package, text: 'Which products should I promote, and which need restocking?' },
-  { icon: Users, text: 'How can I bring back customers and encourage repeat purchases?' },
-]
-const displayDate = (value: string) => new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
 
 export default function BusinessAdvisorPage() {
   const { user, hasPermission } = useJWTAuth()
   const online = useOnlineStatus()
   const allowed = hasPermission('canUseBusinessAI')
-  const [messages, setMessages] = useState<Message[]>([])
+  const [params, setParams] = useSearchParams()
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [chats, setChats] = useState<Chat[]>([])
+  const [current, setCurrent] = useState<Chat | null>(null)
+  const [turns, setTurns] = useState<Turn[]>([])
+  const [filter, setFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [older, setOlder] = useState(false)
+  const [sidebar, setSidebar] = useState(false)
+  const [configured, setConfigured] = useState<boolean | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [pending, setPending] = useState(false)
   const [draft, setDraft] = useState('')
   const [days, setDays] = useState(30)
-  const [pending, setPending] = useState(false)
-  const [configured, setConfigured] = useState<boolean | null>(null)
+  const [research, setResearch] = useState(true)
+  const [remember, setRemember] = useState(true)
   const [error, setError] = useState('')
-  const [businessName, setBusinessName] = useState('Your business')
+  const [editor, setEditor] = useState<Editor | null>(null)
+  const [deleting, setDeleting] = useState<{ type: 'chat' | 'collection'; id: string; name: string } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [dialogError, setDialogError] = useState('')
   const requestRef = useRef<AbortController | null>(null)
+  const readRef = useRef<AbortController | null>(null)
+  const listVersion = useRef(0)
+  const generation = useRef(0)
   const logRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const identity = `${user?.tenantId || ''}:${user?.id || ''}:${(user?.permissions || []).join(',')}`
 
-  useEffect(() => {
-    requestRef.current?.abort()
-    requestRef.current = null
-    setMessages([]); setDraft(''); setPending(false); setError(''); setConfigured(null)
-  }, [identity, allowed])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    setConfigured(null)
-    if (!allowed || !online) return () => controller.abort()
-    apiFetch('/api/ai/status', { signal: controller.signal }).then(async response => {
-      const data = await response.json()
+  async function loadLibrary(nextPage = 1, append = false) {
+    const version = ++listVersion.current
+    const query = new URLSearchParams({ page: String(nextPage), ...(filter ? { collectionId: filter } : {}), ...(search.trim() ? { search: search.trim() } : {}) })
+    try {
+      const data = await request(`/conversations?${query}`)
+      if (version !== listVersion.current) return
+      setChats(previous => append ? [...previous, ...data.conversations.filter((chat: Chat) => !previous.some(row => row.id === chat.id))] : data.conversations)
+      setHasMore(data.hasMore); setPage(nextPage)
+    } catch (error: any) { if (version === listVersion.current) setError(error.message) }
+  }
+  async function loadCollections() {
+    const version = generation.current
+    const data = await request('/collections')
+    if (version === generation.current) setCollections(data.collections)
+  }
+  async function openChat(id: string, before?: number) {
+    if (pending) return
+    readRef.current?.abort()
+    const controller = new AbortController(); readRef.current = controller
+    setLoading(true); setError('')
+    if (!before) { setTurns([]); setCurrent(null); setOlder(false); setDraft(''); setSidebar(false) }
+    try {
+      const data = await request(`/conversations/${encodeURIComponent(id)}${before ? `?before=${before}` : ''}`, { signal: controller.signal })
       if (controller.signal.aborted) return
-      if (!response.ok) throw new Error(data.error || data.message || 'AI Advisor is unavailable.')
-      setConfigured(data.configured === true)
-    }).catch(error => { if (!controller.signal.aborted) { setConfigured(false); setError(error.message || 'AI Advisor is unavailable.') } })
-    apiFetch('/api/settings/business-profile', { signal: controller.signal }).then(async response => {
-      if (response.ok) { const data = await response.json(); if (!controller.signal.aborted) setBusinessName(data.name || data.businessName || 'Your business') }
-    }).catch(() => {})
-    return () => { controller.abort(); requestRef.current?.abort() }
-  }, [identity, allowed, online])
-
+      setCurrent(data.conversation); setTurns(previous => before ? [...data.turns, ...previous] : data.turns); setOlder(data.hasMore)
+      setParams({ chat: id }, { replace: true })
+    } catch (error: any) { if (!controller.signal.aborted) setError(error.message) }
+    finally { if (!controller.signal.aborted) setLoading(false) }
+  }
   useEffect(() => {
-    const log = logRef.current
-    if (log) log.scrollTop = log.scrollHeight
-  }, [messages, pending, error])
+    generation.current++; listVersion.current++
+    requestRef.current?.abort(); readRef.current?.abort(); requestRef.current = null
+    setTurns([]); setCurrent(null); setCollections([]); setChats([]); setDraft(''); setError(''); setPending(false); setLoading(false); setConfigured(null); setEditor(null); setDeleting(null)
+    if (!allowed || !online) return
+    const controller = new AbortController()
+    request('/status', { signal: controller.signal }).then(data => { if (!controller.signal.aborted) setConfigured(data.configured) }).catch(error => { if (!controller.signal.aborted) setError(error.message) })
+    void loadCollections().catch(error => { if (!controller.signal.aborted) setError(error.message) })
+    const saved = params.get('chat')
+    if (saved) void openChat(saved)
+    return () => { generation.current++; listVersion.current++; controller.abort(); requestRef.current?.abort(); readRef.current?.abort() }
+  }, [identity, allowed, online])
+  useEffect(() => {
+    listVersion.current++
+    if (!allowed || !online) return
+    const timer = window.setTimeout(() => void loadLibrary(), 200)
+    return () => { window.clearTimeout(timer); listVersion.current++ }
+  }, [identity, allowed, online, filter, search])
+  useEffect(() => { if (logRef.current && !loading) logRef.current.scrollTop = logRef.current.scrollHeight }, [pending, current?.id])
 
   function newChat() {
-    requestRef.current?.abort(); requestRef.current = null
-    setPending(false); setMessages([]); setError(''); setDraft('')
-    inputRef.current?.focus()
+    if (pending) return
+    readRef.current?.abort(); setCurrent(null); setTurns([]); setDraft(''); setError(''); setOlder(false); setLoading(false); setSidebar(false); setParams({}, { replace: true })
   }
-
-  async function send(content = draft, retry = false) {
-    const text = content.trim()
-    if (requestRef.current || !allowed || !online || !configured || (!retry && (!text || text.length > 2000))) return
-    const previous = messages.at(-1)?.role === 'user' ? messages.slice(0, -1) : messages
-    const next: Message[] = retry ? messages : [...previous, { role: 'user', content: text }]
-    if (!next.length || next.at(-1)?.role !== 'user') return
-    let history = next.map(({ role, content }) => ({ role, content })).slice(-15)
-    while (history.reduce((sum, message) => sum + message.content.length, 0) > 24000) history = history.slice(2)
-    const controller = new AbortController()
-    requestRef.current = controller
-    setPending(true); setError(''); setMessages(next); setDraft('')
-    const timer = window.setTimeout(() => controller.abort(), 65000)
+  async function send(content = draft, retry?: Turn) {
+    const message = (retry?.input || content).trim()
+    if (requestRef.current || !allowed || !online || !configured || loading || !message || message.length > 6000) return
+    const controller = new AbortController(); requestRef.current = controller
+    const requestId = retry?.requestId || crypto.randomUUID()
+    setPending(true); setError(''); setDraft(''); setSidebar(false)
+    const timer = window.setTimeout(() => controller.abort(), 130000)
+    let localTurn: Turn | undefined
     try {
-      const response = await apiFetch('/api/ai/chat', { method: 'POST', signal: controller.signal, body: JSON.stringify({ messages: history, days }) })
-      const data = await response.json()
+      let chat = current
+      if (!chat) {
+        const data = await request('/conversations', { method: 'POST', signal: controller.signal, body: JSON.stringify({ title: message.slice(0, 100), collectionId: filter || null }) })
+        if (requestRef.current !== controller) return
+        chat = data.conversation as Chat; setCurrent(chat); setParams({ chat: chat.id }, { replace: true })
+      }
+      localTurn = retry || { id: requestId, requestId, sequence: (turns.at(-1)?.sequence || 0) + 1, input: message, status: 'pending' }
+      setTurns(previous => retry ? previous.map(row => row.requestId === requestId ? { ...row, status: 'pending' } : row) : [...previous, localTurn!])
+      const data = await request('/chat', { method: 'POST', signal: controller.signal, body: JSON.stringify({ conversationId: chat.id, requestId, message, days, research, remember }) })
       if (requestRef.current !== controller) return
-      if (!response.ok) throw new Error(data.error || data.message || 'The advisor could not respond. Please try again.')
-      if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('The advisor returned an empty reply. Please try again.')
-      setMessages([...next, { role: 'assistant', content: data.reply, context: data.context, truncated: data.truncated }])
-      setBusinessName(data.context?.business?.name || businessName)
+      setTurns(previous => previous.map(row => row.requestId === requestId ? data.turn : row))
+      void loadLibrary()
     } catch (error: any) {
       if (requestRef.current !== controller) return
-      setError(controller.signal.aborted ? 'Reply stopped or timed out. You can retry your last message.' : error?.message || 'Unable to connect. Please try again.')
+      setError(controller.signal.aborted ? 'Reply stopped or timed out. Retry to continue the saved conversation.' : error.message)
+      if (localTurn) setTurns(previous => previous.map(row => row.requestId === requestId ? { ...row, status: 'failed' } : row))
+      else setDraft(message)
     } finally {
       window.clearTimeout(timer)
       if (requestRef.current === controller) { requestRef.current = null; setPending(false) }
     }
   }
-
-  function submit(event: FormEvent) { event.preventDefault(); void send() }
-  const canSend = allowed && online && configured === true && !pending
+  async function saveEditor(event: FormEvent) {
+    event.preventDefault()
+    if (!editor || saving) return
+    setSaving(true); setDialogError('')
+    try {
+      if (editor.type === 'chat') {
+        await request(`/conversations/${editor.id}`, { method: 'PATCH', body: JSON.stringify({ title: editor.name, collectionId: editor.parentId || null }) })
+        setCurrent(previous => previous?.id === editor.id ? { ...previous, title: editor.name, collectionId: editor.parentId || null } : previous)
+      } else {
+        await request(`/collections${editor.id ? `/${editor.id}` : ''}`, { method: editor.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: editor.name, instructions: editor.instructions, parentId: editor.parentId || null, ...(!editor.id ? { kind: editor.type } : {}) }) })
+        await loadCollections()
+      }
+      setEditor(null); void loadLibrary()
+    } catch (error: any) { setDialogError(error.message) }
+    finally { setSaving(false) }
+  }
+  async function remove() {
+    if (!deleting || saving) return
+    setSaving(true); setDialogError('')
+    try {
+      await request(`/${deleting.type === 'chat' ? 'conversations' : 'collections'}/${deleting.id}`, { method: 'DELETE' })
+      if (deleting.type === 'chat' && current?.id === deleting.id) newChat()
+      if (deleting.type === 'collection') { setFilter(''); await loadCollections(); if (current?.collectionId === deleting.id) setCurrent({ ...current, collectionId: null }) }
+      setDeleting(null); void loadLibrary()
+    } catch (error: any) { setDialogError(error.message) }
+    finally { setSaving(false) }
+  }
+  const canSend = allowed && online && configured === true && !pending && !loading
+  const selectedCollection = collections.find(row => row.id === filter)
+  const editCollection = (row: Collection) => { setDialogError(''); setEditor({ type: row.kind, id: row.id, name: row.name, instructions: row.instructions, parentId: row.parentId || '' }) }
+  const collectionButton = (row: Collection, child = false) => <div key={row.id} className={`flex min-w-0 items-center ${child ? 'pl-4' : ''}`}>
+    <button type="button" disabled={pending} onClick={() => setFilter(row.id)} className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${filter === row.id ? 'bg-muted font-semibold' : 'hover:bg-muted/50'}`}>
+      {row.kind === 'folder' ? <Folder className="h-4 w-4 shrink-0 text-amber-600" /> : <BriefcaseBusiness className="h-4 w-4 shrink-0 text-emerald-700" />}<span className="break-words [overflow-wrap:anywhere]">{row.name}</span>
+    </button>
+    <Button size="icon" variant="ghost" disabled={pending || !online} className="h-8 w-8 shrink-0" title={`Edit ${row.name}`} aria-label={`Edit ${row.name}`} onClick={() => editCollection(row)}><Pencil className="h-3 w-3" /></Button>
+  </div>
   if (!allowed) return <div className="p-6" role="alert">You do not have permission to use AI Advisor. Contact your business owner.</div>
 
-  return <section className="mx-auto flex h-[calc(100dvh-7rem)] min-h-[30rem] w-full max-w-6xl flex-col gap-4 p-4 md:p-6" aria-label="AI business advisor">
-    <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
-      <div className="min-w-0">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold"><MessageSquare className="h-6 w-6 shrink-0 text-primary" />AI Advisor</h1>
-        <p className="mt-1 break-words text-sm font-medium">{businessName}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="text-sm">Period <select aria-label="Business data period" value={days} disabled={pending} onChange={event => setDays(Number(event.target.value))} className="ml-2 h-9 rounded-md border bg-background px-2">
-          {[7, 30, 90].map(value => <option key={value} value={value}>Last {value} days</option>)}
-        </select></label>
-        <Button variant="outline" size="sm" onClick={newChat}><Plus className="mr-1 h-4 w-4" />New chat</Button>
-      </div>
+  return <section className="mx-auto flex h-[calc(100dvh-7rem)] min-h-[28rem] w-full max-w-[1600px] flex-col p-3 md:min-h-[34rem] md:p-5" aria-label="AI business advisor">
+    <header className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+      <div className="flex min-w-0 items-center gap-2"><Button size="icon" variant="ghost" className="md:hidden" aria-label="Show conversations" aria-expanded={sidebar} onClick={() => setSidebar(!sidebar)}><PanelLeft className="h-5 w-5" /></Button>
+        <MessageSquare className="h-5 w-5 shrink-0 text-primary" /><h1 className="text-xl font-semibold">AI Advisor</h1></div>
+      <div className="flex items-center gap-2"><label className="text-xs">Period <select aria-label="Business data period" value={days} disabled={pending} onChange={event => setDays(Number(event.target.value))} className="h-9 rounded-md border bg-background px-2">{[7, 30, 90].map(value => <option key={value} value={value}>{value} days</option>)}</select></label>
+        <Button variant="outline" size="sm" disabled={pending} onClick={newChat}><Plus className="mr-1 h-4 w-4" />New chat</Button></div>
     </header>
-    {!online && <p role="alert" className="text-sm text-amber-700">AI Advisor needs an internet connection.</p>}
-    {online && configured === false && !error && <p role="alert" className="text-sm text-amber-700">AI Advisor is not configured yet. Contact JibuSales Admin.</p>}
-    <div ref={logRef} role="log" aria-label="Advisor conversation" aria-live="polite" aria-busy={pending} className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
-      {!messages.length && <div className="py-4">
-        <img src="/img/jibusales_logo.png" alt="JibuSales" className="mb-4 h-8 w-auto max-w-full object-contain" />
-        <h2 className="text-lg font-medium">What would you like to improve?</h2>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {suggestions.map(({ icon: Icon, text }) => <button key={text} type="button" disabled={!canSend} onClick={() => void send(text)} className="flex min-w-0 items-start gap-3 rounded-md border px-3 py-3 text-left text-sm hover:bg-muted disabled:opacity-50">
-            <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span className="break-words">{text}</span>
-          </button>)}
+    {!online && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor needs an internet connection.</p>}
+    {configured === false && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor is not configured yet. Contact JibuSales Admin.</p>}
+    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <aside aria-label="Saved conversations" className={`${sidebar ? 'flex' : 'hidden'} max-h-[30dvh] shrink-0 flex-col gap-3 overflow-y-auto border-b py-3 md:flex md:max-h-none md:w-64 md:border-b-0 md:border-r md:pr-3 xl:w-72`}>
+        <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Projects & folders</h2><div className="flex gap-1">
+          <Button variant="ghost" size="icon" title="New folder" aria-label="New folder" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'folder', name: '', instructions: '', parentId: '' }) }}><FolderPlus className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" title="New project" aria-label="New project" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'project', name: '', instructions: '', parentId: selectedCollection?.kind === 'folder' ? filter : '' }) }}><Plus className="h-4 w-4" /></Button></div></div>
+        <nav aria-label="Chat organization" className="space-y-1"><button type="button" disabled={pending} onClick={() => setFilter('')} className={`w-full rounded-md px-2 py-2 text-left text-sm ${!filter ? 'bg-muted font-semibold' : ''}`}>All chats</button>
+          {collections.filter(row => !row.parentId).map(row => <div key={row.id}>{collectionButton(row)}{collections.filter(child => child.parentId === row.id).map(child => collectionButton(child, true))}</div>)}</nav>
+        <div className="relative"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" /><input aria-label="Search conversations" placeholder="Search conversations" value={search} maxLength={100} onChange={event => setSearch(event.target.value)} className={`${inputClass} pl-8`} /></div>
+        <div className="space-y-1">{chats.map(chat => <button key={chat.id} type="button" disabled={pending} onClick={() => void openChat(chat.id)} className={`flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted ${current?.id === chat.id ? 'bg-muted' : ''}`}>
+          {chat.locked ? <Lock className="mt-1 h-3 w-3 shrink-0" /> : <MessageSquare className="mt-1 h-3 w-3 shrink-0" />}<span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{chat.title}<span className="mt-1 block text-xs text-muted-foreground">{date(chat.updatedAt)}</span></span></button>)}
+          {!chats.length && <p className="px-2 text-xs text-muted-foreground">No conversations</p>}
+          {hasMore && <Button variant="ghost" size="sm" onClick={() => void loadLibrary(page + 1, true)}>More conversations</Button>}</div>
+      </aside>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 pt-3 md:pl-5">
+        <div className="flex min-w-0 items-start justify-between gap-2"><h2 className="min-w-0 break-words text-base font-semibold [overflow-wrap:anywhere]">{current?.title || selectedCollection?.name || 'New conversation'}</h2>
+          {current && <div className="flex shrink-0"><Button size="icon" variant="ghost" title="Edit conversation" aria-label="Edit conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setEditor({ type: 'chat', id: current.id, name: current.title, instructions: '', parentId: current.collectionId || '' }) }}><Pencil className="h-4 w-4" /></Button>
+            <Button size="icon" variant="ghost" title="Delete conversation" aria-label="Delete conversation" disabled={pending || !online} onClick={() => { setDialogError(''); setDeleting({ type: 'chat', id: current.id, name: current.title }) }}><Trash2 className="h-4 w-4" /></Button></div>}</div>
+        <div ref={logRef} role="log" aria-label="Advisor conversation" aria-live="polite" aria-busy={pending || loading} className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
+          {older && <Button size="sm" variant="outline" disabled={loading || pending} onClick={() => current && void openChat(current.id, turns[0]?.sequence)}>Earlier messages</Button>}
+          {loading && <p role="status" className="text-sm text-muted-foreground">Loading conversation...</p>}
+          {!turns.length && !loading && <div className="py-4"><img src="/img/jibusales_logo.png" alt="JibuSales" className="mb-4 h-8 w-auto max-w-full object-contain" /><h3 className="text-lg font-medium">What would you like to improve?</h3>
+            <div className="mt-4 grid gap-2 lg:grid-cols-2">{suggestions.map(suggestion => <button type="button" key={suggestion} disabled={!canSend} onClick={() => void send(suggestion)} className="rounded-md border p-3 text-left text-sm hover:bg-muted disabled:opacity-50">{suggestion}</button>)}</div></div>}
+          {turns.map(turn => <div key={turn.id} className="space-y-4">
+            <article aria-label="Your message" className="ml-auto w-fit max-w-[95%] rounded-md bg-muted px-4 py-3 sm:max-w-[85%]"><p className="mb-1 text-xs font-semibold">You</p><div className="whitespace-pre-wrap break-words text-sm leading-6 [overflow-wrap:anywhere]">{turn.input}</div></article>
+            {turn.output && <article aria-label="Advisor reply" className="min-w-0 border-b pb-5"><p className="mb-2 text-xs font-semibold text-muted-foreground">JibuSales AI</p><AdvisorMarkdown>{turn.output}</AdvisorMarkdown>
+              {turn.truncated && <p className="mt-2 text-xs text-muted-foreground">Ask the advisor to continue for more detail.</p>}
+              {!!turn.context?.research?.sources?.length && <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="Research sources">{turn.context.research.sources.map(source => /^https:\/\//i.test(source.url) && <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="break-words text-primary underline">{source.title}</a>)}</div>}
+              {turn.context?.research?.status === 'unavailable' && <p className="mt-2 text-xs text-amber-700">External research unavailable for this reply.</p>}
+              {turn.context && <details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer font-medium">Sources & memory</summary><div className="mt-2 space-y-1 break-words">
+                <p>{turn.context.business?.name} | {date(turn.context.period.from)} to {date(turn.context.period.to)} | {turn.context.scope?.branch}</p><p>{turn.context.sources?.join(', ')}</p>
+                {turn.context.memory && <p>{turn.context.memory.previousConversations} previous conversations consulted</p>}{turn.context.limitations?.map((line, index) => <p key={index}>{line}</p>)}</div></details>}
+            </article>}
+            {turn.status !== 'complete' && !pending && <Button variant="outline" size="sm" disabled={!canSend} onClick={() => void send('', turn)}><RotateCcw className="mr-2 h-4 w-4" />Retry message</Button>}
+          </div>)}
+          {pending && <p role="status" className="text-sm text-muted-foreground">Preparing your reply...</p>}
+          {error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}
         </div>
-      </div>}
-      {messages.map((message, index) => <article key={index} aria-label={message.role === 'user' ? 'Your message' : 'Advisor reply'} className={message.role === 'user' ? 'ml-auto w-fit max-w-[92%] rounded-md bg-muted px-4 py-3 sm:max-w-[85%]' : 'max-w-full border-b pb-5'}>
-        <p className="mb-2 text-xs font-semibold text-muted-foreground">{message.role === 'user' ? 'You' : 'JibuSales AI'}</p>
-        <div className="whitespace-pre-wrap break-words text-sm leading-6 [overflow-wrap:anywhere]">{message.content}</div>
-        {message.truncated && <p className="mt-2 text-xs text-muted-foreground">Reply reached its length limit.</p>}
-        {message.context && <details className="mt-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer py-1 font-medium">Business data used</summary>
-          <div className="mt-2 space-y-1 break-words">
-            <p>{message.context.business.name} | {displayDate(message.context.period.from)} to {displayDate(message.context.period.to)}</p>
-            <p>{message.context.scope.branch} | {message.context.scope.sales}</p>
-            <p>{message.context.sources.join(', ') || 'Business profile only'}</p>
-            {message.context.limitations.map((limitation, i) => <p key={i}>{limitation}</p>)}
-          </div>
-        </details>}
-      </article>)}
-      {pending && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" />Reviewing your business data...</p>}
-      {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p className="break-words">{error}</p>
-        {messages.at(-1)?.role === 'user' && <Button variant="outline" size="sm" disabled={!canSend} onClick={() => void send('', true)}><RotateCcw className="mr-2 h-4 w-4" />Retry last message</Button>}
-      </div>}
+        <form onSubmit={event => { event.preventDefault(); void send() }} className="shrink-0 border-t pt-3">
+          <div className="mb-2 flex flex-wrap gap-4 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={research} disabled={pending} onChange={event => setResearch(event.target.checked)} /><Globe className="h-3.5 w-3.5" />External research</label>
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={remember} disabled={pending} onChange={event => setRemember(event.target.checked)} /><Brain className="h-3.5 w-3.5" />Recall other chats</label></div>
+          <div className="flex items-end gap-2"><textarea aria-label="Message AI Advisor" placeholder="Ask about your business..." value={draft} onChange={event => setDraft(event.target.value)} maxLength={6000} rows={3} disabled={!canSend}
+            onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} className={`${inputClass} resize-none leading-5`} />
+            {pending ? <Button type="button" size="icon" variant="outline" aria-label="Stop reply" title="Stop reply" onClick={() => requestRef.current?.abort()}><Square className="h-4 w-4" /></Button> : <Button type="submit" size="icon" disabled={!canSend || !draft.trim()} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button>}</div>
+          <p className="mt-2 text-xs text-muted-foreground">AI advice may be inaccurate. Verify important decisions. Chats are private to your account.</p>
+        </form>
+      </main>
     </div>
-    <form onSubmit={submit} className="shrink-0 border-t pt-3">
-      <div className="flex items-end gap-2">
-        <textarea ref={inputRef} aria-label="Message AI Advisor" placeholder="Ask about your sales, marketing or stock..." value={draft} onChange={event => setDraft(event.target.value)} maxLength={2000} rows={3}
-          disabled={!online || configured !== true || pending} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }}
-          className="min-w-0 flex-1 resize-none rounded-md border bg-background p-3 text-sm leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
-        {pending ? <Button type="button" variant="outline" size="icon" aria-label="Stop reply" title="Stop reply" onClick={() => requestRef.current?.abort()}><Square className="h-4 w-4" /></Button>
-          : <Button type="submit" size="icon" disabled={!canSend || !draft.trim()} aria-label="Send message" title="Send message"><Send className="h-4 w-4" /></Button>}
-      </div>
-      <div className="mt-2 flex items-start justify-between gap-3 text-xs text-muted-foreground"><p>AI advice may be inaccurate. Business data follows your access permissions.</p><span className="shrink-0 tabular-nums">{draft.length}/2000</span></div>
-    </form>
+    <Dialog open={!!editor} onOpenChange={open => { if (!open && !saving) setEditor(null) }}><DialogContent className="rounded-lg sm:max-w-lg"><DialogHeader><DialogTitle>{editor?.id ? 'Edit' : 'New'} {editor?.type === 'chat' ? 'conversation' : editor?.type}</DialogTitle><DialogDescription>{editor?.type === 'chat' ? 'Conversation details' : 'Project and folder details'}</DialogDescription></DialogHeader>
+      {editor && <form onSubmit={saveEditor} className="space-y-4"><label className="block text-sm">Name<input autoFocus required maxLength={100} value={editor.name} onChange={event => setEditor({ ...editor, name: event.target.value })} className={`${inputClass} mt-1`} /></label>
+        {editor.type !== 'folder' && <label className="block text-sm">{editor.type === 'project' ? 'Folder' : 'Project or folder'}<select aria-label="Project or folder" value={editor.parentId} onChange={event => setEditor({ ...editor, parentId: event.target.value })} className={`${inputClass} mt-1`}><option value="">None</option>{collections.filter(row => editor.type === 'chat' || row.kind === 'folder').map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>}
+        {editor.type === 'project' && <label className="block text-sm">Project goals & instructions<textarea rows={4} maxLength={4000} value={editor.instructions} onChange={event => setEditor({ ...editor, instructions: event.target.value })} className={`${inputClass} mt-1`} /></label>}
+        {dialogError && <p role="alert" className="text-sm text-destructive">{dialogError}</p>}
+        <div className="flex flex-wrap justify-between gap-2">{editor.id && editor.type !== 'chat' ? <Button type="button" variant="outline" disabled={saving} onClick={() => { setDeleting({ type: 'collection', id: editor.id!, name: editor.name }); setEditor(null) }}><Trash2 className="mr-2 h-4 w-4" />Delete</Button> : <span />}
+          <Button type="submit" disabled={saving || !editor.name.trim()}>{saving ? 'Saving...' : 'Save'}</Button></div></form>}
+    </DialogContent></Dialog>
+    <Dialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(null) }}><DialogContent className="rounded-lg"><DialogHeader><DialogTitle>Delete {deleting?.type === 'chat' ? 'conversation' : 'project or folder'}?</DialogTitle><DialogDescription>{deleting?.type === 'chat' ? 'This permanently deletes the conversation and its saved memory.' : 'Chats are kept under All chats. Projects inside this folder are kept.'}</DialogDescription></DialogHeader>
+      <p className="break-words text-sm">{deleting?.name}</p>{dialogError && <p role="alert" className="text-sm text-destructive">{dialogError}</p>}<div className="flex justify-end gap-2"><Button variant="outline" disabled={saving} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="destructive" disabled={saving} onClick={() => void remove()}>Delete</Button></div>
+    </DialogContent></Dialog>
   </section>
 }

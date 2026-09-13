@@ -300,6 +300,9 @@ model Tenant {
   creditNotes       CreditNote[]
   debitNotes        DebitNote[]
 
+  advisorCollections AdvisorCollection[]
+  advisorConversations AdvisorConversation[]
+
   @@map("tenants")
 }
 
@@ -449,7 +452,68 @@ model User {
   stickyNotes       StickyNote[]
   calculatorHistory CalculatorHistory[]
 
+  advisorCollections AdvisorCollection[]
+  advisorConversations AdvisorConversation[]
+
   @@map("users")
+}
+
+model AdvisorCollection {
+  id String @id @default(cuid())
+  tenantId String
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name String
+  kind String @default("project")
+  instructions String @default("")
+  parentId String?
+  parent AdvisorCollection? @relation("AdvisorFolders", fields: [parentId], references: [id], onDelete: SetNull)
+  children AdvisorCollection[] @relation("AdvisorFolders")
+  conversations AdvisorConversation[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([tenantId, userId])
+  @@map("advisor_collections")
+}
+
+model AdvisorConversation {
+  id String @id @default(cuid())
+  tenantId String
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collectionId String?
+  collection AdvisorCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  title String @default("New chat")
+  scopeKey String
+  memory String @default("")
+  memoryThrough Int @default(0)
+  nextSequence Int @default(1)
+  busyUntil DateTime?
+  activeRequestId String?
+  turns AdvisorTurn[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([tenantId, userId, updatedAt])
+  @@map("advisor_conversations")
+}
+
+model AdvisorTurn {
+  id String @id @default(cuid())
+  conversationId String
+  conversation AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requestId String
+  sequence Int
+  input String
+  output String?
+  status String @default("pending")
+  context Json?
+  truncated Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@unique([conversationId, requestId])
+  @@unique([conversationId, sequence])
+  @@map("advisor_turns")
 }
 
 enum UserRole {

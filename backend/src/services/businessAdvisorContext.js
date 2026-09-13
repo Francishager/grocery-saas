@@ -104,6 +104,6 @@ export async function buildBusinessAdvisorContext(db, req, days = 30, now = new 
     context.sources.push('Current product inventory');
     if (totalProducts > products.length) context.limitations.push(`Stock suggestions use the ${MAX_PRODUCTS} lowest-stock products, not the whole catalogue.`);
   } else context.limitations.push('Current inventory is not included because you do not have permission to view it.');
-  context.limitations.push('Customer identities, contacts, employee data, banking details, expenses, net profit and receivable balances are not provided. Marketing audience, budget and local conditions may need clarification.');
+  context.limitations.push('Expenses and net profit are not included in this sales snapshot. Marketing audience, budget and local conditions may need clarification.');
   return context;
 }

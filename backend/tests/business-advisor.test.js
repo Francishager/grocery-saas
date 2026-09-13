@@ -121,7 +121,7 @@ test('provider request sends only server-generated context and bounded chat with
     assert.equal(body.messages[0].role, 'system');
     assert.match(body.messages[0].content, /Business A/);
     assert.match(body.messages[0].content, /untrusted data/);
-    assert.equal(body.max_tokens, 1200);
+    assert.equal(body.max_tokens, 2400);
     return new Response(JSON.stringify({ choices: [{ message: { content: 'Restock Rice before promoting it.' }, finish_reason: 'stop' }] }), { status: 200 });
   } });
   assert.equal(result.reply, 'Restock Rice before promoting it.');
