@@ -22,6 +22,12 @@ export interface FormSelectSearchProps {
   disabled?: boolean
   className?: string
   clearable?: boolean
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  filterOptions?: boolean
+  isLoading?: boolean
+  emptyText?: string
+  listFooter?: React.ReactNode
 }
 
 export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
@@ -38,6 +44,12 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
   disabled,
   className,
   clearable = true,
+  searchValue,
+  onSearchChange,
+  filterOptions = true,
+  isLoading = false,
+  emptyText = 'No options found',
+  listFooter,
 }) => {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -46,15 +58,17 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
 
   const selectedOption = options.find((opt) => opt.value === value)
 
-  const filteredOptions = options.filter((opt) =>
-    opt.label.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const effectiveSearchQuery = searchValue ?? searchQuery
+  const filteredOptions = filterOptions
+    ? options.filter((opt) => opt.label.toLowerCase().includes(effectiveSearchQuery.toLowerCase()))
+    : options
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false)
         setSearchQuery('')
+        onSearchChange?.('')
       }
     }
 
@@ -72,6 +86,7 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
     onChange?.(optionValue)
     setIsOpen(false)
     setSearchQuery('')
+    onSearchChange?.('')
   }
 
   const handleClear = (e: React.MouseEvent) => {
@@ -130,8 +145,11 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
                 <input
                   ref={inputRef}
                   type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={effectiveSearchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value)
+                    onSearchChange?.(e.target.value)
+                  }}
                   placeholder={searchPlaceholder}
                   className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md text-base focus:outline-none focus:ring-1 focus:ring-primary sm:text-sm"
                   autoComplete="off"
@@ -141,7 +159,7 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
             <ul className="max-h-[min(16rem,50vh)] overflow-auto py-1">
               {filteredOptions.length === 0 ? (
                 <li className="px-3 py-2 text-sm text-gray-500 text-center">
-                  No options found
+                  {isLoading ? 'Loading...' : emptyText}
                 </li>
               ) : (
                 filteredOptions.map((option) => (
@@ -161,6 +179,11 @@ export const FormSelectSearch: React.FC<FormSelectSearchProps> = ({
                 ))
               )}
             </ul>
+            {listFooter && (
+              <div className="border-t border-gray-200 bg-white p-2">
+                {listFooter}
+              </div>
+            )}
           </div>
         )}
       </div>

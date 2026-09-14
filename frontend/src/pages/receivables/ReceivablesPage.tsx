@@ -119,6 +119,16 @@ const createEmptySaleItem = (): SaleDraftItem => ({
   discount: '0',
 })
 
+const CUSTOMER_OPTION_PAGE_SIZE = 100
+
+const mergeCustomerOptions = (existing: Customer[], incoming: Customer[]) => {
+  const byId = new Map<string, Customer>()
+  ;[...existing, ...incoming].forEach((customer) => {
+    if (customer?.id) byId.set(customer.id, customer)
+  })
+  return Array.from(byId.values())
+}
+
 const parseAmount = (value: string | number | undefined) => {
   const amount = Number(value)
   return Number.isFinite(amount) ? amount : 0
@@ -171,6 +181,12 @@ export default function ReceivablesPage() {
   const customerRequestId = React.useRef(0)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [customerOptions, setCustomerOptions] = useState<Customer[]>([])
+  const [customerOptionsLoading, setCustomerOptionsLoading] = useState(false)
+  const [saleCustomerSearch, setSaleCustomerSearch] = useState('')
+  const [selectedSaleCustomerOption, setSelectedSaleCustomerOption] = useState<Customer | null>(null)
+  const [saleCustomerPage, setSaleCustomerPage] = useState(1)
+  const [saleCustomerTotal, setSaleCustomerTotal] = useState(0)
+  const [, setSaleItemSearchByIndex] = useState<Record<number, string>>({})
   const [products, setProducts] = useState<InventoryItem[]>([])
   const [sales, setSales] = useState<any[]>([])
   const [payments, setPayments] = useState<any[]>([])
@@ -273,6 +289,15 @@ export default function ReceivablesPage() {
     if (creditEnabled && activeTab === 'customers') loadCustomers()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creditEnabled, activeTab, searchTerm, statusFilter, customerPage, customerPageSize, online])
+
+  useEffect(() => {
+    if (!showSaleModal) return
+    const timer = window.setTimeout(() => {
+      loadCustomerOptions({ search: saleCustomerSearch, page: 1, append: false })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSaleModal, saleCustomerSearch, online])
 
   const loadCustomers = async (
     showPageLoading = true,
@@ -550,23 +575,44 @@ export default function ReceivablesPage() {
     }
   }
 
-  const loadCustomerOptions = async () => {
+  const loadCustomerOptions = async ({
+    search = saleCustomerSearch,
+    page = 1,
+    append = false,
+  }: { search?: string; page?: number; append?: boolean } = {}) => {
+    const normalizedSearch = search.trim()
     try {
+      setCustomerOptionsLoading(true)
       if (online) {
-        const response = await apiFetch('/api/receivables/customers?status=active&limit=100')
+        const params = new URLSearchParams({
+          status: 'active',
+          page: String(page),
+          limit: String(CUSTOMER_OPTION_PAGE_SIZE),
+          ...(normalizedSearch && { search: normalizedSearch }),
+        })
+        const response = await apiFetch('/api/receivables/customers?' + params)
         if (!response.ok) {
           throw new Error(await readResponseError(response, 'Failed to load customer options'))
         }
         const data = await response.json()
-        setCustomerOptions(data.customers || [])
+        const rows = data.customers || []
+        setCustomerOptions((current) => append ? mergeCustomerOptions(current, rows) : rows)
+        setSaleCustomerPage(Number(data.pagination?.page || page))
+        setSaleCustomerTotal(Number(data.pagination?.total || rows.length))
       } else {
-        const local = await getLocalReceivableCustomers('', 'active')
-        setCustomerOptions(local)
+        const local = await getLocalReceivableCustomers(normalizedSearch, 'active')
+        const rows = local.slice(0, page * CUSTOMER_OPTION_PAGE_SIZE)
+        setCustomerOptions(rows)
+        setSaleCustomerPage(page)
+        setSaleCustomerTotal(local.length)
       }
     } catch (error) {
       try {
-        const local = await getLocalReceivableCustomers('', 'active')
-        setCustomerOptions(local)
+        const local = await getLocalReceivableCustomers(normalizedSearch, 'active')
+        const rows = local.slice(0, page * CUSTOMER_OPTION_PAGE_SIZE)
+        setCustomerOptions(rows)
+        setSaleCustomerPage(page)
+        setSaleCustomerTotal(local.length)
       } catch {
         toast({
           title: 'Error',
@@ -574,6 +620,8 @@ export default function ReceivablesPage() {
           variant: 'destructive'
         })
       }
+    } finally {
+      setCustomerOptionsLoading(false)
     }
   }
 
@@ -650,8 +698,12 @@ export default function ReceivablesPage() {
   }
 
   const openSaleModal = () => {
+    setSaleCustomerSearch('')
+    setSaleCustomerPage(1)
+    setSaleCustomerTotal(0)
+    setSelectedSaleCustomerOption(null)
+    setCustomerOptions([])
     setShowSaleModal(true)
-    loadCustomerOptions()
     if (products.length === 0) loadProducts()
   }
 
@@ -769,6 +821,7 @@ export default function ReceivablesPage() {
         discount: '0',
         notes: '',
       })
+      setSelectedSaleCustomerOption(null)
       setSaleItems([createEmptySaleItem()])
       setSaleCustomerSearch('')
       setSaleItemSearchByIndex({})
@@ -1444,7 +1497,10 @@ export default function ReceivablesPage() {
     tab === 'fuel-cards' ? 'Manage fuel card accounts and transactions' :
     tab === 'credit-accounts' ? 'Manage customer credit account terms' :
     'Manage customer credit and outstanding payments'
-  const saleCustomerList = customerOptions.length ? customerOptions : customers
+  const selectedSaleCustomerFallback = [...(selectedSaleCustomerOption ? [selectedSaleCustomerOption] : []), ...customerOptions, ...customers].find((customer) => customer.id === saleForm.customerId)
+  const saleCustomerList = selectedSaleCustomerFallback && !customerOptions.some((customer) => customer.id === selectedSaleCustomerFallback.id)
+    ? [selectedSaleCustomerFallback, ...customerOptions]
+    : customerOptions
   const saleCustomerOptions = saleCustomerList.map((customer) => ({
     value: customer.id,
     label: [
@@ -1468,6 +1524,8 @@ export default function ReceivablesPage() {
     }
   })
   const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
+  const loadedSaleCustomerCount = saleCustomerOptions.length
+  const saleCustomerHasMore = saleCustomerTotal > loadedSaleCustomerCount
   const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
   const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
   const selectedWithdrawalAccount = cashAccounts.find((account) => String(account.id) === String(selectedCashAccountId))
@@ -1951,10 +2009,31 @@ export default function ReceivablesPage() {
                     required
                     value={saleForm.customerId}
                     options={saleCustomerOptions}
-                    onChange={(value) => setSaleForm((prev) => ({ ...prev, customerId: value ? String(value) : '' }))}
+                    onChange={(value) => {
+                      const customerId = value ? String(value) : ''
+                      setSelectedSaleCustomerOption(saleCustomerList.find((customer) => customer.id === customerId) || null)
+                      setSaleForm((prev) => ({ ...prev, customerId }))
+                    }}
                     placeholder="Select customer"
                     searchPlaceholder="Search customer by name, phone, email, or address..."
-                    helperText={saleCustomerOptions.length === 0 ? 'No customers found' : undefined}
+                    searchValue={saleCustomerSearch}
+                    onSearchChange={setSaleCustomerSearch}
+                    filterOptions={false}
+                    isLoading={customerOptionsLoading}
+                    emptyText={saleCustomerSearch ? 'No matching active customers' : 'No active customers found'}
+                    helperText={saleCustomerTotal > 0 ? loadedSaleCustomerCount + ' of ' + saleCustomerTotal + ' active customers loaded' : undefined}
+                    listFooter={saleCustomerHasMore ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full"
+                        disabled={customerOptionsLoading}
+                        onClick={() => loadCustomerOptions({ search: saleCustomerSearch, page: saleCustomerPage + 1, append: true })}
+                      >
+                        {customerOptionsLoading ? 'Loading customers...' : 'Load more customers (' + loadedSaleCustomerCount + '/' + saleCustomerTotal + ')'}
+                      </Button>
+                    ) : undefined}
                     clearable={false}
                   />
                   {selectedSaleCustomer && (
