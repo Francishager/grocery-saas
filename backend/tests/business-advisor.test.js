@@ -95,7 +95,22 @@ test('missing historical costs are unknown, not zero profit or current replaceme
   const result = summarizeAdvisorSales([{ ...pos, items: [{ ...pos.items[0], cost: null }] }], new Date('2026-09-01'), true);
   assert.equal(result.grossProfit, null);
   assert.equal(result.costDataComplete, false);
+  assert.equal(result.costOfGoodsSold, null);
+  assert.equal(result.grossMarginPercent, null);
   assert.equal(result.salesChangePercent, null);
+});
+
+test('financial analysis uses recorded historical costs and revenue-based margins with permission gates', () => {
+  const start = new Date('2026-09-01');
+  const result = summarizeAdvisorSales([pos], start, true);
+  assert.equal(result.current.netSales, 100000);
+  assert.equal(result.costOfGoodsSold, 60000);
+  assert.equal(result.grossProfit, 40000);
+  assert.equal(result.grossMarginPercent, 40);
+  const restricted = summarizeAdvisorSales([pos], start, false);
+  for (const key of ['costOfGoodsSold', 'grossProfit', 'grossMarginPercent']) assert.equal(restricted[key], undefined);
+  assert.equal(summarizeAdvisorSales([], start, true).grossMarginPercent, null);
+  assert.equal(summarizeAdvisorSales([{ ...pos, items: [] }], start, true).grossProfit, null);
 });
 
 test('request validation rejects forged context, system prompts and malformed or oversized histories', () => {

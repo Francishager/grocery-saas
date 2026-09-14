@@ -35,6 +35,7 @@ test('creative layouts retain copy, logos and uncropped photos with readable exp
         for (const long of [false, true]) {
           const item = structuredClone(artifact); item.data.format = format; item.data.layout = layout;
           if (long) {
+            item.data.externalPhoto = { title: 'Example photo', creator: 'Photographer', sourceUrl: 'https://commons.wikimedia.org/wiki/File:Example.jpg', license: 'CC0 1.0' };
             item.data.brand.name = 'A Business With A Particularly Long Registered Trading Name For Layout Verification';
             item.data.copy.headline = 'Explore everyday essentials for your home and business';
             item.data.copy.subheading = 'Our selection brings everyday essentials together, with room to find what works for your household.';
@@ -64,6 +65,7 @@ test('creative layouts retain copy, logos and uncropped photos with readable exp
           assert.equal(result.width, 1080); assert.equal(result.height, { square: 1080, portrait: 1350, story: 1920 }[format]);
           assert(result.colored > 1000, `${label}: canvas must be nonblank`);
           const actual = result.text.map(row => row.value).join('').replace(/\s/g, '');
+          if (long) assert(actual.includes('Representativephoto'));
           for (const value of [item.data.copy.headline, item.data.copy.offer, item.data.copy.subheading, item.data.copy.body, item.data.copy.cta, item.data.product.name]) assert(actual.includes(value.replace(/\s/g, '')), `${label}: missing ${value}`);
           for (const row of result.text) {
             assert(row.size >= 22, `${label}: unreadable text`);

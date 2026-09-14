@@ -49,7 +49,8 @@ test('advisor saves, organizes, reopens and safely renders chats on desktop, tab
           if (method === 'GET') return json({ artifacts: artifacts.filter(row => row.conversationId === conversationId), hasMore: false });
           const artifact = { id: `visual-${artifacts.length + 1}`, conversationId, title: body.kind === 'report' ? 'Customer balances' : 'Good rice. Great meals.', kind: body.kind, status: 'complete', createdAt: '2026-09-13', imageMime: body.kind === 'report' ? null : 'image/jpeg', data: {
             brand: { name: 'SYNTHETIC FAMILY RICE STORE', currency: 'UGX' }, copy: { headline: 'Good rice. Great meals.', subheading: 'Rice for everyday cooking', body: 'From a quick lunch to a family feast, make something delicious with our pink rice.', cta: 'Visit our store today', caption: 'What is cooking tonight? Pick up rice for your next family meal.', hashtags: ['#Rice', '#FamilyMeals'] },
-            product: body.kind === 'report' ? null : { name: 'Pink rice for everyday cooking', price: 4500, unit: 'kg' }, format: body.format, palette: body.palette, platform: body.platform, brief: body.brief, imageSource: body.kind === 'report' ? null : 'product', warnings: ['Review before sharing. Nothing is published automatically.'],
+            product: body.kind === 'report' ? null : { name: 'Pink rice for everyday cooking', price: 4500, unit: 'kg' }, format: body.format, palette: body.palette, platform: body.platform, brief: body.brief, artwork: body.artwork, imageSource: body.kind === 'report' ? null : 'external', warnings: ['Review before sharing. Nothing is published automatically.'],
+            externalPhoto: body.kind === 'report' ? undefined : { title: 'Rice photo', sourceUrl: 'https://commons.wikimedia.org/wiki/File:Rice.jpg', creator: 'Test photographer', license: 'CC0 1.0' },
             report: body.kind !== 'report' ? null : { title: 'Customer balances', period: { from: '2026-09-01', to: '2026-09-13' }, scope: { branch: 'All permitted branches' }, asOf: '2026-09-13', sources: ['Customer balances and repayments'], limitations: ['A snapshot of 65 synthetic customers. No phone or bank numbers.'], metrics: [{ label: 'Outstanding in snapshot', value: 9876543210.45, format: 'currency' }, { label: 'Customers', value: 65, format: 'number' }], charts: [{ title: 'Outstanding balances', format: 'currency', rows: [{ label: 'Customer with a particularly long business name', value: 9876543210.45 }, { label: 'Customer funds', value: -250000 }] }], tables: [{ title: 'Customer balances and repayments', columns: [{ key: 'name', label: 'Customer' }, { key: 'balance', label: 'Balance', format: 'currency' }, { key: 'repaid', label: 'All-time repayments', format: 'currency' }], rows: Array.from({ length: 65 }, (_, i) => ({ name: `Customer ${i + 1} Family Trading Company With A Long Name`, balance: 9876543210.45 - i, repaid: 450000 + i })) }] },
           } };
           artifacts.push(artifact); return json({ artifact }, 201);
@@ -146,9 +147,12 @@ test('advisor saves, organizes, reopens and safely renders chats on desktop, tab
       await page.getByLabel('Creative brief', { exact: true }).fill('Create a warm and natural rice promotion for families.');
       await page.getByLabel('Product or service', { exact: true }).selectOption('rice');
       await page.getByLabel('Visual size', { exact: true }).selectOption(viewport.width < 768 ? 'square' : 'portrait');
+      await page.getByLabel('Artwork', { exact: true }).selectOption('external');
       await page.getByRole('button', { name: 'Generate', exact: true }).click();
       await page.locator('[role="dialog"] canvas').waitFor();
       assert.equal(artifacts.length, 1);
+      assert.equal(artifacts[0].data.artwork, 'external');
+      assert.equal(await page.getByRole('link', { name: 'Photo source', exact: true }).getAttribute('href'), 'https://commons.wikimedia.org/wiki/File:Rice.jpg');
       assert(await page.locator('[role="dialog"] canvas').evaluate(canvas => {
         const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; const colors = new Set();
         for (let i = 0; i < data.length; i += 400) colors.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);

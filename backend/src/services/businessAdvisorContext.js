@@ -20,6 +20,7 @@ export function summarizeAdvisorSales(rows, currentStart, canSeeProfit) {
     bucket.netSales += net;
     bucket.discounts += Number(sale.discount || 0) + Number(sale.cashDiscount || 0);
     if (!isCurrent) continue;
+    if (canSeeProfit && net !== 0 && !sale.items?.length) missingCosts = true;
     const weightTotal = (sale.items || []).reduce((sum, item) => sum + Math.max(0, Number(item.total || 0)), 0);
     for (const item of sale.items || []) {
       const key = item.productId;
@@ -42,7 +43,12 @@ export function summarizeAdvisorSales(rows, currentStart, canSeeProfit) {
     current, previous,
     salesChangePercent: previous.netSales > 0 ? money((current.netSales - previous.netSales) / previous.netSales * 100) : null,
     topProducts: [...top.values()].sort((a, b) => b.netSales - a.netSales).slice(0, 8).map(item => ({ ...item, quantity: money(item.quantity), netSales: money(item.netSales) })),
-    ...(canSeeProfit ? { grossProfit: missingCosts ? null : money(current.netSales - savedCosts), costDataComplete: !missingCosts } : {}),
+    ...(canSeeProfit ? {
+      costOfGoodsSold: missingCosts ? null : money(savedCosts),
+      grossProfit: missingCosts ? null : money(current.netSales - savedCosts),
+      grossMarginPercent: !missingCosts && current.netSales > 0 ? money((current.netSales - savedCosts) / current.netSales * 100) : null,
+      costDataComplete: !missingCosts,
+    } : {}),
   };
 }
 

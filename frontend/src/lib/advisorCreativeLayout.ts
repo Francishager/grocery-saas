@@ -145,7 +145,8 @@ export function drawCreative(ctx: CanvasRenderingContext2D, data: Data, image: H
 
   const brandBox = { x: logo ? 280 : margin, y: 46, width: logo ? 728 : usable, height: 86 }
   const brand = plan(ctx, [{ value: data.brand.name || 'Business', max: 36, min: 22, bold: true }], brandBox)
-  const ctaBox = { x: margin, y: footerY + 36, width: usable, height: 70 }
+  const externalPhoto = Boolean(data.externalPhoto && image)
+  const ctaBox = { x: margin, y: footerY + (externalPhoto ? 20 : 36), width: usable, height: externalPhoto ? 60 : 70 }
   const cta = plan(ctx, [{ value: data.copy.cta || 'Visit us today', max: 40, min: 28, bold: true }], ctaBox)
   fill(ctx, '#ffffff', { x: 0, y: 0, width, height })
   paint()
@@ -154,5 +155,9 @@ export function drawCreative(ctx: CanvasRenderingContext2D, data: Data, image: H
   fill(ctx, palette.accent, { x: 0, y: 0, width, height: 10 })
   fill(ctx, palette.accent, { x: 0, y: footerY, width, height: 140 })
   draw(ctx, cta, ctaBox, '#ffffff', true)
+  if (externalPhoto) {
+    ctx.font = font(22); ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'top'
+    ctx.fillText('Representative photo', margin, height - 38)
+  }
   fill(ctx, palette.secondary, { x: 0, y: height - 10, width, height: 10 })
 }

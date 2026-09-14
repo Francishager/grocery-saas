@@ -7,7 +7,8 @@ export type VisualReport = { title: string; metrics: { label: string; value: num
   sources: string[]; limitations: string[]; asOf: string; period: { from: string; to: string }; scope: { branch: string; sales?: string } }
 export type AdvisorVisual = { id: string; conversationId: string; kind: 'report' | 'flyer' | 'social'; title: string; status: string; imageMime?: string; createdAt: string;
   data?: { brand: { name: string; currency: string; logo?: string | null }; copy: CreativeCopy; product?: { name: string; price: number; unit: string }; format: string; palette: string; platform: string;
-    report?: VisualReport; warnings: string[]; imageSource?: string; brief: string; tone?: string; reportType?: string; productId?: string; layout?: string } }
+    report?: VisualReport; warnings: string[]; imageSource?: string; brief: string; tone?: string; reportType?: string; productId?: string; layout?: string; artwork?: string;
+    externalPhoto?: { title: string; sourceUrl: string; creator: string; license: string; licenseUrl: string; retrievedAt: string } } }
 const palettes: Record<string, { accent: string; pale: string; secondary: string; ink: string; soft: string }> = {
   green: { accent: '#11634c', pale: '#eff8f3', secondary: '#e3b648', ink: '#11251d', soft: '#d8eee4' },
   blue: { accent: '#1f5aa6', pale: '#eff5fc', secondary: '#dd6158', ink: '#132238', soft: '#dbeafe' },

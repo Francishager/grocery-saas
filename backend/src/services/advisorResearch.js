@@ -1,5 +1,7 @@
 // Search queries come from this public topic catalogue, never from private business/customer text.
 const topics = [
+  { match: /\b(invest(?:ment|ing)?|capital|expansion|expand|equipment|roi|npv|payback)\b/i, query: 'business investment capital budgeting cash flow risk payback', titles: ['Capital budgeting', 'Payback period'] },
+  { match: /\b(design|graphic|flyer|poster|branding|typography|creative)\b/i, query: 'graphic design visual hierarchy typography marketing', titles: ['Graphic design', 'Typography'] },
   { match: /\b(hr|staff|employee|hiring|retention|attendance|payroll|salary|team)\b/i, query: 'human resource management employee retention small business', titles: ['Human resource management', 'Employee retention'] },
   { match: /\b(credit|repay|repayment|debt|balance|cash|profit|finance)\b/i, query: 'small business accounts receivable cash flow management', titles: ['Cash flow management', 'Accounts receivable'] },
   { match: /\b(stock|inventory|supply|supplier|product|restock)\b/i, query: 'small business inventory management demand planning', titles: ['Inventory management', 'Demand forecasting'] },
