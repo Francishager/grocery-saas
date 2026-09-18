@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -372,6 +373,8 @@ export default function AccountingPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [openEntryActionsId, setOpenEntryActionsId] = useState<string | null>(null)
   const [reversingEntryId, setReversingEntryId] = useState<string | null>(null)
+  const [reverseDialogEntry, setReverseDialogEntry] = useState<JournalEntry | null>(null)
+  const [reversalReason, setReversalReason] = useState('Expense reversal')
   const [filters, setFilters] = useState({
     branch: '',
     account: '',
@@ -820,7 +823,11 @@ export default function AccountingPage() {
     isExpenseJournalEntry(entry)
   )
 
-  const handleReverseJournalEntry = async (entry: JournalEntry) => {
+  const getJournalEntryDebitTotal = (entry: JournalEntry | null) => (
+    (entry?.lines || []).reduce((sum, line) => sum + Number(line.debit || 0), 0)
+  )
+
+  const handleReverseJournalEntry = (entry: JournalEntry) => {
     if (!canReverseAccountingEntries) {
       return toast({
         variant: 'destructive',
@@ -832,10 +839,26 @@ export default function AccountingPage() {
       return toast({ variant: 'destructive', title: 'This entry cannot be reversed from here' })
     }
 
-    const reason = window.prompt('Reason for reversing this expense transaction:', 'Expense reversal')
-    if (reason === null) return
-    if (!window.confirm('Reverse this expense transaction? The original will stay in the audit trail and an opposite journal entry will be posted.')) return
+    setReversalReason('Expense reversal')
+    setReverseDialogEntry(entry)
+    setOpenEntryActionsId(null)
+  }
 
+  const closeReverseDialog = () => {
+    if (reversingEntryId) return
+    setReverseDialogEntry(null)
+    setReversalReason('Expense reversal')
+  }
+
+  const submitReverseJournalEntry = async () => {
+    const entry = reverseDialogEntry
+    if (!entry) return
+    if (!canReverseJournalEntry(entry)) {
+      closeReverseDialog()
+      return toast({ variant: 'destructive', title: 'This entry cannot be reversed from here' })
+    }
+
+    const reason = reversalReason.trim() || 'Expense reversal'
     setReversingEntryId(entry.id)
     setOpenEntryActionsId(null)
     try {
@@ -847,6 +870,8 @@ export default function AccountingPage() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || data.message || 'Failed to reverse journal entry')
       toast({ title: 'Expense transaction reversed', description: data.message || 'A reversal journal entry was posted.' })
+      setReverseDialogEntry(null)
+      setReversalReason('Expense reversal')
       await Promise.all([fetchEntries(), fetchAccounts()])
     } catch (err) {
       toast({ variant: 'destructive', title: err instanceof Error ? err.message : 'Failed to reverse journal entry' })
@@ -2036,7 +2061,63 @@ export default function AccountingPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
       </Tabs>
+
+      <Dialog open={Boolean(reverseDialogEntry)} onOpenChange={(open) => { if (!open) closeReverseDialog() }}>
+        <DialogContent className="max-w-lg overflow-hidden border-0 p-0 shadow-2xl">
+          <DialogHeader className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-900 px-6 py-5 text-white">
+            <div className="flex items-start gap-4">
+              <div className="rounded-full bg-white/15 p-3 ring-1 ring-white/20">
+                <RotateCcw className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <DialogTitle className="text-xl font-semibold text-white">Reverse expense transaction</DialogTitle>
+                <DialogDescription className="text-sm text-white/80">
+                  This will keep the original entry in the audit trail and post an opposite journal entry.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="space-y-5 px-6 py-5">
+            <div className="grid grid-cols-1 gap-3 rounded-lg border bg-muted/30 p-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Entry</p>
+                <p className="mt-1 font-semibold">{reverseDialogEntry?.entryNo || 'Journal entry'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Amount</p>
+                <p className="mt-1 font-semibold">{formatCurrency(getJournalEntryDebitTotal(reverseDialogEntry))}</p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Description</p>
+                <p className="mt-1 text-sm text-foreground">{reverseDialogEntry?.description || reverseDialogEntry?.lines?.[0]?.description || 'Expense transaction'}</p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Reversal is permanent for accounting history. Use it only when this expense was posted by mistake or needs an auditable correction.
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reversal-reason">Reason for reversal</Label>
+              <Textarea
+                id="reversal-reason"
+                value={reversalReason}
+                onChange={(event) => setReversalReason(event.target.value)}
+                rows={4}
+                className="resize-none"
+                placeholder="Example: Expense was posted to the wrong account"
+              />
+            </div>
+          </div>
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={closeReverseDialog} disabled={Boolean(reversingEntryId)}>Cancel</Button>
+            <Button onClick={submitReverseJournalEntry} disabled={Boolean(reversingEntryId)} className="bg-emerald-700 hover:bg-emerald-800">
+              <RotateCcw className="mr-2 h-4 w-4" />
+              {reversingEntryId ? 'Reversing...' : 'Reverse transaction'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
