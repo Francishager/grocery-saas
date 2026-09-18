@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
-import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer, MoreVertical, RotateCcw, Eye } from 'lucide-react'
+import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer, MoreVertical, RotateCcw, Eye, Edit } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
@@ -166,6 +166,16 @@ type AccountHistoryRow = {
 }
 
 const normalizeValue = (value?: string) => String(value || '').trim().toLowerCase()
+const toAccountUiType = (type?: string) => {
+  if (type === 'expense') return 'expenses'
+  if (type === 'revenue') return 'income'
+  return type || 'asset'
+}
+const toPersistedAccountType = (type?: string) => {
+  if (type === 'expenses') return 'expense'
+  if (type === 'income') return 'revenue'
+  return type || 'asset'
+}
 const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(['asset', 'expense', 'expenses'])
 
 const isDebitNormalAccount = (account?: Pick<Account, 'type'> | null) => (
@@ -309,6 +319,7 @@ export default function AccountingPage() {
   const { user, hasPermission } = useJWTAuth()
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
+  const canEditAccountingEntries = hasPermission('canEditAccounting')
   const canDeleteAccountingEntries = hasPermission('canDeleteAccounting')
   const canReverseAccountingEntries = hasPermission('canReverseAccountingEntry')
   const tenantCurrency = getTenantCurrency()
@@ -322,6 +333,8 @@ export default function AccountingPage() {
   const [showAccountModal, setShowAccountModal] = useState(false)
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
   const dropdownBtnRef = useRef<HTMLButtonElement>(null)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  const [openAccountActionsId, setOpenAccountActionsId] = useState<string | null>(null)
   const [accCode, setAccCode] = useState('')
   const [accName, setAccName] = useState('')
   const [accType, setAccType] = useState('asset')
@@ -605,8 +618,41 @@ export default function AccountingPage() {
     }
   }, [assignedCashAccountId, jePaymentAccount, jePaymentMethod, paymentAccountOptions])
 
+  const resetAccountForm = () => {
+    setAccCode('')
+    setAccName('')
+    setAccSubType('')
+    setAccDescription('')
+    setAccCategory('')
+    setAccBranch('')
+    setBranchSearch('')
+    setEditingAccount(null)
+  }
+
+  const openEditAccount = (account: Account) => {
+    const uiType = toAccountUiType(account.type)
+    setEditingAccount(account)
+    setAccType(uiType)
+    setAccName(account.name || '')
+    setAccSubType(account.subType || '')
+    setAccDescription(account.description || '')
+    setAccBranch(account.branchId || '')
+    const categories = ACCOUNT_CATEGORIES[uiType] || []
+    const parent = account.parentId ? accounts.find(item => item.id === account.parentId) : null
+    setAccCategory(parent?.code || categories.find(cat => Number(account.code) >= Number(cat.code))?.code || '')
+    setOpenAccountActionsId(null)
+    setShowAccountModal(true)
+  }
+
   const handleCreateAccount = async () => {
-    if (!canCreateAccountingEntries) {
+    if (editingAccount && !canEditAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to edit accounting accounts',
+        description: 'Required permission: canEditAccounting',
+      })
+    }
+    if (!editingAccount && !canCreateAccountingEntries) {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to create accounting accounts',
@@ -614,24 +660,31 @@ export default function AccountingPage() {
       })
     }
     if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
-    if (!accCategory) return toast({ variant: 'destructive', title: 'Account category required' })
+    if (!editingAccount && !accCategory) return toast({ variant: 'destructive', title: 'Account category required' })
 
     const categories = ACCOUNT_CATEGORIES[accType] || []
     const selectedCategory = categories.find(c => c.code === accCategory)
     const baseCode = selectedCategory ? parseInt(selectedCategory.code) : 1100
     let generatedCode = String(baseCode + 1)
-    while (accounts.some(account => account.code === generatedCode)) {
+    const persistedType = toPersistedAccountType(accType)
+    while (!editingAccount && accounts.some(account => account.code === generatedCode)) {
       generatedCode = String(Number(generatedCode) + 1)
     }
 
     try {
-      const res = await apiFetch('/api/accounting/accounts', {
-        method: 'POST',
+      const res = await apiFetch(editingAccount ? '/api/accounting/accounts/' + editingAccount.id : '/api/accounting/accounts', {
+        method: editingAccount ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(editingAccount ? {
+          name: accName,
+          type: persistedType,
+          subType: accSubType || undefined,
+          description: accDescription || undefined,
+          branchId: accBranch || null,
+        } : {
           code: generatedCode,
           name: accName,
-          type: accType,
+          type: persistedType,
           subType: accSubType || undefined,
           description: accDescription || undefined,
           parentCode: accCategory || undefined,
@@ -641,29 +694,24 @@ export default function AccountingPage() {
         }),
       })
       if (res.ok) {
-        const createdAccount = await res.json().catch(() => null)
-        toast({ title: 'Account created' })
+        const savedAccount = await res.json().catch(() => null)
+        toast({ title: editingAccount ? 'Account updated' : 'Account created' })
         setShowAccountModal(false)
-        setAccCode('')
-        setAccName('')
-        setAccSubType('')
-        setAccDescription('')
-        setAccCategory('')
-        setAccBranch('')
-        if (createdAccount?.id) {
-          setAccounts(prev => [createdAccount, ...prev.filter(account => account.id !== createdAccount.id)])
+        resetAccountForm()
+        if (savedAccount?.id) {
+          setAccounts(prev => [savedAccount, ...prev.filter(account => account.id !== savedAccount.id)])
         }
         await fetchAccounts()
       } else {
         const data = await res.json().catch(() => ({}))
         toast({
           variant: 'destructive',
-          title: data.error || data.message || 'Failed to create account',
-          description: data.required ? `Required permission: ${data.required}` : undefined,
+          title: data.error || data.message || (editingAccount ? 'Failed to update account' : 'Failed to create account'),
+          description: data.required ? 'Required permission: ' + data.required : undefined,
         })
       }
     } catch {
-      toast({ variant: 'destructive', title: 'Failed to create account' })
+      toast({ variant: 'destructive', title: editingAccount ? 'Failed to update account' : 'Failed to create account' })
     }
   }
 
@@ -685,6 +733,49 @@ export default function AccountingPage() {
       toast({ variant: 'destructive', title: 'Failed to delete account' })
     }
   }
+
+  const renderAccountActionMenu = (account: Account) => (
+    <div className="relative inline-block text-left" onClick={(event) => event.stopPropagation()}>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-8 w-8 p-0"
+        onClick={() => setOpenAccountActionsId(openAccountActionsId === account.id ? null : account.id)}
+        aria-label="Open account actions"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </Button>
+      {openAccountActionsId === account.id && (
+        <div className="absolute right-0 z-30 mt-2 w-52 rounded-md border bg-white p-1 shadow-lg">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+            onClick={() => { setOpenAccountActionsId(null); setSelectedHistoryAccount(account) }}
+          >
+            <Eye className="h-4 w-4" /> History
+          </button>
+          {canEditAccountingEntries && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+              onClick={() => openEditAccount(account)}
+            >
+              <Edit className="h-4 w-4" /> Edit account
+            </button>
+          )}
+          {canDeleteAccountingEntries && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              onClick={() => { setOpenAccountActionsId(null); handleDeleteAccount(account.id) }}
+            >
+              <Trash2 className="h-4 w-4" /> Delete account
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 
   // Filtered entries for Journal Ledger
   const filteredEntries = useMemo(() => {
@@ -1088,8 +1179,8 @@ export default function AccountingPage() {
                   <button
                     key={t.value}
                     onClick={() => {
+                      resetAccountForm()
                       setAccType(t.value)
-                      setAccCode(''); setAccName(''); setAccSubType(''); setAccDescription(''); setAccCategory(''); setBranchSearch('')
                       setShowAccountDropdown(false)
                       setShowAccountModal(true)
                     }}
@@ -1103,11 +1194,11 @@ export default function AccountingPage() {
             document.body
           )}
 
-          <Dialog open={showAccountModal} onOpenChange={setShowAccountModal}>
+          <Dialog open={showAccountModal} onOpenChange={(open) => { setShowAccountModal(open); if (!open) resetAccountForm() }}>
             <DialogContent className="max-w-3xl">
               <DialogHeader>
-                <DialogTitle>Create SubAccount {ACCOUNT_TYPES.find(t => t.value === accType)?.label || ''}</DialogTitle>
-                <DialogDescription>Create a new sub-account under {ACCOUNT_TYPES.find(t => t.value === accType)?.label.toLowerCase() || 'the selected type'}.</DialogDescription>
+                <DialogTitle>{editingAccount ? 'Edit Account' : 'Create SubAccount'} {ACCOUNT_TYPES.find(t => t.value === accType)?.label || ''}</DialogTitle>
+                <DialogDescription>{editingAccount ? 'Update this account details.' : `Create a new sub-account under ${ACCOUNT_TYPES.find(t => t.value === accType)?.label.toLowerCase() || 'the selected type'}.`}</DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1144,7 +1235,7 @@ export default function AccountingPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Account Category</Label>
-                    <Select value={accCategory} onValueChange={setAccCategory}>
+                    <Select value={accCategory} onValueChange={setAccCategory} disabled={Boolean(editingAccount)}>
                       <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                       <SelectContent>
                         {(ACCOUNT_CATEGORIES[accType] || []).map(cat => (
@@ -1176,7 +1267,7 @@ export default function AccountingPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setShowAccountModal(false)}>Close</Button>
-                <Button onClick={handleCreateAccount}>Save</Button>
+                <Button onClick={handleCreateAccount}>{editingAccount ? 'Update Account' : 'Save'}</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -1369,14 +1460,7 @@ export default function AccountingPage() {
                                 <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
                                 <td className="py-2 px-3 text-right font-mono">{formatCurrency(acc.balance)}</td>
                                 <td className="py-2 px-3 whitespace-nowrap">
-                                  <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setSelectedHistoryAccount(acc) }}>
-                                    History
-                                  </Button>
-                                  {canDeleteAccountingEntries && (
-                                    <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(acc.id) }}>
-                                      <Trash2 className="h-4 w-4 text-red-500" />
-                                    </Button>
-                                  )}
+                                  {renderAccountActionMenu(acc)}
                                 </td>
                               </tr>
                               {isExpanded && childAccounts.map(child => (
@@ -1394,14 +1478,7 @@ export default function AccountingPage() {
                                   <td className="py-2 px-3">{child.branch?.name || '—'}</td>
                                   <td className="py-2 px-3 text-right font-mono">{formatCurrency(child.balance)}</td>
                                   <td className="py-2 px-3 whitespace-nowrap">
-                                    <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setSelectedHistoryAccount(child) }}>
-                                      History
-                                    </Button>
-                                    {canDeleteAccountingEntries && (
-                                      <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); handleDeleteAccount(child.id) }}>
-                                        <Trash2 className="h-4 w-4 text-red-500" />
-                                      </Button>
-                                    )}
+                                    {renderAccountActionMenu(child)}
                                   </td>
                                 </tr>
                               ))}
@@ -1803,12 +1880,12 @@ export default function AccountingPage() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-8 w-8 p-0"
-                                onClick={() => setOpenEntryActionsId(openEntryActionsId === entry.id ? null : entry.id)}
+                                onClick={() => setOpenEntryActionsId(openEntryActionsId === entry.id + '-' + lineIdx ? null : entry.id + '-' + lineIdx)}
                                 aria-label="Open journal entry actions"
                               >
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
-                              {openEntryActionsId === entry.id && (
+                              {openEntryActionsId === entry.id + '-' + lineIdx && (
                                 <div className="absolute right-0 z-30 mt-2 w-56 rounded-md border bg-white p-1 shadow-lg">
                                   <button
                                     type="button"
@@ -1963,3 +2040,4 @@ export default function AccountingPage() {
     </div>
   )
 }
+
