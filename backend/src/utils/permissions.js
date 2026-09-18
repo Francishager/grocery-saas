@@ -146,6 +146,7 @@ const PERMISSION_TO_FEATURES = {
   canCreateAccounting: ['accounting'],
   canEditAccounting: ['accounting'],
   canDeleteAccounting: ['accounting'],
+  canReverseAccountingEntry: ['accounting'],
   canViewTransactionAccount: ['accounting', 'expenses'],
   canUseAnyTransactionAccount: ['accounting', 'expenses'],
   canUseOtherCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
@@ -248,7 +249,7 @@ export const ALL_PERMISSION_KEYS = [
   // Communication
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   // Accounting
-  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting",
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting", "canReverseAccountingEntry",
   // Transaction Accounts & Cash Movements
   "canViewTransactionAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
   "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
@@ -873,6 +874,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canDeleteAccounting: {
     name: 'Delete accounting entries',
     description: 'Remove accounting records where allowed.',
+  },
+  canReverseAccountingEntry: {
+    name: 'Reverse accounting entries',
+    description: 'Reverse posted expense journal entries using auditable opposite entries.',
   },
   canViewTransactionAccount: {
     name: 'View transaction accounts',

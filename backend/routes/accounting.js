@@ -9,6 +9,7 @@ const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
 const BALANCE_EPSILON = 0.01;
 const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
+const EXPENSE_ACCOUNT_TYPES = new Set(["expense", "expenses"]);
 const AUTO_DEFAULT_CASH_ACCOUNT_NAMES = new Set(["Cash Box", "Mobile Money", "Bank Account", "Card Payments"]);
 const TRANSACTION_ACCOUNT_PERMISSION_KEYS = {
   cash: "canUseCash",
@@ -49,6 +50,8 @@ const isDebitNormalAccount = (account) => DEBIT_NORMAL_ACCOUNT_TYPES.has(normali
 const journalLineBalanceDelta = (account, debit, credit) => {
   return isDebitNormalAccount(account) ? debit - credit : credit - debit;
 };
+
+const isExpenseAccount = (account) => EXPENSE_ACCOUNT_TYPES.has(normalizeValue(account?.type));
 
 const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 
@@ -324,14 +327,136 @@ router.get("/journal", authenticateToken, requirePermission("canViewAccounting")
     const entries = await prisma.journalEntry.findMany({
       where: scopedWhere(scope, {}),
       include: {
-        lines: { include: { account: { select: { id: true, code: true, name: true, type: true } } } },
+        lines: { include: { account: { select: { id: true, code: true, name: true, type: true, subType: true, description: true } } } },
         user: { select: { id: true, fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
       },
       orderBy: { date: "desc" },
     });
     res.json(entries);
   } catch (err) {
     handleBranchError(res, err, "Failed to fetch journal entries");
+  }
+});
+
+// Reverse an expense journal entry without deleting the original audit trail.
+router.post("/journal/:id/reverse", authenticateToken, requirePermission("canReverseAccountingEntry"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const reversalReason = String(req.body?.reason || "Expense reversal").trim() || "Expense reversal";
+
+    await ensureTransactionAccounts(tenantId);
+
+    const original = await prisma.journalEntry.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      include: { lines: { include: { account: true } } },
+    });
+
+    if (!original) return res.status(404).json({ error: "Journal entry not found" });
+    if (original.reversalOfId) return res.status(400).json({ error: "A reversal entry cannot be reversed from this action" });
+    if (original.status === "reversed" || original.reversalJournalId) return res.status(400).json({ error: "This journal entry has already been reversed" });
+    if (!(original.lines || []).some((line) => isExpenseAccount(line.account))) {
+      return res.status(400).json({ error: "Only expense journal entries can be reversed from this action" });
+    }
+
+    const reversalLines = original.lines.map((line) => ({
+      accountId: line.accountId,
+      debit: Number(line.credit || 0),
+      credit: Number(line.debit || 0),
+      description: "Reversal of " + original.entryNo + ": " + (line.description || original.description || reversalReason),
+    }));
+
+    const totalDebit = reversalLines.reduce((sum, line) => sum + line.debit, 0);
+    const totalCredit = reversalLines.reduce((sum, line) => sum + line.credit, 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      return res.status(400).json({ error: "Original journal entry is not balanced and cannot be reversed safely" });
+    }
+
+    const linkedCashAccountIds = [...new Set(original.lines.map((line) => linkedCashAccountId(line.account)).filter(Boolean))];
+    const cashAccounts = linkedCashAccountIds.length
+      ? await prisma.cashAccount.findMany({ where: { tenantId, id: { in: linkedCashAccountIds }, isActive: true } })
+      : [];
+    const cashAccountsById = new Map(cashAccounts.map((account) => [account.id, account]));
+
+    for (const line of original.lines) {
+      const cashAccountId = linkedCashAccountId(line.account);
+      if (!cashAccountId) continue;
+      const cashAccount = cashAccountsById.get(cashAccountId);
+      if (!cashAccount) return res.status(400).json({ error: "Linked transaction account for " + line.account.name + " was not found or is inactive" });
+      if (!(await canUseTransactionAccount(req, cashAccount))) {
+        return res.status(403).json({ error: "You do not have permission to reverse entries affecting " + cashAccount.name });
+      }
+    }
+
+    const reversal = await prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const entryNo = "REV-" + Date.now();
+      const createdReversal = await tx.journalEntry.create({
+        data: {
+          entryNo,
+          tenantId,
+          branchId: original.branchId || null,
+          date: now,
+          description: "Reversal of " + original.entryNo + ": " + (original.description || "Expense journal entry"),
+          reference: original.reference || original.entryNo,
+          status: "posted",
+          userId: req.user.id,
+          sourceType: "JOURNAL_REVERSAL",
+          sourceId: original.id,
+          reversalOfId: original.id,
+          reversalReason,
+          lines: { create: reversalLines },
+        },
+        include: {
+          lines: { include: { account: { select: { id: true, code: true, name: true, type: true, subType: true, description: true } } } },
+          user: { select: { id: true, fname: true, lname: true } },
+          branch: { select: { id: true, name: true } },
+        },
+      });
+
+      await tx.journalEntry.update({
+        where: { id: original.id },
+        data: { status: "reversed", reversalJournalId: createdReversal.id, reversalReason, reversedBy: req.user.id, reversedAt: now },
+      });
+
+      for (const line of reversalLines) {
+        const originalLine = original.lines.find((item) => item.accountId === line.accountId);
+        const account = originalLine?.account;
+        const delta = journalLineBalanceDelta(account, line.debit, line.credit);
+        await tx.account.update({ where: { id: line.accountId }, data: { balance: { increment: delta } } });
+
+        const cashAccountId = linkedCashAccountId(account);
+        if (cashAccountId && Math.abs(delta) > 0) {
+          const updatedCashAccount = await tx.cashAccount.update({ where: { id: cashAccountId }, data: { balance: { increment: delta } } });
+          await tx.cashTransaction.create({
+            data: {
+              tenantId,
+              accountId: cashAccountId,
+              type: delta >= 0 ? "journal_reversal_in" : "journal_reversal_out",
+              amount: Math.abs(delta),
+              balanceAfter: updatedCashAccount.balance,
+              reference: entryNo,
+              description: "Reversal of " + original.entryNo,
+              userId: req.user.id,
+            },
+          });
+        }
+      }
+
+      for (const cashAccountId of linkedCashAccountIds) {
+        await syncLinkedTransactionAccountBalance(tx, tenantId, cashAccountId).catch(() => null);
+      }
+
+      return createdReversal;
+    });
+
+    res.status(201).json({ entry: reversal, message: "Expense journal entry reversed" });
+  } catch (err) {
+    console.error("Reverse journal entry error:", err);
+    if (err.code === "P2002") return res.status(409).json({ error: "This journal entry has already been reversed" });
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    handleBranchError(res, err, "Failed to reverse journal entry");
   }
 });
 

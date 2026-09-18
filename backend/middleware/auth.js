@@ -371,6 +371,7 @@ export const hasAccountingPermission = (req) => {
     'canCreateAccounting',
     'canEditAccounting',
     'canDeleteAccounting',
+    'canReverseAccountingEntry',
     'canViewTransactionAccount',
     'canUseOwnCashAccount',
     'canUseOtherStaffCashAccount',

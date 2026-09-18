@@ -728,6 +728,7 @@ model UserPermission {
   canCreateAccounting          Boolean  @default(false)
   canEditAccounting            Boolean  @default(false)
   canDeleteAccounting          Boolean  @default(false)
+  canReverseAccountingEntry    Boolean  @default(false)
   // Transaction Accounts & Cash Movements
   canViewTransactionAccount    Boolean  @default(false)
   canUseAnyTransactionAccount  Boolean  @default(false)

@@ -260,6 +260,7 @@ export const permissions: Permission[] = [
   { id: 'canCreateAccounting', name: 'Create Accounting Entries', description: 'Create journal entries and accounting records', category: 'accounting', accessesBusinessData: true },
   { id: 'canEditAccounting', name: 'Edit Accounting Entries', description: 'Edit accounting records', category: 'accounting', accessesBusinessData: true },
   { id: 'canDeleteAccounting', name: 'Delete Accounting Entries', description: 'Delete accounting records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canReverseAccountingEntry', name: 'Reverse Accounting Entries', description: 'Reverse posted expense journal entries with auditable opposite entries', category: 'accounting', accessesBusinessData: true },
 
   // Transaction Accounts & Cash Movements
   { id: 'canViewTransactionAccount', name: 'View Transaction Accounts', description: 'View cash, safe, bank, mobile money, and card transaction accounts', category: 'transactions', accessesBusinessData: true },

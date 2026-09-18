@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
-import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer } from 'lucide-react'
+import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer, MoreVertical, RotateCcw, Eye } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
@@ -58,6 +58,12 @@ interface JournalEntry {
   currency?: string
   action?: string
   createdAt?: string
+  sourceType?: string
+  sourceId?: string
+  reversalOfId?: string | null
+  reversalJournalId?: string | null
+  reversalReason?: string | null
+  reversedAt?: string | null
 }
 
 interface Branch {
@@ -304,6 +310,7 @@ export default function AccountingPage() {
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
   const canDeleteAccountingEntries = hasPermission('canDeleteAccounting')
+  const canReverseAccountingEntries = hasPermission('canReverseAccountingEntry')
   const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -350,6 +357,8 @@ export default function AccountingPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [pageSize, setPageSize] = useState(10)
   const [showFilters, setShowFilters] = useState(false)
+  const [openEntryActionsId, setOpenEntryActionsId] = useState<string | null>(null)
+  const [reversingEntryId, setReversingEntryId] = useState<string | null>(null)
   const [filters, setFilters] = useState({
     branch: '',
     account: '',
@@ -705,6 +714,54 @@ export default function AccountingPage() {
 
   const resetFilters = () => {
     setFilters({ branch: '', account: '', startDate: '', endDate: '', category: '', currency: '' })
+  }
+
+  const isExpenseJournalEntry = (entry: JournalEntry) => (
+    (entry.lines || []).some((line) => ['expense', 'expenses'].includes(normalizeValue(line.account?.type)))
+  )
+
+  const canReverseJournalEntry = (entry: JournalEntry) => (
+    canReverseAccountingEntries &&
+    online &&
+    entry.status !== 'reversed' &&
+    !entry.reversalOfId &&
+    !entry.reversalJournalId &&
+    isExpenseJournalEntry(entry)
+  )
+
+  const handleReverseJournalEntry = async (entry: JournalEntry) => {
+    if (!canReverseAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to reverse accounting entries',
+        description: 'Required permission: canReverseAccountingEntry',
+      })
+    }
+    if (!canReverseJournalEntry(entry)) {
+      return toast({ variant: 'destructive', title: 'This entry cannot be reversed from here' })
+    }
+
+    const reason = window.prompt('Reason for reversing this expense transaction:', 'Expense reversal')
+    if (reason === null) return
+    if (!window.confirm('Reverse this expense transaction? The original will stay in the audit trail and an opposite journal entry will be posted.')) return
+
+    setReversingEntryId(entry.id)
+    setOpenEntryActionsId(null)
+    try {
+      const res = await apiFetch('/api/accounting/journal/' + entry.id + '/reverse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || data.message || 'Failed to reverse journal entry')
+      toast({ title: 'Expense transaction reversed', description: data.message || 'A reversal journal entry was posted.' })
+      await Promise.all([fetchEntries(), fetchAccounts()])
+    } catch (err) {
+      toast({ variant: 'destructive', title: err instanceof Error ? err.message : 'Failed to reverse journal entry' })
+    } finally {
+      setReversingEntryId(null)
+    }
   }
 
   // Submit single journal entry
@@ -1723,7 +1780,15 @@ export default function AccountingPage() {
                       entry.lines?.map((line, lineIdx) => (
                         <tr key={`${entry.id}-${lineIdx}`} className="border-b hover:bg-muted/50">
                           <td className="py-2 px-2 whitespace-nowrap">{new Date(entry.date).toLocaleDateString()}</td>
-                          <td className="py-2 px-2">{line.description || entry.description || '—'}</td>
+                          <td className="py-2 px-2">
+                            <div className="flex flex-col gap-1">
+                              <span>{line.description || entry.description || '—'}</span>
+                              <div className="flex flex-wrap gap-1">
+                                {entry.status === 'reversed' && <Badge variant="destructive" className="w-fit">Reversed</Badge>}
+                                {entry.reversalOfId && <Badge variant="outline" className="w-fit">Reversal</Badge>}
+                              </div>
+                            </div>
+                          </td>
                           <td className="py-2 px-2">{entry.branch?.name || '—'}</td>
                           <td className="py-2 px-2">{line.account ? `${line.account.code} - ${line.account.name}` : '—'}</td>
                           <td className="py-2 px-2">{entry.reference || entry.voucherNo || '—'}</td>
@@ -1733,9 +1798,42 @@ export default function AccountingPage() {
                           <td className="py-2 px-2">{entry.user ? `${entry.user.fname} ${entry.user.lname}` : '—'}</td>
                           <td className="py-2 px-2 whitespace-nowrap">{entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : '—'}</td>
                           <td className="py-2 px-2">
-                            <Button size="sm" variant="ghost" onClick={() => toast({ title: `Entry ${entry.entryNo}`, description: entry.description })}>
-                              View
-                            </Button>
+                            <div className="relative inline-block text-left">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                                onClick={() => setOpenEntryActionsId(openEntryActionsId === entry.id ? null : entry.id)}
+                                aria-label="Open journal entry actions"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                              {openEntryActionsId === entry.id && (
+                                <div className="absolute right-0 z-30 mt-2 w-56 rounded-md border bg-white p-1 shadow-lg">
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+                                    onClick={() => {
+                                      setOpenEntryActionsId(null)
+                                      toast({ title: 'Entry ' + entry.entryNo, description: entry.description })
+                                    }}
+                                  >
+                                    <Eye className="h-4 w-4" /> View details
+                                  </button>
+                                  {canReverseAccountingEntries && (
+                                    <button
+                                      type="button"
+                                      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      disabled={!canReverseJournalEntry(entry) || reversingEntryId === entry.id}
+                                      onClick={() => handleReverseJournalEntry(entry)}
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                      {reversingEntryId === entry.id ? 'Reversing...' : 'Reverse expense'}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
