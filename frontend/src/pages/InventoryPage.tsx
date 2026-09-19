@@ -183,6 +183,7 @@ export default function InventoryPage() {
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryQuery, setCategoryQuery] = useState('')
   const [items, setItems] = useState<InventoryItem[]>([])
+  const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
   const [inventoryError, setInventoryError] = useState<string | null>(null)
@@ -348,16 +349,19 @@ export default function InventoryPage() {
         )
         if (requestId !== inventoryRequestRef.current) return
         setItems(Array.isArray(data?.products) ? data.products : [])
+        setMovementItems(Array.isArray(data?.movementProducts) ? data.movementProducts : data?.products || [])
         setMovementSummary({ ...emptyMovementSummary, ...(data?.movementSummary || {}) })
       } else {
         const local = await getLocalProducts(appliedSearch, canManageInventory ? branchFilter : undefined, typeFilter)
         if (requestId !== inventoryRequestRef.current) return
         setItems(local)
+        setMovementItems(local)
         setMovementSummary(emptyMovementSummary)
       }
     } catch (error: any) {
       if (requestId !== inventoryRequestRef.current) return
       setItems([])
+      setMovementItems([])
       setMovementSummary(emptyMovementSummary)
       setInventoryError(error?.message || 'Unable to load products. Please try again.')
     } finally {
@@ -707,6 +711,8 @@ export default function InventoryPage() {
   const movementForItem = (item: InventoryItem) => item.dailyMovement || defaultMovementForItem(item)
 
   const statusForItem = (item: InventoryItem, movement = movementForItem(item)) => {
+    if (item.isActive === false) return 'Archived'
+    if (item.itemType === 'service') return 'Service'
     if (movement.currentStock <= 0) return 'Out of Stock'
     if (movement.currentStock <= item.low_stock_alert) return 'Low Stock'
     return 'In Stock'
@@ -720,6 +726,7 @@ export default function InventoryPage() {
     if (kind === 'stock_received') return movement.stockIn
     if (kind === 'other_stock_out') return movement.otherStockOut
     if (kind === 'returns') return movement.returns
+    if (item.isActive === false || item.itemType === 'service') return 0
     if (kind === 'low_stock') return movement.currentStock <= item.low_stock_alert ? 1 : 0
     if (kind === 'out_of_stock') return movement.currentStock <= 0 ? 1 : 0
     return 0
@@ -741,7 +748,7 @@ export default function InventoryPage() {
 
     return baseRows.map((row) => ({
       ...row,
-      productName: row.productName || item.product_name,
+      productName: `${row.productName || item.product_name}${item.isActive === false ? ' (Archived)' : ''}`,
       productSku: row.productSku || item.product_id || item.sku || '',
       branchName: row.branchName || item.branch?.name || branchNameById.get(String(item.branchId || '')) || '',
     }))
@@ -751,7 +758,7 @@ export default function InventoryPage() {
     const movement = movementForItem(item)
     return {
       id: item.id,
-      name: item.product_name,
+      name: `${item.product_name}${item.isActive === false ? ' (Archived)' : ''}`,
       sku: item.product_id || item.sku || '-',
       category: item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-',
       branch: item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-',
@@ -784,12 +791,12 @@ export default function InventoryPage() {
   }
 
   const openMovementCardModal = (card: MovementCardConfig) => {
-    const productRows = filteredItems
+    const productRows = movementItems
       .map((item) => ({ item, metric: movementMetricForCard(item, card.id) }))
       .filter(({ metric }) => metric > 0)
       .map(({ item, metric }) => buildMovementProductRow(item, metric))
 
-    const rows = filteredItems.flatMap((item) => detailRowsForCard(item, card.id))
+    const rows = movementItems.flatMap((item) => detailRowsForCard(item, card.id))
 
     setMovementModal({
       title: `${card.label} - ${movementPeriodLabel}`,

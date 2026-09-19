@@ -46,7 +46,7 @@ export async function checkUsageLimit(tenantId, resource) {
       count = await prisma.user.count({ where: { tenantId, isActive: true } })
       break
     case 'products':
-      count = await prisma.product.count({ where: { tenantId } })
+      count = await prisma.product.count({ where: { tenantId, isActive: { not: false } } })
       break
     case 'branches':
       count = await prisma.branch.count({ where: { tenantId } })

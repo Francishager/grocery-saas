@@ -307,7 +307,8 @@ export const inventoryApi = {
       },
     })
     const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
-    return { ...data, products: products.map(mapProductToInventory) }
+    const movementProducts = Array.isArray(data?.movementProducts) ? data.movementProducts : products
+    return { ...data, products: products.map(mapProductToInventory), movementProducts: movementProducts.map(mapProductToInventory) }
   },
 
   get: async (id: string) => {
@@ -392,6 +393,7 @@ export const inventoryApi = {
 // Map backend Product model to frontend InventoryItem
 function mapProductToInventory(p: any): InventoryItem {
   return {
+    isActive: p.isActive !== false,
     id: p.id,
     business_id: p.tenantId,
     product_id: p.sku || '',
@@ -1070,6 +1072,7 @@ export interface DailyPerformanceData {
 }
 
 export interface InventoryItem {
+  isActive?: boolean
   id: string | number
   business_id: string
   product_id: string

@@ -186,7 +186,6 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
     afterPurchaseItems,
     afterSupplierPurchaseItems,
     afterSaleReturnItems,
-    afterTransferItems,
     afterProductionOrders,
     afterProductionWaste,
     afterAdjustmentLogs,
@@ -285,8 +284,11 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
       orderBy: { createdAt: "asc" },
     }),
     prisma.stockTransferItem.findMany({
-      where: { ...productWhere, transfer: { tenantId: scope.tenantId, createdAt: dateWhere, status: { not: "cancelled" }, ...(scope.branchId ? { OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] } : {}) } },
-      include: { transfer: { select: { id: true, transferNo: true, createdAt: true, fromBranchId: true, toBranchId: true, user: { select: userSelect } } } },
+      where: { transfer: { tenantId: scope.tenantId, status: { in: ["in_transit", "received", "cancelled"] }, AND: [
+        { OR: [{ createdAt: { gte: range.start } }, { updatedAt: { gte: range.start } }] },
+        ...(scope.branchId ? [{ OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] }] : []),
+      ] } },
+      include: { product: { select: { ...productSelect, barcode: true } }, transfer: { select: { id: true, transferNo: true, createdAt: true, updatedAt: true, status: true, fromBranchId: true, toBranchId: true, user: { select: userSelect } } } },
       orderBy: { createdAt: "asc" },
     }),
     prisma.productionOrder.findMany({
@@ -308,10 +310,6 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
     prisma.purchaseItem.findMany({ where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: afterWhere }) }, select: { productId: true, quantity: true } }),
     prisma.supplierPurchaseItem.findMany({ where: { ...productWhere, purchase: scopedWhere(scope, { createdAt: afterWhere }) }, select: { productId: true, quantity: true } }),
     prisma.saleReturnItem.findMany({ where: { ...productWhere, return: scopedWhere(scope, { createdAt: afterWhere, status: { in: inventorySaleReturnStatuses } }) }, select: { productId: true, quantity: true } }),
-    prisma.stockTransferItem.findMany({
-      where: { ...productWhere, transfer: { tenantId: scope.tenantId, createdAt: afterWhere, status: { not: "cancelled" }, ...(scope.branchId ? { OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] } : {}) } },
-      include: { transfer: { select: { fromBranchId: true, toBranchId: true } } },
-    }),
     prisma.productionOrder.findMany({ where: scopedWhere(scope, { productId: { in: productIds }, status: "completed", updatedAt: afterWhere }), select: { productId: true, actualQuantity: true, quantity: true } }),
     prisma.productionWaste.findMany({ where: { productId: { in: productIds }, tenantId: scope.tenantId, createdAt: afterWhere, ...(scope.branchId ? { productionOrder: { branchId: scope.branchId } } : {}) }, select: { productId: true, quantity: true } }),
     prisma.auditLog.findMany({
@@ -434,14 +432,29 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
   }));
 
   transferItems.forEach((item) => {
-    if (!scope.branchId) return;
-    const isIn = scope.branchId && item.transfer?.toBranchId === scope.branchId;
-    addInventoryMovement(buckets, item.productId, {
-      type: isIn ? "TRANSFER_IN" : "TRANSFER_OUT",
-      direction: isIn ? "IN" : "OUT",
-      quantity: item.quantity,
-      detail: { time: item.transfer?.createdAt, type: isIn ? "Transfer In" : "Transfer Out", reference: item.transfer?.transferNo || item.transferId, referenceId: item.transferId, quantity: item.quantity, reason: item.notes || "", staff: userDisplayName(item.transfer?.user) },
-    });
+    const transfer = item.transfer;
+    const recordTransfer = (productId, direction, time, reason = item.notes || "") => {
+      const date = new Date(time);
+      if (date < range.start) return;
+      addInventoryMovement(buckets, productId, {
+        period: date > range.end ? "after" : "period",
+        type: direction === "IN" ? "TRANSFER_IN" : "TRANSFER_OUT",
+        direction,
+        quantity: item.quantity,
+        detail: { time, type: direction === "IN" ? "Transfer In" : "Transfer Out", reference: transfer.transferNo || transfer.id, referenceId: transfer.id, quantity: item.quantity, reason, staff: userDisplayName(transfer.user) },
+      });
+    };
+    recordTransfer(item.productId, "OUT", transfer.createdAt);
+    if (transfer.status === "cancelled") {
+      recordTransfer(item.productId, "IN", transfer.updatedAt, "Transfer cancelled - stock restored");
+    } else if (transfer.status === "received") {
+      // Legacy transfers store only the source ID; receiving creates a branch-local product.
+      const candidates = products.filter((product) => product.branchId === transfer.toBranchId && (
+        (item.product?.sku && product.sku === item.product.sku) ||
+        (item.product?.barcode && product.barcode === item.product.barcode)
+      ));
+      if (candidates.length === 1) recordTransfer(candidates[0].id, "IN", transfer.updatedAt);
+    }
   });
 
   productionOrders.forEach((order) => addInventoryMovement(buckets, order.productId, {
@@ -468,11 +481,6 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
   afterPurchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "PURCHASE", direction: "IN", quantity: item.quantity }));
   afterSupplierPurchaseItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "SUPPLIER_PURCHASE", direction: "IN", quantity: item.quantity }));
   afterSaleReturnItems.forEach((item) => addInventoryMovement(buckets, item.productId, { period: "after", type: "SALE_RETURN", direction: "IN", quantity: item.quantity }));
-  afterTransferItems.forEach((item) => {
-    if (!scope.branchId) return;
-    const isIn = scope.branchId && item.transfer?.toBranchId === scope.branchId;
-    addInventoryMovement(buckets, item.productId, { period: "after", type: isIn ? "TRANSFER_IN" : "TRANSFER_OUT", direction: isIn ? "IN" : "OUT", quantity: item.quantity });
-  });
   afterProductionOrders.forEach((order) => addInventoryMovement(buckets, order.productId, { period: "after", type: "PRODUCTION_IN", direction: "IN", quantity: Math.ceil(Number(order.actualQuantity || order.quantity || 0)) }));
   afterProductionWaste.forEach((waste) => addInventoryMovement(buckets, waste.productId, { period: "after", type: "PRODUCTION_OUT", direction: "OUT", quantity: waste.quantity }));
   afterAdjustmentLogs.forEach((log) => {
@@ -513,8 +521,8 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
       stockReceived,
       otherStockOut,
       returns,
-      lowStockProducts: products.filter((product) => Number(product.quantity || 0) <= Number(product.minStock || 0)).length,
-      outOfStockProducts: products.filter((product) => Number(product.quantity || 0) <= 0).length,
+      lowStockProducts: products.filter((product) => product.isActive !== false && product.itemType !== "service" && Number(product.quantity || 0) <= Number(product.minStock || 0)).length,
+      outOfStockProducts: products.filter((product) => product.isActive !== false && product.itemType !== "service" && Number(product.quantity || 0) <= 0).length,
     },
   };
 }
@@ -691,9 +699,16 @@ router.get("/", authenticateToken, async (req, res) => {
       }
 
       const range = inventoryDateRange(req);
-      const { byProductId, summary } = await buildInventoryMovementSummary(scope, products, range, req);
-      return {
-        products: products.map((product) => {
+      // History includes archived products and all matching pages, independently of the active catalogue.
+      const { isActive, ...historyWhere } = where;
+      if (barcode) historyWhere.barcode = String(barcode);
+      const historyProducts = await prisma.product.findMany({
+        where: historyWhere,
+        include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
+        orderBy: { name: "asc" },
+      });
+      const { byProductId, summary } = await buildInventoryMovementSummary(scope, historyProducts, range, req);
+      const withMovement = (product) => {
           const bucket = byProductId.get(product.id) || createMovementBucket();
           return {
             ...product,
@@ -713,7 +728,13 @@ router.get("/", authenticateToken, async (req, res) => {
               returnDetails: bucket.returnDetails,
             },
           };
-        }),
+        };
+      return {
+        products: products.map(withMovement),
+        movementProducts: historyProducts.filter((product) => {
+          const period = byProductId.get(product.id)?.period;
+          return product.isActive !== false || (period && Object.values(period).some((quantity) => quantity > 0));
+        }).map(withMovement),
         total,
         page: responsePage,
         limit: responseLimit,
@@ -727,6 +748,8 @@ router.get("/", authenticateToken, async (req, res) => {
 
     // Filter by itemType if provided
     if (itemType) where.itemType = String(itemType);
+    if (category) where.categoryId = category;
+    if (lowStock === "true") where.quantity = { lte: 10 };
 
     // Barcode exact lookup (highest priority)
     if (barcode) {
@@ -754,9 +777,6 @@ router.get("/", authenticateToken, async (req, res) => {
       const total = await prisma.product.count({ where });
       return res.json(await buildListResponse(products, total));
     }
-
-    if (category) where.categoryId = category;
-    if (lowStock === "true") where.quantity = { lte: 10 };
 
     const products = await prisma.product.findMany({
       where: { ...where, isActive: { not: false } },

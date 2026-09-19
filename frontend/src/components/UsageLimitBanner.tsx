@@ -19,11 +19,13 @@ export function UsageLimitBanner({ resource, label, currentCount }: UsageLimitBa
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     const fetchLimits = async () => {
       try {
         const res = await apiFetch('/api/tenants/me/limits')
         if (res.ok) {
           const data = await res.json()
+          if (cancelled) return
           if (data.usage?.[resource]) {
             setUsage(data.usage[resource])
           } else if (data.limits) {
@@ -35,12 +37,13 @@ export function UsageLimitBanner({ resource, label, currentCount }: UsageLimitBa
           }
         }
       } catch {}
-      setLoading(false)
+      if (!cancelled) setLoading(false)
     }
     fetchLimits()
-  }, [resource])
+    return () => { cancelled = true }
+  }, [resource, currentCount])
 
-  if (loading || !usage) return null
+  if (loading || !usage || usage.limit <= 0) return null
 
   const pct = usage.percentage
   const displayLabel = label || resource.charAt(0).toUpperCase() + resource.slice(1)

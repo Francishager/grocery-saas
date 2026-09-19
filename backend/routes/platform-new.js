@@ -721,13 +721,13 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
 
     // Get product count separately (products relation is via Branch, not direct on Tenant in some schemas)
-    const productCount = await prisma.product.count({ where: { tenantId } })
+    const productCount = await prisma.product.count({ where: { tenantId, isActive: { not: false } } })
     const branchCount = await prisma.branch.count({ where: { tenantId } })
 
     // Get product count per branch
     const branchesWithCounts = await Promise.all(
       tenant.branches.map(async (b) => {
-        const productCount = await prisma.product.count({ where: { branchId: b.id } })
+        const productCount = await prisma.product.count({ where: { branchId: b.id, isActive: { not: false } } })
         const userCount = await prisma.userBranch.count({ where: { branchId: b.id } })
         return { ...b, productCount, userCount }
       })
@@ -788,7 +788,7 @@ router.get('/tenants/:tenantId/detail', authenticateToken, requirePlatformAdmin,
     // Build usage stats
     const usage = {
       users: { count: tenant._count.users, limit: tenant.usageLimit?.maxUsers || tenant.plan?.maxUsers || 5 },
-      products: { count: productCount, limit: tenant.usageLimit?.maxProducts || tenant.plan?.maxProducts || 100 },
+      products: { count: productCount, limit: tenant.usageLimit?.maxProducts ?? tenant.plan?.maxProducts ?? 100 },
       branches: { count: branchCount, limit: tenant.usageLimit?.maxBranches || 1 },
       customers: { count: tenant._count.customers, limit: tenant.usageLimit?.maxCustomers || 100 },
       suppliers: { count: tenant._count.suppliers, limit: tenant.usageLimit?.maxSuppliers || 50 },

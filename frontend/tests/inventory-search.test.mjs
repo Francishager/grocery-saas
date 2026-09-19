@@ -16,6 +16,9 @@ const products = Array.from({ length: 22 }, (_, index) => ({ id: `product-${inde
   itemType: 'product', quantity: 50, low_stock_alert: 5, cost_price: 3200, unit_price: 5400,
   categoryId: 'rice', categoryName: 'Groceries', branchId: index === 21 ? 'north' : 'south', isUncategorized: false,
 }));
+const archived = { ...products[0], id: 'archived', product_name: 'Historical rice', isActive: false,
+  dailyMovement: { openingStock: 7, stockIn: 0, soldToday: 7, posSold: 7, receivableSold: 0, otherStockOut: 0, returns: 0, closingStock: 0, currentStock: 0,
+    soldDetails: [{ type: 'Sale', quantity: 7, reference: 'OLD-SALE', staff: 'Original Seller', customerName: 'Original Customer' }] } };
 
 test('inventory searches stay visible across pagination, filters, concurrent requests and screen sizes', { timeout: 180000 }, async () => {
   const adapters = {
@@ -65,7 +68,7 @@ test('inventory searches stay visible across pagination, filters, concurrent req
         if (query.search === 'failure' && failSearch) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Search temporarily unavailable' }) });
         const matches = query.search === 'old' ? [products[0]] : query.search === 'failure' ? [products[21]] : products.filter(item =>
           `${item.product_name} ${item.product_id}`.toLowerCase().includes(query.search.toLowerCase()) && (!query.branchId || item.branchId === query.branchId));
-        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ products: matches, movementSummary: {} }) });
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ products: matches, movementProducts: [...matches, archived], movementSummary: { unitsSold: 7, productsSold: 1 } }) });
       });
       const mount = async (offline = false) => {
         await page.goto('http://inventory.test/');
@@ -84,6 +87,16 @@ test('inventory searches stay visible across pagination, filters, concurrent req
         assert(await page.getByText('1 / 1', { exact: true }).isVisible());
       };
       await mount();
+      assert.equal(await page.getByText('Historical rice', { exact: true }).count(), 0, 'Archived products must not reappear in the active catalogue');
+      await page.getByRole('button', { name: /^Units Sold/ }).click();
+      await page.getByRole('heading', { name: 'Units Sold - Today', exact: true }).waitFor();
+      assert.equal(await page.getByText('Historical rice (Archived)', { exact: true }).count(), 2, 'Both product and transaction rows must identify archived history');
+      assert(await page.getByText('Today total: 7 units', { exact: true }).isVisible());
+      assert(await page.getByText('Original Customer', { exact: true }).isVisible());
+      assert(await page.getByText('Original Seller', { exact: true }).isVisible());
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Movement dialog overflow at ${viewport.width}px`);
+      await page.screenshot({ path: path.join(screenshots, `movements-${viewport.width}.png`), fullPage: true });
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
       const input = page.getByRole('textbox', { name: 'Search products', exact: true });
       await page.getByRole('button', { name: 'Last page', exact: true }).click();
       assert(await page.getByText('3 / 3', { exact: true }).isVisible());
