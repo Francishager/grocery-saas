@@ -1,0 +1,4 @@
+ALTER TABLE "user_permissions"
+ADD COLUMN IF NOT EXISTS "canViewChartOfAccounts" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN IF NOT EXISTS "canCreateChartOfAccounts" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN IF NOT EXISTS "canEditChartOfAccounts" BOOLEAN NOT NULL DEFAULT false;

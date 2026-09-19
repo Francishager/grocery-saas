@@ -258,11 +258,11 @@ const reportCategories: ReportCategoryDef[] = [
 ]
 
 const accountingSubItems = [
-  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry'] },
-  { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: ['accounting', 'expenses'], permission: ['canViewTransactionAccount', 'canUseOwnCashAccount', 'canUseOtherStaffCashAccount', 'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount'] },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts'] },
+  { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: ['accounting', 'expenses'], permission: 'canViewTransactionAccount' },
   { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewFinancialReport'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
-  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: ['canViewAccounting', 'canViewStaffTillSheet'] },
+  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: 'canViewStaffTillSheet' },
 ]
 
 const hrAccountingSubItems = [

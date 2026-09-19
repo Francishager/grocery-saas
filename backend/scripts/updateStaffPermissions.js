@@ -92,7 +92,7 @@ function getRoleDefaults(role) {
     // Communication
     canViewCommunication: false, canCreateCommunication: false, canEditCommunication: false, canDeleteCommunication: false,
     // Accounting
-    canViewAccounting: false, canCreateAccounting: false, canEditAccounting: false, canDeleteAccounting: false, canReverseAccountingEntry: false,
+    canViewAccounting: false, canCreateAccounting: false, canEditAccounting: false, canDeleteAccounting: false, canReverseAccountingEntry: false, canViewChartOfAccounts: false, canCreateChartOfAccounts: false, canEditChartOfAccounts: false,
     // Payment Methods
     canUseCash: true, canUseMobileMoney: false, canUseBank: false, canUseCard: false,
     // Data Import

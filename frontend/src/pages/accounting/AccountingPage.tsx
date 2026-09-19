@@ -325,16 +325,20 @@ export default function AccountingPage() {
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
+  const canViewAccountingEntries = hasPermission('canViewAccounting')
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
   const canEditAccountingEntries = hasPermission('canEditAccounting')
   const canReverseAccountingEntries = hasPermission('canReverseAccountingEntry')
+  const canViewChartOfAccounts = hasPermission('canViewChartOfAccounts')
+  const canCreateChartOfAccounts = hasPermission('canCreateChartOfAccounts')
+  const canEditChartOfAccounts = hasPermission('canEditChartOfAccounts')
   const canSwitchBranches = user?.role === 'owner' || hasPermission('canViewBranch')
   const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('chart-of-accounts')
+  const [activeTab, setActiveTab] = useState(() => canViewChartOfAccounts ? 'chart-of-accounts' : canCreateAccountingEntries ? 'journal-entry' : 'journal-ledger')
 
   // Account modal
   const [showAccountModal, setShowAccountModal] = useState(false)
@@ -659,18 +663,18 @@ export default function AccountingPage() {
   }
 
   const handleCreateAccount = async () => {
-    if (editingAccount && !canEditAccountingEntries) {
+    if (editingAccount && !canEditChartOfAccounts) {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to edit accounting accounts',
-        description: 'Required permission: canEditAccounting',
+        description: 'Required permission: canEditChartOfAccounts',
       })
     }
-    if (!editingAccount && !canCreateAccountingEntries) {
+    if (!editingAccount && !canCreateChartOfAccounts) {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to create accounting accounts',
-        description: 'Required permission: canCreateAccounting',
+        description: 'Required permission: canCreateChartOfAccounts',
       })
     }
     if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
@@ -749,7 +753,7 @@ export default function AccountingPage() {
           >
             <Eye className="h-4 w-4" /> History
           </button>
-          {canEditAccountingEntries && (
+          {canEditChartOfAccounts && (
             <button
               type="button"
               className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
@@ -870,7 +874,7 @@ export default function AccountingPage() {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to post accounting entries',
-        description: 'Required permission: canCreateAccounting',
+        description: 'Required permission: canCreateChartOfAccounts',
       })
     }
     if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
@@ -933,7 +937,7 @@ export default function AccountingPage() {
       return toast({
         variant: 'destructive',
         title: 'You do not have permission to post accounting entries',
-        description: 'Required permission: canCreateAccounting',
+        description: 'Required permission: canCreateChartOfAccounts',
       })
     }
     const validLines = mjLines.filter(l => l.debitAccount && l.creditAccount && l.amount)
@@ -1153,18 +1157,18 @@ export default function AccountingPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid grid-cols-3 sm:grid-cols-5 h-auto w-full">
-          <TabsTrigger value="chart-of-accounts" className="text-xs sm:text-base font-medium"><Calculator className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Chart of Accounts</span><span className="sm:hidden">Accounts</span></TabsTrigger>
-          <TabsTrigger value="account-categories" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Categories</span><span className="sm:hidden">Cats</span></TabsTrigger>
+          {canViewChartOfAccounts && <TabsTrigger value="chart-of-accounts" className="text-xs sm:text-base font-medium"><Calculator className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Chart of Accounts</span><span className="sm:hidden">Accounts</span></TabsTrigger>}
+          {canViewChartOfAccounts && <TabsTrigger value="account-categories" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Categories</span><span className="sm:hidden">Cats</span></TabsTrigger>}
           {canCreateAccountingEntries && (
             <TabsTrigger value="journal-entry" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Register Entries</span><span className="sm:hidden">Entry</span></TabsTrigger>
           )}
-          <TabsTrigger value="journal-ledger" className="text-xs sm:text-base font-medium"><Scale className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Journal Ledger</span><span className="sm:hidden">Ledger</span></TabsTrigger>
-          <TabsTrigger value="tax-management" className="text-xs sm:text-base font-medium"><DollarSign className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Tax Management</span><span className="sm:hidden">Tax</span></TabsTrigger>
+          {canViewAccountingEntries && <TabsTrigger value="journal-ledger" className="text-xs sm:text-base font-medium"><Scale className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Journal Ledger</span><span className="sm:hidden">Ledger</span></TabsTrigger>}
+          {canViewAccountingEntries && <TabsTrigger value="tax-management" className="text-xs sm:text-base font-medium"><DollarSign className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Tax Management</span><span className="sm:hidden">Tax</span></TabsTrigger>}
         </TabsList>
 
         {/* ─── Chart of Accounts Tab ─── */}
         <TabsContent value="chart-of-accounts" className="space-y-4">
-          {canCreateAccountingEntries && (
+          {canCreateChartOfAccounts && (
             <div className="flex justify-end">
               <span ref={dropdownBtnRef} className="inline-block">
                 <Button onClick={() => setShowAccountDropdown(!showAccountDropdown)}>
@@ -1175,7 +1179,7 @@ export default function AccountingPage() {
             </div>
           )}
 
-          {canCreateAccountingEntries && showAccountDropdown && dropdownBtnRef.current && createPortal(
+          {canCreateChartOfAccounts && showAccountDropdown && dropdownBtnRef.current && createPortal(
             <>
               <div className="fixed inset-0 z-[100]" onClick={() => setShowAccountDropdown(false)} />
               <div

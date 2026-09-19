@@ -147,6 +147,9 @@ const PERMISSION_TO_FEATURES = {
   canEditAccounting: ['accounting'],
   canDeleteAccounting: ['accounting'],
   canReverseAccountingEntry: ['accounting'],
+  canViewChartOfAccounts: ['accounting'],
+  canCreateChartOfAccounts: ['accounting'],
+  canEditChartOfAccounts: ['accounting'],
   canViewTransactionAccount: ['accounting', 'expenses'],
   canUseAnyTransactionAccount: ['accounting', 'expenses'],
   canUseOtherCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
@@ -249,9 +252,9 @@ export const ALL_PERMISSION_KEYS = [
   // Communication
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   // Accounting
-  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting", "canReverseAccountingEntry",
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting", "canReverseAccountingEntry", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
   // Transaction Accounts & Cash Movements
-  "canViewTransactionAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
+  "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
   "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
   "canCreateTransactionAccount", "canEditTransactionAccount", "canDeleteTransactionAccount", "canCreateWithdrawal",
   // Payment Methods (for spending — expenses, payables)
@@ -879,6 +882,18 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Reverse accounting entries',
     description: 'Reverse posted expense journal entries using auditable opposite entries.',
   },
+  canViewChartOfAccounts: {
+    name: 'View chart of accounts',
+    description: 'View account categories, ledger accounts, balances, and account history.',
+  },
+  canCreateChartOfAccounts: {
+    name: 'Create chart of accounts',
+    description: 'Create ledger accounts and account categories.',
+  },
+  canEditChartOfAccounts: {
+    name: 'Edit chart of accounts',
+    description: 'Edit or deactivate ledger accounts and account categories.',
+  },
   canViewTransactionAccount: {
     name: 'View transaction accounts',
     description: 'Open cash, safe, bank, mobile money, and card transaction account balances.',
@@ -986,7 +1001,8 @@ function permissionCategoryForKey(key) {
   if (key.includes('Manufacturing')) return 'manufacturing';
   if (key.includes('Agriculture')) return 'agriculture';
   if (key.includes('Communication')) return 'communication';
-  if (key.includes('Accounting')) return 'accounting';
+  if (key.includes('TransactionAccount') || key === 'canUseOtherCashAccount') return 'transactions';
+  if (key.includes('Accounting') || key.includes('ChartOfAccounts')) return 'accounting';
   return 'settings';
 }
 

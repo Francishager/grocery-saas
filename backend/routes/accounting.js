@@ -253,7 +253,7 @@ async function ensureTransactionAccounts(tenantId, client = prisma) {
 }
 
 // List accounts (chart of accounts)
-router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
+router.get("/accounts", authenticateToken, requireAnyPermission(["canViewAccounting", "canCreateAccounting", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts"]), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     await ensureTransactionAccounts(tenantId);
@@ -274,7 +274,7 @@ router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"
 });
 
 // Create account
-router.post("/accounts", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
+router.post("/accounts", authenticateToken, requirePermission("canCreateChartOfAccounts"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { code, name, type, subType, parentId, parentCode, parentName, description, branchId } = req.body;
@@ -313,7 +313,7 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
 });
 
 // Update account
-router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
+router.put("/accounts/:id", authenticateToken, requirePermission("canEditChartOfAccounts"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { name, type, subType, parentId, description, isActive, branchId } = req.body;
@@ -335,7 +335,7 @@ router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccount
 });
 
 // Chart of Accounts records are part of the accounting audit structure and must be retained.
-router.delete("/accounts/:id", authenticateToken, requirePermission("canDeleteAccounting"), requireFeature("accounting"), async (req, res) => {
+router.delete("/accounts/:id", authenticateToken, requirePermission("canEditChartOfAccounts"), requireFeature("accounting"), async (req, res) => {
   return res.status(400).json({
     error: "Chart of Accounts records cannot be deleted. Deactivate the account if it should no longer be used.",
   });
