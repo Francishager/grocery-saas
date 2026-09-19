@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { exportToExcel, exportToPDF, printReport, type BusinessInfo } from '@/lib/exportUtils'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -1884,7 +1885,10 @@ export default function ReportsPage() {
     ;(async () => {
       try {
         const branches = await branchesApi.active()
-        if (!cancelled) setBranchList(branches)
+        if (!cancelled) {
+          setBranchList(branches)
+          if (user?.role !== 'owner') setSelectedBranchId(current => current || defaultBranchId(user, branches))
+        }
       } catch { /* ignore */ }
     })()
     return () => { cancelled = true }

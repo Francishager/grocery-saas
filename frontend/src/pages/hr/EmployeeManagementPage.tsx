@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { apiFetch } from '@/lib/api'
 import { HRTable, HRColumn } from '@/components/hr/HRTable'
 import { Input } from '@/components/ui/input'
@@ -206,6 +208,7 @@ const initialFormData = () => ({
 
 export default function EmployeeManagementPage() {
   const { toast } = useToast()
+  const { user } = useJWTAuth()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [positions, setPositions] = useState<Position[]>([])
@@ -450,7 +453,7 @@ export default function EmployeeManagementPage() {
         apiFetch('/api/hr/employees?take=500'),
         apiFetch('/api/hr/departments?take=500'),
         apiFetch('/api/hr/positions?take=500'),
-        apiFetch('/api/branches?status=active'),
+        apiFetch('/api/branches/options'),
         apiFetch('/api/hr/units?take=500'),
         apiFetch('/api/hr/teams?take=500'),
       ])
@@ -508,7 +511,7 @@ export default function EmployeeManagementPage() {
 
   const handleAdd = () => {
     setEditingId(null)
-    setFormData(initialFormData())
+    setFormData({ ...initialFormData(), branchId: defaultBranchId(user, branches) })
     setProfilePhotoFile(null)
     setProfilePhotoPreview('')
     setFormError('')

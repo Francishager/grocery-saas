@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalBranches } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
@@ -266,14 +267,8 @@ export default function InventoryPage() {
   }, [lockedType, itemTypeFilter])
 
   useEffect(() => {
-    if (canManageInventory) {
-      loadBranches()
-      return
-    }
-
-    setBranches([])
-    setBranchFilter('')
-  }, [canManageInventory])
+    loadBranches()
+  }, [user?.id])
 
   useEffect(() => {
     loadInventory()
@@ -315,6 +310,7 @@ export default function InventoryPage() {
       if (online) {
         const data = await branchesApi.active()
         setBranches(data)
+        if (user?.role !== 'owner') setBranchFilter(current => current || defaultBranchId(user, data))
       } else {
         const local = await getLocalBranches()
         setBranches(local as any)
@@ -343,7 +339,7 @@ export default function InventoryPage() {
       if (online) {
         const data = await inventoryApi.listWithDailyMovements(
           appliedSearch,
-          canManageInventory ? branchFilter : undefined,
+          branchFilter || undefined,
           typeFilter,
           movementParams
         )
@@ -352,7 +348,7 @@ export default function InventoryPage() {
         setMovementItems(Array.isArray(data?.movementProducts) ? data.movementProducts : data?.products || [])
         setMovementSummary({ ...emptyMovementSummary, ...(data?.movementSummary || {}) })
       } else {
-        const local = await getLocalProducts(appliedSearch, canManageInventory ? branchFilter : undefined, typeFilter)
+        const local = await getLocalProducts(appliedSearch, branchFilter || undefined, typeFilter)
         if (requestId !== inventoryRequestRef.current) return
         setItems(local)
         setMovementItems(local)
@@ -646,7 +642,7 @@ export default function InventoryPage() {
     setFormData({
       ...initialFormData,
       itemType: lockedType || 'product',
-      branchId: branches.length === 1 ? branches[0].id : '',
+      branchId: defaultBranchId(user, branches),
     })
     setSellingUnits([])
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
@@ -954,7 +950,7 @@ export default function InventoryPage() {
           </button>
         </div>
         )}
-        {canManageInventory && branches.length > 1 && (
+        {branches.length > 0 && (
           <select
             value={branchFilter}
             onChange={(event) => setBranchFilter(event.target.value)}
@@ -1431,7 +1427,7 @@ export default function InventoryPage() {
                     <th className="pb-3 pr-4 font-medium whitespace-nowrap">SKU</th>
                     <th className="pb-3 pr-4 font-medium whitespace-nowrap">Name</th>
                     <th className="pb-3 pr-4 font-medium whitespace-nowrap">Category</th>
-                    {canManageInventory && <th className="pb-3 pr-4 font-medium whitespace-nowrap">Branch</th>}
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Branch</th>
                     <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Opening Stock</th>
                     <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Stock In</th>
                     <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Sold Today</th>
@@ -1473,11 +1469,9 @@ export default function InventoryPage() {
                       <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
                       </td>
-                      {canManageInventory && (
                         <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
                         </td>
-                      )}
                       <td className="py-3 pr-4 text-right tabular-nums whitespace-nowrap">{formatQty(movement.openingStock)}</td>
                       <td className="py-3 pr-4 text-right whitespace-nowrap">
                         <button
@@ -1723,12 +1717,10 @@ export default function InventoryPage() {
                         <span className="text-muted-foreground">Category: </span>
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
                       </div>
-                      {canManageInventory && (
                         <div>
                           <span className="text-muted-foreground">Branch: </span>
                           {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
                         </div>
-                      )}
                       <div>
                         <span className="text-muted-foreground">Qty: </span>
                         <span className={item.quantity <= item.low_stock_alert ? 'text-orange-600 font-bold' : ''}>

@@ -855,7 +855,7 @@ export const tenantsApi = {
 // Branch endpoints
 export const branchesApi = {
   active: async () => {
-    const data = await api.get<any>('/api/branches/active')
+    const data = await api.get<any>('/api/branches/options')
     return (Array.isArray(data?.branches) ? data.branches : Array.isArray(data) ? data : []) as BranchOption[]
   },
   list: async () => {

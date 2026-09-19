@@ -111,6 +111,24 @@ router.get(
   }
 );
 
+// Operational forms need branch names without granting branch administration access.
+router.get('/options', authenticateToken, requireTenantUser, async (req, res) => {
+  try {
+    if (req.user.role === 'owner') {
+      const branches = await prisma.branch.findMany({ where: { tenantId: req.tenantId, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+      return res.json({ branches });
+    }
+    const assignments = await prisma.userBranch.findMany({
+      where: { userId: req.user.id, branch: { tenantId: req.tenantId, isActive: true } },
+      include: { branch: { select: { id: true, name: true } } },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    });
+    res.json({ branches: assignments.map(assignment => ({ ...assignment.branch, isPrimary: assignment.isPrimary })) });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load assigned branches' });
+  }
+});
+
 router.get(
   "/:id",
   authenticateToken,

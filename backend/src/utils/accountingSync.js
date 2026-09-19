@@ -115,6 +115,7 @@ export async function ensureTransactionAccounts(prismaClient, tenantId) {
         where: { id: existing.id },
         data: {
           name: cashAccount.name,
+          branchId: cashAccount.branchId || existing.branchId || null,
           type: 'asset',
           subType,
           balance: cashAccount.balance,
@@ -136,6 +137,7 @@ export async function ensureTransactionAccounts(prismaClient, tenantId) {
         tenantId,
         code,
         name: cashAccount.name,
+        branchId: cashAccount.branchId || null,
         type: 'asset',
         subType,
         balance: cashAccount.balance,

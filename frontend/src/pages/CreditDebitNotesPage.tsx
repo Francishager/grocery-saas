@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { creditNotesApi, debitNotesApi, apiFetch, branchesApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Search, FileText, Pencil, Ban, Loader2, ArrowDownCircle, ArrowUpCircle } from 'lucide-react'
@@ -85,6 +87,7 @@ const saleNetLineFactor = (row: any) => {
 
 export default function CreditDebitNotesPage({ initialTab }: { initialTab?: NoteType }) {
   const { toast } = useToast()
+  const { user } = useJWTAuth()
   const [activeTab, setActiveTab] = useState<NoteType>(initialTab || 'credit')
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
@@ -170,7 +173,10 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   }, [fetchNotes])
 
   useEffect(() => {
-    branchesApi.active().then(setBranches).catch(() => {})
+    branchesApi.active().then(data => {
+      setBranches(data)
+      setBranchId(current => current || defaultBranchId(user, data))
+    }).catch(() => {})
   }, [])
 
   const fetchLinkedDocs = useCallback(async () => {
@@ -239,7 +245,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
     setAmount('')
     setReason(nextReason)
     setNotesField('')
-    setBranchId('')
+    setBranchId(defaultBranchId(user, branches))
     setLinkedDocId('')
     setLinkedDocs([])
     setReturnItems([])

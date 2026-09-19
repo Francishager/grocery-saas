@@ -9,6 +9,8 @@ import { apiFetch } from '@/lib/api'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalBranches } from '@/db/hybrid'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { Users, Search, Wallet, TrendingUp, TrendingDown, ChevronDown, ChevronRight, Info, Receipt } from 'lucide-react'
 
 interface CashTransaction {
@@ -46,13 +48,14 @@ const DEBIT_TXN_TYPES = new Set(['expense', 'payment', 'transfer', 'journal_out'
 
 export default function StaffTillSheetPage() {
   const { toast } = useToast()
+  const { user } = useJWTAuth()
   const online = useOnlineStatus()
   const [tillSheets, setTillSheets] = useState<StaffTill[]>([])
   const [summary, setSummary] = useState({ totalStaff: 0, totalCredited: 0, totalDebited: 0, totalBalance: 0 })
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterBranch, setFilterBranch] = useState('')
+  const [filterBranch, setFilterBranch] = useState(defaultBranchId(user))
   const [filterStaff, setFilterStaff] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -85,10 +88,12 @@ export default function StaffTillSheetPage() {
   const fetchBranches = async () => {
     try {
       if (online) {
-        const res = await apiFetch('/api/branches')
+        const res = await apiFetch('/api/branches/options')
         if (res.ok) {
           const data = await res.json()
-          setBranches(data.branches || data || [])
+          const options = data.branches || data || []
+          setBranches(options)
+          if (user?.role !== 'owner') setFilterBranch(current => current || defaultBranchId(user, options))
         }
       } else {
         setBranches(await getLocalBranches())

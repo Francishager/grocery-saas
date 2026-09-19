@@ -211,6 +211,7 @@ async function ensureTransactionAccounts(tenantId, client = prisma) {
         where: { id: existing.id },
         data: {
           name: cashAccount.name,
+          branchId: cashAccount.branchId || existing.branchId || null,
           type: "asset",
           subType,
           balance: cashAccount.balance,
@@ -232,6 +233,7 @@ async function ensureTransactionAccounts(tenantId, client = prisma) {
         tenantId,
         code,
         name: cashAccount.name,
+        branchId: cashAccount.branchId || null,
         type: "asset",
         subType,
         balance: cashAccount.balance,
@@ -262,6 +264,7 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { code, name, type, subType, parentId, parentCode, parentName, description, branchId } = req.body;
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     if (!code || !name || !type) return res.status(400).json({ error: "code, name, type required" });
 
     let resolvedParentId = parentId || null;
@@ -278,7 +281,7 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
             type,
             subType: 'category',
             description: `Category ${parentName || parentCode}`,
-            branchId: branchId || null,
+            branchId: scope.branchId || null,
           },
         });
       }
@@ -286,12 +289,12 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
     }
 
     const account = await prisma.account.create({
-      data: { tenantId, code, name, type, subType, parentId: resolvedParentId, description, branchId: branchId || null },
+      data: { tenantId, code, name, type, subType, parentId: resolvedParentId, description, branchId: scope.branchId || null },
     });
     res.status(201).json(account);
   } catch (err) {
     if (err.code === "P2002") return res.status(409).json({ error: "Account code already exists" });
-    res.status(500).json({ error: "Failed to create account" });
+    handleBranchError(res, err, "Failed to create account");
   }
 });
 
@@ -300,13 +303,14 @@ router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccount
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { name, type, subType, parentId, description, isActive, branchId } = req.body;
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const account = await prisma.account.update({
-      where: { id: req.params.id },
-      data: { name, type, subType, parentId, description, isActive, branchId: branchId ?? undefined },
+      where: { id: req.params.id, tenantId },
+      data: { name, type, subType, parentId, description, isActive, branchId: scope.branchId || (branchId === undefined ? undefined : null) },
     });
     res.json(account);
   } catch (err) {
-    res.status(500).json({ error: "Failed to update account" });
+    handleBranchError(res, err, "Failed to update account");
   }
 });
 
@@ -465,6 +469,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { date, description, reference, lines = [], branchId, action, paymentMethod, paymentAccountId } = req.body;
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const normalizedAction = normalizeValue(action);
     const requestedPaymentMethod = normalizeValue(paymentMethod);
 
@@ -569,7 +574,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
         data: {
           entryNo,
           tenantId,
-          branchId: branchId || null,
+          branchId: scope.branchId || null,
           date: date ? new Date(date) : new Date(),
           description,
           reference,

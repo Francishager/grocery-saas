@@ -13,6 +13,7 @@ import { cacheTenantFormattingSettings, getTenantCurrency } from '@/lib/utils'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalCashAccounts, getLocalBranches } from '@/db/hybrid'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { Wallet, Landmark, Shield, Smartphone, Plus, Edit, Trash2 } from 'lucide-react'
 
 interface CashAccount {
@@ -83,7 +84,7 @@ export default function TransactionAccountsPage() {
     network: '',
     balance: '0',
     currency: tenantCurrency,
-    branchId: '',
+    branchId: defaultBranchId(user),
     assignedStaffId: '',
     depletionAlertThreshold: '',
   })
@@ -106,7 +107,7 @@ export default function TransactionAccountsPage() {
   const fetchBranches = async () => {
     try {
       if (online) {
-        const res = await apiFetch('/api/branches')
+        const res = await apiFetch('/api/branches/options')
         if (res.ok) {
           const data = await res.json()
           setBranches(data.branches || data || [])
@@ -142,10 +143,11 @@ export default function TransactionAccountsPage() {
         }
       }
     }).catch(() => {})
-    if (user?.branchId && !hasPermission('canViewBranch')) {
-      setForm(f => ({ ...f, branchId: user.branchId! }))
-    }
   }, [])
+
+  useEffect(() => {
+    if (!editingAccount) setForm(current => ({ ...current, branchId: current.branchId || defaultBranchId(user, branches) }))
+  }, [user?.branchId, branches, editingAccount])
 
   const bankAccounts = accounts.filter(a => a.type === 'bank')
   const cashAccounts = accounts.filter(a => a.type === 'cash')
@@ -235,7 +237,7 @@ export default function TransactionAccountsPage() {
         toast({ title: editingAccount ? 'Account updated' : 'Account created' })
         setShowModal(false)
         setEditingAccount(null)
-        setForm({ name: '', type: form.type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
+        setForm({ name: '', type: form.type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: defaultBranchId(user, branches), assignedStaffId: '', depletionAlertThreshold: '' })
         fetchAccounts()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -279,7 +281,7 @@ export default function TransactionAccountsPage() {
       return
     }
     setEditingAccount(null)
-    setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: user?.branchId && !hasPermission('canViewBranch') ? user.branchId : '', assignedStaffId: '', depletionAlertThreshold: '' })
+    setForm({ name: '', type, accountNumber: '', bankName: '', phoneNumber: '', mobileMoneyName: '', network: '', balance: '0', currency: form.currency || getTenantCurrency(), branchId: defaultBranchId(user, branches), assignedStaffId: '', depletionAlertThreshold: '' })
     setShowModal(true)
   }
 
@@ -459,7 +461,7 @@ export default function TransactionAccountsPage() {
                 </div>
                 <div>
                   <Label>Branch <span className="text-red-500">*</span></Label>
-                  {hasPermission('canViewBranch') ? (
+                  {branches.length > 1 ? (
                     <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
                       <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                       <SelectContent>
@@ -468,7 +470,7 @@ export default function TransactionAccountsPage() {
                     </Select>
                   ) : (
                     <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
-                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                      {branches.find(b => b.id === form.branchId)?.name || 'No branch assigned'}
                     </div>
                   )}
                 </div>
@@ -493,7 +495,7 @@ export default function TransactionAccountsPage() {
                 </div>
                 <div>
                   <Label>Branch <span className="text-red-500">*</span></Label>
-                  {hasPermission('canViewBranch') ? (
+                  {branches.length > 1 ? (
                     <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
                       <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                       <SelectContent>
@@ -502,7 +504,7 @@ export default function TransactionAccountsPage() {
                     </Select>
                   ) : (
                     <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
-                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                      {branches.find(b => b.id === form.branchId)?.name || 'No branch assigned'}
                     </div>
                   )}
                 </div>
@@ -542,7 +544,7 @@ export default function TransactionAccountsPage() {
                 </div>
                 <div>
                   <Label>Branch <span className="text-red-500">*</span></Label>
-                  {hasPermission('canViewBranch') ? (
+                  {branches.length > 1 ? (
                     <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
                       <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                       <SelectContent>
@@ -551,7 +553,7 @@ export default function TransactionAccountsPage() {
                     </Select>
                   ) : (
                     <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
-                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                      {branches.find(b => b.id === form.branchId)?.name || 'No branch assigned'}
                     </div>
                   )}
                 </div>
@@ -593,7 +595,7 @@ export default function TransactionAccountsPage() {
                 </div>
                 <div>
                   <Label>Branch <span className="text-red-500">*</span></Label>
-                  {hasPermission('canViewBranch') ? (
+                  {branches.length > 1 ? (
                     <Select value={form.branchId} onValueChange={(v) => setForm({ ...form, branchId: v })}>
                       <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                       <SelectContent>
@@ -602,7 +604,7 @@ export default function TransactionAccountsPage() {
                     </Select>
                   ) : (
                     <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
-                      {branches.find(b => b.id === form.branchId)?.name || 'Default branch'}
+                      {branches.find(b => b.id === form.branchId)?.name || 'No branch assigned'}
                     </div>
                   )}
                 </div>

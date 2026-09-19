@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer, MoreVertical, RotateCcw, Eye, Edit } from 'lucide-react'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
@@ -434,7 +435,7 @@ export default function AccountingPage() {
   const fetchBranches = async () => {
     try {
       if (online) {
-        const res = await apiFetch('/api/branches')
+        const res = await apiFetch('/api/branches/options')
         if (res.ok) {
           const data = await res.json()
           setBranches(data.branches || data || [])
@@ -558,9 +559,6 @@ export default function AccountingPage() {
   )
 
   useEffect(() => {
-    if (user?.branchId && !hasPermission('canViewBranch')) {
-      setAccBranch(user.branchId)
-    }
     apiFetch('/api/settings/tax-config').then(async (res) => {
       if (res.ok) {
         const data = await res.json()
@@ -573,6 +571,13 @@ export default function AccountingPage() {
       }
     }).catch(() => {})
   }, [user, hasPermission])
+
+  useEffect(() => {
+    const branch = defaultBranchId(user, branches)
+    if (!editingAccount) setAccBranch(current => current || branch)
+    setJeBranch(current => current || branch)
+    setTaxForm(current => ({ ...current, branch: current.branch || branch }))
+  }, [user?.branchId, branches, editingAccount])
 
   useEffect(() => {
     fetchAccounts()
@@ -627,7 +632,7 @@ export default function AccountingPage() {
     setAccSubType('')
     setAccDescription('')
     setAccCategory('')
-    setAccBranch('')
+    setAccBranch(defaultBranchId(user, branches))
     setBranchSearch('')
     setEditingAccount(null)
   }
@@ -973,6 +978,7 @@ export default function AccountingPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             date: line.date,
+            branchId: jeBranch || undefined,
             description: line.description,
             lines: [
               { accountId: line.debitAccount, debit: amount, credit: 0 },
@@ -1005,7 +1011,7 @@ export default function AccountingPage() {
       if (res.ok) {
         toast({ title: 'Tax payment saved' })
         setShowTaxModal(false)
-        setTaxForm({ branch: '', amount: '', currency: getTenantCurrency(), from: '', to: '', prn: '', paymentMethod: 'cash', dateOfPayment: new Date().toISOString().split('T')[0] })
+        setTaxForm({ branch: defaultBranchId(user, branches), amount: '', currency: getTenantCurrency(), from: '', to: '', prn: '', paymentMethod: 'cash', dateOfPayment: new Date().toISOString().split('T')[0] })
         fetchTaxPayments()
       } else {
         const data = await res.json()
@@ -1233,7 +1239,7 @@ export default function AccountingPage() {
                   </div>
                   <div>
                     <Label>Branch</Label>
-                    {hasPermission('canViewBranch') ? (
+                    {branches.length > 1 ? (
                       <Select value={accBranch} onValueChange={setAccBranch}>
                         <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                         <SelectContent>
@@ -1252,7 +1258,7 @@ export default function AccountingPage() {
                       </Select>
                     ) : (
                       <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
-                        {branches.find(b => b.id === accBranch)?.name || 'Default branch'}
+                        {branches.find(b => b.id === accBranch)?.name || 'No branch assigned'}
                       </div>
                     )}
                   </div>
@@ -1696,6 +1702,13 @@ export default function AccountingPage() {
           {/* Multiple General Journal Form */}
           {jeSubForm === 'multiple' && (
             <div className="space-y-3">
+              <div className="max-w-sm space-y-2">
+                <Label>Branch</Label>
+                <Select value={jeBranch} onValueChange={setJeBranch}>
+                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                  <SelectContent>{branches.map(branch => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
               <div className="flex justify-end">
                 <Button size="sm" variant="outline" onClick={() => setMjLines([...mjLines, { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' }])}>
                   <Plus className="h-3 w-3 mr-1" /> Add Line

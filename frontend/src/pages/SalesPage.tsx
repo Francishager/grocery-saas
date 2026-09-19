@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
+import { branchesApi, type BranchOption } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import ReceiptViewer from '@/components/ReceiptViewer'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
@@ -91,7 +93,10 @@ interface CustomerCreditInfo {
 export default function SalesPage() {
   const { hasPermission, user } = useJWTAuth()
   const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [branches, setBranches] = useState<BranchOption[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const inventoryRequestRef = useRef(0)
+  const productSearchRef = useRef<HTMLInputElement>(null)
   const [cart, setCart] = useState<CartItem[]>([])
   const [paymentMode, setPaymentMode] = useState('cash')
   const [mobileProvider, setMobileProvider] = useState('')
@@ -130,11 +135,11 @@ export default function SalesPage() {
   const online = useOnlineStatus()
 
   useEffect(() => {
-    loadInventory()
     loadRecentSales()
     loadTaxConfig()
     loadBusinessSettings()
     loadCustomers()
+    branchesApi.active().then(setBranches).catch(() => {})
   }, [])
 
   const filteredCategories = useMemo(() => {
@@ -153,27 +158,42 @@ export default function SalesPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const loadInventory = async () => {
+  const loadInventory = async (query = searchQuery) => {
+    const requestId = ++inventoryRequestRef.current
     setLoading(true)
     try {
       if (online) {
-        const data = await inventoryApi.list(searchQuery)
-        setInventory(data)
+        const data = await inventoryApi.list(query)
+        if (requestId === inventoryRequestRef.current) setInventory(data)
       } else {
-        const local = await getLocalProducts(searchQuery)
-        setInventory(local)
+        const local = await getLocalProducts(query)
+        if (requestId === inventoryRequestRef.current) setInventory(local)
       }
     } catch (error: any) {
       // API failed — fall back to local
       try {
-        const local = await getLocalProducts(searchQuery)
-        setInventory(local)
+        const local = await getLocalProducts(query)
+        if (requestId === inventoryRequestRef.current) setInventory(local)
       } catch {
         toast({ variant: 'destructive', title: 'Failed to load inventory', description: error.message })
       }
     } finally {
-      setLoading(false)
+      if (requestId === inventoryRequestRef.current) setLoading(false)
     }
+  }
+
+  useEffect(() => {
+    ++inventoryRequestRef.current
+    setCurrentPage(1)
+    const timer = setTimeout(() => { void loadInventory(searchQuery.trim()) }, 200)
+    return () => { clearTimeout(timer); ++inventoryRequestRef.current }
+  }, [searchQuery, online, user?.branchId])
+
+  const resetProductSearch = () => {
+    setSearchQuery('')
+    setCurrentPage(1)
+    void loadInventory('')
+    productSearchRef.current?.focus()
   }
 
   const handleSearch = (e: React.FormEvent) => {
@@ -508,7 +528,7 @@ export default function SalesPage() {
         setPhoneNumber('')
         setTransactionId('')
         loadRecentSales()
-        loadInventory()
+        resetProductSearch()
         void autoPrintReceipt(saleId, receiptNo, browserPrintWindow)
       } catch (error: any) {
         browserPrintWindow?.close()
@@ -540,7 +560,7 @@ export default function SalesPage() {
       setTransactionId('')
       if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo, browserPrintWindow)
       loadRecentSales()
-      loadInventory()
+      resetProductSearch()
     } catch (error: any) {
       browserPrintWindow?.close()
       toast({
@@ -576,9 +596,7 @@ export default function SalesPage() {
     }
   }
 
-  const filteredInventory = inventory.filter((item) =>
-    item.product_name.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredInventory = inventory
 
   const canEditItem = (item: InventoryItem) => {
     const itemType = (item as any).itemType || 'product'
@@ -644,6 +662,9 @@ export default function SalesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Sales</h1>
+        {branches.find(branch => branch.id === defaultBranchId(user, branches)) && (
+          <p className="text-sm font-medium">Branch: {branches.find(branch => branch.id === defaultBranchId(user, branches))?.name}</p>
+        )}
         <p className="text-muted-foreground">
           Process sales and manage transactions
         </p>
@@ -663,6 +684,8 @@ export default function SalesPage() {
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     placeholder="Search products..."
+                    ref={productSearchRef}
+                    aria-label="Search products"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9"

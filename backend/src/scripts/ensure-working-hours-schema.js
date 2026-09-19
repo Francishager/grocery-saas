@@ -20,7 +20,7 @@ try {
   }
   await prisma.$transaction(async tx => {
     await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '15s'");
-    for (const migration of ['20260913120000_advisor_memory', '20260913150000_advisor_creative_tools']) {
+    for (const migration of ['20260913120000_advisor_memory', '20260913150000_advisor_creative_tools', '20260920120000_cash_account_branch']) {
       const sql = await readFile(new URL(`../../prisma/migrations/${migration}/migration.sql`, import.meta.url), 'utf8');
       for (const statement of sql.split(';').map(value => value.trim()).filter(Boolean)) await tx.$executeRawUnsafe(statement);
     }

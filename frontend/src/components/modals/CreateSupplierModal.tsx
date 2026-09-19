@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch, branchesApi, type BranchOption } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 
 interface Supplier {
   id: string
@@ -82,7 +83,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
       openingBalance: initialData?.openingBalance ?? 0,
       openingBalanceDate: initialData?.openingBalanceDate ? String(initialData.openingBalanceDate).slice(0, 10) : todayInputDate(),
       openingBalanceNote: initialData?.openingBalanceNote || '',
-      branchId: initialData?.branchId || initialData?.branch?.id || '',
+      branchId: initialData?.branchId || initialData?.branch?.id || defaultBranchId(user, branches),
     })
   }, [isOpen, initialData])
 
@@ -95,9 +96,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
     branchesApi.active()
       .then((data) => {
         setBranches(data)
-        if (data.length === 1) {
-          setFormData((prev) => ({ ...prev, branchId: prev.branchId || data[0].id }))
-        }
+        setFormData((prev) => ({ ...prev, branchId: prev.branchId || defaultBranchId(user, data) }))
       })
       .catch((error) => {
         console.error('Failed to load branches:', error)
@@ -182,7 +181,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
         openingBalanceDate: todayInputDate(),
         openingBalanceNote: '',
         notes: '',
-        branchId: branches.length === 1 ? branches[0].id : '',
+        branchId: defaultBranchId(user, branches),
       })
     } catch (error) {
       toast({

@@ -22,6 +22,7 @@ model Branch {
   users                UserBranch[]
   products             Product[]
   accounts             Account[]
+  cashAccounts         CashAccount[]
   sales                Sale[]
   purchases            Purchase[]
   customers            Customer[]
@@ -1481,6 +1482,8 @@ model Expense {
 model CashAccount {
   id              String            @id @default(cuid())
   tenantId        String
+  branchId        String?
+  branch          Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   name            String // "Cash Box", "MTN Mobile Money", "Stanbic Bank"
   type            String // cash, mobile_money, bank, card
   accountNumber   String? // Phone number for mobile money, account number for bank
@@ -1500,6 +1503,7 @@ model CashAccount {
 
   @@unique([tenantId, name])
   @@map("cash_accounts")
+  @@index([tenantId, branchId])
 }
 
 model CashTransaction {

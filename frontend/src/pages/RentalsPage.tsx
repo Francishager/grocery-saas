@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalRentals, getLocalBranches, getLocalProducts, getLocalSettings } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
@@ -91,7 +92,7 @@ export default function RentalsPage() {
   const [returnDepositStatus, setReturnDepositStatus] = useState('refunded')
 
   const { toast } = useToast()
-  const { hasPermission } = useJWTAuth()
+  const { hasPermission, user } = useJWTAuth()
   const online = useOnlineStatus()
   const canCreateRental = hasPermission('canCreateRental')
   const canProcessReturn = hasPermission('canProcessRentalReturn')
@@ -144,11 +145,11 @@ export default function RentalsPage() {
       if (online) {
         const data = await branchesApi.active()
         setBranches(data || [])
-        if (data.length === 1) setBranchId(data[0].id)
+        setBranchId(current => current || defaultBranchId(user, data))
       } else {
         const local = await getLocalBranches()
         setBranches(local as any)
-        if (local.length === 1) setBranchId(local[0].id)
+        setBranchId(current => current || defaultBranchId(user, local))
       }
     } catch (err: any) {
       try {
@@ -666,7 +667,7 @@ export default function RentalsPage() {
               </div>
 
               {/* Branch */}
-              {branches.length > 1 && (
+              {branches.length > 0 && (
                 <div className="space-y-2">
                   <Label htmlFor="branchId">Branch</Label>
                   <select

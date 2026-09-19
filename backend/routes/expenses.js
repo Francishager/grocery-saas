@@ -450,6 +450,7 @@ router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyP
       },
       orderBy: { name: 'asc' },
       include: {
+        branch: { select: { id: true, name: true } },
         AssignedUsers: {
           where: { isActive: true },
           select: {
@@ -499,8 +500,8 @@ router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyP
         updatedAt: account.updatedAt,
 
         // Derived fields for UI
-        branchId: primaryBranch?.id || null,
-        branch: primaryBranch,
+        branchId: account.branchId || primaryBranch?.id || null,
+        branch: account.branch || primaryBranch,
         assignedStaffId: staff?.id || null,
         assignedStaff: staff
           ? {
@@ -567,11 +568,16 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateTra
       return res.status(400).json({ error: 'Account with this name already exists' })
     }
 
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    if (assignedStaffId && !await prisma.user.findFirst({ where: { id: assignedStaffId, tenantId: req.tenant.id, isActive: true } })) {
+      return res.status(400).json({ error: 'Invalid staff selected for this cash account' })
+    }
     const balanceValue = toMoney(balance, 0)
 
     const account = await prisma.cashAccount.create({
       data: {
         tenantId: req.tenant.id,
+        branchId: scope.branchId,
         name,
         type,
         currency: resolvedCurrency,
@@ -601,7 +607,7 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateTra
     res.status(201).json(account)
   } catch (error) {
     console.error('Create cash account error:', error)
-    res.status(500).json({ error: 'Failed to create cash account' })
+    handleBranchError(res, error, 'Failed to create cash account')
   }
 })
 
@@ -655,12 +661,17 @@ router.put('/cash-accounts/:id', authenticateToken, requirePermission('canEditTr
       return res.status(400).json({ error: 'Account with this name already exists' })
     }
 
+    const scope = await resolveBranchScope(prisma, { ...req, body: { ...req.body, branchId: branchId || existing.branchId } }, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    if (assignedStaffId && !await prisma.user.findFirst({ where: { id: assignedStaffId, tenantId: req.tenant.id, isActive: true } })) {
+      return res.status(400).json({ error: 'Invalid staff selected for this cash account' })
+    }
     const balanceValue = balance !== undefined ? toMoney(balance, existing.balance) : existing.balance
     const resolvedCurrency = normalizeCurrency(currency || existing.currency || await tenantCurrency(req.tenant.id))
 
     const account = await prisma.cashAccount.update({
       where: { id },
       data: {
+        branchId: scope.branchId,
         name,
         type,
         currency: resolvedCurrency,
@@ -691,7 +702,7 @@ router.put('/cash-accounts/:id', authenticateToken, requirePermission('canEditTr
     res.json(account)
   } catch (error) {
     console.error('Update cash account error:', error)
-    res.status(500).json({ error: 'Failed to update cash account' })
+    handleBranchError(res, error, 'Failed to update cash account')
   }
 })
 
