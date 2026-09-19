@@ -98,6 +98,15 @@ const hasRequestPermission = (req, permission) => {
   return permissions.includes("*") || permissions.includes(permission);
 };
 
+const canSwitchAccountingBranch = (req) => req.user?.role === "owner" || hasRequestPermission(req, "canViewBranch");
+
+const accountingBranchRequest = (req, source = "query") => {
+  if (canSwitchAccountingBranch(req)) return req;
+  if (source === "body") return { ...req, body: { ...req.body, branchId: null, branch_id: null } };
+  if (source === "params") return { ...req, params: { ...req.params, branchId: null, branch_id: null } };
+  return { ...req, query: { ...req.query, branchId: null, branch_id: null } };
+};
+
 async function requestUserCashAccountId(req) {
   if (req.userCashAccountId) return req.userCashAccountId;
   if (req.user?.cashAccountId) return req.user.cashAccountId;
@@ -248,9 +257,14 @@ router.get("/accounts", authenticateToken, requirePermission("canViewAccounting"
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     await ensureTransactionAccounts(tenantId);
+    const branchSelect = { id: true, name: true };
     const accounts = await prisma.account.findMany({
       where: { tenantId },
-      include: { parent: true, children: true },
+      include: {
+        parent: true,
+        branch: { select: branchSelect },
+        children: { include: { branch: { select: branchSelect } } },
+      },
       orderBy: { code: "asc" },
     });
     res.json(accounts);
@@ -264,7 +278,7 @@ router.post("/accounts", authenticateToken, requirePermission("canCreateAccounti
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { code, name, type, subType, parentId, parentCode, parentName, description, branchId } = req.body;
-    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "body"), { source: "body", allowOwnerAll: true });
     if (!code || !name || !type) return res.status(400).json({ error: "code, name, type required" });
 
     let resolvedParentId = parentId || null;
@@ -303,9 +317,15 @@ router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccount
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { name, type, subType, parentId, description, isActive, branchId } = req.body;
-    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
-    const account = await prisma.account.update({
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "body"), { source: "body", allowOwnerAll: true });
+    const existing = await prisma.account.findFirst({
       where: { id: req.params.id, tenantId },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ error: "Account not found" });
+
+    const account = await prisma.account.update({
+      where: { id: existing.id },
       data: { name, type, subType, parentId, description, isActive, branchId: scope.branchId || (branchId === undefined ? undefined : null) },
     });
     res.json(account);
@@ -314,20 +334,17 @@ router.put("/accounts/:id", authenticateToken, requirePermission("canEditAccount
   }
 });
 
-// Delete account
+// Chart of Accounts records are part of the accounting audit structure and must be retained.
 router.delete("/accounts/:id", authenticateToken, requirePermission("canDeleteAccounting"), requireFeature("accounting"), async (req, res) => {
-  try {
-    await prisma.account.delete({ where: { id: req.params.id } });
-    res.json({ message: "Account deleted" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to delete account" });
-  }
+  return res.status(400).json({
+    error: "Chart of Accounts records cannot be deleted. Deactivate the account if it should no longer be used.",
+  });
 });
 
 // List journal entries
 router.get("/journal", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
-    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
     const entries = await prisma.journalEntry.findMany({
       where: scopedWhere(scope, {}),
       include: {
@@ -347,7 +364,7 @@ router.get("/journal", authenticateToken, requirePermission("canViewAccounting")
 router.post("/journal/:id/reverse", authenticateToken, requirePermission("canReverseAccountingEntry"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
     const reversalReason = String(req.body?.reason || "Expense reversal").trim() || "Expense reversal";
 
     await ensureTransactionAccounts(tenantId);
@@ -469,7 +486,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const { date, description, reference, lines = [], branchId, action, paymentMethod, paymentAccountId } = req.body;
-    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "body"), { source: "body", allowOwnerAll: true });
     const normalizedAction = normalizeValue(action);
     const requestedPaymentMethod = normalizeValue(paymentMethod);
 
@@ -490,9 +507,16 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
     const entryNo = `JE-${Date.now()}`;
 
     const accountIds = [...uniqueLineAccountIds];
-    const accounts = await prisma.account.findMany({ where: { tenantId, id: { in: accountIds } } });
+    const accounts = await prisma.account.findMany({
+      where: { tenantId, id: { in: accountIds } },
+      include: { _count: { select: { children: true } } },
+    });
     if (accounts.length !== accountIds.length) {
       return res.status(400).json({ error: "One or more accounts were not found" });
+    }
+    const parentPostingAccount = accounts.find((account) => Number(account._count?.children || 0) > 0 || normalizeValue(account.subType) === "category");
+    if (parentPostingAccount) {
+      return res.status(400).json({ error: `${parentPostingAccount.name} is a parent account. Select a sub-account for posting.` });
     }
     const accountsById = new Map(accounts.map((account) => [account.id, account]));
     const linkedCashAccountIds = [...new Set(accounts.map(linkedCashAccountId).filter(Boolean))];
@@ -740,7 +764,7 @@ router.get("/reports/balance-sheet", authenticateToken, requirePermission("canVi
 // List tax payments
 router.get("/tax-payments", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
-    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
     const payments = await prisma.taxPayment.findMany({
       where: scopedWhere(scope, {}),
       include: { branch: { select: { id: true, name: true } } },

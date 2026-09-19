@@ -262,7 +262,8 @@ const buildAccountOptions = (
 
   const flatten = (account: Account, depth = 0): AccountOption[] => {
     const childItems = (account.children || []).flatMap(child => flatten(child, depth + 1))
-    if (!matchesType(account) || !predicate(account)) return childItems
+    const isParentAccount = (account.children || []).length > 0 || normalizeValue(account.subType) === 'category'
+    if (isParentAccount || !matchesType(account) || !predicate(account)) return childItems
     const prefix = '-- '.repeat(depth)
     const label = isTransactionAccount(account)
       ? `${prefix}${account.name} - ${accountBalanceLabel(account)}`
@@ -277,6 +278,10 @@ const buildAccountOptions = (
   }
   return accounts.flatMap((account) => flatten(account))
 }
+
+const accountDisplayBalance = (account: Account) => (
+  flattenAccountTree([account]).reduce((sum, item) => sum + Number(item.balance || 0), 0)
+)
 
 const flattenAccountTree = (accountList: Account[]): Account[] => {
   const flattened: Account[] = []
@@ -322,8 +327,8 @@ export default function AccountingPage() {
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
   const canEditAccountingEntries = hasPermission('canEditAccounting')
-  const canDeleteAccountingEntries = hasPermission('canDeleteAccounting')
   const canReverseAccountingEntries = hasPermission('canReverseAccountingEntry')
+  const canSwitchBranches = user?.role === 'owner' || hasPermission('canViewBranch')
   const tenantCurrency = getTenantCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -574,10 +579,11 @@ export default function AccountingPage() {
 
   useEffect(() => {
     const branch = defaultBranchId(user, branches)
-    if (!editingAccount) setAccBranch(current => current || branch)
-    setJeBranch(current => current || branch)
-    setTaxForm(current => ({ ...current, branch: current.branch || branch }))
-  }, [user?.branchId, branches, editingAccount])
+    if (!editingAccount) setAccBranch(current => canSwitchBranches ? (current || branch) : branch)
+    setJeBranch(current => canSwitchBranches ? (current || branch) : branch)
+    setTaxForm(current => ({ ...current, branch: canSwitchBranches ? (current.branch || branch) : branch }))
+    setFilters(current => ({ ...current, branch: canSwitchBranches ? current.branch : branch }))
+  }, [user?.branchId, branches, editingAccount, canSwitchBranches])
 
   useEffect(() => {
     fetchAccounts()
@@ -723,25 +729,6 @@ export default function AccountingPage() {
     }
   }
 
-  const handleDeleteAccount = async (id: string) => {
-    if (!canDeleteAccountingEntries) {
-      return toast({
-        variant: 'destructive',
-        title: 'You do not have permission to delete accounting accounts',
-        description: 'Required permission: canDeleteAccounting',
-      })
-    }
-    try {
-      const res = await apiFetch(`/api/accounting/accounts/${id}`, { method: 'DELETE' })
-      if (res.ok) {
-        toast({ title: 'Account deleted' })
-        fetchAccounts()
-      }
-    } catch {
-      toast({ variant: 'destructive', title: 'Failed to delete account' })
-    }
-  }
-
   const renderAccountActionMenu = (account: Account) => (
     <div className="relative inline-block text-left" onClick={(event) => event.stopPropagation()}>
       <Button
@@ -771,15 +758,7 @@ export default function AccountingPage() {
               <Edit className="h-4 w-4" /> Edit account
             </button>
           )}
-          {canDeleteAccountingEntries && (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-              onClick={() => { setOpenAccountActionsId(null); handleDeleteAccount(account.id) }}
-            >
-              <Trash2 className="h-4 w-4" /> Delete account
-            </button>
-          )}
+
         </div>
       )}
     </div>
@@ -812,7 +791,7 @@ export default function AccountingPage() {
   }, [filteredEntries, currentPage, pageSize])
 
   const resetFilters = () => {
-    setFilters({ branch: '', account: '', startDate: '', endDate: '', category: '', currency: '' })
+    setFilters({ branch: canSwitchBranches ? '' : defaultBranchId(user, branches), account: '', startDate: '', endDate: '', category: '', currency: '' })
   }
 
   const isExpenseJournalEntry = (entry: JournalEntry) => (
@@ -1239,7 +1218,7 @@ export default function AccountingPage() {
                   </div>
                   <div>
                     <Label>Branch</Label>
-                    {branches.length > 1 ? (
+                    {canSwitchBranches && branches.length > 1 ? (
                       <Select value={accBranch} onValueChange={setAccBranch}>
                         <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                         <SelectContent>
@@ -1489,7 +1468,7 @@ export default function AccountingPage() {
                                 </td>
                                 <td className="py-2 px-3 font-mono font-bold">{acc.code}</td>
                                 <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
-                                <td className="py-2 px-3 text-right font-mono">{formatCurrency(acc.balance)}</td>
+                                <td className="py-2 px-3 text-right font-mono">{formatCurrency(accountDisplayBalance(acc))}</td>
                                 <td className="py-2 px-3 whitespace-nowrap">
                                   {renderAccountActionMenu(acc)}
                                 </td>
@@ -1507,7 +1486,7 @@ export default function AccountingPage() {
                                   </td>
                                   <td className="py-2 px-3 font-mono font-bold">{child.code}</td>
                                   <td className="py-2 px-3">{child.branch?.name || '—'}</td>
-                                  <td className="py-2 px-3 text-right font-mono">{formatCurrency(child.balance)}</td>
+                                  <td className="py-2 px-3 text-right font-mono">{formatCurrency(accountDisplayBalance(child))}</td>
                                   <td className="py-2 px-3 whitespace-nowrap">
                                     {renderAccountActionMenu(child)}
                                   </td>
@@ -1585,12 +1564,18 @@ export default function AccountingPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label>Branch</Label>
-                  <Select value={jeBranch} onValueChange={setJeBranch}>
-                    <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                    <SelectContent>
-                      {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  {canSwitchBranches && branches.length > 1 ? (
+                    <Select value={jeBranch} onValueChange={setJeBranch}>
+                      <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                      {branches.find(b => b.id === jeBranch)?.name || 'No branch assigned'}
+                    </div>
+                  )}
                 </div>
                 {jeBranch && (
                   <div>
@@ -1704,10 +1689,16 @@ export default function AccountingPage() {
             <div className="space-y-3">
               <div className="max-w-sm space-y-2">
                 <Label>Branch</Label>
-                <Select value={jeBranch} onValueChange={setJeBranch}>
-                  <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                  <SelectContent>{branches.map(branch => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent>
-                </Select>
+                {canSwitchBranches && branches.length > 1 ? (
+                  <Select value={jeBranch} onValueChange={setJeBranch}>
+                    <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                    <SelectContent>{branches.map(branch => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                    {branches.find(branch => branch.id === jeBranch)?.name || 'No branch assigned'}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end">
                 <Button size="sm" variant="outline" onClick={() => setMjLines([...mjLines, { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' }])}>
@@ -1822,19 +1813,25 @@ export default function AccountingPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <Label>Branch</Label>
-                      <Select value={filters.branch} onValueChange={(v) => setFilters({ ...filters, branch: v })}>
-                        <SelectTrigger><SelectValue placeholder="All branches" /></SelectTrigger>
-                        <SelectContent>
-                          {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      {canSwitchBranches && branches.length > 1 ? (
+                        <Select value={filters.branch} onValueChange={(v) => setFilters({ ...filters, branch: v })}>
+                          <SelectTrigger><SelectValue placeholder="All branches" /></SelectTrigger>
+                          <SelectContent>
+                            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                          {branches.find(b => b.id === filters.branch)?.name || branches.find(b => b.id === jeBranch)?.name || 'No branch assigned'}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <Label>Affected Account</Label>
                       <Select value={filters.account} onValueChange={(v) => setFilters({ ...filters, account: v })}>
                         <SelectTrigger><SelectValue placeholder="All accounts" /></SelectTrigger>
                         <SelectContent>
-                          {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}
+                          {accountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1982,12 +1979,18 @@ export default function AccountingPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label>Branch</Label>
-                      <Select value={taxForm.branch} onValueChange={(v) => setTaxForm({ ...taxForm, branch: v })}>
-                        <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
-                        <SelectContent>
-                          {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      {canSwitchBranches && branches.length > 1 ? (
+                        <Select value={taxForm.branch} onValueChange={(v) => setTaxForm({ ...taxForm, branch: v })}>
+                          <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                          <SelectContent>
+                            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                          {branches.find(b => b.id === taxForm.branch)?.name || 'No branch assigned'}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <Label>Amount</Label>
@@ -2134,4 +2137,3 @@ export default function AccountingPage() {
     </div>
   )
 }
-
