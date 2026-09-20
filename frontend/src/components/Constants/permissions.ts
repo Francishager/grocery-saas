@@ -267,8 +267,14 @@ export const permissions: Permission[] = [
 
   // Transaction Accounts & Cash Movements
   { id: 'canViewTransactionAccount', name: 'View Transaction Accounts', description: 'View cash, safe, bank, mobile money, and card transaction accounts', category: 'transactions', accessesBusinessData: true },
-  { id: 'canUseAnyTransactionAccount', name: 'Use Any Transaction Account', description: 'Select permitted tills, safe, bank, mobile money, and card accounts beyond the user assigned account', category: 'transactions', accessesBusinessData: true },
-  { id: 'canUseOtherCashAccount', name: 'Use Other Cash Accounts', description: 'Select another staff cash till or safe account for cash payments, collections, withdrawals, and cash journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseAnyTransactionAccount', name: 'Use Any Transaction Account', description: 'Legacy broad access to transaction accounts. Prefer the separate account-type permissions for tighter control.', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOtherCashAccount', name: 'Use Other Cash Accounts', description: 'Legacy broad access to other cash accounts. Prefer own till, other staff till, safe, bank, mobile money, and card permissions.', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOwnCashAccount', name: 'Use Own Assigned Cash Till', description: 'Use only the cash till assigned to this staff member for permitted transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOtherStaffCashAccount', name: 'Use Other Staff Cash Tills', description: 'Use cash tills assigned to other staff members without granting safe, bank, mobile money, or card access', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseSafeAccount', name: 'Use Safe Accounts', description: 'Use business safe or vault accounts for permitted cash movements and transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseBankAccount', name: 'Use Bank Accounts', description: 'Use bank accounts for permitted payments, collections, and journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseMobileMoneyAccount', name: 'Use Mobile Money Accounts', description: 'Use mobile money transaction accounts for permitted payments, collections, and journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseCardAccount', name: 'Use Card Accounts', description: 'Use card or POS clearing accounts for permitted card payments and journal movements', category: 'transactions', accessesBusinessData: true },
   { id: 'canCreateTransactionAccount', name: 'Create Transaction Accounts', description: 'Create cash tills, safe accounts, bank accounts, mobile money accounts, and card accounts', category: 'transactions', accessesBusinessData: true },
   { id: 'canEditTransactionAccount', name: 'Edit Transaction Accounts', description: 'Update transaction account details, assignments, status, and balances', category: 'transactions', accessesBusinessData: true },
   { id: 'canDeleteTransactionAccount', name: 'Deactivate Transaction Accounts', description: 'Deactivate transaction accounts that should no longer be used', category: 'transactions', accessesBusinessData: true },
@@ -390,3 +396,4 @@ export const hasPermission = (roleId: string, permissionId: string): boolean => 
 }
 
 export default permissions
+
