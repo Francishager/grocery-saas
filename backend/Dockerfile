@@ -61,4 +61,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
 # Start the application — sync schema in background, start server immediately
 # app.js already retries DB connection in the background, so the healthcheck passes
 # even if the database is temporarily unavailable
-CMD ["sh", "-c", "(npx prisma db push --accept-data-loss 2>&1 || true) & npm start"]
+CMD ["sh", "-c", "(npx prisma db push --accept-data-loss 2>&1 || true) & ./start.sh"]
+

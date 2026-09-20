@@ -135,6 +135,69 @@ const REPORT_PERMISSION_KEYS = [
   'canViewServiceBusinessReport',
 ]
 
+const FALLBACK_CATEGORY_IDS: Record<string, string> = {
+  Dashboard: 'dashboard',
+  Sales: 'sales',
+  Products: 'inventory',
+  Purchases: 'purchases',
+  Payables: 'payables',
+  Expenses: 'expenses',
+  Customers: 'customers',
+  Receivables: 'customers',
+  Suppliers: 'suppliers',
+  Staff: 'staff',
+  'HR Management': 'hr',
+  Branches: 'branches',
+  Reports: 'reports',
+  Settings: 'settings',
+  Receipts: 'receipts',
+  Discounts: 'sales',
+  Tax: 'tax',
+  Services: 'services',
+  Rentals: 'rentals',
+  Restaurant: 'restaurant',
+  'Fuel Station': 'fuel_station',
+  Manufacturing: 'manufacturing',
+  Agriculture: 'agriculture',
+  'Service Business': 'service_business',
+  Communication: 'communication',
+  Accounting: 'accounting',
+  'Transaction Accounts & Cash Movements': 'transactions',
+  Stock: 'inventory',
+  'Payment Methods': 'payment_methods',
+  'Data Import': 'inventory',
+  Other: 'other',
+}
+
+const FALLBACK_CATEGORY_NAMES: Record<string, string> = {
+  dashboard: 'Dashboard',
+  sales: 'Sales',
+  inventory: 'Inventory',
+  purchases: 'Purchases',
+  payables: 'Payables',
+  expenses: 'Expenses',
+  customers: 'Customers & Receivables',
+  suppliers: 'Suppliers',
+  staff: 'Staff Access',
+  hr: 'HR Management',
+  branches: 'Branches',
+  reports: 'Reports',
+  settings: 'Settings',
+  receipts: 'Receipts',
+  tax: 'Tax',
+  services: 'Services',
+  rentals: 'Rentals',
+  restaurant: 'Restaurant & Bar',
+  fuel_station: 'Fuel Station',
+  manufacturing: 'Manufacturing',
+  agriculture: 'Agriculture',
+  service_business: 'Service Business',
+  communication: 'Communication',
+  accounting: 'Accounting',
+  transactions: 'Transaction Accounts & Cash Movements',
+  payment_methods: 'Payment Methods',
+  other: 'Other',
+}
 const PERM_GROUPS = [
   { label: 'Dashboard', prefix: 'Dashboard' },
   { label: 'Sales', prefix: 'Sale' },
@@ -182,9 +245,13 @@ function fallbackPermissionName(key: string) {
     .trim()
 }
 
-function fallbackPermissionCategory(key: string) {
+function fallbackPermissionCategoryId(key: string) {
   const group = PERM_GROUPS.find(g => matchesPermissionGroup(g, key))
-  return group?.label || 'Other'
+  return group ? FALLBACK_CATEGORY_IDS[group.label] || group.label : 'other'
+}
+
+function fallbackPermissionCategoryName(categoryId: string) {
+  return FALLBACK_CATEGORY_NAMES[categoryId] || categoryId
 }
 
 function getPermissionGroups(schema: PermissionSchema | null, search: string) {
@@ -196,9 +263,9 @@ function getPermissionGroups(schema: PermissionSchema | null, search: string) {
 
   keys.forEach((key) => {
     const definition = definitions.get(key)
-    const fallbackCategory = fallbackPermissionCategory(key)
+    const fallbackCategory = fallbackPermissionCategoryId(key)
     const categoryId = definition?.category || fallbackCategory
-    const categoryName = categories.get(categoryId)?.name || fallbackCategory
+    const categoryName = categories.get(categoryId)?.name || fallbackPermissionCategoryName(categoryId)
     const permission: PermissionDefinition = {
       id: key,
       name: definition?.name || PERM_LABELS[key] || fallbackPermissionName(key),
@@ -218,8 +285,8 @@ function getPermissionGroups(schema: PermissionSchema | null, search: string) {
   })
 
   const backendOrder = (schema?.categories || []).map(category => category.id)
-  const fallbackOrder = PERM_GROUPS.map(group => group.label)
-  const order = [...backendOrder, ...fallbackOrder, 'Other']
+  const fallbackOrder = PERM_GROUPS.map(group => FALLBACK_CATEGORY_IDS[group.label] || group.label)
+  const order = [...backendOrder, ...fallbackOrder, 'other']
 
   return [...groups.values()].sort((a, b) => {
     const aIndex = order.indexOf(a.id)
