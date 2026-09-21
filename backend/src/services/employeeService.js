@@ -323,6 +323,9 @@ class EmployeeService {
     );
     const openingHrBalanceNote = String(data.openingHrBalanceNote || data.openingBalanceNote || '').trim() || null;
 
+    const linkedUser = data.userId
+      ? await prisma.user.findFirst({ where: { id: data.userId, tenantId }, select: { id: true } })
+      : data.email ? await prisma.user.findFirst({ where: { email: data.email, tenantId }, select: { id: true } }) : null;
     const createData = {
       tenantId,
       branchId: data.branchId || null,

@@ -157,6 +157,7 @@ export const permissions: Permission[] = [
   { id: 'canManageHRSalaries', name: 'Manage HR Salaries', description: 'Record and manage salary history', category: 'hr', accessesBusinessData: true },
   { id: 'canViewHRAttendance', name: 'View HR Attendance', description: 'View attendance records', category: 'hr', accessesBusinessData: true },
   { id: 'canRecordHRAttendance', name: 'Record Employee Check-In/Out', description: 'Allow a receptionist or supervisor to check employees in and out without payroll access', category: 'hr', accessesBusinessData: true },
+  { id: 'canRecordOwnHRAttendance', name: 'Record Own Check-In/Out', description: 'Allow a staff member to check in and out only their linked employee profile', category: 'hr', accessesBusinessData: true },
   { id: 'canManageHRAttendance', name: 'Full Attendance Management', description: 'Legacy broad attendance access; prefer the separate attendance permissions for tighter control', category: 'hr', accessesBusinessData: true },
   { id: 'canEditHRAttendance', name: 'Edit HR Attendance', description: 'Correct attendance records after check-in/check-out', category: 'hr', accessesBusinessData: true },
   { id: 'canDeleteHRAttendance', name: 'Delete HR Attendance', description: 'Delete incorrect attendance records', category: 'hr', accessesBusinessData: true },

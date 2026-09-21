@@ -21,19 +21,41 @@ const requireHRPermission = (permissionCode) => async (req, res, next) => {
   if (await hrPermissionService.hasPermission(tenantId, req.user.id, permissionCode)) return next();
   return res.status(403).json({ success: false, message: 'Permission denied', required: permissionCode });
 };
+const requireAttendanceRecordPermission = async (req, res, next) => {
+  const tenantId = req.tenant?.id || req.user?.tenantId || req.user?.tenant_id;
+  const canRecordAnyone = await hrPermissionService.hasPermission(tenantId, req.user.id, 'ATTENDANCE_RECORD');
+  const canRecordOwn = await hrPermissionService.hasPermission(tenantId, req.user.id, 'ATTENDANCE_RECORD_OWN');
+  if (canRecordAnyone || canRecordOwn) { req.canRecordAnyone = canRecordAnyone; return next(); }
+  return res.status(403).json({ success: false, message: 'Permission denied', required: 'ATTENDANCE_RECORD or ATTENDANCE_RECORD_OWN' });
+};
+
+async function linkedEmployeeForRequest(req) {
+  const tenantId = req.tenant.id;
+  const employee = await prisma.employee.findFirst({ where: { tenantId, OR: [{ userId: req.user.id }, ...(req.user.email ? [{ email: req.user.email }] : [])] }, select: { id: true, userId: true } });
+  if (employee && !employee.userId) await prisma.employee.update({ where: { id: employee.id }, data: { userId: req.user.id } });
+  return employee;
+}
+
+async function attendanceEmployeeId(req, requestedEmployeeId) {
+  if (req.canRecordAnyone) return requestedEmployeeId;
+  const employee = await linkedEmployeeForRequest(req);
+  if (!employee) { const error = new Error('Your login is not linked to an employee profile. Ask an HR administrator to use the same email address on your employee profile.'); error.status = 403; throw error; }
+  if (requestedEmployeeId && requestedEmployeeId !== employee.id) { const error = new Error('You can record attendance only for your own employee profile.'); error.status = 403; throw error; }
+  return employee.id;
+}
 
 /**
  * Check-in Operations
  */
 
 // Manual check-in
-router.post('/attendance/checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
+router.post('/attendance/checkin', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const { employeeId, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
     const method = 'MANUAL';
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, method, location, req.user.id, coordinates);
+    const record = await attendanceService.checkIn(tenantId, await attendanceEmployeeId(req, employeeId), method, location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'Check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -41,7 +63,7 @@ router.post('/attendance/checkin', requireHRPermission('ATTENDANCE_RECORD'), asy
 });
 
 // QR code check-in
-router.post('/attendance/qr-checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
+router.post('/attendance/qr-checkin', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const { employeeId, qrData, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
@@ -49,7 +71,7 @@ router.post('/attendance/qr-checkin', requireHRPermission('ATTENDANCE_RECORD'), 
     // Validate QR data (decode employee ID from QR)
     if (!qrData) throw new Error('Invalid QR code');
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, 'QR_CODE', location, req.user.id, coordinates);
+    const record = await attendanceService.checkIn(tenantId, await attendanceEmployeeId(req, employeeId), 'QR_CODE', location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'QR check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -57,14 +79,14 @@ router.post('/attendance/qr-checkin', requireHRPermission('ATTENDANCE_RECORD'), 
 });
 
 // Biometric check-in
-router.post('/attendance/biometric-checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
+router.post('/attendance/biometric-checkin', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const { employeeId, biometricData, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
 
     if (!biometricData) throw new Error('Biometric data required');
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, 'BIOMETRIC', location, req.user.id, coordinates);
+    const record = await attendanceService.checkIn(tenantId, await attendanceEmployeeId(req, employeeId), 'BIOMETRIC', location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'Biometric check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -72,12 +94,12 @@ router.post('/attendance/biometric-checkin', requireHRPermission('ATTENDANCE_REC
 });
 
 // Check-out
-router.post('/attendance/checkout', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
+router.post('/attendance/checkout', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const { employeeId, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
 
-    const record = await attendanceService.checkOut(tenantId, employeeId, location, req.user.id, coordinates);
+    const record = await attendanceService.checkOut(tenantId, await attendanceEmployeeId(req, employeeId), location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'Check-out recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -88,7 +110,7 @@ router.post('/attendance/checkout', requireHRPermission('ATTENDANCE_RECORD'), as
  * Attendance Record Management
  */
 
-router.get('/attendance/geofence', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
+router.get('/attendance/geofence', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.tenant.id },
@@ -106,11 +128,13 @@ router.get('/attendance/geofence', requireHRPermission('ATTENDANCE_RECORD'), asy
 });
 // Limited directory for attendance staff. This excludes employee profiles,
 // salary, contacts, and all Employee Management data.
-router.get('/attendance/employee-options', requireHRPermission('HR_EMPLOYEE_ATTENDANCE_LOOKUP'), async (req, res) => {
+router.get('/attendance/employee-options', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const tenantId = req.tenant.id;
+    const ownEmployee = req.canRecordAnyone ? null : await linkedEmployeeForRequest(req);
+    if (!req.canRecordAnyone && !ownEmployee) return res.status(403).json({ success: false, message: 'Your login is not linked to an employee profile. Ask an HR administrator to use the same email address on your employee profile.' });
     const employees = await prisma.employee.findMany({
-      where: { tenantId, status: { not: 'terminated' } },
+      where: { tenantId, status: { not: 'terminated' }, ...(ownEmployee ? { id: ownEmployee.id } : {}) },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });

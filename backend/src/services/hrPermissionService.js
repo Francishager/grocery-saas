@@ -40,6 +40,7 @@ const HR_PERMISSION_DEFINITIONS = [
   ['HR_SALARY_RECORD', 'canManageHRSalaries', 'Record HR salary changes'],
   ['ATTENDANCE_VIEW', 'canViewHRAttendance', 'View HR attendance'],
   ['ATTENDANCE_RECORD', 'canRecordHRAttendance', 'Record employee check-in/check-out', ['canManageHRAttendance']],
+  ['ATTENDANCE_RECORD_OWN', 'canRecordOwnHRAttendance', 'Record own employee check-in/check-out'],
   ['ATTENDANCE_EDIT', 'canEditHRAttendance', 'Edit HR attendance', ['canManageHRAttendance']],
   ['ATTENDANCE_DELETE', 'canDeleteHRAttendance', 'Delete HR attendance records', ['canManageHRAttendance']],
   ['ATTENDANCE_IMPORT', 'canImportHRAttendance', 'Import HR attendance', ['canManageHRAttendance']],

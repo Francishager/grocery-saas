@@ -82,7 +82,13 @@ export default function BusinessSettingsPage() {
         setSettings((current: any) => ({ ...current, attendanceLatitude: position.coords.latitude, attendanceLongitude: position.coords.longitude }))
         toast({ title: 'Business location captured', description: 'Save changes to activate attendance location checks.' })
       },
-      () => toast({ variant: 'destructive', title: 'Unable to capture location', description: 'Allow location access while at the business address and try again.' }),
+      async (error) => {
+        const permission = navigator.permissions ? await navigator.permissions.query({ name: 'geolocation' as PermissionName }).catch(() => null) : null
+        const description = error.code === error.PERMISSION_DENIED || permission?.state === 'denied'
+          ? 'Location is blocked for this site. Open the browser site controls next to the address bar, set Location to Allow, then try again.'
+          : 'Allow location access while at the business address and try again.'
+        toast({ variant: 'destructive', title: 'Unable to capture location', description })
+      },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }

@@ -65,6 +65,7 @@ const PERMISSION_TO_FEATURES = {
   canManageHRSalaries: ['hr'],
   canViewHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
   canRecordHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canRecordOwnHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
   canManageHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
   canEditHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
   canDeleteHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
@@ -209,7 +210,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewHR", "canViewHREmployeesForAttendance", "canCreateHREmployee", "canEditHREmployee", "canDeleteHREmployee",
   "canManageHRStructure", "canViewHRContracts", "canManageHRContracts",
   "canViewHRDocuments", "canManageHRDocuments", "canViewHRSalaries", "canManageHRSalaries",
-  "canViewHRAttendance", "canRecordHRAttendance", "canManageHRAttendance",
+  "canViewHRAttendance", "canRecordHRAttendance", "canRecordOwnHRAttendance", "canManageHRAttendance",
   "canEditHRAttendance", "canDeleteHRAttendance", "canImportHRAttendance",
   "canConfigureHRAttendance", "canApproveHRAttendance",
   "canViewHRShifts", "canManageHRShifts", "canAssignHRShifts", "canApproveHRShifts",
@@ -547,6 +548,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canRecordHRAttendance: {
     name: 'Record employee check-in/check-out',
     description: 'Allow a receptionist or supervisor to check employees in and out without payroll access.',
+  },
+  canRecordOwnHRAttendance: {
+    name: 'Record own check-in/check-out',
+    description: 'Allow a staff member to record attendance only for their linked employee profile.',
   },
   canManageHRAttendance: {
     name: 'Full attendance management',

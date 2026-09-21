@@ -631,6 +631,7 @@ model UserPermission {
   canManageHRSalaries          Boolean  @default(false)
   canViewHRAttendance          Boolean  @default(false)
   canRecordHRAttendance        Boolean  @default(false)
+  canRecordOwnHRAttendance     Boolean  @default(false)
   canManageHRAttendance        Boolean  @default(false)
   canEditHRAttendance          Boolean  @default(false)
   canDeleteHRAttendance        Boolean  @default(false)
@@ -1876,6 +1877,7 @@ model Employee {
   middleName    String? // Phase 1: New
   lastName      String
   employeeNumber String?
+  userId         String?  @unique
   profilePhoto   String?
   email         String?
   phone         String?
