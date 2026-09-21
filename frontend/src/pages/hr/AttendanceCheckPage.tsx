@@ -35,7 +35,7 @@ export default function AttendanceCheckPage() {
 
     const loadEmployees = async () => {
       try {
-        const res = await apiFetch('/api/hr/employees?take=500')
+        const res = await apiFetch('/api/hr/attendance/employee-options')
         if (!res.ok) throw new Error('Failed to load employees')
         const data = await res.json()
         const rows = Array.isArray(data.data) ? data.data : []

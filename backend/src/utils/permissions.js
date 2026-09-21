@@ -52,6 +52,7 @@ const PERMISSION_TO_FEATURES = {
   canEditStaff: [],
   canDeleteStaff: [],
   canViewHR: ['hr'],
+  canViewHREmployeesForAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
   canCreateHREmployee: ['hr'],
   canEditHREmployee: ['hr'],
   canDeleteHREmployee: ['hr'],
@@ -205,7 +206,7 @@ export const ALL_PERMISSION_KEYS = [
   // Staff
   "canCreateStaff", "canViewStaff", "canEditStaff", "canDeleteStaff",
   // HR Management
-  "canViewHR", "canCreateHREmployee", "canEditHREmployee", "canDeleteHREmployee",
+  "canViewHR", "canViewHREmployeesForAttendance", "canCreateHREmployee", "canEditHREmployee", "canDeleteHREmployee",
   "canManageHRStructure", "canViewHRContracts", "canManageHRContracts",
   "canViewHRDocuments", "canManageHRDocuments", "canViewHRSalaries", "canManageHRSalaries",
   "canViewHRAttendance", "canRecordHRAttendance", "canManageHRAttendance",
@@ -507,6 +508,9 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canDeleteHREmployee: {
     name: 'Deactivate employee profiles',
     description: 'Archive or deactivate employees who should no longer appear as active staff.',
+  },  canViewHREmployeesForAttendance: {
+    name: 'View employees for attendance',
+    description: 'See only employee names and staff numbers in Check In/Out; does not grant Employee Management access.',
   },
   canManageHRStructure: {
     name: 'Manage departments, positions, units, and teams',

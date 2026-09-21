@@ -8,6 +8,7 @@ import { requireAuth, requireTenant } from '../middleware/authMiddleware.js';
 import attendanceService from '../services/attendanceService.js';
 import attendanceConfigService from '../services/attendanceConfigService.js';
 import hrPermissionService from '../services/hrPermissionService.js';
+import prisma from '../db.js';
 
 const router = express.Router();
 
@@ -87,6 +88,21 @@ router.post('/attendance/checkout', requireHRPermission('ATTENDANCE_RECORD'), as
  * Attendance Record Management
  */
 
+// Limited directory for attendance staff. This excludes employee profiles,
+// salary, contacts, and all Employee Management data.
+router.get('/attendance/employee-options', requireHRPermission('HR_EMPLOYEE_ATTENDANCE_LOOKUP'), async (req, res) => {
+  try {
+    const tenantId = req.tenant.id;
+    const employees = await prisma.employee.findMany({
+      where: { tenantId, status: { not: 'terminated' } },
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+    res.json({ success: true, data: employees });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 // Get attendance records (list with filtering)
 router.get('/attendance', requireHRPermission('ATTENDANCE_VIEW'), async (req, res) => {
   try {

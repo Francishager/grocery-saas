@@ -5,6 +5,7 @@ const PLATFORM_ROLES = new Set(['saas_admin', 'platform_admin', 'super_admin']);
 const HR_PERMISSION_DEFINITIONS = [
   ['HR_DASHBOARD_VIEW', 'canViewHR', 'View HR dashboard'],
   ['HR_EMPLOYEE_VIEW', 'canViewHR', 'View HR employees'],
+  ['HR_EMPLOYEE_ATTENDANCE_LOOKUP', 'canViewHREmployeesForAttendance', 'View employee names for attendance only', ['canRecordHRAttendance']],
   ['HR_EMPLOYEE_CREATE', 'canCreateHREmployee', 'Create HR employees'],
   ['HR_EMPLOYEE_UPDATE', 'canEditHREmployee', 'Edit HR employees'],
   ['HR_EMPLOYEE_TRANSFER', 'canEditHREmployee', 'Transfer HR employees'],

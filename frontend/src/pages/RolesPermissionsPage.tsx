@@ -46,6 +46,7 @@ const PERM_LABELS: Record<string, string> = {
   canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
   canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaff:'Can edit staff', canDeleteStaff:'Can delete staff',
   canViewHR:'Can view HR management',
+  canViewHREmployeesForAttendance:'Can view employees for attendance only',
   canCreateHREmployee:'Can create HR employees',
   canEditHREmployee:'Can edit HR employees',
   canDeleteHREmployee:'Can delete HR employees',
@@ -114,7 +115,7 @@ const PAYMENT_METHOD_PERMISSION_KEYS = ['canUseCash', 'canUseMobileMoney', 'canU
 
 const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaff', 'canDeleteStaff']
 const HR_PERMISSION_KEYS = [
-  'canViewHR', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee',
+  'canViewHR', 'canViewHREmployeesForAttendance', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee',
   'canManageHRStructure', 'canViewHRContracts', 'canManageHRContracts',
   'canViewHRDocuments', 'canManageHRDocuments', 'canViewHRSalaries', 'canManageHRSalaries',
   'canViewHRAttendance', 'canRecordHRAttendance', 'canManageHRAttendance',

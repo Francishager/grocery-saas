@@ -144,6 +144,7 @@ export const permissions: Permission[] = [
 
   // HR Management
   { id: 'canViewHR', name: 'View HR Management', description: 'Open HR dashboard and view HR records', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHREmployeesForAttendance', name: 'View Employees for Attendance', description: 'View employee names and staff numbers only in Check In/Out', category: 'hr', accessesBusinessData: true },
   { id: 'canCreateHREmployee', name: 'Create HR Employees', description: 'Create HR employee profiles', category: 'hr', accessesBusinessData: true },
   { id: 'canEditHREmployee', name: 'Edit HR Employees', description: 'Edit HR employee profiles and status', category: 'hr', accessesBusinessData: true },
   { id: 'canDeleteHREmployee', name: 'Delete HR Employees', description: 'Deactivate HR employee profiles', category: 'hr', accessesBusinessData: true },
