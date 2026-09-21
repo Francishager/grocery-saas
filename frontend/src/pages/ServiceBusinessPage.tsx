@@ -23,6 +23,7 @@ interface GarageRecord { id: string; createdAt: string; customerName: string; ti
 interface ServiceTechnician { id: string; name: string; email?: string | null; phone?: string | null; role: string; skills: string[]; specializations: string[]; hourlyRate: number; availability: string; rating: number; totalJobs: number; completedJobs: number; isActive: boolean; hireDate?: string | null; notes?: string | null; branch?: { name: string } | null; user?: { id: string; fname: string; lname: string } | null }
 interface ServiceJobCard { id: string; cardNo: string; appointmentId?: string | null; workOrderId?: string | null; productId?: string | null; technicianId?: string | null; customerName: string; customerPhone?: string | null; serviceTitle: string; serviceDescription?: string | null; status: string; priority: string; scheduledStart?: string | null; scheduledEnd?: string | null; actualStart?: string | null; actualEnd?: string | null; laborHours: number; laborCost: number; partsCost: number; totalCost: number; partsUsed?: any; qualityCheckPassed: boolean; qualityNotes?: string | null; completionNotes?: string | null; technician?: ServiceTechnician | null; appointment?: { id: string; title: string } | null; workOrder?: { id: string; orderNo: string; title: string } | null; product?: { id: string; name: string; serviceCategory?: string | null; duration?: string | null } | null }
 interface ServiceFeedback { id: string; customerName: string; customerPhone?: string | null; rating: number; serviceQuality: number; timeliness: number; professionalism: number; valueForMoney: number; comment?: string | null; wouldRecommend: boolean; status: string; response?: string | null; respondedAt?: string | null; createdAt: string; appointment?: { id: string; title: string } | null; workOrder?: { id: string; orderNo: string } | null; contract?: { id: string; contractNo: string } | null; product?: { id: string; name: string; serviceCategory?: string | null } | null; customer?: { id: string; name: string } | null }
+interface ServiceShareRequest { id: string; recordType: 'work-order' | 'job-card'; recordId: string; recordLabel: string; requesterName: string; targetName: string; status: string; canApprove: boolean }
 
 const statusColors: Record<string, string> = {
   scheduled: 'bg-blue-100 text-blue-700',
@@ -54,6 +55,8 @@ export default function ServiceBusinessPage() {
   const canOpen = servicePagePermissions(tab).some(hasPermission)
   const [technicianOptions, setTechnicianOptions] = useState<{ id: string; name: string; userId?: string | null; isCurrentUser?: boolean }[]>([])
   const [employeeOptions, setEmployeeOptions] = useState<{ id: string; name: string; email?: string; phone?: string; role?: string; hireDate?: string | null; branchId?: string | null }[]>([])
+  const [serviceCategories, setServiceCategories] = useState<{ id: string; name: string }[]>([])
+  const [shareRequests, setShareRequests] = useState<ServiceShareRequest[]>([])
   const [shareRecord, setShareRecord] = useState<{ type: 'work-orders' | 'job-cards'; id: string; label: string } | null>(null)
   const [shareTechnicianId, setShareTechnicianId] = useState('')
   const [replyTo, setReplyTo] = useState<ServiceFeedback | null>(null)
@@ -95,7 +98,7 @@ export default function ServiceBusinessPage() {
   const loadData = useCallback(async () => {
     try {
       const readSection = async (section: string) => tab === section && can('View', section) ? (await apiFetch('/api/service/' + section)).json() : []
-      const [a, w, c, car, gar, tech, jc, fb, svc, options, employees] = await Promise.all([
+      const [a, w, c, car, gar, tech, jc, fb, svc, options, employees, categories, shares] = await Promise.all([
         readSection('appointments'),
         readSection('work-orders'),
         readSection('contracts'),
@@ -107,6 +110,8 @@ export default function ServiceBusinessPage() {
         canOpen && ['Create', 'Edit', 'GenerateQR'].some(action => can(action)) ? apiFetch('/api/service/catalog').then(r => r.json()) : Promise.resolve([]),
         (can('Assign') || can('Create')) ? apiFetch('/api/service/technician-options').then(r => r.json()) : Promise.resolve([]),
         tab === 'technicians' && can('Create', 'technicians') ? apiFetch('/api/service/employee-options').then(r => r.json()) : Promise.resolve([]),
+        canOpen ? rawApiFetch('/api/inventory/categories?type=service').then(r => r.ok ? r.json() : []).catch(() => []) : Promise.resolve([]),
+        (tab === 'work-orders' || tab === 'job-cards') && canOpen ? apiFetch('/api/service/' + tab + '/share-requests').then(r => r.json()).catch(() => []) : Promise.resolve([]),
       ])
       setAppointments(Array.isArray(a) ? a : [])
       setWorkOrders(Array.isArray(w) ? w : [])
@@ -119,6 +124,8 @@ export default function ServiceBusinessPage() {
       setServices(Array.isArray(svc) ? svc : [])
       setTechnicianOptions(Array.isArray(options) ? options : [])
       setEmployeeOptions(Array.isArray(employees) ? employees : [])
+      setServiceCategories(Array.isArray(categories) ? categories : [])
+      setShareRequests(Array.isArray(shares) ? shares : [])
     } catch (e) { console.error(e); toast({ variant: 'destructive', title: 'Unable to load service data. Please try again.' }) }
   }, [can, canOpen, tab, toast])
 
@@ -284,8 +291,9 @@ export default function ServiceBusinessPage() {
   const currentSectionLabel = sectionLabels[tab] || 'Appointments'
   const currentSectionDescription = sectionDescription[tab] || 'Manage scheduled service appointments and confirmations.'
   const serviceOptions = services.filter(s => s.isActive !== false)
-  const serviceCategoryOptions = [...new Set(serviceOptions.map(service => service.serviceCategory || service.categoryName).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b))
+  const serviceCategoryOptions = [...new Set([...serviceCategories.map(category => category.name), ...serviceOptions.map(service => service.serviceCategory || service.categoryName)].filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b))
   const currentTechnician = technicianOptions.find(technician => technician.isCurrentUser)
+  const canShareWork = (section: 'work-orders' | 'job-cards') => ['View', 'Create', 'Edit', 'Assign', 'UpdateStatus'].some(action => can(action, section))
 
   const applyWorkOrderService = (id: string) => {
     const service = serviceOptions.find(item => String(item.id) === id)
@@ -301,6 +309,65 @@ export default function ServiceBusinessPage() {
     const employee = employeeOptions.find(option => option.id === employeeId)
     if (!employee) return
     setTechForm(previous => ({ ...previous, employeeId, name: employee.name, email: employee.email || '', phone: employee.phone || '', role: employee.role || previous.role, hireDate: employee.hireDate ? new Date(employee.hireDate).toISOString().slice(0, 10) : previous.hireDate }))
+  }
+
+  const storeCurrentTechnician = (technician: { id: string; name: string; userId?: string | null; isCurrentUser?: boolean }) => {
+    setTechnicianOptions(previous => {
+      const nextTechnician = { ...technician, isCurrentUser: true }
+      const normalized = previous.map(option => ({ ...option, isCurrentUser: false }))
+      const index = normalized.findIndex(option => option.id === technician.id)
+      if (index >= 0) {
+        normalized[index] = { ...normalized[index], ...nextTechnician }
+        return normalized.sort((a, b) => a.name.localeCompare(b.name))
+      }
+      return [...normalized, nextTechnician].sort((a, b) => a.name.localeCompare(b.name))
+    })
+  }
+
+  const ensureCurrentTechnician = async () => {
+    if (currentTechnician) return currentTechnician
+    try {
+      const response = await apiFetch('/api/service/current-technician', { method: 'POST' })
+      const technician = await response.json()
+      storeCurrentTechnician(technician)
+      return technician as { id: string; name: string; userId?: string | null; isCurrentUser?: boolean }
+    } catch (error) {
+      toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to identify the signed-in technician' })
+      return null
+    }
+  }
+
+  useEffect(() => {
+    if (!currentTechnician) return
+    if (showWOModal && !woForm.technicianId && currentTechnician.userId) {
+      setWoForm(previous => ({ ...previous, technicianId: currentTechnician.userId || '' }))
+    }
+    if (showJobCardModal && !jobCardForm.technicianId) {
+      setJobCardForm(previous => ({ ...previous, technicianId: currentTechnician.id }))
+    }
+  }, [currentTechnician, showWOModal, showJobCardModal, woForm.technicianId, jobCardForm.technicianId])
+
+  const openWorkOrderForm = async () => {
+    const technician = await ensureCurrentTechnician()
+    setWoForm({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: technician?.userId || '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 })
+    setShowWOModal(true)
+  }
+
+  const openJobCardForm = async () => {
+    setEditingJobCardId(null)
+    const technician = await ensureCurrentTechnician()
+    setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: technician?.id || '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 })
+    setShowJobCardModal(true)
+  }
+
+  const decideShareRequest = async (requestId: string, decision: 'approve' | 'reject') => {
+    try {
+      await apiFetch('/api/service/' + tab + '/share-requests/' + requestId + '/' + decision, { method: 'POST' })
+      toast({ title: decision === 'approve' ? 'Share request approved' : 'Share request rejected' })
+      loadData()
+    } catch (error) {
+      toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to update share request' })
+    }
   }
   if (!canOpen) return <div role="alert" className="p-6">You do not have permission to access this service section.</div>
 
@@ -359,7 +426,22 @@ export default function ServiceBusinessPage() {
 
       {tab === 'work-orders' && (
         <div className="space-y-4">
-          {can('Create', 'work-orders') && <Button onClick={() => { setWoForm({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: currentTechnician?.userId || '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 }); setShowWOModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>}
+          {can('Create', 'work-orders') && <Button onClick={openWorkOrderForm}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>}
+          {shareRequests.length > 0 && <div className="rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="mb-2 font-medium">Share approvals</div>
+            <div className="space-y-2">
+              {shareRequests.map(request => <div key={request.id} className="flex flex-col gap-2 rounded-md bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="font-medium">{request.recordLabel}</div>
+                  <div className="text-xs text-muted-foreground">{request.requesterName} wants to share with {request.targetName}</div>
+                </div>
+                {request.canApprove ? <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => decideShareRequest(request.id, 'approve')}>Approve</Button>
+                  <Button size="sm" variant="ghost" onClick={() => decideShareRequest(request.id, 'reject')}>Reject</Button>
+                </div> : <Badge variant="secondary">Waiting for creator approval</Badge>}
+              </div>)}
+            </div>
+          </div>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-left">Category</th><th className="p-2 text-left">Tech</th><th className="p-2 text-left">Priority</th><th className="p-2 text-right">Est. Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -378,7 +460,7 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 space-x-1">
                       {w.status === 'open' && can('UpdateStatus', 'work-orders') && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'in_progress')}>Start</Button>}
                       {w.status === 'in_progress' && can('UpdateStatus', 'work-orders') && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'completed')}>Complete</Button>}
-                      {can('Create', 'work-orders') && <Button size="sm" variant="ghost" title="Share work order" onClick={() => { setShareRecord({ type: 'work-orders', id: w.id, label: w.orderNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
+                      {canShareWork('work-orders') && <Button size="sm" variant="ghost" title="Share work order" onClick={() => { setShareRecord({ type: 'work-orders', id: w.id, label: w.orderNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
                       {can('Delete', 'work-orders') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteWO(w.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
@@ -448,7 +530,7 @@ export default function ServiceBusinessPage() {
                     <div className="text-xs text-muted-foreground">Rate: {tech.hourlyRate.toFixed(0)}/hr</div>
                   </div>
                   <div className="mt-4 flex gap-2">
-                    {can('Edit', 'technicians') && <Button size="sm" variant="outline" onClick={() => { setEditingTechId(tech.id); setTechForm({ name: tech.name, email: tech.email || '', phone: tech.phone || '', role: tech.role, skills: tech.skills.join(', '), specializations: tech.specializations.join(', '), hourlyRate: tech.hourlyRate, availability: tech.availability, hireDate: tech.hireDate ? new Date(tech.hireDate).toISOString().split('T')[0] : '', notes: tech.notes || '' }); setShowTechModal(true) }}><Edit className="h-3 w-3 mr-1" /> Edit</Button>}
+                    {can('Edit', 'technicians') && <Button size="sm" variant="outline" onClick={() => { setEditingTechId(tech.id); setTechForm({ employeeId: '', name: tech.name, email: tech.email || '', phone: tech.phone || '', role: tech.role, skills: tech.skills.join(', '), specializations: tech.specializations.join(', '), hourlyRate: tech.hourlyRate, availability: tech.availability, hireDate: tech.hireDate ? new Date(tech.hireDate).toISOString().split('T')[0] : '', notes: tech.notes || '' }); setShowTechModal(true) }}><Edit className="h-3 w-3 mr-1" /> Edit</Button>}
                     {can('Delete', 'technicians') && <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteTechnician(tech.id)}><Trash2 className="h-3 w-3" /></Button>}
                   </div>
                 </CardContent>
@@ -460,7 +542,22 @@ export default function ServiceBusinessPage() {
 
       {tab === 'job-cards' && (
         <div className="space-y-4">
-          {can('Create', 'job-cards') && <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: currentTechnician?.id || '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>}
+          {can('Create', 'job-cards') && <Button onClick={openJobCardForm}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>}
+          {shareRequests.length > 0 && <div className="rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="mb-2 font-medium">Share approvals</div>
+            <div className="space-y-2">
+              {shareRequests.map(request => <div key={request.id} className="flex flex-col gap-2 rounded-md bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="font-medium">{request.recordLabel}</div>
+                  <div className="text-xs text-muted-foreground">{request.requesterName} wants to share with {request.targetName}</div>
+                </div>
+                {request.canApprove ? <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => decideShareRequest(request.id, 'approve')}>Approve</Button>
+                  <Button size="sm" variant="ghost" onClick={() => decideShareRequest(request.id, 'reject')}>Reject</Button>
+                </div> : <Badge variant="secondary">Waiting for creator approval</Badge>}
+              </div>)}
+            </div>
+          </div>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Card No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Total Cost</th><th className="p-2 text-left">Priority</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -478,7 +575,7 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 space-x-1">
                       {jc.status === 'pending' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'in_progress')}>Start</Button>}
                       {jc.status === 'in_progress' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'completed')}>Complete</Button>}
-                      {can('Create', 'job-cards') && <Button size="sm" variant="ghost" title="Share job card" onClick={() => { setShareRecord({ type: 'job-cards', id: jc.id, label: jc.cardNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
+                      {canShareWork('job-cards') && <Button size="sm" variant="ghost" title="Share job card" onClick={() => { setShareRecord({ type: 'job-cards', id: jc.id, label: jc.cardNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
                       {can('Delete', 'job-cards') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteJobCard(jc.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>

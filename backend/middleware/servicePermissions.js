@@ -1,5 +1,6 @@
 import { requirePermission } from './auth.js';
 import { SERVICE_PERMISSION_DEFINITIONS } from '../src/utils/servicePermissions.js';
+import { resolveServiceTechnician } from '../src/services/serviceTechnicianIdentity.js';
 
 export function servicePermission(tab, action) {
   return SERVICE_PERMISSION_DEFINITIONS.find(p => p.tab === tab && p.action === action)?.id;
@@ -9,7 +10,7 @@ const updateFields = {
   appointments: ['status', 'technicianId', 'scheduledDate', 'scheduledTime', 'endTime', 'duration', 'price', 'actualPrice', 'notes', 'cancelledReason'],
   'work-orders': ['status', 'technicianId', 'priority', 'serviceCategory', 'estimatedCost', 'actualCost', 'laborCost', 'partsCost', 'startDate', 'endDate', 'diagnostics', 'warrantyInfo', 'notes'],
   contracts: ['title', 'description', 'serviceCategory', 'endDate', 'renewalDate', 'autoRenew', 'nextBillingDate', 'value', 'billingCycle', 'discountPercent', 'status', 'terms'],
-  technicians: ['name', 'email', 'phone', 'role', 'skills', 'specializations', 'hourlyRate', 'availability', 'isActive', 'notes'],
+  technicians: ['name', 'email', 'phone', 'role', 'skills', 'specializations', 'hourlyRate', 'availability', 'isActive', 'notes', 'hireDate'],
   'job-cards': ['status', 'technicianId', 'priority', 'actualStart', 'actualEnd', 'laborHours', 'laborCost', 'partsCost', 'partsUsed', 'qualityCheckPassed', 'qualityNotes', 'completionNotes', 'customerSignature', 'productId', 'serviceTitle', 'serviceDescription'],
   feedback: ['status', 'response'],
   'car-wash': ['vehicle', 'serviceType', 'amount', 'attendantId', 'notes'],
@@ -40,7 +41,15 @@ export const requireServiceUpdate = tab => async (req, res, next) => {
   next();
 };
 
-export const requireServiceAssignment = tab => (req, res, next) => {
+export const requireServiceAssignment = tab => async (req, res, next) => {
   if (!req.body.technicianId) return next();
+  const id = req.user?.id || req.user?.userId || req.user?.sub;
+  if (tab === 'work-orders' && req.body.technicianId === id) return next();
+  if (tab === 'job-cards') {
+    try {
+      const technician = await resolveServiceTechnician(req.user.tenantId || req.user.tenant_id, id);
+      if (technician?.id === req.body.technicianId) return next();
+    } catch (error) { return res.status(error.status || 400).json({ error: error.message }); }
+  }
   return requirePermission(servicePermission(tab, 'Assign'))(req, res, next);
 };
