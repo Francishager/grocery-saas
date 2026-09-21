@@ -197,7 +197,7 @@ function App() {
           <Route path="hr/legacy" element={<FeatureGuard feature="hr" permission="canViewHR"><HRPage /></FeatureGuard>} />
           {/* Phase 2 HR Attendance, Shift, Leave Routes */}
           <Route path="hr/attendance" element={<FeatureGuard feature="hr" permission={['canViewHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canApproveHRAttendance', 'canManageHRAttendance']}><AttendanceListPage /></FeatureGuard>} />
-          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr" permission={['canRecordHRAttendance', 'canManageHRAttendance']}><AttendanceCheckPage /></FeatureGuard>} />
+          <Route path="hr/attendance/check" element={<FeatureGuard feature="hr" permission={['canRecordHRAttendance', 'canRecordOwnHRAttendance', 'canManageHRAttendance']}><AttendanceCheckPage /></FeatureGuard>} />
           <Route path="hr/shifts" element={<FeatureGuard feature="hr" permission="canViewHRShifts"><ShiftManagementPage /></FeatureGuard>} />
           <Route path="hr/leaves" element={<FeatureGuard feature="hr" permission={['canViewHRLeave', 'canRequestHRLeave']}><LeaveRequestPage /></FeatureGuard>} />
           <Route path="hr/leaves/approval" element={<FeatureGuard feature="hr" permission="canApproveHRLeave"><LeaveApprovalPage /></FeatureGuard>} />

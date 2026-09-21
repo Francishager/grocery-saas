@@ -9,6 +9,7 @@ import attendanceService from '../services/attendanceService.js';
 import attendanceConfigService from '../services/attendanceConfigService.js';
 import hrPermissionService from '../services/hrPermissionService.js';
 import prisma from '../db.js';
+import { businessAttendanceLocation } from '../utils/attendanceLocation.js';
 
 const router = express.Router();
 
@@ -31,9 +32,16 @@ const requireAttendanceRecordPermission = async (req, res, next) => {
 
 async function linkedEmployeeForRequest(req) {
   const tenantId = req.tenant.id;
-  const employee = await prisma.employee.findFirst({ where: { tenantId, OR: [{ userId: req.user.id }, ...(req.user.email ? [{ email: req.user.email }] : [])] }, select: { id: true, userId: true } });
-  if (employee && !employee.userId) await prisma.employee.update({ where: { id: employee.id }, data: { userId: req.user.id } });
-  return employee;
+  const linked = await prisma.employee.findFirst({ where: { tenantId, userId: req.user.id, status: { not: 'terminated' } }, select: { id: true, userId: true } });
+  if (linked || !req.user.email) return linked;
+  const matches = await prisma.employee.findMany({
+    where: { tenantId, userId: null, email: { equals: req.user.email.trim(), mode: 'insensitive' }, status: { not: 'terminated' } },
+    select: { id: true, userId: true }, take: 2,
+  });
+  // Ambiguous email matches must be resolved by HR, never linked to an arbitrary employee.
+  if (matches.length !== 1) return null;
+  const result = await prisma.employee.updateMany({ where: { id: matches[0].id, tenantId, userId: null }, data: { userId: req.user.id } });
+  return result.count ? matches[0] : prisma.employee.findFirst({ where: { tenantId, userId: req.user.id, status: { not: 'terminated' } }, select: { id: true, userId: true } });
 }
 
 async function attendanceEmployeeId(req, requestedEmployeeId) {
@@ -116,11 +124,12 @@ router.get('/attendance/geofence', requireAttendanceRecordPermission, async (req
       where: { id: req.tenant.id },
       select: { address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true },
     });
-    const configured = Boolean(tenant?.address?.trim()) && tenant?.attendanceLatitude != null && tenant?.attendanceLongitude != null;
+    const location = businessAttendanceLocation(tenant);
+    res.set('Cache-Control', 'no-store');
     res.json({
       success: true,
-      data: configured ? { address: tenant.address, latitude: tenant.attendanceLatitude, longitude: tenant.attendanceLongitude, radiusMeters: tenant.attendanceRadiusMeters || 200 } : null,
-      configured,
+      data: location,
+      configured: location.configured,
     });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -131,16 +140,28 @@ router.get('/attendance/geofence', requireAttendanceRecordPermission, async (req
 router.get('/attendance/employee-options', requireAttendanceRecordPermission, async (req, res) => {
   try {
     const tenantId = req.tenant.id;
-    const ownEmployee = req.canRecordAnyone ? null : await linkedEmployeeForRequest(req);
+    const ownEmployee = await linkedEmployeeForRequest(req);
     if (!req.canRecordAnyone && !ownEmployee) return res.status(403).json({ success: false, message: 'Your login is not linked to an employee profile. Ask an HR administrator to use the same email address on your employee profile.' });
     const employees = await prisma.employee.findMany({
-      where: { tenantId, status: { not: 'terminated' }, ...(ownEmployee ? { id: ownEmployee.id } : {}) },
+      where: { tenantId, status: { not: 'terminated' }, ...(!req.canRecordAnyone ? { id: ownEmployee.id } : {}) },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });
-    res.json({ success: true, data: employees });
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: employees, ownEmployeeId: ownEmployee?.id || null, canRecordAnyone: req.canRecordAnyone });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+// Check-in staff can read only the minimal status needed for their permitted employee.
+router.get('/attendance/current-status', requireAttendanceRecordPermission, async (req, res) => {
+  try {
+    const employeeId = await attendanceEmployeeId(req, req.query.employeeId);
+    const record = await attendanceService.getCurrentStatus(req.tenant.id, employeeId);
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: record });
+  } catch (error) {
+    res.status(error.status || 400).json({ success: false, message: error.message });
   }
 });
 // Get attendance records (list with filtering)

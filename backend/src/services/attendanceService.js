@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { businessAttendanceLocation, validCoordinates } from '../utils/attendanceLocation.js';
 
 function dayRange(value = new Date()) {
   const start = new Date(value);
@@ -17,11 +18,6 @@ function haversineDistanceMeters(from, to) {
   return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function validCoordinates(coordinates) {
-  const latitude = Number(coordinates?.latitude);
-  const longitude = Number(coordinates?.longitude);
-  return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
-}
 function employeeName(employee) {
   return [employee?.firstName, employee?.lastName].filter(Boolean).join(' ').trim();
 }
@@ -41,7 +37,7 @@ class AttendanceService {
       where: { id: tenantId },
       select: { address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true },
     });
-    if (!tenant?.address?.trim() || tenant.attendanceLatitude == null || tenant.attendanceLongitude == null) {
+    if (!businessAttendanceLocation(tenant).configured) {
       throw new Error('Attendance is unavailable until the business owner saves the business address and location in Business Settings.');
     }
     if (!validCoordinates(coordinates)) throw new Error('Device location is required to check in or out. Enable location access and try again.');
@@ -55,12 +51,23 @@ class AttendanceService {
     return { address: tenant.address, distanceMeters };
   }
   async requireEmployee(tenantId, employeeId) {
+    if (!employeeId) throw new Error('Select an employee first');
     const employee = await prisma.employee.findFirst({
       where: { id: employeeId, tenantId },
       select: { id: true, firstName: true, lastName: true, branchId: true },
     });
     if (!employee) throw new Error('Employee not found');
     return employee;
+  }
+
+  async getCurrentStatus(tenantId, employeeId) {
+    await this.requireEmployee(tenantId, employeeId);
+    const { start, end } = dayRange();
+    return prisma.attendanceRecord.findFirst({
+      where: { tenantId, employeeId, attendanceDate: { gte: start, lt: end }, isActive: true },
+      select: { checkInTime: true, checkOutTime: true },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async attachEmployees(tenantId, records) {
@@ -84,7 +91,8 @@ class AttendanceService {
   }
 
   async checkIn(tenantId, employeeId, method = 'MANUAL', location = null, changedBy = 'SYSTEM', coordinates = null) {
-    await this.assertWithinBusinessLocation(tenantId, coordinates);
+    const businessLocation = await this.assertWithinBusinessLocation(tenantId, coordinates);
+    location = businessLocation.address;
     const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkInTime = new Date();
@@ -124,7 +132,8 @@ class AttendanceService {
   }
 
   async checkOut(tenantId, employeeId, location = null, changedBy = 'SYSTEM', coordinates = null) {
-    await this.assertWithinBusinessLocation(tenantId, coordinates);
+    const businessLocation = await this.assertWithinBusinessLocation(tenantId, coordinates);
+    location = businessLocation.address;
     const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkOutTime = new Date();

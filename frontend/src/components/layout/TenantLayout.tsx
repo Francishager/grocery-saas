@@ -284,7 +284,7 @@ const hrSubItems = [
   { to: '/tenant/hr/contracts', label: 'Contracts', icon: FileText, feature: 'hr', permission: ['canViewHRContracts', 'canManageHRContracts'] },
   { to: '/tenant/hr/documents', label: 'Documents', icon: ClipboardList, feature: 'hr', permission: ['canViewHRDocuments', 'canManageHRDocuments'] },
   { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: ['canViewHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canApproveHRAttendance', 'canManageHRAttendance'] },
-  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: ['canRecordHRAttendance', 'canManageHRAttendance'] },
+  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: ['canRecordHRAttendance', 'canRecordOwnHRAttendance', 'canManageHRAttendance'] },
   { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewHRShifts' },
   { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: ['canViewHRLeave', 'canRequestHRLeave'] },
   { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canApproveHRLeave' },

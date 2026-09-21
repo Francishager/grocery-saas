@@ -17,6 +17,8 @@ export default function BusinessSettingsPage() {
   const [settings, setSettings] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [capturingLocation, setCapturingLocation] = useState(false)
+  const [locationPending, setLocationPending] = useState(false)
   const { toast } = useToast()
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
@@ -62,6 +64,7 @@ export default function BusinessSettingsPage() {
       const updatedSettings = result?.tenant || { ...settings, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
       cacheTenantFormattingSettings(updatedSettings)
       setSettings(updatedSettings)
+      setLocationPending(false)
       toast({ title: 'Settings saved' })
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Failed to save', description: err?.message })
@@ -77,12 +80,16 @@ export default function BusinessSettingsPage() {
       toast({ variant: 'destructive', title: 'Location services are not available on this device' })
       return
     }
+    setCapturingLocation(true)
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setSettings((current: any) => ({ ...current, attendanceLatitude: position.coords.latitude, attendanceLongitude: position.coords.longitude }))
+        setCapturingLocation(false)
+        setLocationPending(true)
         toast({ title: 'Business location captured', description: 'Save changes to activate attendance location checks.' })
       },
       async (error) => {
+        setCapturingLocation(false)
         const permission = navigator.permissions ? await navigator.permissions.query({ name: 'geolocation' as PermissionName }).catch(() => null) : null
         const description = error.code === error.PERMISSION_DENIED || permission?.state === 'denied'
           ? 'Location is blocked for this site. Open the browser site controls next to the address bar, set Location to Allow, then try again.'
@@ -152,11 +159,11 @@ export default function BusinessSettingsPage() {
               <div className="space-y-2 sm:col-span-2">
                 <Label>Attendance Location</Label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Button type="button" variant="outline" onClick={captureAttendanceLocation} disabled={saving || !online}>
+                  <Button type="button" variant="outline" onClick={captureAttendanceLocation} disabled={saving || capturingLocation || !online}>
                     <MapPin className="mr-2 h-4 w-4" /> Capture Business Location
                   </Button>
                   <span className="text-xs text-muted-foreground">
-                    {settings.attendanceLatitude != null && settings.attendanceLongitude != null ? 'Location captured. Save changes to keep it.' : 'Capture this while physically at the saved business address.'}
+                    {capturingLocation ? 'Capturing business location...' : locationPending ? 'Location captured but not saved. Select Save Changes to activate it.' : settings.attendanceLatitude != null && settings.attendanceLongitude != null ? 'Business GPS location saved.' : 'Capture this while physically at the saved business address.'}
                   </span>
                 </div>
               </div>
@@ -166,7 +173,7 @@ export default function BusinessSettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Location Status</Label>
-                <div className="flex h-10 items-center text-sm text-muted-foreground">{settings.attendanceLatitude != null && settings.attendanceLongitude != null ? 'Configured' : 'Not configured'}</div>
+                <div className="min-h-10 break-words text-sm text-muted-foreground">{locationPending ? 'Not saved yet' : settings.attendanceLatitude != null && settings.attendanceLongitude != null ? 'Configured' : 'Not configured'}{settings.attendanceLatitude != null && settings.attendanceLongitude != null && <div>{Number(settings.attendanceLatitude).toFixed(6)}, {Number(settings.attendanceLongitude).toFixed(6)}</div>}</div>
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>

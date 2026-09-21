@@ -6,6 +6,7 @@ import { tenantIdFromUser } from "../utils/branchAccess.js";
 import multer from "multer";
 import cloudinary from "cloudinary";
 import { validateWorkingHours, validateTimezone, workingHoursAdmin } from "../utils/workingHours.js";
+import { validCoordinates } from "../utils/attendanceLocation.js";
 
 const router = Router();
 const SYSTEM_DATE_FORMAT = "DD/MM/YY";
@@ -85,15 +86,17 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     if (phone !== undefined) data.phone = phone || null;
     if (address !== undefined) data.address = address || null;
     if (attendanceLatitude !== undefined || attendanceLongitude !== undefined) {
-      const latitude = Number(attendanceLatitude);
-      const longitude = Number(attendanceLongitude);
-      const businessAddress = address !== undefined ? String(address).trim() : (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { address: true } }))?.address;
-      if (!businessAddress) return res.status(400).json({ error: 'Set the business address before capturing its attendance location.' });
-      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      if (attendanceLatitude === null && attendanceLongitude === null) {
+        data.attendanceLatitude = null;
+        data.attendanceLongitude = null;
+      } else if (!validCoordinates({ latitude: attendanceLatitude, longitude: attendanceLongitude })) {
         return res.status(400).json({ error: 'A valid business GPS location is required.' });
+      } else {
+        const businessAddress = address !== undefined ? String(address || '').trim() : (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { address: true } }))?.address;
+        if (!businessAddress) return res.status(400).json({ error: 'Set the business address before capturing its attendance location.' });
+        data.attendanceLatitude = attendanceLatitude;
+        data.attendanceLongitude = attendanceLongitude;
       }
-      data.attendanceLatitude = latitude;
-      data.attendanceLongitude = longitude;
     }
     if (attendanceRadiusMeters !== undefined) {
       const radius = Number(attendanceRadiusMeters);
