@@ -21,6 +21,27 @@ async function deleteTenantRecord(model, where) {
   return deleted.count > 0;
 }
 
+
+function userId(req) {
+  return req.user?.id || req.user?.userId || req.user?.sub;
+}
+
+async function currentServiceTechnician(req) {
+  const id = userId(req);
+  if (!id) return null;
+  return prisma.serviceTechnician.findFirst({
+    where: { tenantId: t(req), userId: id, isActive: true },
+    select: { id: true, userId: true, name: true },
+  });
+}
+
+function arrayUnique(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
+function canApproveServiceShare(record, currentTech, id) {
+  return record.createdByUserId === id || (currentTech?.id && record.createdByTechnicianId === currentTech.id);
+}
 function feedbackTokenHash(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
 }
@@ -61,11 +82,31 @@ router.get('/catalog', authenticateToken, requireAnyPermission(SERVICE_PERMISSIO
   } catch { res.status(500).json({ error: 'Unable to load services' }); }
 });
 
-router.get('/technician-options', authenticateToken, requireAnyPermission(['canAssignServiceAppointment', 'canAssignServiceWorkOrder', 'canAssignServiceJobCard']), requireFeature('service'), async (req, res) => {
+router.get('/technician-options', authenticateToken, requireAnyPermission(['canAssignServiceAppointment', 'canAssignServiceWorkOrder', 'canAssignServiceJobCard', servicePermission('work-orders', 'Create'), servicePermission('job-cards', 'Create')]), requireFeature('service'), async (req, res) => {
   try {
+    const currentTech = await currentServiceTechnician(req);
     const options = await prisma.serviceTechnician.findMany({ where: { tenantId: t(req), isActive: true }, select: { id: true, name: true, userId: true }, orderBy: { name: 'asc' } });
-    res.json(options);
+    res.json(options.map(option => ({ ...option, isCurrentUser: currentTech?.id === option.id })));
   } catch { res.status(500).json({ error: 'Unable to load technicians' }); }
+});
+
+router.get('/employee-options', authenticateToken, requirePermission(servicePermission('technicians', 'Create')), requireFeature('service.technicians'), async (req, res) => {
+  try {
+    const employees = await prisma.employee.findMany({
+      where: { tenantId: t(req), status: { not: 'terminated' } },
+      select: { id: true, firstName: true, middleName: true, lastName: true, email: true, phone: true, position: true, jobTitle: true, hireDate: true, branchId: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+    res.json(employees.map(employee => ({
+      id: employee.id,
+      name: [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' '),
+      email: employee.email || '',
+      phone: employee.phone || '',
+      role: employee.jobTitle || employee.position || 'technician',
+      hireDate: employee.hireDate,
+      branchId: employee.branchId || null,
+    })));
+  } catch { res.status(500).json({ error: 'Unable to load employees' }); }
 });
 
 const validateReferences = tab => async (req, res, next) => {
@@ -131,6 +172,8 @@ router.get("/work-orders", authenticateToken, requirePermission(servicePermissio
 router.post("/work-orders", authenticateToken, requirePermission(servicePermission('work-orders', 'Create')), requireServiceAssignment('work-orders'), requireFeature("service.work_orders"), validateReferences('work-orders'), async (req, res) => {
   try {
     const { orderNo, customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, priority, serviceCategory, estimatedCost, branchId, notes } = req.body;
+    const currentTech = await currentServiceTechnician(req);
+    const finalTechnicianId = technicianId || currentTech?.userId || null;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
     const service = await findServiceProduct(t(req), productId);
     if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
@@ -138,10 +181,10 @@ router.post("/work-orders", authenticateToken, requirePermission(servicePermissi
     const linkError = await validateServiceLinks(t(req), req.body, service.id);
     if (linkError) return res.status(400).json({ error: linkError });
     if (customerId && !await prisma.customer.findFirst({ where: { id: customerId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid customer' });
-    if (technicianId && !await prisma.user.findFirst({ where: { id: technicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
+    if (finalTechnicianId && !await prisma.user.findFirst({ where: { id: finalTechnicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
     const cost = Number(estimatedCost ?? service.price ?? 0);
     if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ error: 'Estimated cost must be a non-negative number' });
-    const order = await prisma.workOrder.create({ data: { serviceKind: 'work_order', orderNo: orderNo || `WO-${Date.now()}`, customerId: customerId || null, customerName, customerPhone, customerEmail, productId: service.id, technicianId: technicianId || null, title: orderTitle, description: description || service.description || null, priority: priority || "normal", serviceCategory: serviceCategory || service.serviceCategory || service.category?.name || null, estimatedCost: cost, branchId: branchId || null, notes, tenantId: t(req) } });
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'work_order', orderNo: orderNo || `WO-${Date.now()}`, customerId: customerId || null, customerName, customerPhone, customerEmail, productId: service.id, technicianId: finalTechnicianId, createdByUserId: userId(req) || null, createdByTechnicianId: currentTech?.id || null, title: orderTitle, description: description || service.description || null, priority: priority || "normal", serviceCategory: serviceCategory || service.serviceCategory || service.category?.name || null, estimatedCost: cost, branchId: branchId || null, notes, tenantId: t(req) } });
     res.status(201).json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -216,9 +259,11 @@ router.get("/technicians", authenticateToken, requirePermission(servicePermissio
 
 router.post("/technicians", authenticateToken, requirePermission(servicePermission('technicians', 'Create')), requireFeature("service.technicians"), validateReferences('technicians'), async (req, res) => {
   try {
-    const { name, email, phone, role, skills, specializations, hourlyRate, availability, branchId, userId, hireDate, notes } = req.body;
-    if (!name?.trim()) return res.status(400).json({ error: 'Technician name is required' });
-    const tech = await prisma.serviceTechnician.create({ data: { name, email, phone, role: role || "technician", skills: skills || [], specializations: specializations || [], hourlyRate: hourlyRate || 0, availability: availability || "full_time", branchId, userId, hireDate: hireDate ? new Date(hireDate) : undefined, notes, tenantId: t(req) } });
+    const { employeeId, name, email, phone, role, skills, specializations, hourlyRate, availability, branchId, userId, hireDate, notes } = req.body;
+    const employee = employeeId ? await prisma.employee.findFirst({ where: { id: employeeId, tenantId: t(req) } }) : null;
+    const finalName = name?.trim() || (employee ? [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' ') : '');
+    if (!finalName) return res.status(400).json({ error: 'Technician name is required' });
+    const tech = await prisma.serviceTechnician.create({ data: { employeeId: employee?.id || employeeId || null, name: finalName, email: email || employee?.email || null, phone: phone || employee?.phone || null, role: role || employee?.jobTitle || employee?.position || "technician", skills: skills || [], specializations: specializations || [], hourlyRate: hourlyRate || 0, availability: availability || "full_time", branchId: branchId || employee?.branchId || null, userId, hireDate: hireDate ? new Date(hireDate) : employee?.hireDate || undefined, notes, tenantId: t(req) } });
     res.status(201).json(tech);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -253,17 +298,19 @@ router.post("/job-cards", authenticateToken, requirePermission(servicePermission
   try {
     await ensureServiceFeedbackSchema();
     const { cardNo, appointmentId, workOrderId, productId, technicianId, customerName, customerPhone, serviceTitle, serviceDescription, priority, scheduledStart, scheduledEnd, laborCost, partsCost, partsUsed, branchId } = req.body;
+    const currentTech = await currentServiceTechnician(req);
+    const finalTechnicianId = technicianId || currentTech?.id || null;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
     const service = await findServiceProduct(t(req), productId);
     if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
     const linkError = await validateServiceLinks(t(req), req.body, service.id);
     if (linkError) return res.status(400).json({ error: linkError });
-    if (technicianId && !await prisma.serviceTechnician.findFirst({ where: { id: technicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
+    if (finalTechnicianId && !await prisma.serviceTechnician.findFirst({ where: { id: finalTechnicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
     const finalLaborCost = Number(laborCost ?? service.price ?? 0);
     const finalPartsCost = Number(partsCost ?? 0);
     if (![finalLaborCost, finalPartsCost].every(value => Number.isFinite(value) && value >= 0)) return res.status(400).json({ error: 'Costs must be non-negative numbers' });
     const totalCost = finalLaborCost + finalPartsCost;
-    const card = await prisma.serviceJobCard.create({ data: { cardNo: cardNo || `JC-${Date.now()}`, appointmentId: appointmentId || null, workOrderId: workOrderId || null, productId: service.id, technicianId: technicianId || null, customerName, customerPhone, serviceTitle: serviceTitle?.trim() || service.name, serviceDescription: serviceDescription || service.description || null, priority: priority || "normal", scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined, scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined, laborCost: finalLaborCost, partsCost: finalPartsCost, totalCost, partsUsed, branchId: branchId || null, tenantId: t(req) } });
+    const card = await prisma.serviceJobCard.create({ data: { cardNo: cardNo || `JC-${Date.now()}`, appointmentId: appointmentId || null, workOrderId: workOrderId || null, productId: service.id, technicianId: finalTechnicianId, createdByUserId: userId(req) || null, createdByTechnicianId: currentTech?.id || null, customerName, customerPhone, serviceTitle: serviceTitle?.trim() || service.name, serviceDescription: serviceDescription || service.description || null, priority: priority || "normal", scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined, scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined, laborCost: finalLaborCost, partsCost: finalPartsCost, totalCost, partsUsed, branchId: branchId || null, tenantId: t(req) } });
     res.status(201).json(card);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -420,6 +467,68 @@ router.post("/public-feedback/:token", async (req, res) => {
     res.status(201).json({ id: fb.id, message: 'Thank you for your feedback' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+async function serviceShareRecord(recordType, id, tenantId) {
+  if (recordType === 'work-order') return prisma.workOrder.findFirst({ where: { id, tenantId, serviceKind: 'work_order' } });
+  if (recordType === 'job-card') return prisma.serviceJobCard.findFirst({ where: { id, tenantId } });
+  return null;
+}
+
+async function applyApprovedServiceShare(recordType, record, targetTech) {
+  if (recordType === 'work-order') {
+    return prisma.workOrder.update({ where: { id: record.id }, data: {
+      sharedWithTechnicianIds: arrayUnique([...(record.sharedWithTechnicianIds || []), targetTech.id]),
+      sharedWithUserIds: arrayUnique([...(record.sharedWithUserIds || []), targetTech.userId]),
+    } });
+  }
+  return prisma.serviceJobCard.update({ where: { id: record.id }, data: {
+    sharedWithTechnicianIds: arrayUnique([...(record.sharedWithTechnicianIds || []), targetTech.id]),
+    sharedWithUserIds: arrayUnique([...(record.sharedWithUserIds || []), targetTech.userId]),
+  } });
+}
+
+async function createServiceShareRequest(req, res, recordType) {
+  try {
+    const record = await serviceShareRecord(recordType, req.params.id, t(req));
+    if (!record) return res.status(404).json({ error: recordType === 'work-order' ? 'Work order not found' : 'Job card not found' });
+    const currentTech = await currentServiceTechnician(req);
+    const id = userId(req);
+    const isAssigned = recordType === 'work-order' ? record.technicianId === id : record.technicianId === currentTech?.id;
+    if (!isAssigned && !canApproveServiceShare(record, currentTech, id)) return res.status(403).json({ error: 'Only the assigned or creator technician can share this record' });
+    const targetTech = await prisma.serviceTechnician.findFirst({ where: { id: req.body.targetTechnicianId, tenantId: t(req), isActive: true } });
+    if (!targetTech) return res.status(400).json({ error: 'Select a valid technician to share with' });
+    const approved = canApproveServiceShare(record, currentTech, id);
+    const request = await prisma.serviceShareRequest.create({ data: {
+      tenantId: t(req), recordType, recordId: record.id, requesterUserId: id || null, requesterTechnicianId: currentTech?.id || null,
+      targetUserId: targetTech.userId || null, targetTechnicianId: targetTech.id, reason: req.body.reason || null,
+      status: approved ? 'approved' : 'pending', approvedByUserId: approved ? id || null : null, approvedByTechnicianId: approved ? currentTech?.id || null : null, approvedAt: approved ? new Date() : null,
+    } });
+    if (approved) await applyApprovedServiceShare(recordType, record, targetTech);
+    res.status(201).json(request);
+  } catch (e) { res.status(500).json({ error: e.message || 'Unable to share service record' }); }
+}
+
+async function approveServiceShareRequest(req, res, recordType) {
+  try {
+    const request = await prisma.serviceShareRequest.findFirst({ where: { id: req.params.requestId, tenantId: t(req), recordType, status: 'pending' } });
+    if (!request) return res.status(404).json({ error: 'Share request not found' });
+    const record = await serviceShareRecord(recordType, request.recordId, t(req));
+    if (!record) return res.status(404).json({ error: 'Service record not found' });
+    const currentTech = await currentServiceTechnician(req);
+    const id = userId(req);
+    if (!canApproveServiceShare(record, currentTech, id)) return res.status(403).json({ error: 'Only the creator technician can approve sharing' });
+    const targetTech = await prisma.serviceTechnician.findFirst({ where: { id: request.targetTechnicianId || '', tenantId: t(req), isActive: true } });
+    if (!targetTech) return res.status(400).json({ error: 'Target technician is no longer active' });
+    await applyApprovedServiceShare(recordType, record, targetTech);
+    const updated = await prisma.serviceShareRequest.update({ where: { id: request.id }, data: { status: 'approved', approvedByUserId: id || null, approvedByTechnicianId: currentTech?.id || null, approvedAt: new Date() } });
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message || 'Unable to approve share request' }); }
+}
+
+router.post('/work-orders/:id/share-requests', authenticateToken, requireAnyPermission([servicePermission('work-orders', 'Assign'), servicePermission('work-orders', 'Create')]), requireFeature('service.work_orders'), async (req, res) => createServiceShareRequest(req, res, 'work-order'));
+router.post('/work-orders/share-requests/:requestId/approve', authenticateToken, requireAnyPermission([servicePermission('work-orders', 'Assign'), servicePermission('work-orders', 'Create')]), requireFeature('service.work_orders'), async (req, res) => approveServiceShareRequest(req, res, 'work-order'));
+router.post('/job-cards/:id/share-requests', authenticateToken, requireAnyPermission([servicePermission('job-cards', 'Assign'), servicePermission('job-cards', 'Create')]), requireFeature('service.job_cards'), async (req, res) => createServiceShareRequest(req, res, 'job-card'));
+router.post('/job-cards/share-requests/:requestId/approve', authenticateToken, requireAnyPermission([servicePermission('job-cards', 'Assign'), servicePermission('job-cards', 'Create')]), requireFeature('service.job_cards'), async (req, res) => approveServiceShareRequest(req, res, 'job-card'));
 
 // ===== SERVICE CATEGORIES PRESETS =====
 router.get("/categories", authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.action !== 'Report').map(p => p.id)), async (req, res) => {
@@ -597,4 +706,6 @@ router.delete('/garage/:id', authenticateToken, requirePermission(servicePermiss
 });
 
 export default router;
+
+
 

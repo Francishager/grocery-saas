@@ -3254,6 +3254,10 @@ model WorkOrder {
   product         Product?  @relation(fields: [productId], references: [id])
   technicianId    String?
   technician      User?     @relation("WorkOrderTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  createdByUserId String?
+  createdByTechnicianId String?
+  sharedWithUserIds String[] @default([])
+  sharedWithTechnicianIds String[] @default([])
   title           String
   description     String?
   status          String    @default("open") // open, in_progress, on_hold, completed, cancelled
@@ -3361,6 +3365,7 @@ model ServiceTechnician {
   branch          Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
   userId          String? // linked system user (optional)
   user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  employeeId      String?
   name            String
   email           String?
   phone           String?
@@ -3404,6 +3409,10 @@ model ServiceJobCard {
   product            Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
   technicianId       String?
   technician         ServiceTechnician? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  createdByUserId    String?
+  createdByTechnicianId String?
+  sharedWithUserIds String[] @default([])
+  sharedWithTechnicianIds String[] @default([])
   customerName       String
   customerPhone      String?
   serviceTitle       String
@@ -3438,6 +3447,27 @@ model ServiceJobCard {
   @@map("service_job_cards")
 }
 
+model ServiceShareRequest {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  recordType            String
+  recordId              String
+  requesterUserId       String?
+  requesterTechnicianId String?
+  targetUserId          String?
+  targetTechnicianId    String?
+  status                String   @default("pending")
+  reason                String?
+  approvedByUserId      String?
+  approvedByTechnicianId String?
+  approvedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, recordType, recordId])
+  @@index([tenantId, status])
+  @@map("service_share_requests")
+}
 // =====================================================
 // SERVICE FEEDBACK (customer ratings & reviews)
 // =====================================================
@@ -4162,3 +4192,4 @@ model ShiftSwap {
 // =====================================================
 // PHASE 2: LEAVE MANAGEMENT (LeaveType, LeaveBalance, LeaveHistory added)
 // =====================================================
+

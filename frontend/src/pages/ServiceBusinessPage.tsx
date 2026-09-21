@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit, QrCode, Printer, Copy } from 'lucide-react'
+import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit, QrCode, Printer, Copy, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import QRCode from 'qrcode'
 
@@ -52,7 +52,10 @@ export default function ServiceBusinessPage() {
   const tab = urlTab || SERVICE_PERMISSION_DEFINITIONS.find(p => p.action !== 'Report' && hasPermission(p.id))?.tab || 'appointments'
   const can = useCallback((action: string, section = tab) => hasPermission(servicePermission(section, action)), [hasPermission, tab])
   const canOpen = servicePagePermissions(tab).some(hasPermission)
-  const [technicianOptions, setTechnicianOptions] = useState<{ id: string; name: string; userId?: string | null }[]>([])
+  const [technicianOptions, setTechnicianOptions] = useState<{ id: string; name: string; userId?: string | null; isCurrentUser?: boolean }[]>([])
+  const [employeeOptions, setEmployeeOptions] = useState<{ id: string; name: string; email?: string; phone?: string; role?: string; hireDate?: string | null; branchId?: string | null }[]>([])
+  const [shareRecord, setShareRecord] = useState<{ type: 'work-orders' | 'job-cards'; id: string; label: string } | null>(null)
+  const [shareTechnicianId, setShareTechnicianId] = useState('')
   const [replyTo, setReplyTo] = useState<ServiceFeedback | null>(null)
   const [replyText, setReplyText] = useState('')
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -81,7 +84,7 @@ export default function ServiceBusinessPage() {
   const [apptForm, setApptForm] = useState({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' })
   const [woForm, setWoForm] = useState({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 })
   const [contractForm, setContractForm] = useState({ contractNo: '', customerId: '', title: '', description: '', serviceCategory: '', startDate: '', endDate: '', renewalDate: '', autoRenew: false, value: 0, billingCycle: 'monthly', discountPercent: 0, terms: '' })
-  const [techForm, setTechForm] = useState({ name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' })
+  const [techForm, setTechForm] = useState({ employeeId: '', name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' })
   const [jobCardForm, setJobCardForm] = useState({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 })
   const [feedbackLinkForm, setFeedbackLinkForm] = useState({ productId: '', appointmentId: '', workOrderId: '', contractId: '' })
   const [feedbackQr, setFeedbackQr] = useState<{ url: string; qrDataUrl: string; businessName: string; logo?: string | null; service: { id: string; name: string; category?: string | null; duration?: string | null } } | null>(null)
@@ -92,7 +95,7 @@ export default function ServiceBusinessPage() {
   const loadData = useCallback(async () => {
     try {
       const readSection = async (section: string) => tab === section && can('View', section) ? (await apiFetch('/api/service/' + section)).json() : []
-      const [a, w, c, car, gar, tech, jc, fb, svc, options] = await Promise.all([
+      const [a, w, c, car, gar, tech, jc, fb, svc, options, employees] = await Promise.all([
         readSection('appointments'),
         readSection('work-orders'),
         readSection('contracts'),
@@ -102,7 +105,8 @@ export default function ServiceBusinessPage() {
         readSection('job-cards'),
         readSection('feedback'),
         canOpen && ['Create', 'Edit', 'GenerateQR'].some(action => can(action)) ? apiFetch('/api/service/catalog').then(r => r.json()) : Promise.resolve([]),
-        can('Assign') ? apiFetch('/api/service/technician-options').then(r => r.json()) : Promise.resolve([]),
+        (can('Assign') || can('Create')) ? apiFetch('/api/service/technician-options').then(r => r.json()) : Promise.resolve([]),
+        tab === 'technicians' && can('Create', 'technicians') ? apiFetch('/api/service/employee-options').then(r => r.json()) : Promise.resolve([]),
       ])
       setAppointments(Array.isArray(a) ? a : [])
       setWorkOrders(Array.isArray(w) ? w : [])
@@ -114,6 +118,7 @@ export default function ServiceBusinessPage() {
       setFeedback(Array.isArray(fb) ? fb : [])
       setServices(Array.isArray(svc) ? svc : [])
       setTechnicianOptions(Array.isArray(options) ? options : [])
+      setEmployeeOptions(Array.isArray(employees) ? employees : [])
     } catch (e) { console.error(e); toast({ variant: 'destructive', title: 'Unable to load service data. Please try again.' }) }
   }, [can, canOpen, tab, toast])
 
@@ -162,7 +167,7 @@ export default function ServiceBusinessPage() {
       } else {
         await apiFetch('/api/service/technicians', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       }
-      setShowTechModal(false); setTechForm({ name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' }); loadData()
+      setShowTechModal(false); setTechForm({ employeeId: '', name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' }); loadData()
     } catch { toast({ variant: 'destructive', title: 'Failed to save technician' }) }
   }
   const deleteTechnician = async (id: string) => { try { await apiFetch(`/api/service/technicians/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
@@ -258,6 +263,8 @@ export default function ServiceBusinessPage() {
   const currentSectionLabel = sectionLabels[tab] || 'Appointments'
   const currentSectionDescription = sectionDescription[tab] || 'Manage scheduled service appointments and confirmations.'
   const serviceOptions = services.filter(s => s.isActive !== false)
+  const serviceCategoryOptions = [...new Set(serviceOptions.map(service => service.serviceCategory || service.categoryName).filter((category): category is string => Boolean(category)))].sort((a, b) => a.localeCompare(b))
+  const currentTechnician = technicianOptions.find(technician => technician.isCurrentUser)
 
   const applyWorkOrderService = (id: string) => {
     const service = serviceOptions.find(item => String(item.id) === id)
@@ -269,6 +276,11 @@ export default function ServiceBusinessPage() {
     setJobCardForm(prev => ({ ...prev, productId: id, serviceTitle: service?.product_name || prev.serviceTitle, serviceDescription: service?.description ?? '', laborCost: Number(service?.unit_price ?? 0) }))
   }
 
+  const applyTechnicianEmployee = (employeeId: string) => {
+    const employee = employeeOptions.find(option => option.id === employeeId)
+    if (!employee) return
+    setTechForm(previous => ({ ...previous, employeeId, name: employee.name, email: employee.email || '', phone: employee.phone || '', role: employee.role || previous.role, hireDate: employee.hireDate ? new Date(employee.hireDate).toISOString().slice(0, 10) : previous.hireDate }))
+  }
   if (!canOpen) return <div role="alert" className="p-6">You do not have permission to access this service section.</div>
 
   return (
@@ -326,7 +338,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'work-orders' && (
         <div className="space-y-4">
-          {can('Create', 'work-orders') && <Button onClick={() => setShowWOModal(true)}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>}
+          {can('Create', 'work-orders') && <Button onClick={() => { setWoForm({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: currentTechnician?.userId || '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 }); setShowWOModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-left">Category</th><th className="p-2 text-left">Tech</th><th className="p-2 text-left">Priority</th><th className="p-2 text-right">Est. Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -345,6 +357,7 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 space-x-1">
                       {w.status === 'open' && can('UpdateStatus', 'work-orders') && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'in_progress')}>Start</Button>}
                       {w.status === 'in_progress' && can('UpdateStatus', 'work-orders') && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'completed')}>Complete</Button>}
+                      {can('Create', 'work-orders') && <Button size="sm" variant="ghost" title="Share work order" onClick={() => { setShareRecord({ type: 'work-orders', id: w.id, label: w.orderNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
                       {can('Delete', 'work-orders') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteWO(w.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
@@ -384,7 +397,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'technicians' && (
         <div className="space-y-4">
-          {can('Create', 'technicians') && <Button onClick={() => { setEditingTechId(null); setTechForm({ name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' }); setShowTechModal(true) }}><Plus className="mr-1 h-4 w-4" /> Add Technician</Button>}
+          {can('Create', 'technicians') && <Button onClick={() => { setEditingTechId(null); setTechForm({ employeeId: '', name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' }); setShowTechModal(true) }}><Plus className="mr-1 h-4 w-4" /> Add Technician</Button>}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {technicians.length === 0 && <div className="col-span-full text-center text-muted-foreground py-8">No technicians yet. Add your first technician to get started.</div>}
             {technicians.map(tech => (
@@ -426,7 +439,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'job-cards' && (
         <div className="space-y-4">
-          {can('Create', 'job-cards') && <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>}
+          {can('Create', 'job-cards') && <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: currentTechnician?.id || '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Card No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Total Cost</th><th className="p-2 text-left">Priority</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -444,6 +457,7 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 space-x-1">
                       {jc.status === 'pending' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'in_progress')}>Start</Button>}
                       {jc.status === 'in_progress' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'completed')}>Complete</Button>}
+                      {can('Create', 'job-cards') && <Button size="sm" variant="ghost" title="Share job card" onClick={() => { setShareRecord({ type: 'job-cards', id: jc.id, label: jc.cardNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
                       {can('Delete', 'job-cards') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteJobCard(jc.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
@@ -647,7 +661,13 @@ export default function ServiceBusinessPage() {
             </div>
             <div><Label>Title</Label><Input value={woForm.title} onChange={e => setWoForm({ ...woForm, title: e.target.value })} /></div>
             <div><Label>Description</Label><Input value={woForm.description} onChange={e => setWoForm({ ...woForm, description: e.target.value })} /></div>
-            <div><Label>Service Category</Label><Input value={woForm.serviceCategory} onChange={e => setWoForm({ ...woForm, serviceCategory: e.target.value })} placeholder="repair, installation, maintenance" /></div>
+            <div><Label>Service Category</Label>
+              <Select value={woForm.serviceCategory} onValueChange={value => setWoForm({ ...woForm, serviceCategory: value })}>
+                <SelectTrigger><SelectValue placeholder="Select service category" /></SelectTrigger><SelectContent>
+                  {serviceCategoryOptions.map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div><Label>Technician</Label>
               <Select disabled={!can('Assign')} value={woForm.technicianId} onValueChange={v => setWoForm({ ...woForm, technicianId: v })}>
                 <SelectTrigger><SelectValue placeholder="Assign technician" /></SelectTrigger><SelectContent>
@@ -676,7 +696,13 @@ export default function ServiceBusinessPage() {
             <div><Label>Customer ID</Label><Input value={contractForm.customerId} onChange={e => setContractForm({ ...contractForm, customerId: e.target.value })} placeholder="Customer ID" /></div>
             <div><Label>Title</Label><Input value={contractForm.title} onChange={e => setContractForm({ ...contractForm, title: e.target.value })} /></div>
             <div><Label>Description</Label><Input value={contractForm.description} onChange={e => setContractForm({ ...contractForm, description: e.target.value })} /></div>
-            <div><Label>Service Category</Label><Input value={contractForm.serviceCategory} onChange={e => setContractForm({ ...contractForm, serviceCategory: e.target.value })} placeholder="maintenance, consulting, cleaning" /></div>
+            <div><Label>Service Category</Label>
+              <Select value={contractForm.serviceCategory} onValueChange={value => setContractForm({ ...contractForm, serviceCategory: value })}>
+                <SelectTrigger><SelectValue placeholder="Select service category" /></SelectTrigger><SelectContent>
+                  {serviceCategoryOptions.map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Start Date</Label><Input type="date" value={contractForm.startDate} onChange={e => setContractForm({ ...contractForm, startDate: e.target.value })} /></div>
               <div><Label>End Date</Label><Input type="date" value={contractForm.endDate} onChange={e => setContractForm({ ...contractForm, endDate: e.target.value })} /></div>
@@ -707,6 +733,13 @@ export default function ServiceBusinessPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editingTechId ? 'Edit Technician' : 'Add Technician'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            {!editingTechId && <div><Label>HR Employee</Label>
+              <Select value={techForm.employeeId} onValueChange={applyTechnicianEmployee}>
+                <SelectTrigger><SelectValue placeholder="Select employee to fill details" /></SelectTrigger><SelectContent>
+                  {employeeOptions.map(employee => <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>}
             <div><Label>Name</Label><Input value={techForm.name} onChange={e => setTechForm({ ...techForm, name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Phone</Label><Input value={techForm.phone} onChange={e => setTechForm({ ...techForm, phone: e.target.value })} /></div>
@@ -777,6 +810,20 @@ export default function ServiceBusinessPage() {
             </div>
           </div>
           <DialogFooter><Button onClick={saveJobCard} disabled={savingService || !jobCardForm.productId}>{savingService ? 'Saving...' : editingJobCardId ? 'Update Job Card' : 'Create Job Card'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(shareRecord)} onOpenChange={open => { if (!open) { setShareRecord(null); setShareTechnicianId('') } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Share {shareRecord?.label}</DialogTitle><DialogDescription>The technician who created this record approves the share request.</DialogDescription></DialogHeader>
+          <div><Label>Technician</Label>
+            <Select value={shareTechnicianId} onValueChange={setShareTechnicianId}>
+              <SelectTrigger><SelectValue placeholder="Select technician" /></SelectTrigger><SelectContent>
+                {technicianOptions.map(technician => <SelectItem key={technician.id} value={technician.id}>{technician.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter><Button onClick={submitShare}>Send Share Request</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
