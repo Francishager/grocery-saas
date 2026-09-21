@@ -18,6 +18,7 @@ import { UsageLimitBanner } from '@/components/UsageLimitBanner'
 import { Pagination } from '@/components/Pagination'
 import { usePagination } from '@/hooks/usePagination'
 import { db } from '@/db/index'
+import ServiceList from '@/components/ServiceList'
 
 interface SellingUnit {
   id?: string
@@ -43,6 +44,8 @@ interface FormData {
   baseUnit: string
   itemType: 'product' | 'service' | 'rental'
   description: string
+  estimatedHours: number | ''
+  duration: string
 }
 
 type MovementPreset = 'today' | 'yesterday' | 'week' | 'custom'
@@ -122,6 +125,8 @@ const initialFormData: FormData = {
   baseUnit: 'Piece',
   itemType: 'product',
   description: '',
+  estimatedHours: '',
+  duration: '',
 }
 
 const emptyMovementSummary: MovementSummary = {
@@ -211,7 +216,8 @@ export default function InventoryPage() {
   const [priceHistory, setPriceHistory] = useState<PriceHistoryState | null>(null)
   const [openActionMenu, setOpenActionMenu] = useState<string | number | null>(null)
   const { tab: urlTab } = useParams()
-  const lockedType = urlTab === 'products' ? 'product' as const : null
+  const lockedType = urlTab === 'products' ? 'product' : urlTab === 'services' ? 'service' : null
+  const isServicesPage = lockedType === 'service'
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const formRef = useRef<HTMLDivElement | null>(null)
   const { toast } = useToast()
@@ -225,9 +231,9 @@ export default function InventoryPage() {
 
   // Determine create/edit/delete permission based on the active item type
   const activeType = lockedType || itemTypeFilter
-  const canCreateCurrent = canCreateProduct
-  const canEditCurrent = canEditProduct
-  const canDeleteCurrent = canDeleteProduct
+  const canCreateCurrent = isServicesPage ? hasPermission('canCreateService') : canCreateProduct
+  const canEditCurrent = isServicesPage ? hasPermission('canEditService') : canEditProduct
+  const canDeleteCurrent = isServicesPage ? hasPermission('canDeleteService') : canDeleteProduct
   const canManageInventory = canCreateCurrent || canEditCurrent
 
   const filteredItems = useMemo(() => {
@@ -259,7 +265,10 @@ export default function InventoryPage() {
   }, [currentPage, totalPages, goToPage])
 
   useEffect(() => {
-    if (lockedType) setItemTypeFilter(lockedType as 'all' | 'product')
+    closeForm()
+    setItems([])
+    setMovementItems([])
+    setOpenActionMenu(null)
   }, [lockedType])
 
   useEffect(() => {
@@ -337,6 +346,14 @@ export default function InventoryPage() {
     setInventoryError(null)
     try {
       if (online) {
+        if (isServicesPage) {
+          const services = await inventoryApi.list(appliedSearch, branchFilter || undefined, 'service')
+          if (requestId !== inventoryRequestRef.current) return
+          setItems(services)
+          setMovementItems([])
+          setMovementSummary(emptyMovementSummary)
+          return
+        }
         const data = await inventoryApi.listWithDailyMovements(
           appliedSearch,
           branchFilter || undefined,
@@ -359,7 +376,7 @@ export default function InventoryPage() {
       setItems([])
       setMovementItems([])
       setMovementSummary(emptyMovementSummary)
-      setInventoryError(error?.message || 'Unable to load products. Please try again.')
+      setInventoryError(error?.message || `Unable to load ${isServicesPage ? 'services' : 'products'}. Please try again.`)
     } finally {
       if (requestId === inventoryRequestRef.current) setLoading(false)
     }
@@ -394,14 +411,14 @@ export default function InventoryPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.product_name.trim()) {
-      toast({ variant: 'destructive', title: 'Product name is required' })
+      toast({ variant: 'destructive', title: `${isServicesPage ? 'Service' : 'Product'} name is required` })
       return
     }
     if (!formData.categoryId) {
       toast({ variant: 'destructive', title: 'Category is required' })
       return
     }
-    if (!editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !Number.isFinite(formData.quantity) || formData.quantity < 0)) {
+    if (formData.itemType !== 'service' && !editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !Number.isFinite(formData.quantity) || formData.quantity < 0)) {
       toast({ variant: 'destructive', title: 'Stock quantity is required and must be a non-negative number' })
       return
     }
@@ -409,11 +426,11 @@ export default function InventoryPage() {
       toast({ variant: 'destructive', title: 'Item type is required' })
       return
     }
-    if (formData.cost_price === '' || typeof formData.cost_price !== 'number' || !Number.isFinite(formData.cost_price) || formData.cost_price < 0) {
+    if (formData.itemType !== 'service' && (formData.cost_price === '' || typeof formData.cost_price !== 'number' || !Number.isFinite(formData.cost_price) || formData.cost_price < 0)) {
       toast({ variant: 'destructive', title: 'Cost price is required and must be a non-negative number' })
       return
     }
-    if (formData.unit_price <= 0) {
+    if (!Number.isFinite(formData.unit_price) || formData.unit_price <= 0) {
       toast({ variant: 'destructive', title: 'Selling price must be greater than 0' })
       return
     }
@@ -438,7 +455,7 @@ export default function InventoryPage() {
     try {
       if (editingItem) {
         if (!canEditCurrent) {
-          toast({ variant: 'destructive', title: 'You do not have permission to edit products' })
+          toast({ variant: 'destructive', title: `You do not have permission to edit ${isServicesPage ? 'services' : 'products'}` })
           return
         }
         if (online) {
@@ -461,6 +478,8 @@ export default function InventoryPage() {
             branchId: formData.branchId || undefined,
             itemType: formData.itemType,
             description: formData.description,
+            estimatedHours: formData.estimatedHours === '' ? undefined : formData.estimatedHours,
+            duration: formData.duration,
             updatedAt: new Date().toISOString(),
           })
           await queueMutation('products', 'update', String(editingItem.id), {
@@ -471,7 +490,7 @@ export default function InventoryPage() {
         toast({ title: 'Item updated successfully' })
       } else {
         if (!canCreateCurrent) {
-          toast({ variant: 'destructive', title: 'You do not have permission to create products' })
+          toast({ variant: 'destructive', title: `You do not have permission to create ${isServicesPage ? 'services' : 'products'}` })
           return
         }
         if (online) {
@@ -498,6 +517,8 @@ export default function InventoryPage() {
             branchId: formData.branchId || undefined,
             itemType: formData.itemType,
             description: formData.description,
+            estimatedHours: formData.estimatedHours === '' ? undefined : formData.estimatedHours,
+            duration: formData.duration,
             updatedAt: new Date().toISOString(),
           })
           await queueMutation('products', 'create', newId, formData)
@@ -627,6 +648,8 @@ export default function InventoryPage() {
       baseUnit: (item as any).baseUnit || 'Piece',
       itemType: item.itemType || 'product',
       description: (item as any).description || '',
+      estimatedHours: item.estimatedHours ?? '',
+      duration: item.duration || '',
     })
     // Load selling units for this product
     const units = (item as any).units || []
@@ -642,6 +665,7 @@ export default function InventoryPage() {
     setFormData({
       ...initialFormData,
       itemType: lockedType || 'product',
+      ...(isServicesPage ? { quantity: 0, cost_price: 0, low_stock_alert: 0, baseUnit: 'Service' } : {}),
       branchId: defaultBranchId(user, branches),
     })
     setSellingUnits([])
@@ -889,30 +913,30 @@ export default function InventoryPage() {
         {canCreateCurrent && (
           <Button onClick={openNewForm}>
             <Plus className="mr-2 h-4 w-4" />
-            {lockedType === 'product' ? 'Add Product' : 'Add Item'}
+            {isServicesPage ? 'Add Service' : lockedType === 'product' ? 'Add Product' : 'Add Item'}
           </Button>
         )}
       </div>
 
-      <UsageLimitBanner resource="products" label="Products" currentCount={items.length} />
+      <UsageLimitBanner resource="products" label={isServicesPage ? 'Services' : 'Products'} currentCount={items.length} />
 
       {/* Search + Filters */}
-      <form onSubmit={handleSearch} role="search" aria-label="Product search" className="flex min-w-0 flex-wrap gap-2">
+      <form onSubmit={handleSearch} role="search" aria-label={isServicesPage ? 'Service search' : 'Product search'} className="flex min-w-0 flex-wrap gap-2">
         <div className="flex w-full min-w-0 gap-2 sm:w-auto sm:min-w-72 sm:flex-1">
           <div className="relative min-w-0 flex-1">
             <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              aria-label="Search products"
+              aria-label={isServicesPage ? 'Search services' : 'Search products'}
               aria-controls="inventory-results"
               autoComplete="off"
               enterKeyHint="search"
-              placeholder="Search items..."
+              placeholder={isServicesPage ? 'Search services...' : 'Search items...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="min-w-0 pl-9 pr-10"
             />
             {searchQuery && (
-              <button type="button" aria-label="Clear product search" title="Clear search"
+              <button type="button" aria-label={isServicesPage ? 'Clear service search' : 'Clear product search'} title="Clear search"
                 className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md hover:bg-muted"
                 onClick={() => { setSearchQuery(''); setAppliedSearch(''); resetPage() }}>
                 <X className="h-4 w-4" />
@@ -963,7 +987,7 @@ export default function InventoryPage() {
             ))}
           </select>
         )}
-        <div className="flex flex-wrap gap-1">
+        {!isServicesPage && <div className="flex flex-wrap gap-1">
           {([
             ['today', 'Today'],
             ['yesterday', 'Yesterday'],
@@ -984,8 +1008,8 @@ export default function InventoryPage() {
               {label}
             </button>
           ))}
-        </div>
-        {movementPreset === 'custom' && (
+        </div>}
+        {!isServicesPage && movementPreset === 'custom' && (
           <Input
             type="date"
             value={customMovementDate}
@@ -1007,20 +1031,20 @@ export default function InventoryPage() {
         </button>
       </form>
 
-      {!online && (
+      {!online && !isServicesPage && (
         <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           <WifiOff className="h-4 w-4" />
           Daily movement figures are available when the device is online.
         </div>
       )}
 
-      {!searching && movementSummaryCards}
+      {!searching && !isServicesPage && movementSummaryCards}
 
       {/* Add/Edit Form */}
       {showForm && (
         <Card ref={formRef as any}>
           <CardHeader>
-            <CardTitle>{editingItem ? 'Edit Item' : 'Add New Item'}</CardTitle>
+            <CardTitle>{isServicesPage ? (editingItem ? 'Edit Service' : 'Add Service') : (editingItem ? 'Edit Item' : 'Add New Item')}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
@@ -1048,7 +1072,7 @@ export default function InventoryPage() {
 
               {/* Common: Name */}
               <div className="space-y-2">
-                <Label htmlFor="product_name">Product Name</Label>
+                <Label htmlFor="product_name">{isServicesPage ? 'Service Name' : 'Product Name'}</Label>
                 <Input
                   id="product_name"
                   value={formData.product_name}
@@ -1061,7 +1085,7 @@ export default function InventoryPage() {
 
               {/* Common: Selling Price */}
               <div className="space-y-2">
-                <Label htmlFor="unit_price">Current Selling Price</Label>
+                <Label htmlFor="unit_price">{isServicesPage ? 'Service Price' : 'Current Selling Price'}</Label>
                 <Input
                   id="unit_price"
                   type="number"
@@ -1077,6 +1101,29 @@ export default function InventoryPage() {
                   required
                 />
               </div>
+
+              {isServicesPage && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="service-hours">Estimated Hours</Label>
+                    <Input id="service-hours" type="number" min="0" step="0.25"
+                      value={formData.estimatedHours}
+                      onChange={event => setFormData(prev => ({ ...prev, estimatedHours: event.target.value === '' ? '' : Number(event.target.value) }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="service-duration">Duration / Billing Period</Label>
+                    <Input id="service-duration" value={formData.duration}
+                      onChange={event => setFormData(prev => ({ ...prev, duration: event.target.value }))} />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="service-description">Service Description</Label>
+                    <textarea id="service-description" rows={3}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={formData.description}
+                      onChange={event => setFormData(prev => ({ ...prev, description: event.target.value }))} />
+                  </div>
+                </>
+              )}
 
               {/* Product fields */}
               {formData.itemType === 'product' && (
@@ -1163,6 +1210,7 @@ export default function InventoryPage() {
                     type="button"
                     variant="outline"
                     role="combobox"
+                    aria-label="Category"
                     aria-expanded={categoryOpen}
                     className={cn("w-full justify-between", !formData.categoryId && "border-red-500")}
                     onClick={() => setCategoryOpen((current) => !current)}
@@ -1381,7 +1429,7 @@ export default function InventoryPage() {
 
               <div className="sm:col-span-2 flex gap-2">
                 <Button type="submit">
-                  {editingItem ? 'Update Item' : 'Add Item'}
+                  {isServicesPage ? (editingItem ? 'Update Service' : 'Add Service') : (editingItem ? 'Update Item' : 'Add Item')}
                 </Button>
                 <Button type="button" variant="outline" onClick={closeForm}>
                   Cancel
@@ -1393,12 +1441,12 @@ export default function InventoryPage() {
       )}
 
       {/* Items Table */}
-      <Card id="inventory-results" role="region" aria-label="Product search results" aria-busy={loading} className="min-w-0">
+      <Card id="inventory-results" role="region" aria-label={isServicesPage ? 'Service search results' : 'Product search results'} aria-busy={loading} className="min-w-0">
         <CardHeader>
           <CardTitle role="heading" aria-level={2}>
-            {activeType === 'all' ? 'All Items' : 'Products'} ({totalItems})
+            {isServicesPage ? 'Services' : activeType === 'all' ? 'All Items' : 'Products'} ({totalItems})
           </CardTitle>
-          <p role="status" className="break-words text-sm text-muted-foreground">{loading ? 'Loading products...' : appliedSearch ? `Results for "${appliedSearch}"` : ''}</p>
+          <p role="status" className="break-words text-sm text-muted-foreground">{loading ? `Loading ${isServicesPage ? 'services' : 'products'}...` : appliedSearch ? `Results for "${appliedSearch}"` : ''}</p>
         </CardHeader>
         <CardContent>
           {inventoryError ? (
@@ -1415,10 +1463,14 @@ export default function InventoryPage() {
               <p className="text-muted-foreground mb-4">No items found</p>
               {canCreateCurrent && !searching && !showUncategorizedOnly && <Button onClick={openNewForm}>
                 <Plus className="mr-2 h-4 w-4" />
-                {lockedType === 'product' ? 'Add First Product' : 'Add First Item'}
+                {isServicesPage ? 'Add First Service' : lockedType === 'product' ? 'Add First Product' : 'Add First Item'}
               </Button>}
             </div>
           ) : (
+            isServicesPage ? <ServiceList items={paginatedItems} categoryNames={categoryNameById} branchNames={branchNameById}
+              onEdit={canEditCurrent ? openEditForm : undefined}
+              onDelete={canDeleteCurrent ? item => handleDelete(item.id) : undefined}
+              onPriceHistory={canViewPriceHistory ? openPriceHistory : undefined} /> :
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1800px] hidden md:table">
                 <thead>
@@ -1813,7 +1865,7 @@ export default function InventoryPage() {
         </CardContent>
       </Card>
 
-      {searching && movementSummaryCards}
+      {searching && !isServicesPage && movementSummaryCards}
 
       {priceHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

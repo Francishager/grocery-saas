@@ -120,6 +120,7 @@ export async function pullAll(): Promise<void> {
     minStock: p.minStock, baseUnit: p.baseUnit, categoryId: p.categoryId,
     branchId: p.branchId, itemType: p.itemType, isActive: p.isActive,
     description: p.description, units: p.units,
+    estimatedHours: p.estimatedHours, duration: p.duration,
     updatedAt: p.updatedAt || new Date().toISOString(),
   }))
 

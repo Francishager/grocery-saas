@@ -138,6 +138,8 @@ export async function getLocalProducts(search?: string, branchId?: string, itemT
     baseUnit: p.baseUnit || 'Piece',
     itemType: p.itemType || 'product',
     description: p.description || '',
+    estimatedHours: p.estimatedHours ?? null,
+    duration: p.duration || '',
     units: p.units || [],
   }))
 }

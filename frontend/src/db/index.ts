@@ -17,6 +17,8 @@ export interface LocalProduct {
   itemType?: string
   isActive?: boolean
   description?: string
+  estimatedHours?: number
+  duration?: string
   units?: any[]
   updatedAt: string
 }
