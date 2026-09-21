@@ -615,6 +615,7 @@ model UserPermission {
   canDeleteStaff               Boolean  @default(false)
   // HR Management
   canViewHR                    Boolean  @default(false)
+  canViewHREmployeesForAttendance Boolean  @default(false)
   canCreateHREmployee          Boolean  @default(false)
   canEditHREmployee            Boolean  @default(false)
   canDeleteHREmployee          Boolean  @default(false)
