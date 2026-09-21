@@ -1,7 +1,9 @@
 // =====================================================
 // SINGLE SOURCE OF TRUTH for all permission keys
 // =====================================================
+import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_KEYS, SERVICE_PERMISSION_CATEGORIES, LEGACY_SERVICE_PERMISSION_KEYS } from './servicePermissions.js';
 const PERMISSION_TO_FEATURES = {
+  ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, [p.feature, 'service']])),
   canViewDashboard: [],
   canUseBusinessAI: ['dashboard'],
   canCreateSale: ['sales', 'sales.pos', 'sales.orders'],
@@ -247,8 +249,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewAgriculture", "canCreateAgriculture", "canEditAgriculture", "canDeleteAgriculture",
   "canViewAgricultureReport",
   // Service Business (appointments, work orders, contracts)
-  "canViewServiceBusiness", "canCreateServiceBusiness", "canEditServiceBusiness", "canDeleteServiceBusiness",
-  "canViewServiceBusinessReport",
+  ...SERVICE_PERMISSION_KEYS,
   // Communication
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   // Accounting
@@ -294,7 +295,7 @@ export const PERMISSION_CATEGORIES = [
   { id: 'fuel_station', name: 'Fuel Station' },
   { id: 'manufacturing', name: 'Manufacturing' },
   { id: 'agriculture', name: 'Agriculture' },
-  { id: 'service_business', name: 'Service Business' },
+  ...SERVICE_PERMISSION_CATEGORIES,
   { id: 'communication', name: 'Communication' },
   { id: 'accounting', name: 'Accounting' },
   { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
@@ -302,6 +303,7 @@ export const PERMISSION_CATEGORIES = [
 ];
 
 const PERMISSION_DETAIL_OVERRIDES = {
+  ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, p])),
   canUseBusinessAI: {
     name: 'Use AI business advisor',
     description: 'Chat about marketing and sales growth using only business data this user is already permitted to view.',
@@ -957,6 +959,8 @@ const PERMISSION_DETAIL_OVERRIDES = {
 };
 
 function permissionCategoryForKey(key) {
+  const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
+  if (servicePermission) return servicePermission.category;
   if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';
   if (key.includes('TransactionAccount') || [
     'canUseOwnCashAccount',
@@ -1134,7 +1138,7 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
 
   if (Array.isArray(inheritedPermissions)) {
     inheritedPermissions
-      .filter((permission) => permission && permissionAllowedForTenant(permission, tenantFeatures))
+      .filter((permission) => permission && !LEGACY_SERVICE_PERMISSION_KEYS.includes(permission) && permissionAllowedForTenant(permission, tenantFeatures))
       .forEach((permission) => granted.add(permission));
   }
 

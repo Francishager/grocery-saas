@@ -1,8 +1,10 @@
+import { requireServiceUpdate, requireServiceAssignment, servicePermission } from '../middleware/servicePermissions.js';
+import { SERVICE_PERMISSION_DEFINITIONS } from '../src/utils/servicePermissions.js';
 import { Router } from "express";
 import crypto from "crypto";
 import { ensureServiceFeedbackSchema } from '../src/utils/serviceFeedbackSchema.js';
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, requireAnyPermission } from "../middleware/auth.js";
 import { requireFeature, requireAnyFeature, getTenantFeatures, hasFeatureAccess } from "../middleware/featureCheck.js";
 
 const router = Router();
@@ -41,22 +43,42 @@ async function validateServiceLinks(tenantId, body, productId) {
   return null;
 }
 
-router.get('/catalog', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service'), async (req, res) => {
+router.get('/catalog', authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.action !== 'Report').map(p => p.id)), requireFeature('service'), async (req, res) => {
   try {
     const services = await prisma.product.findMany({ where: { tenantId: t(req), itemType: 'service', isActive: true }, select: { id: true, name: true, description: true, price: true, serviceCategory: true, category: { select: { name: true } } }, orderBy: { name: 'asc' } });
     res.json(services.map(service => ({ id: service.id, product_name: service.name, description: service.description || '', unit_price: service.price, serviceCategory: service.serviceCategory, categoryName: service.category?.name, isActive: true })));
   } catch { res.status(500).json({ error: 'Unable to load services' }); }
 });
 
+router.get('/technician-options', authenticateToken, requireAnyPermission(['canAssignServiceAppointment', 'canAssignServiceWorkOrder', 'canAssignServiceJobCard']), requireFeature('service'), async (req, res) => {
+  try {
+    const options = await prisma.serviceTechnician.findMany({ where: { tenantId: t(req), isActive: true }, select: { id: true, name: true, userId: true }, orderBy: { name: 'asc' } });
+    res.json(options);
+  } catch { res.status(500).json({ error: 'Unable to load technicians' }); }
+});
+
+const validateReferences = tab => async (req, res, next) => {
+  try {
+    const linkError = await validateServiceLinks(t(req), req.body, req.body.productId);
+    if (linkError) return res.status(400).json({ error: linkError });
+    const references = { customerId: 'customer', productId: 'product', userId: 'user', attendantId: 'user', technicianId: tab === 'job-cards' ? 'serviceTechnician' : 'user' };
+    for (const [field, model] of Object.entries(references)) {
+      if (!req.body[field]) { if (req.body[field] === '') req.body[field] = null; continue; }
+      if (typeof req.body[field] !== 'string' || !await prisma[model].findFirst({ where: { id: req.body[field], tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid ' + field });
+    }
+    next();
+  } catch { res.status(400).json({ error: 'Unable to validate selected service records' }); }
+};
+
 // ===== APPOINTMENTS =====
-router.get("/appointments", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.get("/appointments", authenticateToken, requirePermission(servicePermission('appointments', 'View')), requireFeature("service.appointments"), async (req, res) => {
   try {
     const appts = await prisma.appointment.findMany({ where: { tenantId: t(req) }, include: { customer: true, product: true, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { scheduledDate: "desc" } });
     res.json(appts);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/appointments", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.post("/appointments", authenticateToken, requirePermission(servicePermission('appointments', 'Create')), requireServiceAssignment('appointments'), requireFeature("service.appointments"), validateReferences('appointments'), async (req, res) => {
   try {
     const { customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, scheduledDate, scheduledTime, endTime, duration, price, branchId, notes } = req.body;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
@@ -67,33 +89,33 @@ router.post("/appointments", authenticateToken, requirePermission("canCreateServ
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/appointments/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appointments'), requireFeature("service.appointments"), validateReferences('appointments'), async (req, res) => {
   try {
     const { status, technicianId, scheduledDate, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason } = req.body;
     const data = { status, technicianId, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason };
     if (scheduledDate) data.scheduledDate = new Date(scheduledDate);
     if (status === 'completed') data.completedAt = new Date();
-    const appt = await prisma.appointment.update({ where: { id: req.params.id }, data });
+    const appt = await prisma.appointment.update({ where: { id: req.params.id, tenantId: t(req) }, data });
     res.json(appt);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/appointments/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.delete("/appointments/:id", authenticateToken, requirePermission(servicePermission('appointments', 'Delete')), requireFeature("service.appointments"), async (req, res) => {
   try {
-    await prisma.appointment.delete({ where: { id: req.params.id } });
+    await prisma.appointment.delete({ where: { id: req.params.id, tenantId: t(req) } });
     res.json({ message: "Appointment deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== WORK ORDERS =====
-router.get("/work-orders", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.work_orders"), async (req, res) => {
+router.get("/work-orders", authenticateToken, requirePermission(servicePermission('work-orders', 'View')), requireFeature("service.work_orders"), async (req, res) => {
   try {
-    const orders = await prisma.workOrder.findMany({ where: { tenantId: t(req) }, include: { customer: true, product: true, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "desc" } });
+    const orders = await prisma.workOrder.findMany({ where: { tenantId: t(req), serviceKind: 'work_order' }, include: { customer: true, product: true, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "desc" } });
     res.json(orders);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/work-orders", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.work_orders"), async (req, res) => {
+router.post("/work-orders", authenticateToken, requirePermission(servicePermission('work-orders', 'Create')), requireServiceAssignment('work-orders'), requireFeature("service.work_orders"), validateReferences('work-orders'), async (req, res) => {
   try {
     const { orderNo, customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, priority, serviceCategory, estimatedCost, branchId, notes } = req.body;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
@@ -106,38 +128,38 @@ router.post("/work-orders", authenticateToken, requirePermission("canCreateServi
     if (technicianId && !await prisma.user.findFirst({ where: { id: technicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
     const cost = Number(estimatedCost ?? service.price ?? 0);
     if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ error: 'Estimated cost must be a non-negative number' });
-    const order = await prisma.workOrder.create({ data: { orderNo: orderNo || `WO-${Date.now()}`, customerId: customerId || null, customerName, customerPhone, customerEmail, productId: service.id, technicianId: technicianId || null, title: orderTitle, description: description || service.description || null, priority: priority || "normal", serviceCategory: serviceCategory || service.serviceCategory || service.category?.name || null, estimatedCost: cost, branchId: branchId || null, notes, tenantId: t(req) } });
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'work_order', orderNo: orderNo || `WO-${Date.now()}`, customerId: customerId || null, customerName, customerPhone, customerEmail, productId: service.id, technicianId: technicianId || null, title: orderTitle, description: description || service.description || null, priority: priority || "normal", serviceCategory: serviceCategory || service.serviceCategory || service.category?.name || null, estimatedCost: cost, branchId: branchId || null, notes, tenantId: t(req) } });
     res.status(201).json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/work-orders/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.work_orders"), async (req, res) => {
+router.put("/work-orders/:id", authenticateToken, requireServiceUpdate('work-orders'), requireFeature("service.work_orders"), validateReferences('work-orders'), async (req, res) => {
   try {
     const { status, technicianId, priority, serviceCategory, estimatedCost, actualCost, laborCost, partsCost, startDate, endDate, diagnostics, warrantyInfo, notes } = req.body;
     const data = { status, technicianId, priority, serviceCategory, estimatedCost, actualCost, laborCost, partsCost, diagnostics, warrantyInfo, notes };
     if (startDate) data.startDate = new Date(startDate);
     if (endDate) data.endDate = new Date(endDate);
-    const order = await prisma.workOrder.update({ where: { id: req.params.id }, data });
+    const order = await prisma.workOrder.update({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' }, data });
     res.json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/work-orders/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service.work_orders"), async (req, res) => {
+router.delete("/work-orders/:id", authenticateToken, requirePermission(servicePermission('work-orders', 'Delete')), requireFeature("service.work_orders"), async (req, res) => {
   try {
-    await prisma.workOrder.delete({ where: { id: req.params.id } });
+    await prisma.workOrder.delete({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' } });
     res.json({ message: "Work order deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== SERVICE CONTRACTS =====
-router.get("/contracts", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.contracts"), async (req, res) => {
+router.get("/contracts", authenticateToken, requirePermission(servicePermission('contracts', 'View')), requireFeature("service.contracts"), async (req, res) => {
   try {
     const contracts = await prisma.serviceContract.findMany({ where: { tenantId: t(req) }, include: { customer: true }, orderBy: { createdAt: "desc" } });
     res.json(contracts);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/contracts", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.contracts"), async (req, res) => {
+router.post("/contracts", authenticateToken, requirePermission(servicePermission('contracts', 'Create')), requireFeature("service.contracts"), validateReferences('contracts'), async (req, res) => {
   try {
     const { contractNo, customerId, title, description, serviceCategory, startDate, endDate, renewalDate, autoRenew, value, billingCycle, discountPercent, branchId, terms } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -148,34 +170,34 @@ router.post("/contracts", authenticateToken, requirePermission("canCreateService
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/contracts/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.contracts"), async (req, res) => {
+router.put("/contracts/:id", authenticateToken, requireServiceUpdate('contracts'), requireFeature("service.contracts"), validateReferences('contracts'), async (req, res) => {
   try {
     const { title, description, serviceCategory, endDate, renewalDate, autoRenew, nextBillingDate, value, billingCycle, discountPercent, status, terms } = req.body;
     const data = { title, description, serviceCategory, autoRenew, value, billingCycle, discountPercent, status, terms };
     if (endDate) data.endDate = new Date(endDate);
     if (renewalDate) data.renewalDate = new Date(renewalDate);
     if (nextBillingDate) data.nextBillingDate = new Date(nextBillingDate);
-    const contract = await prisma.serviceContract.update({ where: { id: req.params.id }, data });
+    const contract = await prisma.serviceContract.update({ where: { id: req.params.id, tenantId: t(req) }, data });
     res.json(contract);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/contracts/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service.contracts"), async (req, res) => {
+router.delete("/contracts/:id", authenticateToken, requirePermission(servicePermission('contracts', 'Delete')), requireFeature("service.contracts"), async (req, res) => {
   try {
-    await prisma.serviceContract.delete({ where: { id: req.params.id } });
+    await prisma.serviceContract.delete({ where: { id: req.params.id, tenantId: t(req) } });
     res.json({ message: "Contract deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== SERVICE TECHNICIANS =====
-router.get("/technicians", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.technicians"), async (req, res) => {
+router.get("/technicians", authenticateToken, requirePermission(servicePermission('technicians', 'View')), requireFeature("service.technicians"), async (req, res) => {
   try {
     const techs = await prisma.serviceTechnician.findMany({ where: { tenantId: t(req) }, include: { branch: { select: { name: true } }, user: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "desc" } });
     res.json(techs);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/technicians", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.technicians"), async (req, res) => {
+router.post("/technicians", authenticateToken, requirePermission(servicePermission('technicians', 'Create')), requireFeature("service.technicians"), validateReferences('technicians'), async (req, res) => {
   try {
     const { name, email, phone, role, skills, specializations, hourlyRate, availability, branchId, userId, hireDate, notes } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Technician name is required' });
@@ -184,23 +206,23 @@ router.post("/technicians", authenticateToken, requirePermission("canCreateServi
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/technicians/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.technicians"), async (req, res) => {
+router.put("/technicians/:id", authenticateToken, requireServiceUpdate('technicians'), requireFeature("service.technicians"), validateReferences('technicians'), async (req, res) => {
   try {
     const { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes } = req.body;
-    const tech = await prisma.serviceTechnician.update({ where: { id: req.params.id }, data: { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes } });
+    const tech = await prisma.serviceTechnician.update({ where: { id: req.params.id, tenantId: t(req) }, data: { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes } });
     res.json(tech);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/technicians/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service.technicians"), async (req, res) => {
+router.delete("/technicians/:id", authenticateToken, requirePermission(servicePermission('technicians', 'Delete')), requireFeature("service.technicians"), async (req, res) => {
   try {
-    await prisma.serviceTechnician.delete({ where: { id: req.params.id } });
+    await prisma.serviceTechnician.delete({ where: { id: req.params.id, tenantId: t(req) } });
     res.json({ message: "Technician deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== SERVICE JOB CARDS =====
-router.get("/job-cards", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
+router.get("/job-cards", authenticateToken, requirePermission(servicePermission('job-cards', 'View')), requireFeature("service.job_cards"), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const cards = await prisma.serviceJobCard.findMany({ where: { tenantId: t(req) }, include: { product: { select: { id: true, name: true, serviceCategory: true, duration: true } }, technician: true, appointment: { select: { id: true, title: true, scheduledDate: true } }, workOrder: { select: { id: true, orderNo: true, title: true } } }, orderBy: { createdAt: "desc" } });
@@ -208,7 +230,7 @@ router.get("/job-cards", authenticateToken, requirePermission("canViewServiceBus
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/job-cards", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
+router.post("/job-cards", authenticateToken, requirePermission(servicePermission('job-cards', 'Create')), requireServiceAssignment('job-cards'), requireFeature("service.job_cards"), validateReferences('job-cards'), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const { cardNo, appointmentId, workOrderId, productId, technicianId, customerName, customerPhone, serviceTitle, serviceDescription, priority, scheduledStart, scheduledEnd, laborCost, partsCost, partsUsed, branchId } = req.body;
@@ -227,7 +249,7 @@ router.post("/job-cards", authenticateToken, requirePermission("canCreateService
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/job-cards/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
+router.put("/job-cards/:id", authenticateToken, requireServiceUpdate('job-cards'), requireFeature("service.job_cards"), validateReferences('job-cards'), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const { status, technicianId, priority, actualStart, actualEnd, laborHours, laborCost, partsCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature } = req.body;
@@ -244,20 +266,20 @@ router.put("/job-cards/:id", authenticateToken, requirePermission("canEditServic
     }
     if (actualStart) data.actualStart = new Date(actualStart);
     if (actualEnd) data.actualEnd = new Date(actualEnd);
-    const card = await prisma.serviceJobCard.update({ where: { id: req.params.id }, data });
+    const card = await prisma.serviceJobCard.update({ where: { id: req.params.id, tenantId: t(req) }, data });
     res.json(card);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/job-cards/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
+router.delete("/job-cards/:id", authenticateToken, requirePermission(servicePermission('job-cards', 'Delete')), requireFeature("service.job_cards"), async (req, res) => {
   try {
-    await prisma.serviceJobCard.delete({ where: { id: req.params.id } });
+    await prisma.serviceJobCard.delete({ where: { id: req.params.id, tenantId: t(req) } });
     res.json({ message: "Job card deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== SERVICE FEEDBACK =====
-router.get("/feedback", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service"), async (req, res) => {
+router.get("/feedback", authenticateToken, requirePermission(servicePermission('feedback', 'View')), requireFeature("service"), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const feedback = await prisma.serviceFeedback.findMany({ where: { tenantId: t(req) }, include: { product: { select: { id: true, name: true, serviceCategory: true } }, customer: { select: { id: true, name: true } }, appointment: { select: { id: true, title: true } }, workOrder: { select: { id: true, orderNo: true } }, contract: { select: { id: true, contractNo: true } } }, orderBy: { createdAt: "desc" } });
@@ -265,7 +287,7 @@ router.get("/feedback", authenticateToken, requirePermission("canViewServiceBusi
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/feedback", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service"), async (req, res) => {
+router.post("/feedback", authenticateToken, requirePermission(servicePermission('feedback', 'Create')), requireFeature("service"), validateReferences('feedback'), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const { appointmentId, workOrderId, contractId, productId, customerId, customerName, customerPhone, rating, serviceQuality, timeliness, professionalism, valueForMoney, comment, wouldRecommend, branchId } = req.body;
@@ -277,7 +299,7 @@ router.post("/feedback", authenticateToken, requirePermission("canCreateServiceB
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/feedback/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service"), async (req, res) => {
+router.put("/feedback/:id", authenticateToken, requireServiceUpdate('feedback'), requireFeature("service"), validateReferences('feedback'), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const { status, response } = req.body;
@@ -288,13 +310,13 @@ router.put("/feedback/:id", authenticateToken, requirePermission("canEditService
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/feedback/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service"), async (req, res) => {
+router.delete("/feedback/:id", authenticateToken, requirePermission(servicePermission('feedback', 'Delete')), requireFeature("service"), async (req, res) => {
   try {
     await prisma.serviceFeedback.delete({ where: { id: req.params.id, tenantId: t(req) } });
     res.json({ message: "Feedback deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-router.post("/feedback-link", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service"), async (req, res) => {
+router.post("/feedback-link", authenticateToken, requirePermission('canGenerateServiceFeedbackQR'), requireFeature("service"), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
     const { productId, appointmentId, workOrderId, contractId, branchId } = req.body;
@@ -378,7 +400,7 @@ router.post("/public-feedback/:token", async (req, res) => {
 });
 
 // ===== SERVICE CATEGORIES PRESETS =====
-router.get("/categories", authenticateToken, requirePermission("canViewServiceBusiness"), async (req, res) => {
+router.get("/categories", authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.action !== 'Report').map(p => p.id)), async (req, res) => {
   try {
     const { getDefaultCategoryDefinitionsForBusinessType } = await import("../src/utils/categoryDefaults.js");
     const businessType = req.query.businessType || 'service';
@@ -392,21 +414,21 @@ export default router;
 // ===== CAR WASH & GARAGE (simple work-order based entries) =====
 // These endpoints create lightweight work order records for car-wash and garage services
 // so the frontend can record and list services without a separate DB model.
-router.get('/car-wash', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.get('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
-    const where = { tenantId: t(req) };
+    const where = { tenantId: t(req), serviceKind: 'car_wash' };
     const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
     // Filter client-side for car wash related entries (product slug or title/notes match)
-    const items = orders.filter(o => (o.product && (o.product.slug === 'car-wash-valet' || (o.product.name || '').toLowerCase().includes('car wash'))) || (o.title && o.title.toLowerCase().includes('car wash')) || (o.notes && o.notes.toLowerCase().includes('car wash')));
+    const items = orders;
     res.json(items);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.post('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'Create')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
   try {
     const { date, vehicle, serviceType, amount, attendantId, branchId, notes } = req.body;
     if (!serviceType || !vehicle) return res.status(400).json({ error: 'Vehicle and service type are required' });
-    const order = await prisma.workOrder.create({ data: {
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'car_wash',
       orderNo: `CW-${Date.now()}`,
       customerName: vehicle,
       customerPhone: null,
@@ -441,15 +463,15 @@ router.post('/car-wash', authenticateToken, requirePermission('canCreateServiceB
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/car-wash/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.get('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
-    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' } });
     if (!order) return res.status(404).json({ error: 'Not found' });
     res.json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/car-wash/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.put('/car-wash/:id', authenticateToken, requireServiceUpdate('car-wash'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
   try {
     const { vehicle, serviceType, amount, attendantId, notes } = req.body;
     const data = {};
@@ -458,32 +480,32 @@ router.put('/car-wash/:id', authenticateToken, requirePermission('canEditService
     if (amount !== undefined) { data.estimatedCost = amount; data.actualCost = amount }
     if (attendantId !== undefined) data.technicianId = attendantId;
     if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
-    const updated = await prisma.workOrder.update({ where: { id: req.params.id }, data });
+    const updated = await prisma.workOrder.update({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' }, data });
     res.json(updated);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/car-wash/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.delete('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'Delete')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
-    await prisma.workOrder.delete({ where: { id: req.params.id } });
+    await prisma.workOrder.delete({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' } });
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/garage', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.get('/garage', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
-    const where = { tenantId: t(req) };
+    const where = { tenantId: t(req), serviceKind: 'garage' };
     const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
-    const items = orders.filter(o => (o.product && (o.product.slug === 'auto-repair-services' || (o.product.name || '').toLowerCase().includes('repair') || (o.product.name || '').toLowerCase().includes('garage'))) || (o.title && (o.title.toLowerCase().includes('repair') || o.title.toLowerCase().includes('garage'))) || (o.notes && o.notes.toLowerCase().includes('repair')));
+    const items = orders;
     res.json(items);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/garage', authenticateToken, requirePermission('canCreateServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.post('/garage', authenticateToken, requirePermission(servicePermission('garage', 'Create')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
   try {
     const { date, vehicle, service, cost, attendantId, branchId, notes } = req.body;
     if (!service || !vehicle) return res.status(400).json({ error: 'Vehicle and service description are required' });
-    const order = await prisma.workOrder.create({ data: {
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'garage',
       orderNo: `GR-${Date.now()}`,
       customerName: vehicle,
       customerPhone: null,
@@ -518,15 +540,15 @@ router.post('/garage', authenticateToken, requirePermission('canCreateServiceBus
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/garage/:id', authenticateToken, requirePermission('canViewServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.get('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
-    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' } });
     if (!order) return res.status(404).json({ error: 'Not found' });
     res.json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/garage/:id', authenticateToken, requirePermission('canEditServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.put('/garage/:id', authenticateToken, requireServiceUpdate('garage'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
   try {
     const { vehicle, service, cost, attendantId, status, notes } = req.body;
     const data = {};
@@ -536,14 +558,14 @@ router.put('/garage/:id', authenticateToken, requirePermission('canEditServiceBu
     if (attendantId !== undefined) data.technicianId = attendantId;
     if (status !== undefined) data.status = status;
     if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
-    const updated = await prisma.workOrder.update({ where: { id: req.params.id }, data });
+    const updated = await prisma.workOrder.update({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' }, data });
     res.json(updated);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/garage/:id', authenticateToken, requirePermission('canDeleteServiceBusiness'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.delete('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'Delete')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
-    await prisma.workOrder.delete({ where: { id: req.params.id } });
+    await prisma.workOrder.delete({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' } });
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

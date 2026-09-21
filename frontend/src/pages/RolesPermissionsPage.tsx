@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast'
 import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 import WorkingHoursEditor, { type WorkingHours } from '@/components/WorkingHoursEditor'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_CATEGORIES, LEGACY_SERVICE_PERMISSION_KEYS } from '@/lib/servicePermissions'
 
 type PermissionDefinition = {
   id: string
@@ -32,6 +33,7 @@ type PermissionSchema = {
 }
 
 const PERM_LABELS: Record<string, string> = {
+  ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, p.name])),
   canViewDashboard:'Can view dashboard',
   canUseBusinessAI:'Can use AI business advisor',
   canCreateSale:'Can create sales', canViewSale:'Can view sales', canEditSale:'Can edit sales', canDeleteSale:'Can delete sales', canRefundSale:'Can refund sales',
@@ -88,7 +90,6 @@ const PERM_LABELS: Record<string, string> = {
   canViewFuelStation:'Can view fuel station', canCreateFuelStation:'Can create fuel station entries', canEditFuelStation:'Can edit fuel station entries', canDeleteFuelStation:'Can delete fuel station entries', canViewFuelStationReport:'Can view fuel station reports',
   canViewManufacturing:'Can view manufacturing', canCreateManufacturing:'Can create manufacturing entries', canEditManufacturing:'Can edit manufacturing entries', canDeleteManufacturing:'Can delete manufacturing entries', canViewManufacturingReport:'Can view manufacturing reports',
   canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries', canViewAgricultureReport:'Can view agriculture reports',
-  canViewServiceBusiness:'Can view service business', canCreateServiceBusiness:'Can create service business entries', canEditServiceBusiness:'Can edit service business entries', canDeleteServiceBusiness:'Can delete service business entries', canViewServiceBusinessReport:'Can view service business reports',
   canViewCommunication:'Can view communication', canCreateCommunication:'Can create communication', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
   canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canDeleteAccounting:'Can delete accounting entries', canReverseAccountingEntry:'Can reverse accounting entries', canViewChartOfAccounts:'Can view chart of accounts', canCreateChartOfAccounts:'Can create chart of accounts', canEditChartOfAccounts:'Can edit chart of accounts',
   canViewTransactionAccount:'Can view transaction accounts', canUseAnyTransactionAccount:'Can use any transaction account', canUseOtherCashAccount:'Can use other cash accounts', canUseOwnCashAccount:'Can use own cash till', canUseOtherStaffCashAccount:'Can use other staff cash tills', canUseSafeAccount:'Can use safe accounts', canUseBankAccount:'Can use bank accounts', canUseMobileMoneyAccount:'Can use mobile money accounts', canUseCardAccount:'Can use card accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
@@ -255,9 +256,9 @@ function fallbackPermissionCategoryName(categoryId: string) {
 }
 
 function getPermissionGroups(schema: PermissionSchema | null, search: string) {
-  const keys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])]
-  const definitions = new Map((schema?.permissions || []).map(permission => [permission.id, permission]))
-  const categories = new Map((schema?.categories || []).map(category => [category.id, category]))
+  const keys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])].filter(key => !LEGACY_SERVICE_PERMISSION_KEYS.includes(key))
+  const definitions = new Map([...SERVICE_PERMISSION_DEFINITIONS, ...(schema?.permissions || [])].map(permission => [permission.id, permission]))
+  const categories = new Map([...SERVICE_PERMISSION_CATEGORIES, ...(schema?.categories || [])].map(category => [category.id, category]))
   const query = search.trim().toLowerCase()
   const groups = new Map<string, { id: string; name: string; permissions: PermissionDefinition[] }>()
 
@@ -315,7 +316,7 @@ function PermissionMatrix({
   search: string
   onSearch: (value: string) => void
 }) {
-  const allKeys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])]
+  const allKeys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])].filter(key => !LEGACY_SERVICE_PERMISSION_KEYS.includes(key))
   const groups = getPermissionGroups(schema, search)
 
   const setAll = (checked: boolean) => {
@@ -371,6 +372,7 @@ function PermissionMatrix({
                   <input
                     type="checkbox"
                     checked={allSelected}
+                    ref={element => { if (element) element.indeterminate = selectedCount > 0 && !allSelected }}
                     onChange={e => setGroup(groupKeys, e.target.checked)}
                     className="rounded"
                   />

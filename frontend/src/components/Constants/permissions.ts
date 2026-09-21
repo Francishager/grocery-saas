@@ -1,4 +1,5 @@
 // Permission-related constants
+import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_CATEGORIES } from '@/lib/servicePermissions'
 
 export interface Permission {
   id: string
@@ -45,7 +46,7 @@ export const permissionCategories = [
   { id: 'fuel_station', name: 'Fuel Station' },
   { id: 'manufacturing', name: 'Manufacturing' },
   { id: 'agriculture', name: 'Agriculture' },
-  { id: 'service_business', name: 'Service Business' },
+  ...SERVICE_PERMISSION_CATEGORIES,
   { id: 'communication', name: 'Communication' },
   { id: 'accounting', name: 'Accounting' },
   { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
@@ -243,11 +244,7 @@ export const permissions: Permission[] = [
   { id: 'canViewAgricultureReport', name: 'View Agriculture Reports', description: 'View agriculture reports', category: 'agriculture', accessesBusinessData: true },
 
   // Service Business (appointments, work orders, contracts)
-  { id: 'canViewServiceBusiness', name: 'View Service Business', description: 'Access service business module', category: 'service_business', accessesBusinessData: true },
-  { id: 'canCreateServiceBusiness', name: 'Create Service Business', description: 'Create appointments, work orders, contracts', category: 'service_business', accessesBusinessData: true },
-  { id: 'canEditServiceBusiness', name: 'Edit Service Business', description: 'Edit service business records', category: 'service_business', accessesBusinessData: true },
-  { id: 'canDeleteServiceBusiness', name: 'Delete Service Business', description: 'Delete service business records', category: 'service_business', accessesBusinessData: true },
-  { id: 'canViewServiceBusinessReport', name: 'View Service Business Reports', description: 'View service business reports', category: 'service_business', accessesBusinessData: true },
+  ...SERVICE_PERMISSION_DEFINITIONS.map(p => ({ ...p, accessesBusinessData: true })),
 
   // Communication
   { id: 'canViewCommunication', name: 'View Communication', description: 'Access communication module', category: 'communication', accessesBusinessData: true },

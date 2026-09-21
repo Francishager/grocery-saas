@@ -38,6 +38,7 @@ import fuelRouter from "../routes/fuel.js";
 import manufacturingRouter from "../routes/manufacturing.js";
 import agricultureRouter from "../routes/agriculture.js";
 import serviceRouter from "../routes/service.js";
+import { ensureServicePermissionSchema } from "./utils/servicePermissionSchema.js";
 import referralRoutes from "./routes/referrals.js";
 import tenantVisibilityRoutes from "./routes/tenant-visibility.js";
 import onboardingRoutes from "./routes/onboarding.js";
@@ -178,6 +179,12 @@ app.get("/", (req, res) => {
 // Lightweight health check for connectivity ping (used by frontend offline detection)
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "ok" });
+});
+
+// Prepare new permission fields before login or Prisma permission reads. Health checks stay independent.
+app.use("/api", async (req, res, next) => {
+  try { await ensureServicePermissionSchema(); next(); }
+  catch (error) { console.error("Service permission schema unavailable:", error.code || error.message); res.status(503).json({ error: "Access settings are being updated. Please try again shortly." }); }
 });
 
 // API routes

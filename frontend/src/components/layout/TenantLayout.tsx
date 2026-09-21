@@ -1,3 +1,4 @@
+import { servicePagePermissions, serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { MessageSquare } from 'lucide-react'
 import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar } from 'lucide-react'
@@ -42,14 +43,14 @@ const receivablesSubItems = [
 ]
 
 const serviceSubItems = [
-  { to: '/tenant/service/appointments', label: 'Appointments', icon: CalendarClock, permission: 'canViewServiceBusiness', feature: 'service' },
-  { to: '/tenant/service/work-orders', label: 'Work Orders', icon: ClipboardList, permission: 'canViewServiceBusiness', feature: 'service' },
-  { to: '/tenant/service/contracts', label: 'Contracts', icon: FileText, permission: 'canViewServiceBusiness', feature: 'service' },
-  { to: '/tenant/service/technicians', label: 'Technicians', icon: UserCog, permission: 'canViewServiceBusiness', feature: 'service' },
-  { to: '/tenant/service/job-cards', label: 'Job Cards', icon: ClipboardCheck, permission: 'canViewServiceBusiness', feature: 'service' },
-  { to: '/tenant/service/feedback', label: 'Feedback', icon: Star, permission: 'canViewServiceBusiness', feature: 'service' },
-  { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: 'canViewServiceBusiness', feature: 'fuel_station.car_wash' },
-  { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: 'canViewServiceBusiness', feature: 'fuel_station.garage' },
+  { to: '/tenant/service/appointments', label: 'Appointments', icon: CalendarClock, permission: servicePagePermissions('appointments'), feature: 'service' },
+  { to: '/tenant/service/work-orders', label: 'Work Orders', icon: ClipboardList, permission: servicePagePermissions('work-orders'), feature: 'service' },
+  { to: '/tenant/service/contracts', label: 'Contracts', icon: FileText, permission: servicePagePermissions('contracts'), feature: 'service' },
+  { to: '/tenant/service/technicians', label: 'Technicians', icon: UserCog, permission: servicePagePermissions('technicians'), feature: 'service' },
+  { to: '/tenant/service/job-cards', label: 'Job Cards', icon: ClipboardCheck, permission: servicePagePermissions('job-cards'), feature: 'service' },
+  { to: '/tenant/service/feedback', label: 'Feedback', icon: Star, permission: servicePagePermissions('feedback'), feature: 'service' },
+  { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: servicePagePermissions('car-wash'), feature: 'fuel_station.car_wash' },
+  { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'fuel_station.garage' },
 ]
 
 const navItems = [
@@ -64,7 +65,7 @@ const navItems = [
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
   { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },
   { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
-  { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: 'canViewServiceBusiness', isService: true },
+  { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: ['appointments','work-orders','contracts','technicians','job-cards','feedback','car-wash','garage'].flatMap(servicePagePermissions), isService: true },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport', isAccounting: true },
   { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewHR', isHR: true },
@@ -243,7 +244,7 @@ const reportCategories: ReportCategoryDef[] = [
     ],
   },
   {
-    id: 'service', label: 'Service Business Reports', icon: Wrench, permission: 'canViewServiceBusinessReport', feature: 'service.reports',
+    id: 'service', label: 'Service Business Reports', icon: Wrench, permission: Object.values(serviceReportPermissions), feature: 'service.reports',
     items: [
       { id: 'svcAppointmentSummary', label: 'Appointment Summary' },
       { id: 'svcByTechnician', label: 'Jobs by Technician' },
@@ -403,9 +404,10 @@ export function TenantLayout() {
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
-  const visibleReportCategories = reportCategories.filter((cat) => {
+  const visibleReportCategories = reportCategories.map(cat => cat.id === 'service' ? { ...cat, items: cat.items.filter(item => hasPermission(serviceReportPermissions[serviceReportIds[item.id]])) } : cat).filter((cat) => {
+    if (!cat.items.length) return false
     if (cat.feature && !canAccessFeature(cat.feature)) return false
-    if (cat.permission && !hasPermission(cat.permission)) return false
+    if (cat.permission && !hasRequiredPermission(cat.permission)) return false
     return true
   })
   const visibleNavItems = navItems.filter((item) => {
@@ -492,7 +494,7 @@ export function TenantLayout() {
   }, [user?.id, onboardingCompleted])
 
   const selectReport = (reportId: string) => {
-    navigate(`/tenant/reports?report=${reportId}`)
+    navigate(`/tenant/reports?report=${serviceReportIds[reportId] || reportId}`)
     setSidebarOpen(false)
   }
 

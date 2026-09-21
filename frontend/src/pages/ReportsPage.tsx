@@ -1,3 +1,4 @@
+import { serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -1772,7 +1773,7 @@ function ExecutiveSummaryReport({ data }: { data: any }) {
 
 export default function ReportsPage() {
   const [searchParams] = useSearchParams()
-  const selectedReport = searchParams.get('report')
+  const selectedReport = (serviceReportIds[searchParams.get('report') || ''] || searchParams.get('report'))
   const selectedCustomerIdParam = searchParams.get('customerId') || ''
   const selectedSupplierIdParam = searchParams.get('supplierId') || ''
   const selectedProductIdParam = searchParams.get('productId') || ''
@@ -1797,7 +1798,11 @@ export default function ReportsPage() {
   const online = useOnlineStatus()
   const isOwner = user?.role === 'owner'
 
-  const visibleCategories = useMemo(() => CATEGORIES.filter(c => (isOwner || hasPermission(c.permission)) && (!c.feature || canAccessFeature(c.feature))), [hasPermission, isOwner, canAccessFeature])
+  const visibleCategories = useMemo(() => CATEGORIES.flatMap(c => c.id === 'services' ? [
+    { ...c, items: c.items.filter(item => !serviceReportPermissions[item.id]) },
+    { ...c, id: 'service-business', label: 'Service Business Reports', feature: 'service.reports', items: c.items.filter(item => serviceReportPermissions[item.id]) },
+  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => isOwner || hasPermission(serviceReportPermissions[item.id] || c.permission)) }))
+    .filter(c => c.items.length > 0 && (!c.feature || canAccessFeature(c.feature))), [hasPermission, isOwner, canAccessFeature])
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
 
   const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])

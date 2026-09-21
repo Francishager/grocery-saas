@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { apiFetch } from '@/lib/api'
+import { apiFetch as rawApiFetch } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { SERVICE_PERMISSION_DEFINITIONS, servicePagePermissions, servicePermission } from '@/lib/servicePermissions'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,9 +40,21 @@ const statusColors: Record<string, string> = {
   pending_renewal: 'bg-orange-100 text-orange-700',
 }
 
+async function apiFetch(path: string, init?: RequestInit) {
+  const response = await rawApiFetch(path, init)
+  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || data.message || 'Request failed') }
+  return response
+}
+
 export default function ServiceBusinessPage() {
   const { tab: urlTab } = useParams()
-  const tab = urlTab || 'appointments'
+  const { hasPermission } = useJWTAuth()
+  const tab = urlTab || SERVICE_PERMISSION_DEFINITIONS.find(p => p.action !== 'Report' && hasPermission(p.id))?.tab || 'appointments'
+  const can = useCallback((action: string, section = tab) => hasPermission(servicePermission(section, action)), [hasPermission, tab])
+  const canOpen = servicePagePermissions(tab).some(hasPermission)
+  const [technicianOptions, setTechnicianOptions] = useState<{ id: string; name: string; userId?: string | null }[]>([])
+  const [replyTo, setReplyTo] = useState<ServiceFeedback | null>(null)
+  const [replyText, setReplyText] = useState('')
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
   const [contracts, setContracts] = useState<ServiceContract[]>([])
@@ -77,16 +91,18 @@ export default function ServiceBusinessPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [a, w, c, car, gar, tech, jc, fb, svc] = await Promise.all([
-        apiFetch('/api/service/appointments').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/work-orders').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/contracts').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/car-wash').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/garage').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/technicians').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/job-cards').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/feedback').then(r => r.json()).catch(() => []),
-        apiFetch('/api/service/catalog').then(async r => { if (!r.ok) throw new Error('Unable to load services'); return r.json() }),
+      const readSection = async (section: string) => tab === section && can('View', section) ? (await apiFetch('/api/service/' + section)).json() : []
+      const [a, w, c, car, gar, tech, jc, fb, svc, options] = await Promise.all([
+        readSection('appointments'),
+        readSection('work-orders'),
+        readSection('contracts'),
+        readSection('car-wash'),
+        readSection('garage'),
+        readSection('technicians'),
+        readSection('job-cards'),
+        readSection('feedback'),
+        canOpen && ['Create', 'Edit', 'GenerateQR'].some(action => can(action)) ? apiFetch('/api/service/catalog').then(r => r.json()) : Promise.resolve([]),
+        can('Assign') ? apiFetch('/api/service/technician-options').then(r => r.json()) : Promise.resolve([]),
       ])
       setAppointments(Array.isArray(a) ? a : [])
       setWorkOrders(Array.isArray(w) ? w : [])
@@ -97,8 +113,9 @@ export default function ServiceBusinessPage() {
       setJobCards(Array.isArray(jc) ? jc : [])
       setFeedback(Array.isArray(fb) ? fb : [])
       setServices(Array.isArray(svc) ? svc : [])
+      setTechnicianOptions(Array.isArray(options) ? options : [])
     } catch (e) { console.error(e); toast({ variant: 'destructive', title: 'Unable to load service data. Please try again.' }) }
-  }, [])
+  }, [can, canOpen, tab, toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -252,6 +269,8 @@ export default function ServiceBusinessPage() {
     setJobCardForm(prev => ({ ...prev, productId: id, serviceTitle: service?.product_name || prev.serviceTitle, serviceDescription: service?.description ?? '', laborCost: Number(service?.unit_price ?? 0) }))
   }
 
+  if (!canOpen) return <div role="alert" className="p-6">You do not have permission to access this service section.</div>
+
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div>
@@ -267,15 +286,15 @@ export default function ServiceBusinessPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{upcomingAppts}</div><p className="text-xs text-muted-foreground">Upcoming Appts</p></CardContent></Card>
-        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{openWOs}</div><p className="text-xs text-muted-foreground">Open Work Orders</p></CardContent></Card>
-        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{activeContracts}</div><p className="text-xs text-muted-foreground">Active Contracts</p></CardContent></Card>
-        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{feedback.length > 0 ? (feedback.reduce((s, f) => s + f.rating, 0) / feedback.length).toFixed(1) : '0.0'}<Star className="inline h-4 w-4 ml-1 text-yellow-400" /></div><p className="text-xs text-muted-foreground">Avg Rating ({feedback.length})</p></CardContent></Card>
+        {tab === 'appointments' && can('View') && <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{upcomingAppts}</div><p className="text-xs text-muted-foreground">Upcoming Appts</p></CardContent></Card>}
+        {tab === 'work-orders' && can('View') && <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{openWOs}</div><p className="text-xs text-muted-foreground">Open Work Orders</p></CardContent></Card>}
+        {tab === 'contracts' && can('View') && <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{activeContracts}</div><p className="text-xs text-muted-foreground">Active Contracts</p></CardContent></Card>}
+        {tab === 'feedback' && can('View') && <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{feedback.length > 0 ? (feedback.reduce((s, f) => s + f.rating, 0) / feedback.length).toFixed(1) : '0.0'}<Star className="inline h-4 w-4 ml-1 text-yellow-400" /></div><p className="text-xs text-muted-foreground">Avg Rating ({feedback.length})</p></CardContent></Card>}
       </div>
 
       {tab === 'appointments' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowApptModal(true)}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>
+          {can('Create', 'appointments') && <Button onClick={() => setShowApptModal(true)}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[700px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -291,11 +310,11 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 text-right">{a.status === 'completed' ? (a.actualPrice || a.price).toFixed(0) : a.price.toFixed(0)}</td>
                     <td className="p-2"><Badge className={statusColors[a.status]}>{a.status}</Badge></td>
                     <td className="p-2 space-x-1">
-                      {a.status === 'scheduled' && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'confirmed')}>Confirm</Button>}
-                      {a.status === 'confirmed' && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'in_progress')}>Start</Button>}
-                      {a.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'completed')}>Complete</Button>}
-                      {a.status !== 'completed' && a.status !== 'cancelled' && <Button size="sm" variant="ghost" className="text-orange-500" onClick={() => updateApptStatus(a.id, 'cancelled')}>Cancel</Button>}
-                      <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteAppt(a.id)}><Trash2 className="h-3 w-3" /></Button>
+                      {a.status === 'scheduled' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'confirmed')}>Confirm</Button>}
+                      {a.status === 'confirmed' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'in_progress')}>Start</Button>}
+                      {a.status === 'in_progress' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'completed')}>Complete</Button>}
+                      {a.status !== 'completed' && a.status !== 'cancelled' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="ghost" className="text-orange-500" onClick={() => updateApptStatus(a.id, 'cancelled')}>Cancel</Button>}
+                      {can('Delete', 'appointments') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteAppt(a.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
                 ))}
@@ -307,7 +326,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'work-orders' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowWOModal(true)}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>
+          {can('Create', 'work-orders') && <Button onClick={() => setShowWOModal(true)}><Plus className="mr-1 h-4 w-4" /> New Work Order</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Order No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-left">Category</th><th className="p-2 text-left">Tech</th><th className="p-2 text-left">Priority</th><th className="p-2 text-right">Est. Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -324,9 +343,9 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 text-right">{w.estimatedCost.toFixed(0)}</td>
                     <td className="p-2"><Badge className={statusColors[w.status]}>{w.status}</Badge></td>
                     <td className="p-2 space-x-1">
-                      {w.status === 'open' && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'in_progress')}>Start</Button>}
-                      {w.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'completed')}>Complete</Button>}
-                      <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteWO(w.id)}><Trash2 className="h-3 w-3" /></Button>
+                      {w.status === 'open' && can('UpdateStatus', 'work-orders') && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'in_progress')}>Start</Button>}
+                      {w.status === 'in_progress' && can('UpdateStatus', 'work-orders') && <Button size="sm" variant="outline" onClick={() => updateWOStatus(w.id, 'completed')}>Complete</Button>}
+                      {can('Delete', 'work-orders') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteWO(w.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
                 ))}
@@ -338,7 +357,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'contracts' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowContractModal(true)}><Plus className="mr-1 h-4 w-4" /> New Contract</Button>
+          {can('Create', 'contracts') && <Button onClick={() => setShowContractModal(true)}><Plus className="mr-1 h-4 w-4" /> New Contract</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Contract No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-left">Category</th><th className="p-2 text-right">Value</th><th className="p-2 text-left">Billing</th><th className="p-2 text-left">Auto-Renew</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -354,7 +373,7 @@ export default function ServiceBusinessPage() {
                     <td className="p-2">{c.billingCycle}</td>
                     <td className="p-2">{c.autoRenew ? <Badge className="bg-green-100 text-green-700">Yes</Badge> : '-'}</td>
                     <td className="p-2"><Badge className={statusColors[c.status]}>{c.status}</Badge></td>
-                    <td className="p-2"><Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteContract(c.id)}><Trash2 className="h-3 w-3" /></Button></td>
+                    <td className="p-2">{can('Delete', 'contracts') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteContract(c.id)}><Trash2 className="h-3 w-3" /></Button>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -365,7 +384,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'technicians' && (
         <div className="space-y-4">
-          <Button onClick={() => { setEditingTechId(null); setTechForm({ name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' }); setShowTechModal(true) }}><Plus className="mr-1 h-4 w-4" /> Add Technician</Button>
+          {can('Create', 'technicians') && <Button onClick={() => { setEditingTechId(null); setTechForm({ name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' }); setShowTechModal(true) }}><Plus className="mr-1 h-4 w-4" /> Add Technician</Button>}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {technicians.length === 0 && <div className="col-span-full text-center text-muted-foreground py-8">No technicians yet. Add your first technician to get started.</div>}
             {technicians.map(tech => (
@@ -395,8 +414,8 @@ export default function ServiceBusinessPage() {
                     <div className="text-xs text-muted-foreground">Rate: {tech.hourlyRate.toFixed(0)}/hr</div>
                   </div>
                   <div className="mt-4 flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => { setEditingTechId(tech.id); setTechForm({ name: tech.name, email: tech.email || '', phone: tech.phone || '', role: tech.role, skills: tech.skills.join(', '), specializations: tech.specializations.join(', '), hourlyRate: tech.hourlyRate, availability: tech.availability, hireDate: tech.hireDate ? new Date(tech.hireDate).toISOString().split('T')[0] : '', notes: tech.notes || '' }); setShowTechModal(true) }}><Edit className="h-3 w-3 mr-1" /> Edit</Button>
-                    <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteTechnician(tech.id)}><Trash2 className="h-3 w-3" /></Button>
+                    {can('Edit', 'technicians') && <Button size="sm" variant="outline" onClick={() => { setEditingTechId(tech.id); setTechForm({ name: tech.name, email: tech.email || '', phone: tech.phone || '', role: tech.role, skills: tech.skills.join(', '), specializations: tech.specializations.join(', '), hourlyRate: tech.hourlyRate, availability: tech.availability, hireDate: tech.hireDate ? new Date(tech.hireDate).toISOString().split('T')[0] : '', notes: tech.notes || '' }); setShowTechModal(true) }}><Edit className="h-3 w-3 mr-1" /> Edit</Button>}
+                    {can('Delete', 'technicians') && <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteTechnician(tech.id)}><Trash2 className="h-3 w-3" /></Button>}
                   </div>
                 </CardContent>
               </Card>
@@ -407,7 +426,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'job-cards' && (
         <div className="space-y-4">
-          <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>
+          {can('Create', 'job-cards') && <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Card No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Total Cost</th><th className="p-2 text-left">Priority</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -423,9 +442,9 @@ export default function ServiceBusinessPage() {
                     <td className="p-2"><Badge variant={jc.priority === 'urgent' ? 'destructive' : 'secondary'}>{jc.priority}</Badge></td>
                     <td className="p-2"><Badge className={statusColors[jc.status]}>{jc.status}</Badge></td>
                     <td className="p-2 space-x-1">
-                      {jc.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'in_progress')}>Start</Button>}
-                      {jc.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'completed')}>Complete</Button>}
-                      <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteJobCard(jc.id)}><Trash2 className="h-3 w-3" /></Button>
+                      {jc.status === 'pending' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'in_progress')}>Start</Button>}
+                      {jc.status === 'in_progress' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'completed')}>Complete</Button>}
+                      {can('Delete', 'job-cards') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteJobCard(jc.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
                 ))}
@@ -437,7 +456,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'feedback' && (
         <div className="space-y-4">
-          <Button onClick={() => { setFeedbackQr(null); setShowFeedbackModal(true) }}><QrCode className="mr-1 h-4 w-4" /> Generate Feedback QR</Button>
+          {can('GenerateQR', 'feedback') && <Button onClick={() => { setFeedbackQr(null); setShowFeedbackModal(true) }}><QrCode className="mr-1 h-4 w-4" /> Generate Feedback QR</Button>}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {feedback.length === 0 && <div className="col-span-full text-center text-muted-foreground py-8">No feedback yet. Customer reviews will appear here.</div>}
             {feedback.map(fb => (
@@ -464,7 +483,7 @@ export default function ServiceBusinessPage() {
                       {fb.wouldRecommend ? <Badge className="bg-green-100 text-green-700"><ThumbsUp className="h-3 w-3 mr-1" /> Recommends</Badge> : <Badge variant="secondary">Does not recommend</Badge>}
                       {fb.product && <span className="text-xs text-muted-foreground">Service: {fb.product.name}</span>}
                     </div>
-                    <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteFeedback(fb.id)}><Trash2 className="h-3 w-3" /></Button>
+                    {can('Delete', 'feedback') && <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteFeedback(fb.id)}><Trash2 className="h-3 w-3" /></Button>}
                   </div>
                   {fb.response && <div className="mt-3 rounded-md bg-muted p-2 text-xs"><span className="font-medium">Response:</span> {fb.response}</div>}
                 </CardContent>
@@ -476,7 +495,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'car-wash' && (
         <div className="space-y-4">
-          <Button onClick={() => { setEditingCarWashId(null); setCarWashForm({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' }); setShowCarWashModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Car Wash</Button>
+          {can('Create', 'car-wash') && <Button onClick={() => { setEditingCarWashId(null); setCarWashForm({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' }); setShowCarWashModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Car Wash</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Attendant</th><th></th></tr></thead>
@@ -490,8 +509,8 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 text-right">{(r.estimatedCost || 0).toFixed(0)}</td>
                     <td className="p-2">{r.technicianId || '-'}</td>
                     <td className="p-2 space-x-1">
-                      <Button size="sm" variant="outline" onClick={() => openEditCarWash(r)}>Edit</Button>
-                      <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteCarWash(r.id)}>Delete</Button>
+                      {can('Edit', 'car-wash') && <Button size="sm" variant="outline" onClick={() => openEditCarWash(r)}>Edit</Button>}
+                      {can('Delete', 'car-wash') && <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteCarWash(r.id)}>Delete</Button>}
                     </td>
                   </tr>
                 ))}
@@ -503,7 +522,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'garage' && (
         <div className="space-y-4">
-          <Button onClick={() => { setEditingGarageId(null); setGarageForm({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' }); setShowGarageModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Garage Service</Button>
+          {can('Create', 'garage') && <Button onClick={() => { setEditingGarageId(null); setGarageForm({ vehicle: '', service: '', cost: 0, attendantId: '', notes: '' }); setShowGarageModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Garage Service</Button>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Service</th><th className="p-2 text-right">Cost</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -517,8 +536,8 @@ export default function ServiceBusinessPage() {
                     <td className="p-2 text-right">{(g.estimatedCost || 0).toFixed(0)}</td>
                     <td className="p-2">{g.status || '-'}</td>
                     <td className="p-2 space-x-1">
-                      <Button size="sm" variant="outline" onClick={() => openEditGarage(g)}>Edit</Button>
-                      <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteGarage(g.id)}>Delete</Button>
+                      {can('Edit', 'garage') && <Button size="sm" variant="outline" onClick={() => openEditGarage(g)}>Edit</Button>}
+                      {can('Delete', 'garage') && <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteGarage(g.id)}>Delete</Button>}
                     </td>
                   </tr>
                 ))}
@@ -528,7 +547,7 @@ export default function ServiceBusinessPage() {
         </div>
       )}
 
-      <Dialog open={showCarWashModal} onOpenChange={setShowCarWashModal}>
+      <Dialog open={showCarWashModal && can(editingCarWashId ? 'Edit' : 'Create', 'car-wash')} onOpenChange={setShowCarWashModal}>
         <DialogContent>
           <DialogHeader><DialogTitle>Record Car Wash</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -552,7 +571,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showGarageModal} onOpenChange={setShowGarageModal}>
+      <Dialog open={showGarageModal && can(editingGarageId ? 'Edit' : 'Create', 'garage')} onOpenChange={setShowGarageModal}>
         <DialogContent>
           <DialogHeader><DialogTitle>Record Garage Service</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -576,7 +595,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showApptModal} onOpenChange={setShowApptModal}>
+      <Dialog open={showApptModal && can('Create', 'appointments')} onOpenChange={setShowApptModal}>
         <DialogContent>
           <DialogHeader><DialogTitle>New Appointment</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -588,9 +607,9 @@ export default function ServiceBusinessPage() {
             <div><Label>Title</Label><Input value={apptForm.title} onChange={e => setApptForm({ ...apptForm, title: e.target.value })} placeholder="e.g. Bridal Makeup, Consultation" /></div>
             <div><Label>Description</Label><Input value={apptForm.description} onChange={e => setApptForm({ ...apptForm, description: e.target.value })} /></div>
             <div><Label>Technician</Label>
-              <Select value={apptForm.technicianId} onValueChange={v => setApptForm({ ...apptForm, technicianId: v })}>
+              <Select disabled={!can('Assign')} value={apptForm.technicianId} onValueChange={v => setApptForm({ ...apptForm, technicianId: v })}>
                 <SelectTrigger><SelectValue placeholder="Assign technician" /></SelectTrigger><SelectContent>
-                  {technicians.map(tech => <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>)}
+                  {technicianOptions.filter(tech => tab === 'job-cards' || tech.userId).map(tech => <SelectItem key={tech.id} value={tab === 'job-cards' ? tech.id : tech.userId!}>{tech.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -609,7 +628,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showWOModal} onOpenChange={setShowWOModal}>
+      <Dialog open={showWOModal && can('Create', 'work-orders')} onOpenChange={setShowWOModal}>
         <DialogContent>
           <DialogHeader><DialogTitle>New Work Order</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -630,9 +649,9 @@ export default function ServiceBusinessPage() {
             <div><Label>Description</Label><Input value={woForm.description} onChange={e => setWoForm({ ...woForm, description: e.target.value })} /></div>
             <div><Label>Service Category</Label><Input value={woForm.serviceCategory} onChange={e => setWoForm({ ...woForm, serviceCategory: e.target.value })} placeholder="repair, installation, maintenance" /></div>
             <div><Label>Technician</Label>
-              <Select value={woForm.technicianId} onValueChange={v => setWoForm({ ...woForm, technicianId: v })}>
+              <Select disabled={!can('Assign')} value={woForm.technicianId} onValueChange={v => setWoForm({ ...woForm, technicianId: v })}>
                 <SelectTrigger><SelectValue placeholder="Assign technician" /></SelectTrigger><SelectContent>
-                  {technicians.map(tech => <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>)}
+                  {technicianOptions.filter(tech => tab === 'job-cards' || tech.userId).map(tech => <SelectItem key={tech.id} value={tab === 'job-cards' ? tech.id : tech.userId!}>{tech.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -649,7 +668,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showContractModal} onOpenChange={setShowContractModal}>
+      <Dialog open={showContractModal && can('Create', 'contracts')} onOpenChange={setShowContractModal}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>New Service Contract</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -684,7 +703,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showTechModal} onOpenChange={setShowTechModal}>
+      <Dialog open={showTechModal && can(editingTechId ? 'Edit' : 'Create', 'technicians')} onOpenChange={setShowTechModal}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editingTechId ? 'Edit Technician' : 'Add Technician'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -719,7 +738,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showJobCardModal} onOpenChange={setShowJobCardModal}>
+      <Dialog open={showJobCardModal && can(editingJobCardId ? 'Edit' : 'Create', 'job-cards')} onOpenChange={setShowJobCardModal}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editingJobCardId ? 'Edit Job Card' : 'New Job Card'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -735,9 +754,9 @@ export default function ServiceBusinessPage() {
             <div><Label>Service Title</Label><Input value={jobCardForm.serviceTitle} onChange={e => setJobCardForm({ ...jobCardForm, serviceTitle: e.target.value })} /></div>
             <div><Label>Service Description</Label><Input value={jobCardForm.serviceDescription} onChange={e => setJobCardForm({ ...jobCardForm, serviceDescription: e.target.value })} /></div>
             <div><Label>Technician</Label>
-              <Select value={jobCardForm.technicianId} onValueChange={v => setJobCardForm({ ...jobCardForm, technicianId: v })}>
+              <Select disabled={!can('Assign')} value={jobCardForm.technicianId} onValueChange={v => setJobCardForm({ ...jobCardForm, technicianId: v })}>
                 <SelectTrigger><SelectValue placeholder="Assign technician" /></SelectTrigger><SelectContent>
-                  {technicians.map(tech => <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>)}
+                  {technicianOptions.filter(tech => tab === 'job-cards' || tech.userId).map(tech => <SelectItem key={tech.id} value={tab === 'job-cards' ? tech.id : tech.userId!}>{tech.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -761,7 +780,7 @@ export default function ServiceBusinessPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showFeedbackModal} onOpenChange={setShowFeedbackModal}>
+      <Dialog open={showFeedbackModal && can('GenerateQR', 'feedback')} onOpenChange={setShowFeedbackModal}>
         <DialogContent className="w-[calc(100%-2rem)] max-w-lg sm:max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader><DialogTitle>Customer Feedback QR</DialogTitle><DialogDescription>{feedbackQr?.businessName || 'Customer feedback'}</DialogDescription></DialogHeader>
           <div className="space-y-4">

@@ -1,3 +1,5 @@
+import { SERVICE_REPORT_PERMISSIONS } from '../utils/servicePermissions.js';
+import { requireFeature as requireServiceFeature } from '../../middleware/featureCheck.js';
 import { Router } from "express";
 import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
@@ -51,6 +53,11 @@ const reportPermMap = {
 
 // Middleware: check granular report permission based on route prefix
 function requireReportPermission(req, res, next) {
+  if (req.path.split('/').filter(Boolean)[0] === 'service-business') {
+    const permission = SERVICE_REPORT_PERMISSIONS[req.path.split('/').filter(Boolean)[1]];
+    if (!permission) return res.status(403).json({ error: 'Service report access denied' });
+    return requireServiceFeature('service.reports')(req, res, () => requirePermission(permission)(req, res, next));
+  }
   // SaaS admin always has access
   if (req.user?.role === "saas_admin" || req.user?.isPlatformUser) return next();
 
@@ -4593,7 +4600,7 @@ router.get("/service-business/job-cards", authenticateToken, async (req, res) =>
 router.get("/service-business/work-orders", authenticateToken, async (req,res) => {
   try {
     const s = await getScope(req);
-    const where = scopedWhere(s, df(req, "createdAt"));
+    const where = scopedWhere(s, { ...df(req, "createdAt"), serviceKind: "work_order" });
     const [total, open, inProgress, onHold, completed, cancelled] = await Promise.all([
       prisma.workOrder.count({ where }),
       prisma.workOrder.count({ where: { ...where, status: "open" } }),
