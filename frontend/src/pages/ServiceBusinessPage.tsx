@@ -192,6 +192,27 @@ export default function ServiceBusinessPage() {
   const updateJobCardStatus = async (id: string, status: string) => { await apiFetch(`/api/service/job-cards/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); loadData() }
   const deleteJobCard = async (id: string) => { try { await apiFetch(`/api/service/job-cards/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
+  const submitShare = async () => {
+    if (!shareRecord || !shareTechnicianId) {
+      toast({ variant: 'destructive', title: 'Select a technician to share with' })
+      return
+    }
+    try {
+      const response = await apiFetch(`/api/service/${shareRecord.type}/${shareRecord.id}/share-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetTechnicianId: shareTechnicianId }),
+      })
+      const request = await response.json()
+      toast({ title: request.status === 'approved' ? 'Work shared' : 'Share request sent for creator approval' })
+      setShareRecord(null)
+      setShareTechnicianId('')
+      loadData()
+    } catch (error) {
+      toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to share this record' })
+    }
+  }
+
   const createFeedbackQr = async () => {
     if (creatingQr) return
     if (!feedbackLinkForm.productId) { toast({ variant: 'destructive', title: 'Select a saved service' }); return }
