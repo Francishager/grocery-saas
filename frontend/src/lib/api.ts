@@ -542,8 +542,8 @@ export const categoriesApi = {
         name: String(category.name),
       })) as Array<{ id: string; name: string; slug?: string }>
   },
-  create: (data: { name: string; slug: string }) =>
-    api.post('/api/inventory/categories', { body: data }),
+  create: (data: { name: string; slug?: string; categoryType: 'product' | 'service' | 'rental' }) =>
+    api.post<{ category: { id: string; name: string; categoryType: 'product' | 'service' | 'rental' } }>('/api/inventory/categories', { body: data }),
 }
 
 // Reports endpoints

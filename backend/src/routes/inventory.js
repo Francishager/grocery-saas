@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "node:crypto";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission, requireFeature } from "../../middleware/auth.js";
 import {
@@ -9,7 +10,8 @@ import {
   tenantIdFromUser,
 } from "../utils/branchAccess.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
-import { getDefaultCategoryDefinitionsForBusinessType } from "../utils/categoryDefaults.js";
+import { ensureTenantCategoryCatalog } from "../utils/categoryDefaults.js";
+import { categoryNameKey, categorySlug } from "../utils/categoryCatalog.js";
 
 const router = Router();
 
@@ -665,24 +667,7 @@ async function ensureUniqueProductName(prisma, tenantId, branchId, name, exclude
 }
 
 async function ensureTenantCategories(tenantId) {
-  if (!tenantId) return;
-
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: { businessType: true },
-  });
-
-  const categories = getDefaultCategoryDefinitionsForBusinessType(tenant?.businessType || "other").map((category) => ({
-    ...category,
-    tenantId,
-  }));
-
-  if (categories.length > 0) {
-    await prisma.category.createMany({
-      data: categories,
-      skipDuplicates: true,
-    });
-  }
+  await ensureTenantCategoryCatalog(prisma, tenantId);
 }
 
 // List products
@@ -805,8 +790,11 @@ router.get("/categories", authenticateToken, async (req, res) => {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    await ensureTenantCategories(tenantId);
     const { type } = req.query;
+    if (type && !['product', 'service', 'rental'].includes(type)) {
+      return res.status(400).json({ error: "Invalid category type" });
+    }
+    await ensureTenantCategories(tenantId);
     const where = { tenantId };
     if (type) where.categoryType = String(type);
     const categories = await prisma.category.findMany({ where, orderBy: { name: "asc" } });
@@ -817,17 +805,31 @@ router.get("/categories", authenticateToken, async (req, res) => {
   }
 });
 
-router.post("/categories", authenticateToken, requirePermission("canCreateProduct"), async (req, res) => {
+router.post("/categories", authenticateToken, (req, res, next) => {
+  const categoryType = req.body?.categoryType || 'product';
+  const permissions = { product: 'canCreateProduct', service: 'canCreateService', rental: 'canCreateRental' };
+  if (typeof categoryType !== 'string' || !Object.hasOwn(permissions, categoryType)) return res.status(400).json({ error: "Invalid category type" });
+  return requirePermission(permissions[categoryType])(req, res, next);
+}, async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    const name = String(req.body?.name || "").trim();
+    const name = String(req.body?.name || "").normalize('NFKC').trim().replace(/\s+/g, ' ');
     if (!name) return res.status(400).json({ error: "Category name is required" });
-
-    const slug = slugify(req.body?.slug || name);
+    if (name.length > 160) return res.status(400).json({ error: "Category name must be 160 characters or fewer" });
     const categoryType = ["service", "rental"].includes(req.body?.categoryType) ? req.body.categoryType : "product";
-    const category = await prisma.category.create({ data: { name, slug, tenantId, categoryType } });
+    const nameSlug = categorySlug(name);
+    if (!nameSlug) return res.status(400).json({ error: "Category name must contain letters or numbers" });
+    const existing = await prisma.category.findMany({ where: { tenantId, categoryType } });
+    const match = existing.find(category => categoryNameKey(category.name) === categoryNameKey(name));
+    if (match) return res.status(200).json({ message: "Category already available", category: match });
+    const nameHash = createHash('sha256').update(categoryNameKey(name)).digest('hex').slice(0, 12);
+    const slug = `custom-${categoryType}-${nameSlug}-${nameHash}`;
+    const category = await prisma.category.upsert({
+      where: { tenantId_slug: { tenantId, slug } },
+      create: { name, slug, tenantId, categoryType }, update: {},
+    });
     res.status(201).json({ message: "Category created", category });
   } catch (err) {
     if (err?.code === "P2002") return res.status(409).json({ error: "Category already exists" });
@@ -942,10 +944,13 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     if (categoryId) {
       categoryForSku = await prisma.category.findFirst({
         where: { id: categoryId, tenantId: scope.tenantId },
-        select: { id: true, name: true, slug: true },
+        select: { id: true, name: true, slug: true, categoryType: true },
       });
       if (!categoryForSku) {
         return res.status(400).json({ error: "Category not found" });
+      }
+      if (categoryForSku.categoryType !== itemTypeValue) {
+        return res.status(400).json({ error: `Choose a ${itemTypeValue} category for this item` });
       }
     }
 
@@ -1114,9 +1119,12 @@ router.put("/:id", authenticateToken, async (req, res) => {
       if (categoryId) {
         const category = await prisma.category.findFirst({
           where: { id: categoryId, tenantId: existing.tenantId },
-          select: { id: true },
+          select: { id: true, categoryType: true },
         });
         if (!category) return res.status(400).json({ error: "Category not found" });
+        if (category.categoryType !== itemType) {
+          return res.status(400).json({ error: `Choose a ${itemType} category for this item` });
+        }
       }
       data.categoryId = categoryId || null;
       data.isUncategorized = categoryId ? false : true;
@@ -1399,12 +1407,13 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       return res.status(400).json({ error: "No data rows provided" });
     }
 
-    // Fetch existing categories for this tenant to map by name
+    await ensureTenantCategories(scope.tenantId);
+    // Category names may exist independently for products and services.
     const existingCategories = await prisma.category.findMany({
       where: { tenantId: scope.tenantId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, categoryType: true },
     });
-    const categoryMap = new Map(existingCategories.map(c => [c.name.toLowerCase(), c.id]));
+    const categoryMap = new Map(existingCategories.map(c => [`${c.categoryType}:${categoryNameKey(c.name)}`, c.id]));
 
     // Fetch existing names and barcodes for duplicate check
     const existingProducts = await prisma.product.findMany({
@@ -1424,6 +1433,7 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       const row = rows[i];
       const rowNum = i + 2; // +2 because row 1 is the header in Excel
       const rowErrors = [];
+      const itemType = String(row.itemType || row["Item Type"] || "").trim().toLowerCase();
 
       // Required: name
       const name = normalizeProductName(String(row.name || row["Product Name"] || ""));
@@ -1481,7 +1491,7 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       let categoryId = null;
       let isUncategorized = false;
       if (categoryName) {
-        categoryId = categoryMap.get(categoryName.toLowerCase());
+        categoryId = categoryMap.get(`${itemType}:${categoryNameKey(categoryName)}`);
         if (!categoryId) {
           // Category name provided but not found — mark as uncategorized for user to fix
           isUncategorized = true;
@@ -1498,7 +1508,6 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       const description = String(row.description || row["Description"] || "").trim() || null;
 
       // Required: itemType
-      const itemType = String(row.itemType || row["Item Type"] || "").trim().toLowerCase();
       if (!itemType) {
         rowErrors.push("Item Type is required");
       } else if (!["product", "service", "rental"].includes(itemType)) {

@@ -109,6 +109,7 @@ async function main() {
   const categories = getDefaultCategoryDefinitionsForBusinessType(tenant.businessType || 'other').map((category) => ({
     name: category.name,
     slug: category.slug,
+    categoryType: category.categoryType,
   }))
 
   for (const category of categories) {
@@ -123,6 +124,7 @@ async function main() {
       create: {
         name: category.name,
         slug: category.slug,
+        categoryType: category.categoryType,
         tenantId: tenant.id,
       },
     });

@@ -19,7 +19,10 @@ test('services have their own catalogue, forms and permissions on desktop, table
       create:async(data)=>{window.saved.push(data);return{id:'created'}},
       update:async(id,data)=>{window.saved.push({...data,id});return{id}},
       delete:async()=>{}
-    };export const categoriesApi={list:async(type)=>{window.categoryTypes.push(type);return[{id:'services',name:'Professional Services'}]}};
+    };export const categoriesApi={
+      list:async(type)=>{window.categoryTypes.push(type);return[{id:'services',name:'Professional Services'},...Array.from({length:1100},(_,i)=>({id:'category-'+i,name:'Speciality Category '+i}))]},
+      create:async(data)=>{window.createdCategories.push(data);return{category:{id:'custom-category',...data}}}
+    };
     export const branchesApi={active:async()=>[{id:'main',name:'Main Branch'}]};`,
     '@/contexts/JWTAuthContext': `export const useJWTAuth=()=>({user:{id:'staff',role:'staff',branchId:'main'},hasPermission:key=>window.permissions.includes(key)});`,
     '@/hooks/use-toast': 'export const useToast=()=>({toast:data=>window.toasts.push(data)});',
@@ -58,7 +61,7 @@ test('services have their own catalogue, forms and permissions on desktop, table
       const mount = async permissions => {
         await page.goto('http://services.test/');
         await page.evaluate(permissions => {
-          window.permissions=permissions;window.saved=[];window.toasts=[];window.listTypes=[];window.categoryTypes=[];window.productLoads=0;
+          window.permissions=permissions;window.saved=[];window.toasts=[];window.listTypes=[];window.categoryTypes=[];window.productLoads=0;window.createdCategories=[];
           window.services=Array.from({length:12},(_,i)=>({id:String(i),product_id:'SVC-'+i,
             product_name:'Professional equipment maintenance and inspection service '+i,unit_price:125000,
             quantity:0,cost_price:0,low_stock_alert:0,itemType:'service',branchId:'main',categoryId:'services',
@@ -91,6 +94,9 @@ test('services have their own catalogue, forms and permissions on desktop, table
       await page.getByLabel('Duration / Billing Period').fill('Per session');
       await page.getByLabel('Service Description').fill('Business consultation');
       await page.getByRole('combobox',{name:'Category',exact:true}).click();
+      await page.getByRole('textbox',{name:'Search categories'}).fill('Speciality Category 1099');
+      assert(await page.getByRole('button',{name:'Speciality Category 1099',exact:true}).isVisible());
+      await page.getByRole('textbox',{name:'Search categories'}).fill('Professional Services');
       await page.getByRole('button',{name:'Professional Services',exact:true}).click();
       await page.locator('#branchId').selectOption('main');
       assert.equal(await page.getByLabel('Opening Stock').count(),0);
@@ -103,10 +109,16 @@ test('services have their own catalogue, forms and permissions on desktop, table
       await page.getByRole('button',{name:'Actions for Professional equipment maintenance and inspection service 0',exact:true}).locator('visible=true').click();
       await page.getByRole('menuitem',{name:'Edit Service'}).click();
       assert.equal(await page.getByLabel('Estimated Hours').inputValue(),'2');
+      await page.getByRole('combobox',{name:'Category',exact:true}).click();
+      await page.getByRole('textbox',{name:'Search categories'}).fill('Specialist equipment advice');
+      await page.getByRole('button',{name:'Create service category: Specialist equipment advice',exact:true}).click();
+      assert(await page.getByRole('combobox',{name:'Category',exact:true}).getByText('Specialist equipment advice').isVisible());
+      assert.deepEqual(await page.evaluate(()=>window.createdCategories),[{name:'Specialist equipment advice',categoryType:'service'}]);
       await page.getByLabel('Service Description').fill('Updated inspection');
       await page.getByRole('button',{name:'Update Service',exact:true}).click();
       await page.waitForFunction(()=>window.saved.length===2);
       assert.equal(await page.evaluate(()=>window.saved[1].description),'Updated inspection');
+      assert.equal(await page.evaluate(()=>window.saved[1].categoryId),'custom-category');
       await page.getByRole('button',{name:'Add Service',exact:true}).click();
       await page.getByRole('link',{name:'Product catalogue'}).click();
       assert.equal(await page.getByLabel('Service Name',{exact:true}).count(),0);

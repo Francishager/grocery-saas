@@ -1,4 +1,8 @@
-// Only truly universal categories that apply to every business type
+import { SERVICE_CATEGORY_GROUPS, ADDITIONAL_PRODUCT_GROUPS, categoryNameKey, categorySlug } from './categoryCatalog.js';
+
+const serviceNames = new Set(Object.values(SERVICE_CATEGORY_GROUPS).flat().map(categoryNameKey));
+
+// Existing product slugs remain stable so historical links are preserved.
 const COMMON_PRODUCT_CATEGORIES = [
   { name: 'Other', slug: 'other' },
 ];
@@ -1251,10 +1255,11 @@ const buildCategoryDefinitions = (businessType = 'other') => {
   const merged = [];
   const seen = new Set();
   const addCategory = (name) => {
-    const slug = slugify(name);
+    const categoryType = serviceNames.has(categoryNameKey(name)) ? 'service' : 'product';
+    const slug = categoryType === 'service' ? `service-${slugify(name)}` : slugify(name);
     if (!seen.has(slug)) {
       seen.add(slug);
-      merged.push({ name, slug, categoryType: 'product' });
+      merged.push({ name, slug, categoryType });
     }
   };
 
@@ -1264,8 +1269,9 @@ const buildCategoryDefinitions = (businessType = 'other') => {
   return merged;
 };
 
-export function getDefaultCategoryDefinitionsForBusinessType(businessType = 'other') {
-  return buildCategoryDefinitions(businessType);
+export function getDefaultCategoryDefinitionsForBusinessType(_businessType = 'other') {
+  // Every business can search the full catalogue, regardless of its initial type.
+  return getAllDefaultCategoryDefinitions();
 }
 
 export function getDefaultCategorySlugsForBusinessType(businessType = 'other') {
@@ -1283,7 +1289,43 @@ export function getAllDefaultCategoryDefinitions() {
       }
     }
   }
-  return all;
+  for (const [categoryType, groups] of [['product', ADDITIONAL_PRODUCT_GROUPS], ['service', SERVICE_CATEGORY_GROUPS]]) {
+    for (const name of Object.values(groups).flat()) {
+      const slug = categoryType === 'service' ? `service-${categorySlug(name)}` : categorySlug(name);
+      if (!seen.has(slug)) {
+        seen.add(slug);
+        all.push({ name, slug, categoryType });
+      }
+    }
+  }
+  return all.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function ensureTenantCategoryCatalog(db, tenantId) {
+  if (!tenantId) return;
+  const readExisting = () => db.category.findMany({
+    where: { tenantId }, select: { id: true, name: true, slug: true, categoryType: true },
+  });
+  let existing = await readExisting();
+  const legacyServiceSlugs = new Set(Object.values(BUSINESS_TYPE_CATEGORY_MAP).flat()
+    .filter(name => serviceNames.has(categoryNameKey(name))).map(slugify));
+  const legacyIds = existing.filter(category => category.categoryType === 'product' &&
+    legacyServiceSlugs.has(category.slug) && category.slug === slugify(category.name)).map(category => category.id);
+  if (legacyIds.length) {
+    // Keep mixed/physical-product categories intact. Service-only links retain their IDs.
+    await db.category.updateMany({
+      where: { tenantId, id: { in: legacyIds }, categoryType: 'product', products: { none: { itemType: { not: 'service' } } } },
+      data: { categoryType: 'service' },
+    });
+    existing = await readExisting();
+  }
+  const slugs = new Set(existing.map(category => category.slug));
+  const names = new Set(existing.map(category => `${category.categoryType}:${categoryNameKey(category.name)}`));
+  const missing = getAllDefaultCategoryDefinitions().filter(category => !slugs.has(category.slug) &&
+    !names.has(`${category.categoryType}:${categoryNameKey(category.name)}`));
+  if (missing.length) {
+    await db.category.createMany({ data: missing.map(category => ({ ...category, tenantId })), skipDuplicates: true });
+  }
 }
 
 export function getAllDefaultCategorySlugs() {

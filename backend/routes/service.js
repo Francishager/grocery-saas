@@ -227,7 +227,7 @@ router.get("/categories", authenticateToken, requirePermission("canViewServiceBu
   try {
     const { getDefaultCategoryDefinitionsForBusinessType } = await import("../src/utils/categoryDefaults.js");
     const businessType = req.query.businessType || 'service';
-    const categories = getDefaultCategoryDefinitionsForBusinessType(businessType);
+    const categories = getDefaultCategoryDefinitionsForBusinessType(businessType).filter(category => category.categoryType === 'service');
     res.json(categories);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

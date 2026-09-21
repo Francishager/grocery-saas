@@ -188,6 +188,10 @@ const formatQty = (value: number | undefined | null) =>
 export default function InventoryPage() {
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryQuery, setCategoryQuery] = useState('')
+  const [categorySaving, setCategorySaving] = useState(false)
+  const [categoriesLoading, setCategoriesLoading] = useState(false)
+  const [categoriesError, setCategoriesError] = useState<string | null>(null)
+  const categoryRequestRef = useRef(0)
   const [items, setItems] = useState<InventoryItem[]>([])
   const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -235,6 +239,8 @@ export default function InventoryPage() {
   const canEditCurrent = isServicesPage ? hasPermission('canEditService') : canEditProduct
   const canDeleteCurrent = isServicesPage ? hasPermission('canDeleteService') : canDeleteProduct
   const canManageInventory = canCreateCurrent || canEditCurrent
+  const categoryType = lockedType || formData.itemType
+  const canCreateCategory = hasPermission(categoryType === 'service' ? 'canCreateService' : categoryType === 'rental' ? 'canCreateRental' : 'canCreateProduct')
 
   const filteredItems = useMemo(() => {
     let result = items
@@ -273,7 +279,8 @@ export default function InventoryPage() {
 
   useEffect(() => {
     loadCategories()
-  }, [lockedType, itemTypeFilter])
+    return () => { categoryRequestRef.current += 1 }
+  }, [categoryType])
 
   useEffect(() => {
     loadBranches()
@@ -300,17 +307,39 @@ export default function InventoryPage() {
   }, [])
 
   const loadCategories = async () => {
+    const requestId = ++categoryRequestRef.current
+    setCategoriesLoading(true)
+    setCategoriesError(null)
+    setCategories([])
     try {
-      const typeFilter = lockedType || (itemTypeFilter !== 'all' ? itemTypeFilter : undefined)
-      const data = await categoriesApi.list(typeFilter)
+      const data = await categoriesApi.list(categoryType)
+      if (requestId !== categoryRequestRef.current) return
       setCategories(Array.isArray(data) ? data : [])
-    } catch (error) {
-      console.error('Failed to load categories:', error)
-      toast({
-        variant: 'destructive',
-        title: 'Failed to load categories',
-        description: 'Please refresh the page and try again.',
-      })
+    } catch (error: any) {
+      if (requestId !== categoryRequestRef.current) return
+      setCategoriesError(error?.message || 'Unable to load categories')
+    } finally {
+      if (requestId === categoryRequestRef.current) setCategoriesLoading(false)
+    }
+  }
+
+  const createCategory = async () => {
+    const name = categoryQuery.normalize('NFKC').trim().replace(/\s+/g, ' ')
+    if (!name || !canCreateCategory || categorySaving || !online) return
+    const requestId = categoryRequestRef.current
+    setCategorySaving(true)
+    try {
+      const { category } = await categoriesApi.create({ name, categoryType })
+      if (requestId !== categoryRequestRef.current) return
+      setCategories(current => [...current.filter(row => row.id !== category.id), category].sort((a, b) => a.name.localeCompare(b.name)))
+      setFormData(current => ({ ...current, categoryId: category.id }))
+      setCategoryOpen(false)
+      setCategoryQuery('')
+      toast({ title: 'Category saved' })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Unable to create category', description: error?.message })
+    } finally {
+      setCategorySaving(false)
     }
   }
 
@@ -1212,10 +1241,10 @@ export default function InventoryPage() {
                     role="combobox"
                     aria-label="Category"
                     aria-expanded={categoryOpen}
-                    className={cn("w-full justify-between", !formData.categoryId && "border-red-500")}
+                    className={cn("h-auto min-h-10 w-full justify-between whitespace-normal", !formData.categoryId && "border-red-500")}
                     onClick={() => setCategoryOpen((current) => !current)}
                   >
-                    <span className={cn("truncate", !selectedCategory && "text-muted-foreground")}>
+                    <span className={cn("min-w-0 break-words text-left", !selectedCategory && "text-muted-foreground")}>
                       {selectedCategory?.name || "Select category"}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
@@ -1227,15 +1256,25 @@ export default function InventoryPage() {
                         <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           autoFocus
+                          aria-label="Search categories"
+                          maxLength={160}
                           value={categoryQuery}
                           onChange={(e) => setCategoryQuery(e.target.value)}
+                          onKeyDown={event => { if (event.key === 'Enter') event.preventDefault() }}
                           placeholder="Search category..."
                           className="pl-8"
                         />
                       </div>
 
                       <div className="max-h-60 overflow-y-auto pr-1">
-                        {filteredCategories.length === 0 ? (
+                        {categoriesLoading ? (
+                          <p role="status" className="px-2 py-4 text-sm text-muted-foreground">Loading categories...</p>
+                        ) : categoriesError ? (
+                          <div role="alert" className="space-y-2 p-2 text-sm">
+                            <p>{categoriesError}</p>
+                            <Button type="button" variant="outline" onClick={loadCategories}>Retry</Button>
+                          </div>
+                        ) : filteredCategories.length === 0 ? (
                           <div className="px-2 py-6 text-center text-sm text-muted-foreground">
                             {categories.length === 0
                               ? 'No categories available'
@@ -1269,12 +1308,21 @@ export default function InventoryPage() {
                                     isSelected ? "opacity-100" : "opacity-0"
                                   )}
                                 />
-                                <span className="truncate">{category.name}</span>
+                                <span className="min-w-0 flex-1 break-words">{category.name}</span>
                               </button>
                             )
                           })
                         )}
                       </div>
+                      {canCreateCategory && categoryQuery.trim() && !categoriesLoading && !categoriesError &&
+                        !categories.some(category => category.name.toLowerCase() === categoryQuery.trim().replace(/\s+/g, ' ').toLowerCase()) && (
+                        <Button type="button" variant="outline" disabled={categorySaving || !online}
+                          className="mt-2 h-auto min-h-10 w-full justify-start whitespace-normal text-left"
+                          onClick={createCategory}>
+                          <Plus className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 break-words">{categorySaving ? 'Saving category...' : `Create ${categoryType} category: ${categoryQuery.trim()}`}</span>
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
