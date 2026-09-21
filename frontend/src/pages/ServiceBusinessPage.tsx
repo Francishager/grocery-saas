@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { apiFetch } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit } from 'lucide-react'
+import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit, QrCode, Printer, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import QRCode from 'qrcode'
 
 interface Appointment { id: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; scheduledDate: string; scheduledTime: string; endTime?: string | null; duration: string | null; status: string; price: number; actualPrice: number; notes?: string | null; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
 interface WorkOrder { id: string; orderNo: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; status: string; priority: string; serviceCategory?: string | null; estimatedCost: number; actualCost: number; laborCost: number; partsCost: number; startDate: string | null; endDate: string | null; diagnostics?: string | null; warrantyInfo?: string | null; notes?: string | null; product?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
@@ -18,8 +19,8 @@ interface ServiceContract { id: string; contractNo: string; title: string; descr
 interface CarWashRecord { id: string; createdAt: string; customerName: string; title: string; estimatedCost: number; technicianId?: string | null; notes?: string | null }
 interface GarageRecord { id: string; createdAt: string; customerName: string; title: string; estimatedCost: number; status?: string | null; technicianId?: string | null; notes?: string | null }
 interface ServiceTechnician { id: string; name: string; email?: string | null; phone?: string | null; role: string; skills: string[]; specializations: string[]; hourlyRate: number; availability: string; rating: number; totalJobs: number; completedJobs: number; isActive: boolean; hireDate?: string | null; notes?: string | null; branch?: { name: string } | null; user?: { id: string; fname: string; lname: string } | null }
-interface ServiceJobCard { id: string; cardNo: string; appointmentId?: string | null; workOrderId?: string | null; technicianId?: string | null; customerName: string; customerPhone?: string | null; serviceTitle: string; serviceDescription?: string | null; status: string; priority: string; scheduledStart?: string | null; scheduledEnd?: string | null; actualStart?: string | null; actualEnd?: string | null; laborHours: number; laborCost: number; partsCost: number; totalCost: number; partsUsed?: any; qualityCheckPassed: boolean; qualityNotes?: string | null; completionNotes?: string | null; technician?: ServiceTechnician | null; appointment?: { id: string; title: string } | null; workOrder?: { id: string; orderNo: string; title: string } | null }
-interface ServiceFeedback { id: string; customerName: string; customerPhone?: string | null; rating: number; serviceQuality: number; timeliness: number; professionalism: number; valueForMoney: number; comment?: string | null; wouldRecommend: boolean; status: string; response?: string | null; respondedAt?: string | null; createdAt: string; appointment?: { id: string; title: string } | null; workOrder?: { id: string; orderNo: string } | null; contract?: { id: string; contractNo: string } | null; customer?: { id: string; name: string } | null }
+interface ServiceJobCard { id: string; cardNo: string; appointmentId?: string | null; workOrderId?: string | null; productId?: string | null; technicianId?: string | null; customerName: string; customerPhone?: string | null; serviceTitle: string; serviceDescription?: string | null; status: string; priority: string; scheduledStart?: string | null; scheduledEnd?: string | null; actualStart?: string | null; actualEnd?: string | null; laborHours: number; laborCost: number; partsCost: number; totalCost: number; partsUsed?: any; qualityCheckPassed: boolean; qualityNotes?: string | null; completionNotes?: string | null; technician?: ServiceTechnician | null; appointment?: { id: string; title: string } | null; workOrder?: { id: string; orderNo: string; title: string } | null; product?: { id: string; name: string; serviceCategory?: string | null; duration?: string | null } | null }
+interface ServiceFeedback { id: string; customerName: string; customerPhone?: string | null; rating: number; serviceQuality: number; timeliness: number; professionalism: number; valueForMoney: number; comment?: string | null; wouldRecommend: boolean; status: string; response?: string | null; respondedAt?: string | null; createdAt: string; appointment?: { id: string; title: string } | null; workOrder?: { id: string; orderNo: string } | null; contract?: { id: string; contractNo: string } | null; product?: { id: string; name: string; serviceCategory?: string | null } | null; customer?: { id: string; name: string } | null }
 
 const statusColors: Record<string, string> = {
   scheduled: 'bg-blue-100 text-blue-700',
@@ -39,7 +40,6 @@ const statusColors: Record<string, string> = {
 
 export default function ServiceBusinessPage() {
   const { tab: urlTab } = useParams()
-  const navigate = useNavigate()
   const tab = urlTab || 'appointments'
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
@@ -49,6 +49,9 @@ export default function ServiceBusinessPage() {
   const [technicians, setTechnicians] = useState<ServiceTechnician[]>([])
   const [jobCards, setJobCards] = useState<ServiceJobCard[]>([])
   const [feedback, setFeedback] = useState<ServiceFeedback[]>([])
+  const [services, setServices] = useState<{ id: string; product_name: string; description: string; unit_price: number; serviceCategory?: string | null; categoryName?: string | null; isActive: boolean }[]>([])
+  const [savingService, setSavingService] = useState(false)
+  const [creatingQr, setCreatingQr] = useState(false)
   const [showCarWashModal, setShowCarWashModal] = useState(false)
   const [showGarageModal, setShowGarageModal] = useState(false)
   const [carWashForm, setCarWashForm] = useState({ vehicle: '', serviceType: '', amount: 0, attendantId: '', notes: '' })
@@ -65,15 +68,16 @@ export default function ServiceBusinessPage() {
   const [woForm, setWoForm] = useState({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 })
   const [contractForm, setContractForm] = useState({ contractNo: '', customerId: '', title: '', description: '', serviceCategory: '', startDate: '', endDate: '', renewalDate: '', autoRenew: false, value: 0, billingCycle: 'monthly', discountPercent: 0, terms: '' })
   const [techForm, setTechForm] = useState({ name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' })
-  const [jobCardForm, setJobCardForm] = useState({ appointmentId: '', workOrderId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 })
-  const [feedbackForm, setFeedbackForm] = useState({ appointmentId: '', workOrderId: '', contractId: '', customerName: '', customerPhone: '', rating: 5, serviceQuality: 5, timeliness: 5, professionalism: 5, valueForMoney: 5, comment: '', wouldRecommend: true })
+  const [jobCardForm, setJobCardForm] = useState({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 })
+  const [feedbackLinkForm, setFeedbackLinkForm] = useState({ productId: '', appointmentId: '', workOrderId: '', contractId: '' })
+  const [feedbackQr, setFeedbackQr] = useState<{ url: string; qrDataUrl: string; businessName: string; logo?: string | null; service: { id: string; name: string; category?: string | null; duration?: string | null } } | null>(null)
   const [editingTechId, setEditingTechId] = useState<string | null>(null)
   const [editingJobCardId, setEditingJobCardId] = useState<string | null>(null)
   const { toast } = useToast()
 
   const loadData = useCallback(async () => {
     try {
-      const [a, w, c, car, gar, tech, jc, fb] = await Promise.all([
+      const [a, w, c, car, gar, tech, jc, fb, svc] = await Promise.all([
         apiFetch('/api/service/appointments').then(r => r.json()).catch(() => []),
         apiFetch('/api/service/work-orders').then(r => r.json()).catch(() => []),
         apiFetch('/api/service/contracts').then(r => r.json()).catch(() => []),
@@ -82,6 +86,7 @@ export default function ServiceBusinessPage() {
         apiFetch('/api/service/technicians').then(r => r.json()).catch(() => []),
         apiFetch('/api/service/job-cards').then(r => r.json()).catch(() => []),
         apiFetch('/api/service/feedback').then(r => r.json()).catch(() => []),
+        apiFetch('/api/service/catalog').then(async r => { if (!r.ok) throw new Error('Unable to load services'); return r.json() }),
       ])
       setAppointments(Array.isArray(a) ? a : [])
       setWorkOrders(Array.isArray(w) ? w : [])
@@ -91,7 +96,8 @@ export default function ServiceBusinessPage() {
       setTechnicians(Array.isArray(tech) ? tech : [])
       setJobCards(Array.isArray(jc) ? jc : [])
       setFeedback(Array.isArray(fb) ? fb : [])
-    } catch (e) { console.error(e) }
+      setServices(Array.isArray(svc) ? svc : [])
+    } catch (e) { console.error(e); toast({ variant: 'destructive', title: 'Unable to load service data. Please try again.' }) }
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
@@ -104,10 +110,13 @@ export default function ServiceBusinessPage() {
     setShowApptModal(false); setApptForm({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to create appointment' }) }
   }
   const createWO = async () => {
+    if (savingService) return
     if (!woForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
-    if (!woForm.title.trim()) { toast({ variant: 'destructive', title: 'Title is required' }); return }
-    try { await apiFetch('/api/service/work-orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(woForm) })
-    setShowWOModal(false); setWoForm({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to create work order' }) }
+    if (!woForm.productId) { toast({ variant: 'destructive', title: 'Select a saved service' }); return }
+    setSavingService(true)
+    try { const res = await apiFetch('/api/service/work-orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(woForm) })
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed to create work order')
+    setShowWOModal(false); setWoForm({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 }); loadData() } catch (e) { toast({ variant: 'destructive', title: e instanceof Error ? e.message : 'Failed to create work order' }) } finally { setSavingService(false) }
   }
   const createContract = async () => {
     if (!contractForm.title.trim()) { toast({ variant: 'destructive', title: 'Title is required' }); return }
@@ -142,25 +151,51 @@ export default function ServiceBusinessPage() {
   const deleteTechnician = async (id: string) => { try { await apiFetch(`/api/service/technicians/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
   const saveJobCard = async () => {
+    if (savingService) return
     if (!jobCardForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
-    if (!jobCardForm.serviceTitle.trim()) { toast({ variant: 'destructive', title: 'Service title is required' }); return }
+    if (!jobCardForm.productId) { toast({ variant: 'destructive', title: 'Select a saved service' }); return }
+    setSavingService(true)
     try {
       if (editingJobCardId) {
-        await apiFetch(`/api/service/job-cards/${editingJobCardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(jobCardForm) })
+        const res = await apiFetch(`/api/service/job-cards/${editingJobCardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(jobCardForm) })
+        if (!res.ok) throw new Error((await res.json()).error || 'Failed to save job card')
         setEditingJobCardId(null)
       } else {
-        await apiFetch('/api/service/job-cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(jobCardForm) })
+        const res = await apiFetch('/api/service/job-cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(jobCardForm) })
+        if (!res.ok) throw new Error((await res.json()).error || 'Failed to save job card')
       }
-      setShowJobCardModal(false); setJobCardForm({ appointmentId: '', workOrderId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); loadData()
-    } catch { toast({ variant: 'destructive', title: 'Failed to save job card' }) }
+      setShowJobCardModal(false); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); loadData()
+    } catch (e) { toast({ variant: 'destructive', title: e instanceof Error ? e.message : 'Failed to save job card' }) } finally { setSavingService(false) }
   }
   const updateJobCardStatus = async (id: string, status: string) => { await apiFetch(`/api/service/job-cards/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); loadData() }
   const deleteJobCard = async (id: string) => { try { await apiFetch(`/api/service/job-cards/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
-  const saveFeedback = async () => {
-    if (!feedbackForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
-    try { await apiFetch('/api/service/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(feedbackForm) })
-    setShowFeedbackModal(false); setFeedbackForm({ appointmentId: '', workOrderId: '', contractId: '', customerName: '', customerPhone: '', rating: 5, serviceQuality: 5, timeliness: 5, professionalism: 5, valueForMoney: 5, comment: '', wouldRecommend: true }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to save feedback' }) }
+  const createFeedbackQr = async () => {
+    if (creatingQr) return
+    if (!feedbackLinkForm.productId) { toast({ variant: 'destructive', title: 'Select a saved service' }); return }
+    setCreatingQr(true)
+    try {
+      const res = await apiFetch('/api/service/feedback-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(feedbackLinkForm) })
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json()
+      const url = new URL(data.path, window.location.origin).href
+      const qrDataUrl = await QRCode.toDataURL(url, { width: 512, margin: 4, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } })
+      setFeedbackQr({ ...data, url, qrDataUrl })
+    } catch { toast({ variant: 'destructive', title: 'Failed to create feedback QR' }) } finally { setCreatingQr(false) }
+  }
+
+  const printFeedbackQr = () => {
+    if (!feedbackQr) return
+    const win = window.open('', '_blank', 'width=520,height=720')
+    if (!win) { toast({ variant: 'destructive', title: 'Allow pop-ups to print the feedback QR.' }); return }
+    win.document.write('<!doctype html><html><head><title>Customer Feedback QR</title><style>@page{margin:15mm}body{font-family:Arial,sans-serif;margin:0;padding:24px;text-align:center;color:#000}h1,p{overflow-wrap:anywhere}h1{font-size:26px}img{width:320px;max-width:100%;height:auto}button{padding:12px 24px}@media print{button{display:none}}</style></head><body><h1 id="brand"></h1><h2>Share your feedback</h2><p id="service"></p><img id="qr" alt="Customer feedback QR code"/><p>Scan to rate this service and send feedback.</p><button id="print">Print QR</button></body></html>')
+    win.document.close()
+    win.document.getElementById('brand')!.textContent = feedbackQr.businessName
+    win.document.getElementById('service')!.textContent = feedbackQr.service.name
+    win.document.getElementById('print')!.onclick = () => { win.focus(); win.print() }
+    const qrImage = win.document.getElementById('qr') as HTMLImageElement
+    qrImage.onload = () => { win.focus(); win.print() }
+    qrImage.src = feedbackQr.qrDataUrl
   }
   const deleteFeedback = async (id: string) => { try { await apiFetch(`/api/service/feedback/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
@@ -205,6 +240,17 @@ export default function ServiceBusinessPage() {
   }
   const currentSectionLabel = sectionLabels[tab] || 'Appointments'
   const currentSectionDescription = sectionDescription[tab] || 'Manage scheduled service appointments and confirmations.'
+  const serviceOptions = services.filter(s => s.isActive !== false)
+
+  const applyWorkOrderService = (id: string) => {
+    const service = serviceOptions.find(item => String(item.id) === id)
+    setWoForm(prev => ({ ...prev, productId: id, title: service?.product_name || prev.title, description: service?.description ?? '', serviceCategory: service?.serviceCategory || service?.categoryName || '', estimatedCost: Number(service?.unit_price ?? 0) }))
+  }
+
+  const applyJobCardService = (id: string) => {
+    const service = serviceOptions.find(item => String(item.id) === id)
+    setJobCardForm(prev => ({ ...prev, productId: id, serviceTitle: service?.product_name || prev.serviceTitle, serviceDescription: service?.description ?? '', laborCost: Number(service?.unit_price ?? 0) }))
+  }
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -227,30 +273,12 @@ export default function ServiceBusinessPage() {
         <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{feedback.length > 0 ? (feedback.reduce((s, f) => s + f.rating, 0) / feedback.length).toFixed(1) : '0.0'}<Star className="inline h-4 w-4 ml-1 text-yellow-400" /></div><p className="text-xs text-muted-foreground">Avg Rating ({feedback.length})</p></CardContent></Card>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b pb-3">
-        {[
-          { key: 'appointments', label: 'Appointments', icon: CalendarClock },
-          { key: 'work-orders', label: 'Work Orders', icon: ClipboardList },
-          { key: 'contracts', label: 'Contracts', icon: FileText },
-          { key: 'technicians', label: 'Technicians', icon: UserCog },
-          { key: 'job-cards', label: 'Job Cards', icon: ClipboardList },
-          { key: 'feedback', label: 'Feedback', icon: Star },
-          { key: 'car-wash', label: 'Car Wash', icon: Droplet },
-          { key: 'garage', label: 'Garage', icon: Wrench },
-        ].map(t => (
-          <button key={t.key} onClick={() => navigate(`/tenant/service/${t.key}`)}
-            className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors', tab === t.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
-            <t.icon className="h-4 w-4" /> {t.label}
-          </button>
-        ))}
-      </div>
-
       {tab === 'appointments' && (
         <div className="space-y-4">
           <Button onClick={() => setShowApptModal(true)}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[700px]">
-              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Title</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
+              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
                 {appointments.length === 0 && <tr className="border-t"><td colSpan={8} className="p-8 text-center text-muted-foreground">No appointments yet</td></tr>}
                 {appointments.map(a => (
@@ -289,7 +317,7 @@ export default function ServiceBusinessPage() {
                   <tr key={w.id} className="border-t">
                     <td className="p-2 font-medium">{w.orderNo}</td>
                     <td className="p-2">{w.customerName}</td>
-                    <td className="p-2">{w.title}</td>
+                    <td className="p-2"><div className="font-medium">{w.product?.name || w.title}</div>{w.title !== w.product?.name && <div className="text-xs text-muted-foreground">{w.title}</div>}</td>
                     <td className="p-2">{w.serviceCategory || '-'}</td>
                     <td className="p-2">{w.technician ? `${w.technician.fname} ${w.technician.lname}` : '-'}</td>
                     <td className="p-2"><Badge variant={w.priority === 'urgent' ? 'destructive' : 'secondary'}>{w.priority}</Badge></td>
@@ -379,7 +407,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'job-cards' && (
         <div className="space-y-4">
-          <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>
+          <Button onClick={() => { setEditingJobCardId(null); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); setShowJobCardModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Job Card</Button>
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="bg-muted"><tr><th className="p-2 text-left">Card No</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Total Cost</th><th className="p-2 text-left">Priority</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
@@ -409,7 +437,7 @@ export default function ServiceBusinessPage() {
 
       {tab === 'feedback' && (
         <div className="space-y-4">
-          <Button onClick={() => setShowFeedbackModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Feedback</Button>
+          <Button onClick={() => { setFeedbackQr(null); setShowFeedbackModal(true) }}><QrCode className="mr-1 h-4 w-4" /> Generate Feedback QR</Button>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {feedback.length === 0 && <div className="col-span-full text-center text-muted-foreground py-8">No feedback yet. Customer reviews will appear here.</div>}
             {feedback.map(fb => (
@@ -434,7 +462,7 @@ export default function ServiceBusinessPage() {
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {fb.wouldRecommend ? <Badge className="bg-green-100 text-green-700"><ThumbsUp className="h-3 w-3 mr-1" /> Recommends</Badge> : <Badge variant="secondary">Does not recommend</Badge>}
-                      {fb.appointment && <span className="text-xs text-muted-foreground">Appt: {fb.appointment.title}</span>}
+                      {fb.product && <span className="text-xs text-muted-foreground">Service: {fb.product.name}</span>}
                     </div>
                     <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteFeedback(fb.id)}><Trash2 className="h-3 w-3" /></Button>
                   </div>
@@ -591,6 +619,13 @@ export default function ServiceBusinessPage() {
               <div><Label>Phone</Label><Input value={woForm.customerPhone} onChange={e => setWoForm({ ...woForm, customerPhone: e.target.value })} /></div>
               <div><Label>Email</Label><Input value={woForm.customerEmail} onChange={e => setWoForm({ ...woForm, customerEmail: e.target.value })} /></div>
             </div>
+            <div><Label>Service</Label>
+              <Select value={woForm.productId} onValueChange={applyWorkOrderService}>
+                <SelectTrigger><SelectValue placeholder="Select saved service" /></SelectTrigger><SelectContent>
+                  {serviceOptions.map(service => <SelectItem key={String(service.id)} value={String(service.id)}>{service.product_name}{service.unit_price ? ` - ${Number(service.unit_price).toFixed(0)}` : ''}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div><Label>Title</Label><Input value={woForm.title} onChange={e => setWoForm({ ...woForm, title: e.target.value })} /></div>
             <div><Label>Description</Label><Input value={woForm.description} onChange={e => setWoForm({ ...woForm, description: e.target.value })} /></div>
             <div><Label>Service Category</Label><Input value={woForm.serviceCategory} onChange={e => setWoForm({ ...woForm, serviceCategory: e.target.value })} placeholder="repair, installation, maintenance" /></div>
@@ -610,7 +645,7 @@ export default function ServiceBusinessPage() {
             </div>
             <div><Label>Estimated Cost</Label><Input type="number" value={woForm.estimatedCost} onChange={e => setWoForm({ ...woForm, estimatedCost: +e.target.value })} /></div>
           </div>
-          <DialogFooter><Button onClick={createWO}>Create Work Order</Button></DialogFooter>
+          <DialogFooter><Button onClick={createWO} disabled={savingService || !woForm.productId}>{savingService ? 'Saving...' : 'Create Work Order'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -690,6 +725,13 @@ export default function ServiceBusinessPage() {
           <div className="space-y-3">
             <div><Label>Customer Name</Label><Input value={jobCardForm.customerName} onChange={e => setJobCardForm({ ...jobCardForm, customerName: e.target.value })} /></div>
             <div><Label>Customer Phone</Label><Input value={jobCardForm.customerPhone} onChange={e => setJobCardForm({ ...jobCardForm, customerPhone: e.target.value })} /></div>
+            <div><Label>Service</Label>
+              <Select value={jobCardForm.productId} onValueChange={applyJobCardService}>
+                <SelectTrigger><SelectValue placeholder="Select saved service" /></SelectTrigger><SelectContent>
+                  {serviceOptions.map(service => <SelectItem key={String(service.id)} value={String(service.id)}>{service.product_name}{service.unit_price ? ` - ${Number(service.unit_price).toFixed(0)}` : ''}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div><Label>Service Title</Label><Input value={jobCardForm.serviceTitle} onChange={e => setJobCardForm({ ...jobCardForm, serviceTitle: e.target.value })} /></div>
             <div><Label>Service Description</Label><Input value={jobCardForm.serviceDescription} onChange={e => setJobCardForm({ ...jobCardForm, serviceDescription: e.target.value })} /></div>
             <div><Label>Technician</Label>
@@ -715,36 +757,37 @@ export default function ServiceBusinessPage() {
               <div><Label>Parts Cost</Label><Input type="number" value={jobCardForm.partsCost} onChange={e => setJobCardForm({ ...jobCardForm, partsCost: +e.target.value })} /></div>
             </div>
           </div>
-          <DialogFooter><Button onClick={saveJobCard}>{editingJobCardId ? 'Update' : 'Create'} Job Card</Button></DialogFooter>
+          <DialogFooter><Button onClick={saveJobCard} disabled={savingService || !jobCardForm.productId}>{savingService ? 'Saving...' : editingJobCardId ? 'Update Job Card' : 'Create Job Card'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={showFeedbackModal} onOpenChange={setShowFeedbackModal}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Add Customer Feedback</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Customer Name</Label><Input value={feedbackForm.customerName} onChange={e => setFeedbackForm({ ...feedbackForm, customerName: e.target.value })} /></div>
-            <div><Label>Customer Phone</Label><Input value={feedbackForm.customerPhone} onChange={e => setFeedbackForm({ ...feedbackForm, customerPhone: e.target.value })} /></div>
-            <div><Label>Overall Rating</Label>
-              <Select value={String(feedbackForm.rating)} onValueChange={v => setFeedbackForm({ ...feedbackForm, rating: +v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
-                  <SelectItem value="1">1 - Poor</SelectItem><SelectItem value="2">2 - Fair</SelectItem><SelectItem value="3">3 - Good</SelectItem><SelectItem value="4">4 - Very Good</SelectItem><SelectItem value="5">5 - Excellent</SelectItem>
+        <DialogContent className="w-[calc(100%-2rem)] max-w-lg sm:max-w-lg max-h-[90dvh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Customer Feedback QR</DialogTitle><DialogDescription>{feedbackQr?.businessName || 'Customer feedback'}</DialogDescription></DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Service Offered</Label>
+              <Select disabled={creatingQr} value={feedbackLinkForm.productId} onValueChange={v => { setFeedbackQr(null); setFeedbackLinkForm({ ...feedbackLinkForm, productId: v }) }}>
+                <SelectTrigger><SelectValue placeholder="Select saved service" /></SelectTrigger><SelectContent>
+                  {serviceOptions.map(service => <SelectItem key={String(service.id)} value={String(service.id)}>{service.product_name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Service Quality (1-5)</Label><Input type="number" min={1} max={5} value={feedbackForm.serviceQuality} onChange={e => setFeedbackForm({ ...feedbackForm, serviceQuality: +e.target.value })} /></div>
-              <div><Label>Timeliness (1-5)</Label><Input type="number" min={1} max={5} value={feedbackForm.timeliness} onChange={e => setFeedbackForm({ ...feedbackForm, timeliness: +e.target.value })} /></div>
-              <div><Label>Professionalism (1-5)</Label><Input type="number" min={1} max={5} value={feedbackForm.professionalism} onChange={e => setFeedbackForm({ ...feedbackForm, professionalism: +e.target.value })} /></div>
-              <div><Label>Value for Money (1-5)</Label><Input type="number" min={1} max={5} value={feedbackForm.valueForMoney} onChange={e => setFeedbackForm({ ...feedbackForm, valueForMoney: +e.target.value })} /></div>
-            </div>
-            <div><Label>Comment</Label><Input value={feedbackForm.comment} onChange={e => setFeedbackForm({ ...feedbackForm, comment: e.target.value })} /></div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="wouldRecommend" checked={feedbackForm.wouldRecommend} onChange={e => setFeedbackForm({ ...feedbackForm, wouldRecommend: e.target.checked })} />
-              <Label htmlFor="wouldRecommend">Would recommend</Label>
-            </div>
+            <Button onClick={createFeedbackQr} disabled={creatingQr || !feedbackLinkForm.productId} className="w-full"><QrCode className="mr-2 h-4 w-4" /> {creatingQr ? 'Creating...' : 'Create QR'}</Button>
+            {feedbackQr && (
+              <div className="rounded-lg border p-4 text-center space-y-3">
+                <div>
+                  <p className="font-semibold">{feedbackQr.businessName}</p>
+                  <p className="text-sm text-muted-foreground">{feedbackQr.service.name}</p>
+                </div>
+                <img src={feedbackQr.qrDataUrl} alt="Customer feedback QR" className="mx-auto aspect-square w-64 max-w-full bg-white" />
+                <Input value={feedbackQr.url} readOnly className="text-xs" />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" className="flex-1" onClick={async () => { try { await navigator.clipboard.writeText(feedbackQr.url); toast({ title: 'Link copied' }) } catch { toast({ variant: 'destructive', title: 'Unable to copy. Select the link above to copy it.' }) } }}><Copy className="mr-2 h-4 w-4" /> Copy Link</Button>
+                  <Button type="button" className="flex-1" onClick={printFeedbackQr}><Printer className="mr-2 h-4 w-4" /> Print QR</Button>
+                </div>
+              </div>
+            )}
           </div>
-          <DialogFooter><Button onClick={saveFeedback}>Add Feedback</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

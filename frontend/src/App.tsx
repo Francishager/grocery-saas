@@ -60,6 +60,7 @@ import FuelStationPage from '@/pages/FuelStationPage'
 import ManufacturingPage from '@/pages/ManufacturingPage'
 import AgriculturePage from '@/pages/AgriculturePage'
 import ServiceBusinessPage from '@/pages/ServiceBusinessPage'
+import PublicServiceFeedbackPage from '@/pages/PublicServiceFeedbackPage'
 import UserProfilePage from '@/pages/UserProfilePage'
 import ReferralPage from '@/pages/ReferralPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
@@ -124,6 +125,7 @@ function App() {
         } />
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
         <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />
+        <Route path="/service-feedback/:token" element={<PublicServiceFeedbackPage />} />
  
         {/* ========== SaaS Admin Routes — /saas/* ========== */}
         <Route

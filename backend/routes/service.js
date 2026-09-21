@@ -1,10 +1,52 @@
 import { Router } from "express";
+import crypto from "crypto";
+import { ensureServiceFeedbackSchema } from '../src/utils/serviceFeedbackSchema.js';
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
-import { requireFeature, requireAnyFeature } from "../middleware/featureCheck.js";
+import { requireFeature, requireAnyFeature, getTenantFeatures, hasFeatureAccess } from "../middleware/featureCheck.js";
 
 const router = Router();
 const t = (req) => req.user.tenantId || req.user.tenant_id;
+
+function feedbackTokenHash(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+async function findServiceProduct(tenantId, productId) {
+  if (!productId) return null;
+  return prisma.product.findFirst({
+    where: { id: productId, tenantId, itemType: "service", isActive: true },
+    include: { category: { select: { name: true } } },
+  });
+}
+
+function publicService(service) {
+  if (!service) return null;
+  return {
+    id: service.id,
+    name: service.name,
+    description: service.description || "",
+    duration: service.duration || null,
+    category: service.serviceCategory || service.category?.name || null,
+  };
+}
+
+async function validateServiceLinks(tenantId, body, productId) {
+  for (const [field, model] of [['appointmentId', 'appointment'], ['workOrderId', 'workOrder'], ['contractId', 'serviceContract'], ['branchId', 'branch']]) {
+    if (!body[field]) continue;
+    if (typeof body[field] !== 'string') return `Invalid ${field}`;
+    const record = await prisma[model].findFirst({ where: { id: body[field], tenantId } });
+    if (!record || (productId && record.productId && record.productId !== productId)) return `The selected ${field} does not belong to this business and service`;
+  }
+  return null;
+}
+
+router.get('/catalog', authenticateToken, requirePermission('canViewServiceBusiness'), requireFeature('service'), async (req, res) => {
+  try {
+    const services = await prisma.product.findMany({ where: { tenantId: t(req), itemType: 'service', isActive: true }, select: { id: true, name: true, description: true, price: true, serviceCategory: true, category: { select: { name: true } } }, orderBy: { name: 'asc' } });
+    res.json(services.map(service => ({ id: service.id, product_name: service.name, description: service.description || '', unit_price: service.price, serviceCategory: service.serviceCategory, categoryName: service.category?.name, isActive: true })));
+  } catch { res.status(500).json({ error: 'Unable to load services' }); }
+});
 
 // ===== APPOINTMENTS =====
 router.get("/appointments", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
@@ -55,8 +97,16 @@ router.post("/work-orders", authenticateToken, requirePermission("canCreateServi
   try {
     const { orderNo, customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, priority, serviceCategory, estimatedCost, branchId, notes } = req.body;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
-    if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
-    const order = await prisma.workOrder.create({ data: { orderNo: orderNo || `WO-${Date.now()}`, customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, priority: priority || "normal", serviceCategory, estimatedCost: estimatedCost || 0, branchId, notes, tenantId: t(req) } });
+    const service = await findServiceProduct(t(req), productId);
+    if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+    const orderTitle = title?.trim() || service.name;
+    const linkError = await validateServiceLinks(t(req), req.body, service.id);
+    if (linkError) return res.status(400).json({ error: linkError });
+    if (customerId && !await prisma.customer.findFirst({ where: { id: customerId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid customer' });
+    if (technicianId && !await prisma.user.findFirst({ where: { id: technicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
+    const cost = Number(estimatedCost ?? service.price ?? 0);
+    if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ error: 'Estimated cost must be a non-negative number' });
+    const order = await prisma.workOrder.create({ data: { orderNo: orderNo || `WO-${Date.now()}`, customerId: customerId || null, customerName, customerPhone, customerEmail, productId: service.id, technicianId: technicianId || null, title: orderTitle, description: description || service.description || null, priority: priority || "normal", serviceCategory: serviceCategory || service.serviceCategory || service.category?.name || null, estimatedCost: cost, branchId: branchId || null, notes, tenantId: t(req) } });
     res.status(201).json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -152,27 +202,46 @@ router.delete("/technicians/:id", authenticateToken, requirePermission("canDelet
 // ===== SERVICE JOB CARDS =====
 router.get("/job-cards", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
   try {
-    const cards = await prisma.serviceJobCard.findMany({ where: { tenantId: t(req) }, include: { technician: true, appointment: { select: { id: true, title: true, scheduledDate: true } }, workOrder: { select: { id: true, orderNo: true, title: true } } }, orderBy: { createdAt: "desc" } });
+    await ensureServiceFeedbackSchema();
+    const cards = await prisma.serviceJobCard.findMany({ where: { tenantId: t(req) }, include: { product: { select: { id: true, name: true, serviceCategory: true, duration: true } }, technician: true, appointment: { select: { id: true, title: true, scheduledDate: true } }, workOrder: { select: { id: true, orderNo: true, title: true } } }, orderBy: { createdAt: "desc" } });
     res.json(cards);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/job-cards", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
   try {
-    const { cardNo, appointmentId, workOrderId, technicianId, customerName, customerPhone, serviceTitle, serviceDescription, priority, scheduledStart, scheduledEnd, laborCost, partsCost, partsUsed, branchId } = req.body;
+    await ensureServiceFeedbackSchema();
+    const { cardNo, appointmentId, workOrderId, productId, technicianId, customerName, customerPhone, serviceTitle, serviceDescription, priority, scheduledStart, scheduledEnd, laborCost, partsCost, partsUsed, branchId } = req.body;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
-    if (!serviceTitle?.trim()) return res.status(400).json({ error: 'Service title is required' });
-    const totalCost = (laborCost || 0) + (partsCost || 0);
-    const card = await prisma.serviceJobCard.create({ data: { cardNo: cardNo || `JC-${Date.now()}`, appointmentId, workOrderId, technicianId, customerName, customerPhone, serviceTitle, serviceDescription, priority: priority || "normal", scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined, scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined, laborCost: laborCost || 0, partsCost: partsCost || 0, totalCost, partsUsed, branchId, tenantId: t(req) } });
+    const service = await findServiceProduct(t(req), productId);
+    if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+    const linkError = await validateServiceLinks(t(req), req.body, service.id);
+    if (linkError) return res.status(400).json({ error: linkError });
+    if (technicianId && !await prisma.serviceTechnician.findFirst({ where: { id: technicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
+    const finalLaborCost = Number(laborCost ?? service.price ?? 0);
+    const finalPartsCost = Number(partsCost ?? 0);
+    if (![finalLaborCost, finalPartsCost].every(value => Number.isFinite(value) && value >= 0)) return res.status(400).json({ error: 'Costs must be non-negative numbers' });
+    const totalCost = finalLaborCost + finalPartsCost;
+    const card = await prisma.serviceJobCard.create({ data: { cardNo: cardNo || `JC-${Date.now()}`, appointmentId: appointmentId || null, workOrderId: workOrderId || null, productId: service.id, technicianId: technicianId || null, customerName, customerPhone, serviceTitle: serviceTitle?.trim() || service.name, serviceDescription: serviceDescription || service.description || null, priority: priority || "normal", scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined, scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined, laborCost: finalLaborCost, partsCost: finalPartsCost, totalCost, partsUsed, branchId: branchId || null, tenantId: t(req) } });
     res.status(201).json(card);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.put("/job-cards/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.job_cards"), async (req, res) => {
   try {
+    await ensureServiceFeedbackSchema();
     const { status, technicianId, priority, actualStart, actualEnd, laborHours, laborCost, partsCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature } = req.body;
-    const totalCost = (laborCost || 0) + (partsCost || 0);
+    const existing = await prisma.serviceJobCard.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
+    if (!existing) return res.status(404).json({ error: 'Job card not found' });
+    const totalCost = Number(laborCost ?? existing.laborCost) + Number(partsCost ?? existing.partsCost);
     const data = { status, technicianId, priority, laborHours, laborCost, partsCost, totalCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature };
+    if (req.body.productId !== undefined) {
+      const service = await findServiceProduct(t(req), req.body.productId);
+      if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+      data.productId = service.id;
+      data.serviceTitle = req.body.serviceTitle?.trim() || service.name;
+      data.serviceDescription = req.body.serviceDescription || service.description || null;
+    }
     if (actualStart) data.actualStart = new Date(actualStart);
     if (actualEnd) data.actualEnd = new Date(actualEnd);
     const card = await prisma.serviceJobCard.update({ where: { id: req.params.id }, data });
@@ -188,37 +257,123 @@ router.delete("/job-cards/:id", authenticateToken, requirePermission("canDeleteS
 });
 
 // ===== SERVICE FEEDBACK =====
-router.get("/feedback", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.get("/feedback", authenticateToken, requirePermission("canViewServiceBusiness"), requireFeature("service"), async (req, res) => {
   try {
-    const feedback = await prisma.serviceFeedback.findMany({ where: { tenantId: t(req) }, include: { customer: { select: { id: true, name: true } }, appointment: { select: { id: true, title: true } }, workOrder: { select: { id: true, orderNo: true } }, contract: { select: { id: true, contractNo: true } } }, orderBy: { createdAt: "desc" } });
+    await ensureServiceFeedbackSchema();
+    const feedback = await prisma.serviceFeedback.findMany({ where: { tenantId: t(req) }, include: { product: { select: { id: true, name: true, serviceCategory: true } }, customer: { select: { id: true, name: true } }, appointment: { select: { id: true, title: true } }, workOrder: { select: { id: true, orderNo: true } }, contract: { select: { id: true, contractNo: true } } }, orderBy: { createdAt: "desc" } });
     res.json(feedback);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/feedback", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.post("/feedback", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service"), async (req, res) => {
   try {
-    const { appointmentId, workOrderId, contractId, customerId, customerName, customerPhone, rating, serviceQuality, timeliness, professionalism, valueForMoney, comment, wouldRecommend, branchId } = req.body;
+    await ensureServiceFeedbackSchema();
+    const { appointmentId, workOrderId, contractId, productId, customerId, customerName, customerPhone, rating, serviceQuality, timeliness, professionalism, valueForMoney, comment, wouldRecommend, branchId } = req.body;
     if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
     if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Rating must be 1-5' });
-    const fb = await prisma.serviceFeedback.create({ data: { appointmentId, workOrderId, contractId, customerId, customerName, customerPhone, rating, serviceQuality: serviceQuality || 5, timeliness: timeliness || 5, professionalism: professionalism || 5, valueForMoney: valueForMoney || 5, comment, wouldRecommend: wouldRecommend !== false, branchId, tenantId: t(req) } });
+    const service = productId ? await findServiceProduct(t(req), productId) : null;
+    const fb = await prisma.serviceFeedback.create({ data: { appointmentId, workOrderId, contractId, productId: service?.id || null, customerId, customerName, customerPhone, rating, serviceQuality: serviceQuality || 5, timeliness: timeliness || 5, professionalism: professionalism || 5, valueForMoney: valueForMoney || 5, comment, wouldRecommend: wouldRecommend !== false, branchId, tenantId: t(req) } });
     res.status(201).json(fb);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/feedback/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.put("/feedback/:id", authenticateToken, requirePermission("canEditServiceBusiness"), requireFeature("service"), async (req, res) => {
   try {
+    await ensureServiceFeedbackSchema();
     const { status, response } = req.body;
     const data = { status };
     if (response !== undefined) { data.response = response; data.respondedAt = new Date(); }
-    const fb = await prisma.serviceFeedback.update({ where: { id: req.params.id }, data });
+    const fb = await prisma.serviceFeedback.update({ where: { id: req.params.id, tenantId: t(req) }, data });
     res.json(fb);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete("/feedback/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service.appointments"), async (req, res) => {
+router.delete("/feedback/:id", authenticateToken, requirePermission("canDeleteServiceBusiness"), requireFeature("service"), async (req, res) => {
   try {
-    await prisma.serviceFeedback.delete({ where: { id: req.params.id } });
+    await prisma.serviceFeedback.delete({ where: { id: req.params.id, tenantId: t(req) } });
     res.json({ message: "Feedback deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post("/feedback-link", authenticateToken, requirePermission("canCreateServiceBusiness"), requireFeature("service"), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const { productId, appointmentId, workOrderId, contractId, branchId } = req.body;
+    const tenantId = t(req);
+    const service = await findServiceProduct(tenantId, productId);
+    if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, logo: true } });
+    const linkError = await validateServiceLinks(tenantId, req.body, service.id);
+    if (linkError) return res.status(400).json({ error: linkError });
+    const token = crypto.randomBytes(32).toString("base64url");
+    await prisma.serviceFeedbackLink.create({ data: {
+      tenantId,
+      productId: service.id,
+      appointmentId: appointmentId || null,
+      workOrderId: workOrderId || null,
+      contractId: contractId || null,
+      branchId: branchId || null,
+      tokenHash: feedbackTokenHash(token),
+    } });
+    res.status(201).json({ path: '/service-feedback/' + encodeURIComponent(token), businessName: tenant?.name || 'Business', logo: tenant?.logo || null, service: publicService(service) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function findFeedbackLink(token) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token || '')) return null;
+  await ensureServiceFeedbackSchema();
+  const tokenHash = feedbackTokenHash(token);
+  const link = await prisma.serviceFeedbackLink.findUnique({ where: { tokenHash } });
+  if (!link || !link.isActive || (link.expiresAt && link.expiresAt < new Date())) return null;
+  const tenant = await prisma.tenant.findUnique({ where: { id: link.tenantId }, select: { status: true } });
+  if (!tenant || !['active', 'trial'].includes(tenant.status)) return null;
+  if (!hasFeatureAccess(await getTenantFeatures(link.tenantId), 'service')) return null;
+  return link;
+}
+
+router.get("/public-feedback/:token", async (req, res) => {
+  try {
+    const link = await findFeedbackLink(req.params.token);
+    if (!link) return res.status(404).json({ error: 'Feedback form not found' });
+    const [tenant, service] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id: link.tenantId }, select: { id: true, name: true, logo: true, status: true } }),
+      findServiceProduct(link.tenantId, link.productId),
+    ]);
+    if (!tenant || !service) return res.status(404).json({ error: 'Feedback form not found' });
+    res.json({ businessName: tenant.name, logo: tenant.logo || null, service: publicService(service) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/public-feedback/:token", async (req, res) => {
+  try {
+    const link = await findFeedbackLink(req.params.token);
+    if (!link) return res.status(404).json({ error: 'Feedback form not found' });
+    const service = await findServiceProduct(link.tenantId, link.productId);
+    if (!service) return res.status(404).json({ error: 'Feedback form not found' });
+    const { customerName, customerPhone, rating, serviceQuality, timeliness, professionalism, valueForMoney, comment, wouldRecommend } = req.body;
+    if (typeof customerName !== 'string' || !customerName.trim() || customerName.length > 120) return res.status(400).json({ error: 'Your name is required (up to 120 characters)' });
+    if (comment != null && (typeof comment !== 'string' || comment.length > 4000)) return res.status(400).json({ error: 'Comments must be 4000 characters or less' });
+    if (customerPhone != null && (typeof customerPhone !== 'string' || customerPhone.length > 40)) return res.status(400).json({ error: 'Invalid phone number' });
+    if (wouldRecommend !== undefined && typeof wouldRecommend !== 'boolean') return res.status(400).json({ error: 'Invalid recommendation' });
+    const finalRating = Number(rating);
+    if (![rating, serviceQuality ?? rating, timeliness ?? rating, professionalism ?? rating, valueForMoney ?? rating].every(value => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 5)) return res.status(400).json({ error: 'Ratings must be whole numbers from 1 to 5' });
+    const fb = await prisma.serviceFeedback.create({ data: {
+      tenantId: link.tenantId,
+      branchId: link.branchId || null,
+      appointmentId: link.appointmentId || null,
+      workOrderId: link.workOrderId || null,
+      contractId: link.contractId || null,
+      productId: service.id,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone || null,
+      rating: finalRating,
+      serviceQuality: Number(serviceQuality) || finalRating,
+      timeliness: Number(timeliness) || finalRating,
+      professionalism: Number(professionalism) || finalRating,
+      valueForMoney: Number(valueForMoney) || finalRating,
+      comment,
+      wouldRecommend: wouldRecommend !== false,
+    } });
+    res.status(201).json({ id: fb.id, message: 'Thank you for your feedback' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

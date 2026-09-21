@@ -855,6 +855,8 @@ model Product {
   harvests              Harvest[]
   appointmentProducts   Appointment[]
   workOrderProducts     WorkOrder[]
+  serviceJobCardProducts ServiceJobCard[]
+  serviceFeedbackProducts ServiceFeedback[]
   priceHistory          ProductPriceHistory[]
 
   @@unique([tenantId, branchId, sku])
@@ -3347,6 +3349,8 @@ model ServiceJobCard {
   appointment        Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   workOrderId        String?
   workOrder          WorkOrder?         @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  productId          String?
+  product            Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
   technicianId       String?
   technician         ServiceTechnician? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
   customerName       String
@@ -3377,6 +3381,7 @@ model ServiceJobCard {
 
   @@unique([tenantId, cardNo])
   @@index([tenantId, branchId])
+  @@index([tenantId, productId])
   @@index([tenantId, technicianId])
   @@index([tenantId, status])
   @@map("service_job_cards")
@@ -3398,6 +3403,8 @@ model ServiceFeedback {
   workOrder       WorkOrder?       @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
   contractId      String?
   contract        ServiceContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  productId       String?
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
   customerId      String?
   customer        Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerName    String
@@ -3416,6 +3423,7 @@ model ServiceFeedback {
   updatedAt       DateTime         @updatedAt
 
   @@index([tenantId, branchId])
+  @@index([tenantId, productId])
   @@index([tenantId, rating])
   @@index([tenantId, createdAt])
   @@map("service_feedback")
@@ -3424,6 +3432,30 @@ model ServiceFeedback {
 // =====================================================
 // ASSET & RESOURCE ENGINE (generic assets)
 // =====================================================
+
+
+// =====================================================
+// SERVICE FEEDBACK LINKS (public customer QR links)
+// =====================================================
+
+model ServiceFeedbackLink {
+  id            String   @id @default(cuid())
+  tenantId      String
+  productId     String
+  appointmentId String?
+  workOrderId   String?
+  contractId    String?
+  branchId      String?
+  tokenHash     String   @unique
+  isActive      Boolean  @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, productId])
+  @@index([tenantId, createdAt])
+  @@map("service_feedback_links")
+}
 
 model Asset {
   id           String    @id @default(cuid())
