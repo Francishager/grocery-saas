@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Upload, Building2 } from 'lucide-react'
+import { Upload, Building2, MapPin } from 'lucide-react'
 import { settingsApi } from '@/lib/api'
 import { cacheTenantFormattingSettings, DEFAULT_SYSTEM_DATE_FORMAT, getTenantCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -68,6 +68,24 @@ export default function BusinessSettingsPage() {
     } finally { setSaving(false) }
   }
 
+  const captureAttendanceLocation = () => {
+    if (!settings?.address?.trim()) {
+      toast({ variant: 'destructive', title: 'Set the business address first' })
+      return
+    }
+    if (!navigator.geolocation) {
+      toast({ variant: 'destructive', title: 'Location services are not available on this device' })
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setSettings((current: any) => ({ ...current, attendanceLatitude: position.coords.latitude, attendanceLongitude: position.coords.longitude }))
+        toast({ title: 'Business location captured', description: 'Save changes to activate attendance location checks.' })
+      },
+      () => toast({ variant: 'destructive', title: 'Unable to capture location', description: 'Allow location access while at the business address and try again.' }),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    )
+  }
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -124,6 +142,25 @@ export default function BusinessSettingsPage() {
               <div className="space-y-2">
                 <Label>Address</Label>
                 <Input value={settings.address || ''} onChange={e => setSettings((s: any) => ({ ...s, address: e.target.value }))} />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Attendance Location</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Button type="button" variant="outline" onClick={captureAttendanceLocation} disabled={saving || !online}>
+                    <MapPin className="mr-2 h-4 w-4" /> Capture Business Location
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {settings.attendanceLatitude != null && settings.attendanceLongitude != null ? 'Location captured. Save changes to keep it.' : 'Capture this while physically at the saved business address.'}
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Attendance Radius (metres)</Label>
+                <Input type="number" min="25" max="2000" value={settings.attendanceRadiusMeters ?? 200} onChange={e => setSettings((s: any) => ({ ...s, attendanceRadiusMeters: Number(e.target.value) || 200 }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Location Status</Label>
+                <div className="flex h-10 items-center text-sm text-muted-foreground">{settings.attendanceLatitude != null && settings.attendanceLongitude != null ? 'Configured' : 'Not configured'}</div>
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>

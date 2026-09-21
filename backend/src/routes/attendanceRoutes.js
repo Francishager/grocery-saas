@@ -29,11 +29,11 @@ const requireHRPermission = (permissionCode) => async (req, res, next) => {
 // Manual check-in
 router.post('/attendance/checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
-    const { employeeId, location } = req.body;
+    const { employeeId, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
     const method = 'MANUAL';
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, method, location, req.user.id);
+    const record = await attendanceService.checkIn(tenantId, employeeId, method, location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'Check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -43,13 +43,13 @@ router.post('/attendance/checkin', requireHRPermission('ATTENDANCE_RECORD'), asy
 // QR code check-in
 router.post('/attendance/qr-checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
-    const { employeeId, qrData, location } = req.body;
+    const { employeeId, qrData, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
 
     // Validate QR data (decode employee ID from QR)
     if (!qrData) throw new Error('Invalid QR code');
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, 'QR_CODE', location, req.user.id);
+    const record = await attendanceService.checkIn(tenantId, employeeId, 'QR_CODE', location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'QR check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -59,12 +59,12 @@ router.post('/attendance/qr-checkin', requireHRPermission('ATTENDANCE_RECORD'), 
 // Biometric check-in
 router.post('/attendance/biometric-checkin', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
-    const { employeeId, biometricData, location } = req.body;
+    const { employeeId, biometricData, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
 
     if (!biometricData) throw new Error('Biometric data required');
 
-    const record = await attendanceService.checkIn(tenantId, employeeId, 'BIOMETRIC', location, req.user.id);
+    const record = await attendanceService.checkIn(tenantId, employeeId, 'BIOMETRIC', location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'Biometric check-in recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -74,10 +74,10 @@ router.post('/attendance/biometric-checkin', requireHRPermission('ATTENDANCE_REC
 // Check-out
 router.post('/attendance/checkout', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
   try {
-    const { employeeId, location } = req.body;
+    const { employeeId, location, coordinates } = req.body;
     const tenantId = req.tenant.id;
 
-    const record = await attendanceService.checkOut(tenantId, employeeId, location, req.user.id);
+    const record = await attendanceService.checkOut(tenantId, employeeId, location, req.user.id, coordinates);
     res.json({ success: true, data: record, message: 'Check-out recorded' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -88,6 +88,22 @@ router.post('/attendance/checkout', requireHRPermission('ATTENDANCE_RECORD'), as
  * Attendance Record Management
  */
 
+router.get('/attendance/geofence', requireHRPermission('ATTENDANCE_RECORD'), async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.tenant.id },
+      select: { address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true },
+    });
+    const configured = Boolean(tenant?.address?.trim()) && tenant?.attendanceLatitude != null && tenant?.attendanceLongitude != null;
+    res.json({
+      success: true,
+      data: configured ? { address: tenant.address, latitude: tenant.attendanceLatitude, longitude: tenant.attendanceLongitude, radiusMeters: tenant.attendanceRadiusMeters || 200 } : null,
+      configured,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 // Limited directory for attendance staff. This excludes employee profiles,
 // salary, contacts, and all Employee Management data.
 router.get('/attendance/employee-options', requireHRPermission('HR_EMPLOYEE_ATTENDANCE_LOOKUP'), async (req, res) => {

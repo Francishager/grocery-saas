@@ -102,6 +102,9 @@ model Tenant {
   email        String       @unique
   phone        String?
   address      String?
+  attendanceLatitude  Float?
+  attendanceLongitude Float?
+  attendanceRadiusMeters Int @default(200)
   logo         String?
   status       TenantStatus @default(active)
   businessType String? // retail, pharmacy, hardware, supermarket, wholesale, restaurant, bar, restaurant_bar, cafe, coffee_shop, fast_food, hotel_restaurant, bakery, service, salon_spa, repair_shop, manufacturing, other

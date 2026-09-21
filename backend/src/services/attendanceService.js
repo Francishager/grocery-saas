@@ -8,6 +8,20 @@ function dayRange(value = new Date()) {
   return { start, end };
 }
 
+function haversineDistanceMeters(from, to) {
+  const radians = (value) => value * Math.PI / 180;
+  const earthRadius = 6371000;
+  const deltaLatitude = radians(to.latitude - from.latitude);
+  const deltaLongitude = radians(to.longitude - from.longitude);
+  const a = Math.sin(deltaLatitude / 2) ** 2 + Math.cos(radians(from.latitude)) * Math.cos(radians(to.latitude)) * Math.sin(deltaLongitude / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function validCoordinates(coordinates) {
+  const latitude = Number(coordinates?.latitude);
+  const longitude = Number(coordinates?.longitude);
+  return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+}
 function employeeName(employee) {
   return [employee?.firstName, employee?.lastName].filter(Boolean).join(' ').trim();
 }
@@ -22,6 +36,24 @@ function mapRecord(record) {
 }
 
 class AttendanceService {
+  async assertWithinBusinessLocation(tenantId, coordinates) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true },
+    });
+    if (!tenant?.address?.trim() || tenant.attendanceLatitude == null || tenant.attendanceLongitude == null) {
+      throw new Error('Attendance is unavailable until the business owner saves the business address and location in Business Settings.');
+    }
+    if (!validCoordinates(coordinates)) throw new Error('Device location is required to check in or out. Enable location access and try again.');
+    const distanceMeters = haversineDistanceMeters(
+      { latitude: tenant.attendanceLatitude, longitude: tenant.attendanceLongitude },
+      { latitude: Number(coordinates.latitude), longitude: Number(coordinates.longitude) },
+    );
+    if (distanceMeters > Number(tenant.attendanceRadiusMeters || 200)) {
+      throw new Error(`You are ${Math.round(distanceMeters)} metres from the business location. Check-in and check-out are allowed within ${tenant.attendanceRadiusMeters || 200} metres.`);
+    }
+    return { address: tenant.address, distanceMeters };
+  }
   async requireEmployee(tenantId, employeeId) {
     const employee = await prisma.employee.findFirst({
       where: { id: employeeId, tenantId },
@@ -51,7 +83,8 @@ class AttendanceService {
     return Array.isArray(records) ? withEmployees : withEmployees[0];
   }
 
-  async checkIn(tenantId, employeeId, method = 'MANUAL', location = null, changedBy = 'SYSTEM') {
+  async checkIn(tenantId, employeeId, method = 'MANUAL', location = null, changedBy = 'SYSTEM', coordinates = null) {
+    await this.assertWithinBusinessLocation(tenantId, coordinates);
     const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkInTime = new Date();
@@ -90,7 +123,8 @@ class AttendanceService {
     return mapRecord({ ...record, employee });
   }
 
-  async checkOut(tenantId, employeeId, location = null, changedBy = 'SYSTEM') {
+  async checkOut(tenantId, employeeId, location = null, changedBy = 'SYSTEM', coordinates = null) {
+    await this.assertWithinBusinessLocation(tenantId, coordinates);
     const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkOutTime = new Date();

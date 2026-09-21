@@ -29,7 +29,7 @@ router.get("/", authenticateToken, requirePermission("canViewSettings"), async (
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       select: {
-        id: true, name: true, slug: true, email: true, phone: true, address: true,
+        id: true, name: true, slug: true, email: true, phone: true, address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
         logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
         createdAt: true, updatedAt: true, workingHours: true,
@@ -53,7 +53,7 @@ router.get("/business-profile", authenticateToken, async (req, res) => {
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       select: {
-        id: true, name: true, slug: true, email: true, phone: true, address: true,
+        id: true, name: true, slug: true, email: true, phone: true, address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
         logo: true, currency: true, timezone: true, dateFormat: true, taxRate: true, taxEnabled: true, taxId: true,
         receiptHeader: true, receiptFooter: true,
       },
@@ -72,7 +72,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    const { name, email, phone, address, currency, timezone, dateFormat, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
+    const { name, email, phone, address, attendanceLatitude, attendanceLongitude, attendanceRadiusMeters, currency, timezone, dateFormat, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
     const data = {};
     if (req.body.workingHours !== undefined) {
       if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canEditStaff')) {
@@ -84,6 +84,22 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     if (email !== undefined) data.email = email;
     if (phone !== undefined) data.phone = phone || null;
     if (address !== undefined) data.address = address || null;
+    if (attendanceLatitude !== undefined || attendanceLongitude !== undefined) {
+      const latitude = Number(attendanceLatitude);
+      const longitude = Number(attendanceLongitude);
+      const businessAddress = address !== undefined ? String(address).trim() : (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { address: true } }))?.address;
+      if (!businessAddress) return res.status(400).json({ error: 'Set the business address before capturing its attendance location.' });
+      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+        return res.status(400).json({ error: 'A valid business GPS location is required.' });
+      }
+      data.attendanceLatitude = latitude;
+      data.attendanceLongitude = longitude;
+    }
+    if (attendanceRadiusMeters !== undefined) {
+      const radius = Number(attendanceRadiusMeters);
+      if (!Number.isInteger(radius) || radius < 25 || radius > 2000) return res.status(400).json({ error: 'Attendance radius must be between 25 and 2,000 metres.' });
+      data.attendanceRadiusMeters = radius;
+    }
     if (currency !== undefined) data.currency = currency;
     if (timezone !== undefined) {
       data.timezone = validateTimezone(timezone);
@@ -103,7 +119,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
       where: { id: tenantId },
       data,
       select: {
-        id: true, name: true, slug: true, email: true, phone: true, address: true,
+        id: true, name: true, slug: true, email: true, phone: true, address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
         logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
         createdAt: true, updatedAt: true, workingHours: true,
