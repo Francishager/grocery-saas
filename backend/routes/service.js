@@ -10,6 +10,17 @@ import { requireFeature, requireAnyFeature, getTenantFeatures, hasFeatureAccess 
 const router = Router();
 const t = (req) => req.user.tenantId || req.user.tenant_id;
 
+async function updateTenantRecord(model, where, data) {
+  const existing = await prisma[model].findFirst({ where, select: { id: true } });
+  if (!existing) return null;
+  return prisma[model].update({ where: { id: existing.id }, data });
+}
+
+async function deleteTenantRecord(model, where) {
+  const deleted = await prisma[model].deleteMany({ where });
+  return deleted.count > 0;
+}
+
 function feedbackTokenHash(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
 }
@@ -95,14 +106,16 @@ router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appoint
     const data = { status, technicianId, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason };
     if (scheduledDate) data.scheduledDate = new Date(scheduledDate);
     if (status === 'completed') data.completedAt = new Date();
-    const appt = await prisma.appointment.update({ where: { id: req.params.id, tenantId: t(req) }, data });
+    const appt = await updateTenantRecord('appointment', { id: req.params.id, tenantId: t(req) }, data);
+    if (!appt) return res.status(404).json({ error: 'Appointment not found' });
     res.json(appt);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/appointments/:id", authenticateToken, requirePermission(servicePermission('appointments', 'Delete')), requireFeature("service.appointments"), async (req, res) => {
   try {
-    await prisma.appointment.delete({ where: { id: req.params.id, tenantId: t(req) } });
+    const deleted = await deleteTenantRecord('appointment', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Appointment not found' });
     res.json({ message: "Appointment deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -139,14 +152,16 @@ router.put("/work-orders/:id", authenticateToken, requireServiceUpdate('work-ord
     const data = { status, technicianId, priority, serviceCategory, estimatedCost, actualCost, laborCost, partsCost, diagnostics, warrantyInfo, notes };
     if (startDate) data.startDate = new Date(startDate);
     if (endDate) data.endDate = new Date(endDate);
-    const order = await prisma.workOrder.update({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' }, data });
+    const order = await updateTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' }, data);
+    if (!order) return res.status(404).json({ error: 'Work order not found' });
     res.json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/work-orders/:id", authenticateToken, requirePermission(servicePermission('work-orders', 'Delete')), requireFeature("service.work_orders"), async (req, res) => {
   try {
-    await prisma.workOrder.delete({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' } });
+    const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' });
+    if (!deleted) return res.status(404).json({ error: 'Work order not found' });
     res.json({ message: "Work order deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -177,14 +192,16 @@ router.put("/contracts/:id", authenticateToken, requireServiceUpdate('contracts'
     if (endDate) data.endDate = new Date(endDate);
     if (renewalDate) data.renewalDate = new Date(renewalDate);
     if (nextBillingDate) data.nextBillingDate = new Date(nextBillingDate);
-    const contract = await prisma.serviceContract.update({ where: { id: req.params.id, tenantId: t(req) }, data });
+    const contract = await updateTenantRecord('serviceContract', { id: req.params.id, tenantId: t(req) }, data);
+    if (!contract) return res.status(404).json({ error: 'Contract not found' });
     res.json(contract);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/contracts/:id", authenticateToken, requirePermission(servicePermission('contracts', 'Delete')), requireFeature("service.contracts"), async (req, res) => {
   try {
-    await prisma.serviceContract.delete({ where: { id: req.params.id, tenantId: t(req) } });
+    const deleted = await deleteTenantRecord('serviceContract', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Contract not found' });
     res.json({ message: "Contract deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -209,14 +226,16 @@ router.post("/technicians", authenticateToken, requirePermission(servicePermissi
 router.put("/technicians/:id", authenticateToken, requireServiceUpdate('technicians'), requireFeature("service.technicians"), validateReferences('technicians'), async (req, res) => {
   try {
     const { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes } = req.body;
-    const tech = await prisma.serviceTechnician.update({ where: { id: req.params.id, tenantId: t(req) }, data: { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes } });
+    const tech = await updateTenantRecord('serviceTechnician', { id: req.params.id, tenantId: t(req) }, { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes });
+    if (!tech) return res.status(404).json({ error: 'Technician not found' });
     res.json(tech);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/technicians/:id", authenticateToken, requirePermission(servicePermission('technicians', 'Delete')), requireFeature("service.technicians"), async (req, res) => {
   try {
-    await prisma.serviceTechnician.delete({ where: { id: req.params.id, tenantId: t(req) } });
+    const deleted = await deleteTenantRecord('serviceTechnician', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Technician not found' });
     res.json({ message: "Technician deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -266,14 +285,15 @@ router.put("/job-cards/:id", authenticateToken, requireServiceUpdate('job-cards'
     }
     if (actualStart) data.actualStart = new Date(actualStart);
     if (actualEnd) data.actualEnd = new Date(actualEnd);
-    const card = await prisma.serviceJobCard.update({ where: { id: req.params.id, tenantId: t(req) }, data });
+    const card = await prisma.serviceJobCard.update({ where: { id: existing.id }, data });
     res.json(card);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/job-cards/:id", authenticateToken, requirePermission(servicePermission('job-cards', 'Delete')), requireFeature("service.job_cards"), async (req, res) => {
   try {
-    await prisma.serviceJobCard.delete({ where: { id: req.params.id, tenantId: t(req) } });
+    const deleted = await deleteTenantRecord('serviceJobCard', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Job card not found' });
     res.json({ message: "Job card deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -305,14 +325,16 @@ router.put("/feedback/:id", authenticateToken, requireServiceUpdate('feedback'),
     const { status, response } = req.body;
     const data = { status };
     if (response !== undefined) { data.response = response; data.respondedAt = new Date(); }
-    const fb = await prisma.serviceFeedback.update({ where: { id: req.params.id, tenantId: t(req) }, data });
+    const fb = await updateTenantRecord('serviceFeedback', { id: req.params.id, tenantId: t(req) }, data);
+    if (!fb) return res.status(404).json({ error: 'Feedback not found' });
     res.json(fb);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/feedback/:id", authenticateToken, requirePermission(servicePermission('feedback', 'Delete')), requireFeature("service"), async (req, res) => {
   try {
-    await prisma.serviceFeedback.delete({ where: { id: req.params.id, tenantId: t(req) } });
+    const deleted = await deleteTenantRecord('serviceFeedback', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Feedback not found' });
     res.json({ message: "Feedback deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -409,12 +431,12 @@ router.get("/categories", authenticateToken, requireAnyPermission(SERVICE_PERMIS
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-export default router;
+
 
 // ===== CAR WASH & GARAGE (simple work-order based entries) =====
 // These endpoints create lightweight work order records for car-wash and garage services
 // so the frontend can record and list services without a separate DB model.
-router.get('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.get('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
     const where = { tenantId: t(req), serviceKind: 'car_wash' };
     const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
@@ -424,7 +446,7 @@ router.get('/car-wash', authenticateToken, requirePermission(servicePermission('
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'Create')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
+router.post('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'Create')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
   try {
     const { date, vehicle, serviceType, amount, attendantId, branchId, notes } = req.body;
     if (!serviceType || !vehicle) return res.status(400).json({ error: 'Vehicle and service type are required' });
@@ -463,15 +485,15 @@ router.post('/car-wash', authenticateToken, requirePermission(servicePermission(
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.get('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
-    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' } });
+    const order = await prisma.workOrder.findFirst({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' } });
     if (!order) return res.status(404).json({ error: 'Not found' });
     res.json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/car-wash/:id', authenticateToken, requireServiceUpdate('car-wash'), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
+router.put('/car-wash/:id', authenticateToken, requireServiceUpdate('car-wash'), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
   try {
     const { vehicle, serviceType, amount, attendantId, notes } = req.body;
     const data = {};
@@ -480,19 +502,21 @@ router.put('/car-wash/:id', authenticateToken, requireServiceUpdate('car-wash'),
     if (amount !== undefined) { data.estimatedCost = amount; data.actualCost = amount }
     if (attendantId !== undefined) data.technicianId = attendantId;
     if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
-    const updated = await prisma.workOrder.update({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' }, data });
+    const updated = await updateTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' }, data);
+    if (!updated) return res.status(404).json({ error: 'Car wash record not found' });
     res.json(updated);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'Delete')), requireAnyFeature(['service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+router.delete('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'Delete')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
   try {
-    await prisma.workOrder.delete({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' } });
+    const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' });
+    if (!deleted) return res.status(404).json({ error: 'Car wash record not found' });
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/garage', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.get('/garage', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
     const where = { tenantId: t(req), serviceKind: 'garage' };
     const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
@@ -501,7 +525,7 @@ router.get('/garage', authenticateToken, requirePermission(servicePermission('ga
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/garage', authenticateToken, requirePermission(servicePermission('garage', 'Create')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
+router.post('/garage', authenticateToken, requirePermission(servicePermission('garage', 'Create')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
   try {
     const { date, vehicle, service, cost, attendantId, branchId, notes } = req.body;
     if (!service || !vehicle) return res.status(400).json({ error: 'Vehicle and service description are required' });
@@ -540,15 +564,15 @@ router.post('/garage', authenticateToken, requirePermission(servicePermission('g
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.get('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
-    const order = await prisma.workOrder.findUnique({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' } });
+    const order = await prisma.workOrder.findFirst({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' } });
     if (!order) return res.status(404).json({ error: 'Not found' });
     res.json(order);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/garage/:id', authenticateToken, requireServiceUpdate('garage'), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
+router.put('/garage/:id', authenticateToken, requireServiceUpdate('garage'), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
   try {
     const { vehicle, service, cost, attendantId, status, notes } = req.body;
     const data = {};
@@ -558,14 +582,19 @@ router.put('/garage/:id', authenticateToken, requireServiceUpdate('garage'), req
     if (attendantId !== undefined) data.technicianId = attendantId;
     if (status !== undefined) data.status = status;
     if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
-    const updated = await prisma.workOrder.update({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' }, data });
+    const updated = await updateTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'garage' }, data);
+    if (!updated) return res.status(404).json({ error: 'Garage service not found' });
     res.json(updated);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'Delete')), requireAnyFeature(['service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+router.delete('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'Delete')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
   try {
-    await prisma.workOrder.delete({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' } });
+    const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'garage' });
+    if (!deleted) return res.status(404).json({ error: 'Garage service not found' });
     res.json({ message: 'Deleted' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+export default router;
+

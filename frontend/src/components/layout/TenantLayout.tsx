@@ -49,8 +49,8 @@ const serviceSubItems = [
   { to: '/tenant/service/technicians', label: 'Technicians', icon: UserCog, permission: servicePagePermissions('technicians'), feature: 'service' },
   { to: '/tenant/service/job-cards', label: 'Job Cards', icon: ClipboardCheck, permission: servicePagePermissions('job-cards'), feature: 'service' },
   { to: '/tenant/service/feedback', label: 'Feedback', icon: Star, permission: servicePagePermissions('feedback'), feature: 'service' },
-  { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: servicePagePermissions('car-wash'), feature: 'fuel_station.car_wash' },
-  { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'fuel_station.garage' },
+  { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: servicePagePermissions('car-wash'), feature: 'service' },
+  { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'service' },
 ]
 
 const navItems = [
@@ -838,3 +838,4 @@ export function TenantLayout() {
     </div>
   )
 }
+

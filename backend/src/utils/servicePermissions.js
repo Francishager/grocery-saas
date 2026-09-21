@@ -367,7 +367,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_car_wash",
     "tab": "car-wash",
     "action": "View",
-    "feature": "fuel_station.car_wash"
+    "feature": "service"
   },
   {
     "id": "canCreateServiceCarWash",
@@ -376,7 +376,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_car_wash",
     "tab": "car-wash",
     "action": "Create",
-    "feature": "fuel_station.car_wash"
+    "feature": "service"
   },
   {
     "id": "canEditServiceCarWash",
@@ -385,7 +385,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_car_wash",
     "tab": "car-wash",
     "action": "Edit",
-    "feature": "fuel_station.car_wash"
+    "feature": "service"
   },
   {
     "id": "canDeleteServiceCarWash",
@@ -394,7 +394,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_car_wash",
     "tab": "car-wash",
     "action": "Delete",
-    "feature": "fuel_station.car_wash"
+    "feature": "service"
   },
   {
     "id": "canViewServiceGarage",
@@ -403,7 +403,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_garage",
     "tab": "garage",
     "action": "View",
-    "feature": "fuel_station.garage"
+    "feature": "service"
   },
   {
     "id": "canCreateServiceGarage",
@@ -412,7 +412,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_garage",
     "tab": "garage",
     "action": "Create",
-    "feature": "fuel_station.garage"
+    "feature": "service"
   },
   {
     "id": "canEditServiceGarage",
@@ -421,7 +421,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_garage",
     "tab": "garage",
     "action": "Edit",
-    "feature": "fuel_station.garage"
+    "feature": "service"
   },
   {
     "id": "canDeleteServiceGarage",
@@ -430,7 +430,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_garage",
     "tab": "garage",
     "action": "Delete",
-    "feature": "fuel_station.garage"
+    "feature": "service"
   },
   {
     "id": "canUpdateServiceGarageStatus",
@@ -439,7 +439,7 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "category": "service_garage",
     "tab": "garage",
     "action": "UpdateStatus",
-    "feature": "fuel_station.garage"
+    "feature": "service"
   }
 ];
 export const SERVICE_PERMISSION_KEYS = SERVICE_PERMISSION_DEFINITIONS.map(item => item.id);
@@ -485,4 +485,5 @@ export const SERVICE_REPORT_PERMISSIONS = {
   "job-cards": "canViewServiceJobCardReport",
   "feedback": "canViewServiceFeedbackReport"
 };
+
 
