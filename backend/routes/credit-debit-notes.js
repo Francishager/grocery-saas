@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../src/utils/customerBalance.js'
+import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -14,6 +15,27 @@ const CREDIT_STOCK_REASONS = new Set(['sales_return', 'cancellation'])
 const DEBIT_STOCK_REASONS = new Set(['purchase_return', 'short_delivery', 'quality_issue', 'cancellation'])
 const CREDIT_NOTE_STOCK_RETURN_STATUS = 'stock_adjusted'
 const CREDIT_NOTE_STOCK_RETURN_METHOD = 'credit_note_stock'
+let refundSchemaReady
+
+function ensureCreditNoteRefundSchema() {
+  if (!refundSchemaReady) {
+    refundSchemaReady = prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundAmount" DOUBLE PRECISION NOT NULL DEFAULT 0')
+      await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundWithdrawalId" TEXT')
+      await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundCashAccountId" TEXT')
+    }).catch((error) => { refundSchemaReady = null; throw error })
+  }
+  return refundSchemaReady
+}
+
+router.use(async (_req, _res, next) => {
+  try {
+    await ensureCreditNoteRefundSchema()
+    next()
+  } catch (error) {
+    next(error)
+  }
+})
 
 // Generate sequential note number
 async function generateNoteNo(prefix, model, tenantId) {
@@ -94,6 +116,143 @@ function paymentStatusForBalance(total, amountPaid, balance, adjustmentTotal = 0
   if (balance <= 0) return 'paid'
   if (amountPaid > 0 || adjustmentTotal > 0 || balance < total) return 'partial'
   return 'unpaid'
+}
+
+function refundReference(noteNo) {
+  return `CNREF-${noteNo}`
+}
+
+export function creditNotePaidRefundSlice({ saleTotal, amountPaid, previousCredit = 0, noteAmount = 0 }) {
+  const total = toMoney(saleTotal)
+  const paid = toMoney(amountPaid)
+  const unpaidPortion = Math.max(0, toMoney(total - paid))
+  const beforePaidCoverage = Math.max(0, toMoney(Math.min(total, toMoney(previousCredit)) - unpaidPortion))
+  const afterPaidCoverage = Math.max(0, toMoney(Math.min(total, toMoney(previousCredit) + toMoney(noteAmount)) - unpaidPortion))
+  return toMoney(Math.max(0, afterPaidCoverage - beforePaidCoverage))
+}
+
+async function creditNoteRefundTarget(client, scope, noteId) {
+  const note = await client.creditNote.findFirst({
+    where: scopedWhere(scope, { id: noteId, status: { not: 'cancelled' } }),
+    include: {
+      sale: { select: { id: true, receiptNo: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } },
+      customer: { select: { id: true, name: true, email: true } },
+    },
+  })
+  if (!note?.saleId || !note.sale || note.sale.status === 'cancelled') return { note, targetRefund: 0 }
+
+  const saleTotal = saleNetTotal(note.sale)
+  const amountPaid = toMoney(note.sale.amountPaid)
+  const notes = await client.creditNote.findMany({
+    where: { tenantId: scope.tenantId, saleId: note.saleId, status: { not: 'cancelled' } },
+    select: { id: true, amount: true, createdAt: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  })
+
+  let creditedBefore = 0
+  for (const row of notes) {
+    const targetRefund = creditNotePaidRefundSlice({ saleTotal, amountPaid, previousCredit: creditedBefore, noteAmount: row.amount })
+    if (row.id === note.id) return { note, targetRefund }
+    creditedBefore = toMoney(creditedBefore + toMoney(row.amount))
+  }
+  return { note, targetRefund: 0 }
+}
+
+async function findCreditNoteRefundAccount(client, scope, sale, refundAmount) {
+  const payments = await client.customerPayment.findMany({
+    where: { tenantId: scope.tenantId, saleId: sale.id },
+    orderBy: { createdAt: 'asc' },
+  })
+  for (const payment of payments) {
+    const references = [...new Set([payment.reference, payment.id, sale.receiptNo].filter(Boolean))]
+    const receipt = await client.cashTransaction.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        type: 'receipt',
+        amount: toMoney(payment.amount),
+        ...(references.length ? { reference: { in: references } } : {}),
+      },
+      include: { account: true },
+      orderBy: { createdAt: 'asc' },
+    })
+    if (receipt?.account?.isActive !== false && Number(receipt.account?.balance || 0) >= refundAmount) return receipt.account
+  }
+  throw httpError(400, 'This credit note refunds money already paid by the customer, but the original payment account could not be found with enough balance. Select/fund the original receipt account before issuing this note.')
+}
+
+async function ensureCreditNotePaidRefund(client, scope, noteId, userId) {
+  const { note, targetRefund } = await creditNoteRefundTarget(client, scope, noteId)
+  if (!note || targetRefund <= 0) return null
+  const existingRefund = toMoney(note.refundAmount)
+  if (existingRefund >= targetRefund) return note
+  if (existingRefund > 0 && targetRefund !== existingRefund) {
+    throw httpError(400, 'This credit note already has a customer refund. Cancel it and create a new note to change the paid refund amount.')
+  }
+
+  const account = await findCreditNoteRefundAccount(client, scope, note.sale, targetRefund)
+  const debited = await client.cashAccount.updateMany({
+    where: { id: account.id, tenantId: scope.tenantId, isActive: true, balance: { gte: targetRefund } },
+    data: { balance: { decrement: targetRefund } },
+  })
+  if (debited.count !== 1) throw httpError(400, `Insufficient available balance in ${account.name} to refund the customer.`)
+  const updatedAccount = await client.cashAccount.findUnique({ where: { id: account.id } })
+  const reference = refundReference(note.noteNo)
+  const withdrawal = await client.customerWithdrawal.create({
+    data: {
+      tenantId: note.tenantId,
+      branchId: note.branchId || scope.branchId || null,
+      customerId: note.customerId,
+      userId,
+      cashAccountId: account.id,
+      amount: targetRefund,
+      paymentMethod: account.type || 'cash',
+      reference,
+      notes: `Customer refund for credit note ${note.noteNo} (${note.reason})`,
+    },
+    select: { id: true },
+  })
+  await client.cashTransaction.create({ data: {
+    tenantId: note.tenantId,
+    accountId: account.id,
+    type: 'credit_note_refund',
+    amount: targetRefund,
+    balanceAfter: updatedAccount.balance,
+    reference,
+    description: `Credit note refund: ${note.customer?.name || note.customer?.email || note.customerId}`,
+    userId,
+  } })
+  await syncLinkedTransactionAccountBalance(client, note.tenantId, account.id)
+  return client.creditNote.update({
+    where: { id: note.id },
+    data: { refundAmount: targetRefund, refundWithdrawalId: withdrawal.id, refundCashAccountId: account.id },
+  })
+}
+
+async function reverseCreditNotePaidRefund(client, scope, note, userId) {
+  const refundAmount = toMoney(note.refundAmount)
+  if (refundAmount <= 0) return null
+  const withdrawal = note.refundWithdrawalId
+    ? await client.customerWithdrawal.findFirst({ where: { id: note.refundWithdrawalId, tenantId: scope.tenantId } })
+    : await client.customerWithdrawal.findFirst({ where: { tenantId: scope.tenantId, reference: refundReference(note.noteNo) }, orderBy: { createdAt: 'desc' } })
+  if (!withdrawal?.cashAccountId) throw httpError(400, 'This credit note refund cannot be reversed because the refund account record is missing.')
+
+  const updatedAccount = await client.cashAccount.update({
+    where: { id: withdrawal.cashAccountId },
+    data: { balance: { increment: refundAmount } },
+  })
+  await client.cashTransaction.create({ data: {
+    tenantId: scope.tenantId,
+    accountId: withdrawal.cashAccountId,
+    type: 'credit_note_refund_reversal',
+    amount: refundAmount,
+    balanceAfter: updatedAccount.balance,
+    reference: `${refundReference(note.noteNo)}-REV`,
+    description: `Reversed credit note refund ${note.noteNo}`,
+    userId,
+  } })
+  await client.customerWithdrawal.delete({ where: { id: withdrawal.id } })
+  await syncLinkedTransactionAccountBalance(client, scope.tenantId, withdrawal.cashAccountId)
+  return client.creditNote.update({ where: { id: note.id }, data: { refundAmount: 0, refundWithdrawalId: null, refundCashAccountId: null } })
 }
 
 function positiveQuantity(value, label = 'Quantity') {
@@ -674,6 +833,7 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
       })
       await createCreditNoteStockReturn(tx, scope, createdNote, items)
       await updateLinkedSaleBalanceFromCreditNotes(tx, scope, createdNote.saleId)
+      await ensureCreditNotePaidRefund(tx, scope, createdNote.id, req.user.id)
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
       return createdNote
     })
@@ -695,6 +855,9 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
 
     const { amount, reason, notes } = req.body
     const updates = {}
+    if ((amount !== undefined || reason !== undefined) && toMoney(existing.refundAmount) > 0) {
+      return res.status(400).json({ error: 'This credit note already refunded money paid by the customer. Cancel it and create a new note to change the amount or reason.' })
+    }
     if (amount !== undefined) {
       const nextAmount = toMoney(amount)
       if (nextAmount <= 0) return res.status(400).json({ error: 'amount must be greater than 0' })
@@ -724,6 +887,7 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
         },
       })
       await updateLinkedSaleBalanceFromCreditNotes(tx, scope, existing.saleId)
+      await ensureCreditNotePaidRefund(tx, scope, updatedNote.id, req.user.id)
       await reconcileCustomerReceivableBalance(tx, scope, existing.customerId)
       return updatedNote
     })
@@ -743,6 +907,7 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
 
     const note = await prisma.$transaction(async (tx) => {
       await reverseCreditNoteStockReturn(tx, existing.tenantId, existing.noteNo)
+      await reverseCreditNotePaidRefund(tx, scope, existing, req.user.id)
       const cancelledNote = await tx.creditNote.update({
         where: { id: req.params.id },
         data: { status: 'cancelled' },

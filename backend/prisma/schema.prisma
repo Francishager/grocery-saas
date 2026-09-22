@@ -3717,6 +3717,9 @@ model CreditNote {
   saleId     String? // Linked sale record (required for new notes)
   sale       SaleRecord? @relation(fields: [saleId], references: [id], onDelete: SetNull)
   amount     Float
+  refundAmount       Float   @default(0)
+  refundWithdrawalId String?
+  refundCashAccountId String?
   reason     String // sales_return, price_adjustment, overcharge, cancellation, other
   status     String   @default("issued") // issued, applied, cancelled
   notes      String?

@@ -1,0 +1,3 @@
+ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundAmount" DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundWithdrawalId" TEXT;
+ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundCashAccountId" TEXT;
