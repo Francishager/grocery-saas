@@ -15,9 +15,9 @@ import {
   transformAgingData,
   transformCashFlowData,
 } from "../utils/enrichedReportTransform.js";
+import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
 
 const router = Router();
-import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
 const salesView = createReceivableSalesView(prisma);
 
 // ==================== HELPERS ====================
@@ -188,6 +188,25 @@ function saleCogs(sale) {
   return (sale?.items || []).reduce((sum, item) => sum + saleLineCogs(item), 0);
 }
 
+function saleItemProductRevenue(item) {
+  const productRevenue = Number(item?.productRevenue || 0);
+  const serviceRevenue = Number(item?.serviceRevenue || 0);
+  if (productRevenue > 0 || serviceRevenue > 0) return toMoney(productRevenue);
+  return toMoney(item?.total || 0);
+}
+
+function saleItemServiceRevenue(item) {
+  return toMoney(item?.serviceRevenue || 0);
+}
+
+function saleProductRevenue(sale) {
+  return toMoney((sale?.items || []).reduce((sum, item) => sum + saleItemProductRevenue(item), 0));
+}
+
+function saleServiceRevenue(sale) {
+  return toMoney((sale?.items || []).reduce((sum, item) => sum + saleItemServiceRevenue(item), 0));
+}
+
 function saleNetRevenue(sale) {
   const total = Number(sale?.total || 0);
   const tax = Number(sale?.tax || 0);
@@ -201,7 +220,7 @@ function aggregateNetRevenue(aggregate) {
 }
 
 function saleItemProfit(item) {
-  return Number(item?.total || 0) - saleLineCogs(item);
+  return saleItemProductRevenue(item) + saleItemServiceRevenue(item) - saleLineCogs(item);
 }
 
 function saleStatus(sale) {
@@ -430,6 +449,8 @@ function compactSaleItems(items = []) {
     price: Number(item?.price || 0),
     cost: Number(item?.cost ?? item?.product?.cost ?? 0),
     total: Number(item?.total || 0),
+    productRevenue: saleItemProductRevenue(item),
+    serviceRevenue: saleItemServiceRevenue(item),
     cogs: toMoney(saleLineCogs(item)),
     grossProfit: toMoney(saleItemProfit(item)),
   }));
@@ -443,6 +464,8 @@ function financialSaleRow(sale, sourceType = "Sale") {
   const grossAmount = toMoney(sale?.total || 0);
   const tax = toMoney(sale?.tax || 0);
   const revenue = toMoney(saleNetRevenue(sale));
+  const productRevenue = saleProductRevenue(sale);
+  const serviceRevenue = saleServiceRevenue(sale);
   const cogs = toMoney(saleCogs(sale));
   const discount = saleDiscountAmount(sale);
   const items = compactSaleItems(sale?.items || []);
@@ -465,13 +488,15 @@ function financialSaleRow(sale, sourceType = "Sale") {
     amount: revenue,
     grossAmount,
     revenue,
+    productRevenue,
+    serviceRevenue,
     tax,
     discount,
     cogs,
     grossProfit: toMoney(revenue - cogs),
     itemCount: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
     status: saleStatus(sale),
-    details: `${items.length} line(s); gross ${grossAmount}, tax ${tax}, discount ${discount}, COGS ${cogs}`,
+    details: `${items.length} line(s); gross ${grossAmount}, product revenue ${productRevenue}, service revenue ${serviceRevenue}, tax ${tax}, discount ${discount}, COGS ${cogs}`,
     items,
   };
 }

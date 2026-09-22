@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeJobRequests, prepareSaleServiceJobs, createSaleServiceJobs, saveProductServiceLinks, saleJobReportRow } from '../src/services/saleServiceJobs.js';
+import { normalizeJobRequests, prepareSaleServiceJobs, createSaleServiceJobs, saveProductServiceLinks, saleJobReportRow, applySaleServiceRevenueSplit } from '../src/services/saleServiceJobs.js';
 
 const scope = { tenantId: 'tenant-a', branchId: 'branch-a' };
 const job = () => ({ serviceProductId: 'service-a', technicianId: 'tech-a', description: 'Install the purchased equipment', priority: 'normal' });
@@ -8,7 +8,7 @@ const item = (type = 'product') => ({ id: 'sale-item-a', productId: type === 'se
 const request = (permissions = ['canCreateServiceJobCard', 'canAssignServiceJobCard']) => ({ user: { id: 'cashier-a', permissions } });
 function fixture({ linked = true, technicianUserId = 'tech-login', services = true } = {}) {
   return {
-    product: { findMany: async ({ where }) => { assert.equal(where.tenantId, scope.tenantId); return services ? [{ id: 'service-a', name: 'Installation', branchId: scope.branchId }] : []; } },
+    product: { findMany: async ({ where }) => { assert.equal(where.tenantId, scope.tenantId); return services ? [{ id: 'service-a', name: 'Installation', branchId: scope.branchId, price: 30 }] : []; } },
     serviceTechnician: { findMany: async ({ where }) => { assert.equal(where.tenantId, scope.tenantId); assert.deepEqual(where.OR, [{ branchId: scope.branchId }, { branchId: null }]); return [{ id: 'tech-a', userId: technicianUserId }]; } },
     productServiceLink: { findMany: async () => linked ? [{ productId: 'product-a', serviceProductId: 'service-a' }] : [] },
   };
@@ -40,9 +40,12 @@ test('sale permission does not grant job creation or assignment to other technic
   await prepareSaleServiceJobs(fixture({ technicianUserId: 'cashier-a' }), request(['canCreateServiceJobCard']), scope, [item()], 'Alice');
 });
 
-test('job persistence keeps receipt, customer, quantity and cashier without posting free service as revenue or expense', async () => {
+test('job persistence keeps receipt, customer, quantity, cashier and allocated service revenue', async () => {
   const selected = item();
   await prepareSaleServiceJobs(fixture(), request(), scope, [selected], 'Alice');
+  selected.cost = 20;
+  selected.total = 140;
+  applySaleServiceRevenueSplit([selected]);
   const notifications = [];
   const tx = { serviceJobCard: { create: async ({ data }) => ({ id: 'job-a', ...data, technician: { name: 'Technician A' } }) }, notification: { create: async ({ data }) => notifications.push(data) } };
   const [card] = await createSaleServiceJobs(tx, { id: 'sale-a', receiptNo: 'RCP-A', tenantId: scope.tenantId, branchId: scope.branchId, userId: 'cashier-a', customerName: 'Alice' }, [selected]);
@@ -57,8 +60,33 @@ test('job persistence keeps receipt, customer, quantity and cashier without post
   assert.equal(notifications[0].metadata.link, '/tenant/service/job-cards?jobCardId=job-a');
   const row = saleJobReportRow({ ...card, sale: { user: { fname: 'Cashier', lname: 'A' }, status: 'completed' } });
   assert.equal(row.source, 'Included free');
+  assert.equal(row.servicePrice, 30);
+  assert.equal(row.serviceRevenue, 60);
   assert.equal(row.cashier, 'Cashier A');
   assert.equal(row.technician, 'Technician A');
+});
+
+test('included service revenue is split from product selling price after product cost', async () => {
+  const selected = { ...item(), quantity: 2, cost: 35, total: 120 };
+  await prepareSaleServiceJobs(fixture(), request(), scope, [selected], 'Alice');
+  applySaleServiceRevenueSplit([selected]);
+  assert.equal(selected.serviceRevenue, 50);
+  assert.equal(selected.productRevenue, 70);
+  assert.equal(selected.jobRequests[0].servicePrice, 30);
+  assert.equal(selected.jobRequests[0].serviceRevenue, 50);
+
+  const highMargin = { ...item(), quantity: 2, cost: 20, total: 140 };
+  await prepareSaleServiceJobs(fixture(), request(), scope, [highMargin], 'Alice');
+  applySaleServiceRevenueSplit([highMargin]);
+  assert.equal(highMargin.serviceRevenue, 60);
+  assert.equal(highMargin.productRevenue, 80);
+
+  const paidService = item('service');
+  paidService.total = 75;
+  await prepareSaleServiceJobs(fixture({ linked: false }), request(), scope, [paidService], 'Alice');
+  applySaleServiceRevenueSplit([paidService]);
+  assert.equal(paidService.productRevenue, 0);
+  assert.equal(paidService.serviceRevenue, 75);
 });
 
 test('links can be saved from either catalog and reject unavailable or cross-branch items before writes', async () => {

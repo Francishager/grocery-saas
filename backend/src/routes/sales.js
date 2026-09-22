@@ -2,7 +2,7 @@ import { Router } from "express";
 import { randomUUID } from 'node:crypto';
 import { requireFeature } from '../../middleware/auth.js';
 import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
-import { normalizeJobRequests, prepareSaleServiceJobs, createSaleServiceJobs, hasSaleServicePermission } from '../services/saleServiceJobs.js';
+import { normalizeJobRequests, prepareSaleServiceJobs, createSaleServiceJobs, applySaleServiceRevenueSplit, hasSaleServicePermission } from '../services/saleServiceJobs.js';
 import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
@@ -358,6 +358,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
 
     const saleItems = await checkedSaleItems(items, scope);
     await validateServiceCheckout(req, scope, saleItems, customerName);
+    applySaleServiceRevenueSplit(saleItems);
     const subtotal = saleItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, i) => sum + i.discount + i.cashDiscount, 0);
     const totalDiscount = lineDiscount + invoiceCashDiscount;
@@ -473,6 +474,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
 
     const saleItems = await checkedSaleItems(cart, scope);
     await validateServiceCheckout(req, scope, saleItems, customerName);
+    applySaleServiceRevenueSplit(saleItems);
     const subtotal = saleItems.reduce((sum, c) => sum + c.price * c.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, c) => sum + c.discount + c.cashDiscount, 0);
     const totalDiscount = lineDiscount + invoiceCashDiscount;

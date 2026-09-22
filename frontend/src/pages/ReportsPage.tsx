@@ -658,7 +658,7 @@ function valueLooksMoney(key: string) {
 
 function FinancialDetailModal({ title, rows, onClose }: { title: string; rows: any[]; onClose: () => void }) {
   const normalizedRows = Array.isArray(rows) ? rows : []
-  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'inQty', 'outQty', 'itemCount', 'grossAmount', 'revenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
+  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'inQty', 'outQty', 'itemCount', 'grossAmount', 'revenue', 'productRevenue', 'serviceRevenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
     .filter((key) => normalizedRows.some((row) => row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== ''))
   const visibleColumns = columns.length ? columns : ['description', 'amount']
 

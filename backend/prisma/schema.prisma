@@ -1090,6 +1090,8 @@ model SaleItem {
   cost             Float?
   discount         Float    @default(0)
   cashDiscount     Float    @default(0) // Cash discount amount on this line item
+  productRevenue   Float    @default(0)
+  serviceRevenue   Float    @default(0)
   unitName         String? // Selling unit name (e.g. "Half KG", "Pack")
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
@@ -1250,6 +1252,8 @@ model SaleRecordItem {
   cost             Float?
   discount         Float      @default(0)
   cashDiscount     Float      @default(0) // Cash discount on this line item
+  productRevenue   Float      @default(0)
+  serviceRevenue   Float      @default(0)
   unitName         String? // Selling unit name
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
@@ -3419,6 +3423,8 @@ model ServiceJobCard {
   soldProductName    String?
   serviceSource      String @default("manual")
   serviceQuantity    Int @default(1)
+  servicePrice       Float @default(0)
+  serviceRevenue     Float @default(0)
   appointmentId      String?
   appointment        Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   workOrderId        String?

@@ -23,7 +23,40 @@ const salesView = createReceivableSalesView(prisma)
 
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)
-  return Number.isFinite(num) ? num : fallback
+  return Number.isFinite(num) ? Math.round(num * 100) / 100 : fallback
+}
+
+async function applyLinkedServiceRevenueSplit(client, scope, saleItems, productsById) {
+  const productIds = saleItems
+    .filter((item) => productsById.get(item.productId)?.itemType !== 'service')
+    .map((item) => item.productId)
+  const links = productIds.length
+    ? await client.productServiceLink.findMany({
+        where: { tenantId: scope.tenantId, productId: { in: [...new Set(productIds)] } },
+        include: { serviceProduct: { select: { id: true, price: true, isActive: true, branchId: true } } }
+      })
+    : []
+
+  for (const item of saleItems) {
+    const product = productsById.get(item.productId)
+    const lineTotal = toMoney(item.total)
+    if (product?.itemType === 'service') {
+      item.productRevenue = 0
+      item.serviceRevenue = lineTotal
+      continue
+    }
+
+    const linkedServices = links.filter((link) =>
+      link.productId === item.productId &&
+      link.serviceProduct?.isActive !== false &&
+      (!link.serviceProduct?.branchId || !scope.branchId || link.serviceProduct.branchId === scope.branchId)
+    )
+    const requestedServiceRevenue = toMoney(linkedServices.reduce((sum, link) => sum + toMoney(link.serviceProduct?.price) * Number(item.quantity || 0), 0))
+    const productCost = toMoney(Number(item.cost || 0) * Number(item.quantity || 0))
+    const serviceRevenue = toMoney(Math.min(requestedServiceRevenue, Math.max(0, lineTotal - productCost)))
+    item.serviceRevenue = serviceRevenue
+    item.productRevenue = toMoney(lineTotal - serviceRevenue)
+  }
 }
 
 const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
@@ -1023,9 +1056,12 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         discount: itemDiscount,
         unitName,
         conversionFactor: normalizedConversionFactor,
+        itemType: product.itemType || 'product',
         total: lineTotal
       }
     })
+
+    await applyLinkedServiceRevenueSplit(prisma, scope, saleItems, productsById)
 
     const computedSubtotal = saleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
     const computedDiscount = saleItems.reduce((sum, item) => sum + item.discount, 0) + toMoney(discount)
@@ -1098,6 +1134,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           discount: item.discount,
           unitName: item.unitName,
           conversionFactor: item.conversionFactor,
+          productRevenue: item.productRevenue,
+          serviceRevenue: item.serviceRevenue,
           total: item.total
         }))
       })

@@ -104,7 +104,7 @@ const detailRowsFor = (data: EnrichedReportData, key: string) => {
 const looksMoney = (key: string) => /(amount|balance|debit|credit|total|revenue|profit|cost|cogs|tax|discount|paid|expense|inflow|outflow|value)$/i.test(key)
 
 function EnrichedDetailModal({ title, rows, onClose }: { title: string; rows: any[]; onClose: () => void }) {
-  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'grossAmount', 'revenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
+  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'grossAmount', 'revenue', 'productRevenue', 'serviceRevenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
     .filter((key) => rows.some((row) => row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== ''))
   const visibleColumns = columns.length ? columns : ['description', 'amount']
   return (

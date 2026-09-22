@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
 const fail = (message, statusCode = 400) => { throw Object.assign(new Error(message), { statusCode }); };
+const money = (value) => {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
+};
 export const saleJobInclude = {
   technician: { select: { id: true, name: true } },
   sale: { select: { receiptNo: true, status: true, user: { select: { fname: true, lname: true } } } },
@@ -9,7 +13,7 @@ export function saleJobReportRow(card) {
   return { id: card.id, cardNo: card.cardNo, date: card.createdAt, receiptNo: card.saleReceiptNo || card.sale?.receiptNo || '',
     customer: card.customerName, product: card.soldProductName || '', service: card.serviceTitle,
     description: card.serviceDescription || '', source: card.serviceSource === 'included_service' ? 'Included free' : card.serviceSource === 'paid_service' ? 'Paid service' : 'Manual',
-    quantity: card.serviceQuantity, cashier: [card.sale?.user?.fname, card.sale?.user?.lname].filter(Boolean).join(' '),
+    quantity: card.serviceQuantity, servicePrice: money(card.servicePrice), serviceRevenue: money(card.serviceRevenue), cashier: [card.sale?.user?.fname, card.sale?.user?.lname].filter(Boolean).join(' '),
     technician: card.technician?.name || 'Unassigned', status: card.status, saleStatus: card.sale?.status || '',
     scheduledStart: card.scheduledStart, actualEnd: card.actualEnd, completionNotes: card.completionNotes || '', totalCost: card.totalCost,
   };
@@ -73,8 +77,35 @@ export async function prepareSaleServiceJobs(db, req, scope, items, customerName
       const isPaidService = item.itemType === 'service' && item.productId === service.id;
       if (!isPaidService && !links.some(link => link.productId === item.productId && link.serviceProductId === service.id)) fail('This service is no longer included with the product. Refresh the product and try again.');
       job.serviceTitle = service.name;
+      job.servicePrice = money(service.price);
       job.serviceSource = isPaidService ? 'paid_service' : 'included_service';
       job.technicianUserId = technician.userId;
+    }
+  }
+}
+
+export function applySaleServiceRevenueSplit(items) {
+  for (const item of items) {
+    const lineTotal = money(item.total);
+    if (item.itemType === 'service') {
+      item.productRevenue = 0;
+      item.serviceRevenue = lineTotal;
+      for (const job of item.jobRequests || []) job.serviceRevenue = lineTotal;
+      continue;
+    }
+
+    const includedJobs = (item.jobRequests || []).filter(job => job.serviceSource === 'included_service');
+    const requestedServiceRevenue = money(includedJobs.reduce((sum, job) => sum + money(job.servicePrice) * Number(item.quantity || 0), 0));
+    const productCost = money(Number(item.cost || 0) * Number(item.quantity || 0));
+    const maxServiceRevenue = Math.max(0, lineTotal - productCost);
+    let remainingServiceRevenue = money(Math.min(requestedServiceRevenue, maxServiceRevenue));
+    item.serviceRevenue = remainingServiceRevenue;
+    item.productRevenue = money(lineTotal - remainingServiceRevenue);
+
+    for (const job of includedJobs) {
+      const requested = money(money(job.servicePrice) * Number(item.quantity || 0));
+      job.serviceRevenue = money(Math.min(requested, remainingServiceRevenue));
+      remainingServiceRevenue = money(remainingServiceRevenue - job.serviceRevenue);
     }
   }
 }
@@ -91,6 +122,7 @@ export async function createSaleServiceJobs(tx, sale, items) {
         createdByUserId: sale.userId, customerName: sale.customerName,
         serviceTitle: job.serviceTitle, serviceDescription: job.description,
         serviceSource: job.serviceSource, serviceQuantity: item.quantity,
+        servicePrice: money(job.servicePrice), serviceRevenue: money(job.serviceRevenue),
         priority: job.priority, scheduledStart: job.scheduledStart, status: 'pending',
         laborCost: 0, partsCost: 0, totalCost: 0,
       }, include: { technician: { select: { id: true, name: true } } } });
