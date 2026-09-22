@@ -33,6 +33,7 @@ interface Account {
   description?: string
   branchId?: string
   branch?: { id: string; name: string } | null
+  isHrProtected?: boolean
 }
 
 interface JournalLine {
@@ -485,13 +486,17 @@ export default function AccountingPage() {
   const transactionAccounts = useMemo(() => (
     visibleAccounts.filter(account => isTransactionAccount(account))
   ), [visibleAccounts])
+  const postingAccounts = useMemo(() => (
+    visibleAccounts.filter(account => !account.isHrProtected)
+  ), [visibleAccounts])
+  const postingAccountOptions = useMemo(() => buildAccountOptions(postingAccounts), [postingAccounts])
   const journalActionAccountOptions = useMemo(() => (
     buildAccountOptions(
-      visibleAccounts,
+      postingAccounts,
       undefined,
       (account) => accountMatchesJournalAction(account, jeAction)
     ).filter(option => option.value !== jePaymentAccount)
-  ), [visibleAccounts, jeAction, jePaymentAccount])
+  ), [postingAccounts, jeAction, jePaymentAccount])
   const allowedPaymentMethods = useMemo(() => (
     PAYMENT_METHODS.filter(method => canUsePaymentMethod(method))
   ), [hasPermission])
@@ -1729,7 +1734,7 @@ export default function AccountingPage() {
                     }}>
                       <SelectTrigger><SelectValue placeholder="Select DR account" /></SelectTrigger>
                       <SelectContent>
-                        {accountOptions
+                        {postingAccountOptions
                           .filter(option => option.value === line.debitAccount || !selectedMultipleJournalAccountIds(idx, 'debitAccount').has(option.value))
                           .map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                       </SelectContent>
@@ -1744,7 +1749,7 @@ export default function AccountingPage() {
                     }}>
                       <SelectTrigger><SelectValue placeholder="Select CR account" /></SelectTrigger>
                       <SelectContent>
-                        {accountOptions
+                        {postingAccountOptions
                           .filter(option => option.value === line.creditAccount || !selectedMultipleJournalAccountIds(idx, 'creditAccount').has(option.value))
                           .map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                       </SelectContent>

@@ -26,6 +26,7 @@ interface Account {
   isActive: boolean
   parentId?: string
   description?: string
+  isHrProtected?: boolean
 }
 
 interface JournalEntry {
@@ -135,7 +136,7 @@ export default function AccountingPage() {
   }), [accounts, hasPermission])
 
   const journalAccountOptions = useMemo(() => (
-    visibleAccounts.map(account => ({ value: account.id, label: accountOptionLabel(account) }))
+    visibleAccounts.filter(account => !account.isHrProtected).map(account => ({ value: account.id, label: accountOptionLabel(account) }))
   ), [visibleAccounts])
 
   const handleCreateAccount = async () => {

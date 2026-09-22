@@ -35,6 +35,14 @@ const JOURNAL_ACTION_ACCOUNT_TYPES = {
   clear_payable: ["liability"],
   collect_receivable: ["asset"],
 };
+const STANDARD_HR_ACCOUNT_NAMES = new Set([
+  "staff salaries & wages",
+  "salaries payable",
+  "employee advances/loans",
+  "employee advances / loans",
+  "paye tax payable",
+  "social security payable",
+]);
 
 const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
 
@@ -52,6 +60,36 @@ const journalLineBalanceDelta = (account, debit, credit) => {
 };
 
 const isExpenseAccount = (account) => EXPENSE_ACCOUNT_TYPES.has(normalizeValue(account?.type));
+
+async function hrProtectedAccountIds(tenantId, client = prisma) {
+  const config = await client.hRAccountingConfig.findUnique({
+    where: { tenantId },
+    select: {
+      salaryExpenseAccountId: true,
+      salaryPayableAccountId: true,
+      salaryAdvanceAccountId: true,
+      payeTaxAccountId: true,
+      socialSecurityAccountId: true,
+    },
+  }).catch(() => null);
+  return new Set(Object.values(config || {}).filter(Boolean));
+}
+
+function isHrProtectedAccount(account, protectedIds = new Set()) {
+  if (!account) return false;
+  if (protectedIds.has(account.id)) return true;
+  const name = normalizeValue(account.name);
+  if (STANDARD_HR_ACCOUNT_NAMES.has(name)) return true;
+  const description = normalizeValue(account.description);
+  return description.includes("payroll") || description.includes("salary") || description.includes("employee social security") || description.includes("social security deductions");
+}
+
+function markHrProtectedAccounts(accounts, protectedIds) {
+  return (accounts || []).map((account) => {
+    const children = markHrProtectedAccounts(account.children || [], protectedIds);
+    return { ...account, children, isHrProtected: isHrProtectedAccount(account, protectedIds) };
+  });
+}
 
 const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 
@@ -257,6 +295,7 @@ router.get("/accounts", authenticateToken, requireAnyPermission(["canViewAccount
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     await ensureTransactionAccounts(tenantId);
+    const protectedIds = await hrProtectedAccountIds(tenantId);
     const branchSelect = { id: true, name: true };
     const accounts = await prisma.account.findMany({
       where: { tenantId },
@@ -267,7 +306,7 @@ router.get("/accounts", authenticateToken, requireAnyPermission(["canViewAccount
       },
       orderBy: { code: "asc" },
     });
-    res.json(accounts);
+    res.json(markHrProtectedAccounts(accounts, protectedIds));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch accounts" });
   }
@@ -517,6 +556,13 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
     const parentPostingAccount = accounts.find((account) => Number(account._count?.children || 0) > 0 || normalizeValue(account.subType) === "category");
     if (parentPostingAccount) {
       return res.status(400).json({ error: `${parentPostingAccount.name} is a parent account. Select a sub-account for posting.` });
+    }
+    const protectedIds = await hrProtectedAccountIds(tenantId);
+    const protectedPostingAccount = accounts.find((account) => isHrProtectedAccount(account, protectedIds));
+    if (protectedPostingAccount) {
+      return res.status(400).json({
+        error: `${protectedPostingAccount.name} is controlled by HR Accounting and cannot be selected in manual accounting entries. Use HR Accounting payroll, salary payment, advance, or loan workflows instead.`,
+      });
     }
     const accountsById = new Map(accounts.map((account) => [account.id, account]));
     const linkedCashAccountIds = [...new Set(accounts.map(linkedCashAccountId).filter(Boolean))];
