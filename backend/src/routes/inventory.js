@@ -2,6 +2,8 @@ import { Router } from "express";
 import { createHash } from "node:crypto";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission, requireFeature } from "../../middleware/auth.js";
+import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
+import { attachProductServiceLinks, saveProductServiceLinks } from '../services/saleServiceJobs.js';
 import {
   handleBranchError,
   resolveBranchScope,
@@ -679,6 +681,7 @@ router.get("/", authenticateToken, async (req, res) => {
     const where = scopedWhere(scope, { isActive: { not: false } });
     const includeDailyMovements = String(req.query.includeDailyMovements || "").toLowerCase() === "true";
     const buildListResponse = async (products, total, responsePage = Number(page), responseLimit = Number(limit)) => {
+      if (hasFeatureAccess(await getTenantFeatures(tenantId), 'service.job_cards')) products = await attachProductServiceLinks(prisma, tenantId, products);
       if (!includeDailyMovements) {
         return { products, total, page: responsePage, limit: responseLimit };
       }
@@ -884,7 +887,8 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
       requireBranch: true,
       allowOwnerAll: false,
     });
-    const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, ...body } = req.body;
+    const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, linkedItemIds, ...body } = req.body;
+    if (linkedItemIds !== undefined && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) return res.status(403).json({ error: 'Job Cards is not available on this business subscription' });
 
     if (body.batchNumber !== undefined && body.batchNumber !== null) {
       body.batchNumber = String(body.batchNumber).trim() || null;
@@ -989,6 +993,7 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
         data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
         include: { category: true, branch: true, units: true },
       });
+      await saveProductServiceLinks(tx, created, linkedItemIds);
       if (created.itemType !== "service") {
         await tx.productPriceHistory.create({
           data: {
@@ -1038,7 +1043,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `Permission denied: ${requiredPerm} required` });
     }
 
-    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, quantity, ...body } = req.body;
+    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, quantity, linkedItemIds, ...body } = req.body;
+    if (linkedItemIds !== undefined && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) return res.status(403).json({ error: 'Job Cards is not available on this business subscription' });
     const data = { ...body };
 
     if (data.batchNumber !== undefined && data.batchNumber !== null) {
@@ -1147,6 +1153,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
       });
 
       const priceChanged = body.price !== undefined && Number(existing.price || 0) !== Number(updated.price || 0);
+      await saveProductServiceLinks(tx, updated, linkedItemIds);
       const costChanged = body.cost !== undefined && Number(existing.cost || 0) !== Number(updated.cost || 0);
       if (priceChanged || costChanged) {
         const reason = String(req.body.priceChangeReason || req.body.reason || "Market price update");

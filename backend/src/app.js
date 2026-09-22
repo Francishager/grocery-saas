@@ -39,6 +39,7 @@ import manufacturingRouter from "../routes/manufacturing.js";
 import agricultureRouter from "../routes/agriculture.js";
 import serviceRouter from "../routes/service.js";
 import { ensureServicePermissionSchema } from "./utils/servicePermissionSchema.js";
+import { ensureSaleServiceSchema } from "./utils/saleServiceSchema.js";
 import referralRoutes from "./routes/referrals.js";
 import tenantVisibilityRoutes from "./routes/tenant-visibility.js";
 import onboardingRoutes from "./routes/onboarding.js";
@@ -183,7 +184,7 @@ app.get("/api/health", (req, res) => {
 
 // Prepare new permission fields before login or Prisma permission reads. Health checks stay independent.
 app.use("/api", async (req, res, next) => {
-  try { await ensureServicePermissionSchema(); next(); }
+  try { await ensureServicePermissionSchema(); await ensureSaleServiceSchema(); next(); }
   catch (error) { console.error("Service permission schema unavailable:", error.code || error.message); res.status(503).json({ error: "Access settings are being updated. Please try again shortly." }); }
 });
 

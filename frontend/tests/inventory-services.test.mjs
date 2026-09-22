@@ -13,6 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('services have their own catalogue, forms and permissions on desktop, tablet and mobile', { timeout: 120000 }, async () => {
   const adapters = {
+    '@/services/featureAccessService': 'export const useFeatureAccess=()=>({hasFeature:()=>false});',
     '@/lib/api': `export const inventoryApi={
       list:async(q,branch,type)=>{window.listTypes.push(type);return window.services.filter(s=>s.product_name.toLowerCase().includes((q||'').toLowerCase()))},
       listWithDailyMovements:async()=>{window.productLoads++;return {products:[],movementProducts:[]}},

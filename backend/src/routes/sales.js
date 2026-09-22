@@ -1,4 +1,8 @@
 import { Router } from "express";
+import { randomUUID } from 'node:crypto';
+import { requireFeature } from '../../middleware/auth.js';
+import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
+import { normalizeJobRequests, prepareSaleServiceJobs, createSaleServiceJobs, hasSaleServicePermission } from '../services/saleServiceJobs.js';
 import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
@@ -21,6 +25,7 @@ const toMoney = (value, fallback = 0) => {
 function normalizeItems(items, idKey = "productId") {
   return items.map((item) => ({
     productId: item[idKey] || item.productId || item.id,
+    jobRequests: normalizeJobRequests(item.serviceJobs),
     quantity: Math.max(1, Number(item.qty || item.quantity || 1)),
     price: Number(item.price || 0),
     discount: Number(item.discount || 0),
@@ -121,6 +126,8 @@ async function checkedSaleItems(items, scope) {
     const lineTotal = effectivePrice * item.quantity;
     const totalDiscount = item.discount + item.cashDiscount;
     return {
+      id: randomUUID(),
+      jobRequests: item.jobRequests,
       productId: item.productId,
       quantity: item.quantity, // quantity in selling units
       baseQty, // quantity in base units (for stock deduction)
@@ -312,6 +319,23 @@ router.get("/customers/:id/credit-info", authenticateToken, requirePermission("c
 });
 
 // Create single sale
+router.get('/service-options', authenticateToken, requirePermission('canCreateSale'), requirePermission('canCreateServiceJobCard'), requireFeature('service.job_cards'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: false });
+    const technicians = await prisma.serviceTechnician.findMany({ where: {
+      tenantId: scope.tenantId, isActive: true, OR: [{ branchId: scope.branchId }, { branchId: null }],
+      ...(!hasSaleServicePermission(req, 'canAssignServiceJobCard') ? { userId: req.user.id } : {}),
+    }, select: { id: true, name: true, userId: true }, orderBy: { name: 'asc' } });
+    res.json({ technicians });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+async function validateServiceCheckout(req, scope, saleItems, customerName) {
+  if (!saleItems.some(item => item.jobRequests.length)) return;
+  if (!hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) throw Object.assign(new Error('Job Cards is not available on this business subscription'), { statusCode: 403 });
+  await prepareSaleServiceJobs(prisma, req, scope, saleItems, customerName);
+}
+
 router.post("/", authenticateToken, requirePermission("canCreateSale"), requireCashAccount, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
@@ -320,7 +344,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId } = req.body;
+    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName } = req.body;
     if (!items.length) return res.status(400).json({ error: "Items required" });
     if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
       return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
@@ -333,6 +357,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     const { invoiceCashDiscount } = discountCheck;
 
     const saleItems = await checkedSaleItems(items, scope);
+    await validateServiceCheckout(req, scope, saleItems, customerName);
     const subtotal = saleItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, i) => sum + i.discount + i.cashDiscount, 0);
     const totalDiscount = lineDiscount + invoiceCashDiscount;
@@ -361,10 +386,13 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           notes,
-          items: { create: saleItems.map(({ baseQty, itemType, productName, ...rest }) => rest) },
+          customerName: customerName?.trim() || null,
+          items: { create: saleItems.map(({ baseQty, itemType, productName, jobRequests, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
       });
+
+      created.serviceJobCards = await createSaleServiceJobs(tx, created, saleItems);
 
       // Deduct stock in base units (skip service items)
       for (const item of saleItems) {
@@ -444,6 +472,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     const { invoiceCashDiscount } = discountCheck;
 
     const saleItems = await checkedSaleItems(cart, scope);
+    await validateServiceCheckout(req, scope, saleItems, customerName);
     const subtotal = saleItems.reduce((sum, c) => sum + c.price * c.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, c) => sum + c.discount + c.cashDiscount, 0);
     const totalDiscount = lineDiscount + invoiceCashDiscount;
@@ -474,10 +503,12 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           customerName: customerName?.trim() || null,
           amountPaid: amountPaid != null ? Number(amountPaid) : null,
           changeGiven: changeGiven != null ? Number(changeGiven) : null,
-          items: { create: saleItems.map(({ baseQty, itemType, productName, ...rest }) => rest) },
+          items: { create: saleItems.map(({ baseQty, itemType, productName, jobRequests, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
       });
+
+      created.serviceJobCards = await createSaleServiceJobs(tx, created, saleItems);
 
       // Deduct stock in base units (skip service items)
       for (const item of saleItems) {

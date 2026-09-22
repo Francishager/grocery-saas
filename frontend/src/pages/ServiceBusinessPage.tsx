@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch as rawApiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { SERVICE_PERMISSION_DEFINITIONS, servicePagePermissions, servicePermission } from '@/lib/servicePermissions'
@@ -12,8 +12,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit, QrCode, Printer, Copy, Share2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency, formatDisplayDate } from '@/lib/utils'
 import QRCode from 'qrcode'
+
+interface ServiceJobCard {
+  saleReceiptNo?: string | null
+  soldProductName?: string | null
+  serviceSource?: string
+  serviceQuantity?: number
+  sale?: { receiptNo: string; status: string; user?: { fname: string; lname: string } } | null
+}
 
 interface Appointment { id: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; scheduledDate: string; scheduledTime: string; endTime?: string | null; duration: string | null; status: string; price: number; actualPrice: number; notes?: string | null; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
 interface WorkOrder { id: string; orderNo: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; status: string; priority: string; serviceCategory?: string | null; estimatedCost: number; actualCost: number; laborCost: number; partsCost: number; startDate: string | null; endDate: string | null; diagnostics?: string | null; warrantyInfo?: string | null; notes?: string | null; product?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
@@ -49,6 +57,9 @@ async function apiFetch(path: string, init?: RequestInit) {
 
 export default function ServiceBusinessPage() {
   const { tab: urlTab } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
+  const [completionDraft, setCompletionDraft] = useState('')
   const { hasPermission } = useJWTAuth()
   const tab = urlTab || SERVICE_PERMISSION_DEFINITIONS.find(p => p.action !== 'Report' && hasPermission(p.id))?.tab || 'appointments'
   const can = useCallback((action: string, section = tab) => hasPermission(servicePermission(section, action)), [hasPermission, tab])
@@ -68,6 +79,12 @@ export default function ServiceBusinessPage() {
   const [garageRecords, setGarageRecords] = useState<GarageRecord[]>([])
   const [technicians, setTechnicians] = useState<ServiceTechnician[]>([])
   const [jobCards, setJobCards] = useState<ServiceJobCard[]>([])
+  const selectedJob = jobCards.find(job => job.id === selectedJobId)
+  useEffect(() => {
+    const job = jobCards.find(card => card.id === searchParams.get('jobCardId'))
+    if (job) { setSelectedJobId(job.id); setCompletionDraft(job.completionNotes || '') }
+  }, [jobCards, searchParams])
+  const openJobDetails = (job: ServiceJobCard) => { setSelectedJobId(job.id); setCompletionDraft(job.completionNotes || '') }
   const [feedback, setFeedback] = useState<ServiceFeedback[]>([])
   const [services, setServices] = useState<{ id: string; product_name: string; description: string; unit_price: number; serviceCategory?: string | null; categoryName?: string | null; isActive: boolean }[]>([])
   const [savingService, setSavingService] = useState(false)
@@ -97,7 +114,7 @@ export default function ServiceBusinessPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const readSection = async (section: string) => tab === section && can('View', section) ? (await apiFetch('/api/service/' + section)).json() : []
+      const readSection = async (section: string) => tab === section && (can('View', section) || (section === 'job-cards' && canOpen)) ? (await apiFetch('/api/service/' + section)).json() : []
       const [a, w, c, car, gar, tech, jc, fb, svc, options, employees, categories, shares] = await Promise.all([
         readSection('appointments'),
         readSection('work-orders'),
@@ -186,7 +203,15 @@ export default function ServiceBusinessPage() {
     setSavingService(true)
     try {
       if (editingJobCardId) {
-        const res = await apiFetch(`/api/service/job-cards/${editingJobCardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(jobCardForm) })
+        const original = jobCards.find(card => card.id === editingJobCardId)
+        const changes = Object.fromEntries(Object.entries(jobCardForm).filter(([key, value]) => {
+          if (['appointmentId', 'workOrderId'].includes(key)) return false
+          const previous = (original as any)?.[key]
+          if (key === 'scheduledStart' || key === 'scheduledEnd') return (previous ? new Date(previous).getTime() : 0) !== (value ? new Date(value).getTime() : 0)
+          return (previous ?? '') !== value
+        }))
+        if (!Object.keys(changes).length) { setShowJobCardModal(false); return }
+        const res = await apiFetch(`/api/service/job-cards/${editingJobCardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) })
         if (!res.ok) throw new Error((await res.json()).error || 'Failed to save job card')
         setEditingJobCardId(null)
       } else {
@@ -196,7 +221,18 @@ export default function ServiceBusinessPage() {
       setShowJobCardModal(false); setJobCardForm({ appointmentId: '', workOrderId: '', productId: '', technicianId: '', customerName: '', customerPhone: '', serviceTitle: '', serviceDescription: '', priority: 'normal', scheduledStart: '', scheduledEnd: '', laborCost: 0, partsCost: 0 }); loadData()
     } catch (e) { toast({ variant: 'destructive', title: e instanceof Error ? e.message : 'Failed to save job card' }) } finally { setSavingService(false) }
   }
-  const updateJobCardStatus = async (id: string, status: string) => { await apiFetch(`/api/service/job-cards/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); loadData() }
+  const updateJobCardStatus = async (id: string, status: string, completionNotes?: string) => {
+    try {
+      await apiFetch(`/api/service/job-cards/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, ...(completionNotes !== undefined ? { completionNotes } : {}) }) })
+      await loadData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to update job card' }) }
+  }
+  const editJobCard = (job: ServiceJobCard) => {
+    const localDate = (value?: string | null) => { if (!value) return ''; const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
+    setEditingJobCardId(job.id)
+    setJobCardForm({ appointmentId: job.appointmentId || '', workOrderId: job.workOrderId || '', productId: job.productId || '', technicianId: job.technicianId || '', customerName: job.customerName, customerPhone: job.customerPhone || '', serviceTitle: job.serviceTitle, serviceDescription: job.serviceDescription || '', priority: job.priority, scheduledStart: localDate(job.scheduledStart), scheduledEnd: localDate(job.scheduledEnd), laborCost: job.laborCost, partsCost: job.partsCost })
+    setShowJobCardModal(true)
+  }
   const deleteJobCard = async (id: string) => { try { await apiFetch(`/api/service/job-cards/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
   const submitShare = async () => {
@@ -565,18 +601,19 @@ export default function ServiceBusinessPage() {
                 {jobCards.length === 0 && <tr className="border-t"><td colSpan={8} className="p-8 text-center text-muted-foreground">No job cards yet</td></tr>}
                 {jobCards.map(jc => (
                   <tr key={jc.id} className="border-t">
-                    <td className="p-2 font-medium">{jc.cardNo}</td>
+                    <td className="p-2 font-medium"><button className="text-primary underline underline-offset-2 text-left" onClick={() => openJobDetails(jc)}>{jc.cardNo}</button>{jc.saleReceiptNo && <div className="text-xs text-muted-foreground">{jc.saleReceiptNo}<br />Cashier: {[jc.sale?.user?.fname, jc.sale?.user?.lname].filter(Boolean).join(' ') || '-'}</div>}</td>
                     <td className="p-2">{jc.customerName}</td>
-                    <td className="p-2">{jc.serviceTitle}</td>
+                    <td className="p-2">{jc.serviceTitle}{jc.serviceSource !== 'manual' && jc.serviceSource && <div className="text-xs text-muted-foreground">{jc.serviceSource === 'included_service' ? 'Included free' : 'Paid service'} - {jc.soldProductName} x {jc.serviceQuantity}</div>}</td>
                     <td className="p-2">{jc.technician?.name || '-'}</td>
                     <td className="p-2 text-right">{jc.totalCost.toFixed(0)}</td>
                     <td className="p-2"><Badge variant={jc.priority === 'urgent' ? 'destructive' : 'secondary'}>{jc.priority}</Badge></td>
                     <td className="p-2"><Badge className={statusColors[jc.status]}>{jc.status}</Badge></td>
                     <td className="p-2 space-x-1">
                       {jc.status === 'pending' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'in_progress')}>Start</Button>}
-                      {jc.status === 'in_progress' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => updateJobCardStatus(jc.id, 'completed')}>Complete</Button>}
+                      {jc.status === 'in_progress' && can('UpdateStatus', 'job-cards') && <Button size="sm" variant="outline" onClick={() => jc.serviceSource !== 'manual' ? openJobDetails(jc) : updateJobCardStatus(jc.id, 'completed')}>Complete</Button>}
+                      {can('Edit', 'job-cards') && <Button size="sm" variant="ghost" title="Edit job card" onClick={() => editJobCard(jc)}><Edit className="h-3 w-3" /></Button>}
                       {canShareWork('job-cards') && <Button size="sm" variant="ghost" title="Share job card" onClick={() => { setShareRecord({ type: 'job-cards', id: jc.id, label: jc.cardNo }); setShareTechnicianId('') }}><Share2 className="h-3 w-3" /></Button>}
-                      {can('Delete', 'job-cards') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteJobCard(jc.id)}><Trash2 className="h-3 w-3" /></Button>}
+                      {jc.serviceSource === 'manual' && can('Delete', 'job-cards') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteJobCard(jc.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </td>
                   </tr>
                 ))}
@@ -886,6 +923,36 @@ export default function ServiceBusinessPage() {
             <div><Label>Notes</Label><Input value={techForm.notes} onChange={e => setTechForm({ ...techForm, notes: e.target.value })} /></div>
           </div>
           <DialogFooter><Button onClick={saveTechnician}>{editingTechId ? 'Update' : 'Add'} Technician</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedJob} onOpenChange={open => { if (!open) { setSelectedJobId(null); const next = new URLSearchParams(searchParams); next.delete('jobCardId'); setSearchParams(next, { replace: true }) } }}>
+        <DialogContent className="w-[calc(100%-2rem)] max-w-4xl max-h-[90dvh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{selectedJob?.cardNo}</DialogTitle><DialogDescription>{selectedJob?.customerName} - {selectedJob?.serviceTitle}</DialogDescription></DialogHeader>
+          {selectedJob && <div className="space-y-4 min-w-0">
+            <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+              {[
+                ['Customer', selectedJob.customerName], ['Receipt', selectedJob.saleReceiptNo || '-'],
+                ['Product / service', selectedJob.soldProductName || selectedJob.serviceTitle],
+                ['Cashier', [selectedJob.sale?.user?.fname, selectedJob.sale?.user?.lname].filter(Boolean).join(' ') || '-'],
+                ['Technician', selectedJob.technician?.name || 'Unassigned'], ['Status', selectedJob.status],
+                ['Service type', selectedJob.serviceSource === 'included_service' ? 'Included free' : selectedJob.serviceSource === 'paid_service' ? 'Paid service' : 'Manual'],
+                ['Quantity', selectedJob.serviceQuantity || 1], ['Costs', formatCurrency(selectedJob.totalCost)],
+                ['Scheduled', selectedJob.scheduledStart ? formatDisplayDate(selectedJob.scheduledStart) : '-'],
+              ].map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="font-medium break-words">{value}</dd></div>)}
+            </dl>
+            <p className="whitespace-pre-wrap break-words text-sm">{selectedJob.serviceDescription}</p>
+            {can('Assign', 'job-cards') && <label className="block text-sm">Assigned technician<select className="block mt-1 w-full rounded-md border bg-background p-2" value={selectedJob.technicianId || ''} onChange={async e => {
+              try { await apiFetch(`/api/service/job-cards/${selectedJob.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ technicianId: e.target.value }) }); await loadData() }
+              catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to assign technician' }) }
+            }}><option value="" disabled>Select technician</option>{technicianOptions.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>}
+            <label className="block text-sm">Completion notes<textarea className="block mt-1 w-full rounded-md border bg-background p-2" rows={4} maxLength={4000} value={completionDraft} readOnly={!can('UpdateStatus', 'job-cards') || selectedJob.status === 'completed'} onChange={e => setCompletionDraft(e.target.value)} /></label>
+            {can('UpdateStatus', 'job-cards') && <div className="flex flex-wrap gap-2">
+              {selectedJob.status === 'pending' && <Button onClick={() => updateJobCardStatus(selectedJob.id, 'in_progress')}>Start job</Button>}
+              {selectedJob.status === 'in_progress' && <Button disabled={!completionDraft.trim()} onClick={() => updateJobCardStatus(selectedJob.id, 'completed', completionDraft)}>Complete job</Button>}
+              {!['completed', 'cancelled'].includes(selectedJob.status) && <Button variant="outline" onClick={() => updateJobCardStatus(selectedJob.id, 'cancelled')}>Cancel job</Button>}
+            </div>}
+          </div>}
         </DialogContent>
       </Dialog>
 

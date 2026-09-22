@@ -911,6 +911,8 @@ model Product {
   appointmentProducts   Appointment[]
   workOrderProducts     WorkOrder[]
   serviceJobCardProducts ServiceJobCard[]
+  includedServices ProductServiceLink[] @relation("ProductIncludedServices")
+  includedInProducts ProductServiceLink[] @relation("ServiceIncludedProducts")
   serviceFeedbackProducts ServiceFeedback[]
   priceHistory          ProductPriceHistory[]
 
@@ -1060,6 +1062,7 @@ model Sale {
   notes          String?
   items          SaleItem[]
   saleReturns    SaleReturn[]
+  serviceJobCards ServiceJobCard[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -1090,6 +1093,7 @@ model SaleItem {
   unitName         String? // Selling unit name (e.g. "Half KG", "Pack")
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
+  serviceJobCards ServiceJobCard[]
   createdAt        DateTime @default(now())
 
   @@map("sale_items")
@@ -3407,6 +3411,14 @@ model ServiceJobCard {
   branchId           String?
   branch             Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
   cardNo             String
+  saleId             String?
+  sale               Sale? @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  saleItemId         String?
+  saleItem           SaleItem? @relation(fields: [saleItemId], references: [id], onDelete: SetNull)
+  saleReceiptNo      String?
+  soldProductName    String?
+  serviceSource      String @default("manual")
+  serviceQuantity    Int @default(1)
   appointmentId      String?
   appointment        Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   workOrderId        String?
@@ -3446,11 +3458,27 @@ model ServiceJobCard {
   updatedAt          DateTime           @updatedAt
 
   @@unique([tenantId, cardNo])
+  @@unique([saleItemId, productId])
+  @@index([saleId])
   @@index([tenantId, branchId])
   @@index([tenantId, productId])
   @@index([tenantId, technicianId])
   @@index([tenantId, status])
   @@map("service_job_cards")
+}
+
+model ProductServiceLink {
+  id String @id @default(cuid())
+  tenantId String
+  productId String
+  product Product @relation("ProductIncludedServices", fields: [productId], references: [id], onDelete: Cascade)
+  serviceProductId String
+  serviceProduct Product @relation("ServiceIncludedProducts", fields: [serviceProductId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([productId, serviceProductId])
+  @@index([tenantId, serviceProductId])
+  @@map("product_service_links")
 }
 
 model ServiceShareRequest {

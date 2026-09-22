@@ -29,6 +29,7 @@ import DailyBusinessReport from '@/components/DailyBusinessReport'
 type IconType = React.ComponentType<{ className?: string }>
 
 interface ReportItem {
+  feature?: string
   id: string
   label: string
   apiFn: (params?: ReportParams) => Promise<any>
@@ -53,6 +54,7 @@ const currencyCol = (key: string, label: string) => ({ key, label, format: 'curr
 const numberCol = (key: string, label: string) => ({ key, label, format: 'number' as const })
 const dateCol = (key: string, label: string) => ({ key, label, format: 'date' as const })
 const textCol = (key: string, label: string) => ({ key, label, format: 'text' as const })
+const saleJobColumns = [dateCol('date', 'Date'), textCol('cardNo', 'Job Card'), textCol('receiptNo', 'Receipt'), textCol('customer', 'Customer'), textCol('product', 'Product / Service Sold'), textCol('service', 'Service'), textCol('source', 'Service Type'), numberCol('quantity', 'Quantity'), textCol('cashier', 'Cashier'), textCol('technician', 'Technician'), textCol('status', 'Job Status'), textCol('saleStatus', 'Sale Status'), textCol('description', 'Job Details'), textCol('completionNotes', 'Completion Notes'), currencyCol('totalCost', 'Service Costs')]
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
@@ -99,6 +101,7 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'salesByUser', label: 'Sales by User/Cashier', apiFn: reportsApiV2.salesByUser, renderType: 'table',
         columns: [textCol('user', 'User'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount')]
       },
+      { id: 'salesServiceJobs', label: 'Product & Service Jobs', apiFn: reportsApiV2.salesServiceJobs, renderType: 'table', feature: 'service.job_cards', columns: saleJobColumns },
       { id: 'salesByBranch', label: 'Sales by Branch', apiFn: reportsApiV2.salesByBranch, renderType: 'table',
         columns: [textCol('branch', 'Branch'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount')]
       },
@@ -418,7 +421,7 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'recommendRate', label: 'Recommend Rate (%)', format: 'number' },
         ]
       },
-      { id: 'svcJobCards', label: 'Job Card Summary', apiFn: reportsApiV2.svcJobCards, renderType: 'summary',
+      { id: 'svcJobCards', label: 'Job Cards & Sales', apiFn: reportsApiV2.svcJobCards, renderType: 'table', columns: saleJobColumns,
         summaryKeys: [
           { key: 'total', label: 'Total Job Cards', format: 'number' },
           { key: 'pending', label: 'Pending', format: 'number' },
@@ -1801,7 +1804,7 @@ export default function ReportsPage() {
   const visibleCategories = useMemo(() => CATEGORIES.flatMap(c => c.id === 'services' ? [
     { ...c, items: c.items.filter(item => !serviceReportPermissions[item.id]) },
     { ...c, id: 'service-business', label: 'Service Business Reports', feature: 'service.reports', items: c.items.filter(item => serviceReportPermissions[item.id]) },
-  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => isOwner || hasPermission(serviceReportPermissions[item.id] || c.permission)) }))
+  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => (!item.feature || canAccessFeature(item.feature)) && (isOwner || hasPermission(serviceReportPermissions[item.id] || c.permission))) }))
     .filter(c => c.items.length > 0 && (!c.feature || canAccessFeature(c.feature))), [hasPermission, isOwner, canAccessFeature])
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
 
@@ -2273,6 +2276,7 @@ export default function ReportsPage() {
                         <BreakdownList title="Age Groups" data={reportData.summary.ageGroups} />
                       </div>
                     )}
+                    {currentReport.id === 'svcJobCards' && <SummaryCards data={reportData} keys={currentReport.summaryKeys} />}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}

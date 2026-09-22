@@ -19,13 +19,15 @@ const updateFields = {
 
 export function requiredServiceUpdatePermissions(tab, body = {}) {
   const keys = Object.keys(body);
-  if (!keys.length || keys.some(key => !updateFields[tab]?.includes(key))) return null;
+  const fields = tab === 'job-cards' ? [...updateFields[tab], 'customerName', 'customerPhone', 'scheduledStart', 'scheduledEnd'] : updateFields[tab];
+  if (!keys.length || keys.some(key => !fields?.includes(key))) return null;
   return [...new Set(keys.map(key => {
     let action = 'Edit';
     if (key === 'status' || key === 'cancelledReason') action = tab === 'feedback' ? 'Moderate' : 'UpdateStatus';
     else if (key === 'technicianId') action = 'Assign';
     else if (['qualityCheckPassed', 'qualityNotes'].includes(key)) action = 'CheckQuality';
     else if (key === 'response') action = 'Respond';
+    else if (tab === 'job-cards' && key === 'completionNotes') action = 'UpdateStatus';
     return servicePermission(tab, action);
   }))];
 }

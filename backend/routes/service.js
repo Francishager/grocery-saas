@@ -5,6 +5,8 @@ import crypto from "crypto";
 import { ensureServiceFeedbackSchema } from '../src/utils/serviceFeedbackSchema.js';
 import prisma from "../src/db.js";
 import { resolveServiceTechnician, technicianEmployeeLink } from '../src/services/serviceTechnicianIdentity.js';
+import { saleJobInclude, hasSaleServicePermission } from '../src/services/saleServiceJobs.js';
+import { resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js';
 import { authenticateToken, requirePermission, requireAnyPermission } from "../middleware/auth.js";
 import { requireFeature, requireAnyFeature, getTenantFeatures, hasFeatureAccess } from "../middleware/featureCheck.js";
 
@@ -293,10 +295,13 @@ router.delete("/technicians/:id", authenticateToken, requirePermission(servicePe
 });
 
 // ===== SERVICE JOB CARDS =====
-router.get("/job-cards", authenticateToken, requirePermission(servicePermission('job-cards', 'View')), requireFeature("service.job_cards"), async (req, res) => {
+router.get("/job-cards", authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.tab === 'job-cards' && p.action !== 'Report').map(p => p.id)), requireFeature("service.job_cards"), async (req, res) => {
   try {
     await ensureServiceFeedbackSchema();
-    const cards = await prisma.serviceJobCard.findMany({ where: { tenantId: t(req) }, include: { product: { select: { id: true, name: true, serviceCategory: true, duration: true } }, technician: true, appointment: { select: { id: true, title: true, scheduledDate: true } }, workOrder: { select: { id: true, orderNo: true, title: true } } }, orderBy: { createdAt: "desc" } });
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const where = scopedWhere(scope);
+    if (!hasSaleServicePermission(req, 'canViewServiceJobCard')) where.OR = [{ createdByUserId: userId(req) }, { technician: { userId: userId(req) } }];
+    const cards = await prisma.serviceJobCard.findMany({ where, include: { ...saleJobInclude, product: { select: { id: true, name: true, serviceCategory: true, duration: true } }, appointment: { select: { id: true, title: true, scheduledDate: true } }, workOrder: { select: { id: true, orderNo: true, title: true } } }, orderBy: { createdAt: "desc" } });
     res.json(cards);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -328,8 +333,22 @@ router.put("/job-cards/:id", authenticateToken, requireServiceUpdate('job-cards'
     const { status, technicianId, priority, actualStart, actualEnd, laborHours, laborCost, partsCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature } = req.body;
     const existing = await prisma.serviceJobCard.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
     if (!existing) return res.status(404).json({ error: 'Job card not found' });
+    const saleLinked = ['included_service', 'paid_service'].includes(existing.serviceSource);
+    if (saleLinked && req.body.productId !== undefined && req.body.productId !== existing.productId) return res.status(400).json({ error: 'The service is linked to the original sale and cannot be replaced' });
+    if (technicianId && !await prisma.serviceTechnician.findFirst({ where: { id: technicianId, tenantId: t(req), isActive: true, OR: [{ branchId: existing.branchId }, { branchId: null }] } })) return res.status(400).json({ error: 'Select an active technician in this branch' });
+    if (saleLinked && ['in_progress', 'completed'].includes(status) && !(technicianId ?? existing.technicianId)) return res.status(400).json({ error: 'Assign a technician before starting or completing this job' });
+    if (status === 'completed' && saleLinked && !(completionNotes ?? existing.completionNotes)?.trim()) return res.status(400).json({ error: 'Enter completion notes before completing this service' });
+    if (status !== undefined && !['pending', 'in_progress', 'on_hold', 'completed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid job status' });
     const totalCost = Number(laborCost ?? existing.laborCost) + Number(partsCost ?? existing.partsCost);
     const data = { status, technicianId, priority, laborHours, laborCost, partsCost, totalCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature };
+    for (const field of ['customerName', 'customerPhone', 'serviceTitle', 'serviceDescription']) if (req.body[field] !== undefined) data[field] = req.body[field];
+    if (data.customerName !== undefined && !data.customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
+    for (const field of ['scheduledStart', 'scheduledEnd']) if (req.body[field] !== undefined) {
+      data[field] = req.body[field] ? new Date(req.body[field]) : null;
+      if (data[field] && !Number.isFinite(data[field].getTime())) return res.status(400).json({ error: 'Invalid scheduled date' });
+    }
+    if (status === 'in_progress' && !existing.actualStart && !actualStart) data.actualStart = new Date();
+    if (status === 'completed' && !actualEnd) data.actualEnd = new Date();
     if (req.body.productId !== undefined) {
       const service = await findServiceProduct(t(req), req.body.productId);
       if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
@@ -346,6 +365,8 @@ router.put("/job-cards/:id", authenticateToken, requireServiceUpdate('job-cards'
 
 router.delete("/job-cards/:id", authenticateToken, requirePermission(servicePermission('job-cards', 'Delete')), requireFeature("service.job_cards"), async (req, res) => {
   try {
+    const existing = await prisma.serviceJobCard.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
+    if (['included_service', 'paid_service'].includes(existing?.serviceSource)) return res.status(400).json({ error: 'Cancel this sale-linked job card to preserve its history' });
     const deleted = await deleteTenantRecord('serviceJobCard', { id: req.params.id, tenantId: t(req) });
     if (!deleted) return res.status(404).json({ error: 'Job card not found' });
     res.json({ message: "Job card deleted" });

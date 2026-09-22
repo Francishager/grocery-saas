@@ -17,6 +17,7 @@ import {
 } from "../utils/enrichedReportTransform.js";
 
 const router = Router();
+import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
 const salesView = createReceivableSalesView(prisma);
 
 // ==================== HELPERS ====================
@@ -4580,6 +4581,14 @@ router.get("/service-business/feedback", authenticateToken, async (req, res) => 
   } catch (err) { handleBranchError(res, err); }
 });
 
+router.get('/sales/service-jobs', requireServiceFeature('service.job_cards'), async (req, res) => {
+  try {
+    const scope = await getScope(req);
+    const cards = await prisma.serviceJobCard.findMany({ where: scopedWhere(scope, { sale: scopedSaleWhere(req, scope), saleId: { not: null } }), include: saleJobInclude, orderBy: { createdAt: 'desc' } });
+    res.json({ data: cards.map(saleJobReportRow) });
+  } catch (err) { handleBranchError(res, err); }
+});
+
 router.get("/service-business/job-cards", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
@@ -4593,7 +4602,8 @@ router.get("/service-business/job-cards", authenticateToken, async (req, res) =>
       prisma.serviceJobCard.count({ where: { ...where, status: "cancelled" } }),
     ]);
     const costAgg = await prisma.serviceJobCard.aggregate({ where: { ...where, status: "completed" }, _sum: { laborCost: true, partsCost: true, totalCost: true } });
-    res.json({ total, pending, inProgress, onHold, completed, cancelled, laborCost: costAgg._sum.laborCost || 0, partsCost: costAgg._sum.partsCost || 0, totalCost: costAgg._sum.totalCost || 0 });
+    const cards = await prisma.serviceJobCard.findMany({ where, include: saleJobInclude, orderBy: { createdAt: 'desc' } });
+    res.json({ data: cards.map(saleJobReportRow), total, pending, inProgress, onHold, completed, cancelled, laborCost: costAgg._sum.laborCost || 0, partsCost: costAgg._sum.partsCost || 0, totalCost: costAgg._sum.totalCost || 0 });
   } catch (err) { handleBranchError(res, err); }
 });
 

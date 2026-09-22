@@ -20,6 +20,10 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales, getLocalSettings } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
+import { useNavigate } from 'react-router-dom'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import SaleServiceJobsEditor, { type SaleTechnician } from '@/components/SaleServiceJobsEditor'
+import { ToastAction } from '@/components/ui/toast'
 
 interface RecentSale {
   id: string
@@ -92,6 +96,22 @@ interface CustomerCreditInfo {
 
 export default function SalesPage() {
   const { hasPermission, user } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const navigate = useNavigate()
+  const canCreateSaleJobs = hasFeature('service.job_cards') && hasPermission('canCreateServiceJobCard')
+  const [saleTechnicians, setSaleTechnicians] = useState<SaleTechnician[]>([])
+  const [serviceOptionsError, setServiceOptionsError] = useState('')
+  useEffect(() => {
+    if (!canCreateSaleJobs) return
+    let active = true
+    setServiceOptionsError('')
+    apiFetch('/api/sales/service-options').then(async response => {
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to load technicians')
+      if (active) setSaleTechnicians(data.technicians || [])
+    }).catch(error => { if (active) { setSaleTechnicians([]); setServiceOptionsError(error.message) } })
+    return () => { active = false }
+  }, [canCreateSaleJobs, user?.branchId, user?.id])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -235,6 +255,9 @@ export default function SalesPage() {
           unitName: unitName || null,
           conversionFactor: conversionFactor ?? null,
           cashDiscount: 0,
+          itemType: item.itemType,
+          includedServices: item.itemType === 'service' ? [{ id: String(item.id), name: item.product_name, description: item.description }] : item.includedServices || [],
+          serviceJobs: [],
         },
       ]
     })
@@ -451,6 +474,12 @@ export default function SalesPage() {
   }
 
   const handleCheckout = async () => {
+    if (processing) return
+    const jobs = cart.flatMap(item => item.serviceJobs || [])
+    if (jobs.length && (!online || !canCreateSaleJobs || !customerName.trim() || jobs.some(job => !job.technicianId || !job.description.trim()))) {
+      toast({ variant: 'destructive', title: 'Complete the service job details', description: !online ? 'Connect to the internet to create service job cards.' : !canCreateSaleJobs ? 'Job-card access is required.' : 'Enter the customer name, technician, and job details for every selected service.' })
+      return
+    }
     if (cart.length === 0) {
       toast({ variant: 'destructive', title: 'Cart is empty', description: 'Add at least one item to checkout.' })
       return
@@ -558,7 +587,12 @@ export default function SalesPage() {
       setMobileProvider('')
       setPhoneNumber('')
       setTransactionId('')
-      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo, browserPrintWindow)
+      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo, browserPrintWindow).then(() => {
+        const jobCards = result.sale.serviceJobCards || []
+        if (jobCards.length) toast({ title: `${jobCards.length} job card(s) created`, description: `${customerName}: assigned service work is pending completion.`,
+          action: <ToastAction altText="Open job cards" onClick={() => navigate(`/tenant/service/job-cards?jobCardId=${jobCards[0].id}`)}>Open job cards</ToastAction>,
+        })
+      })
       loadRecentSales()
       resetProductSearch()
     } catch (error: any) {
@@ -1042,6 +1076,10 @@ export default function SalesPage() {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
+                        {canCreateSaleJobs && (item.itemType === 'service' || !!item.includedServices?.length) && <>
+                          {serviceOptionsError && <p role="alert" className="col-span-full text-sm text-red-600">{serviceOptionsError}</p>}
+                          <SaleServiceJobsEditor item={item} technicians={saleTechnicians} currentUserId={user?.id} disabled={processing} onChange={serviceJobs => setCart(prev => prev.map(row => row.id === item.id ? { ...row, serviceJobs } : row))} />
+                        </>}
                       </div>
                     ))}
                   </div>
@@ -1070,7 +1108,7 @@ export default function SalesPage() {
                       />
                     </div>
                     <div className="mb-4">
-                      <label className="text-sm font-medium">Customer Name (optional)</label>
+                      <label className="text-sm font-medium">Customer Name {cart.some(item => item.serviceJobs?.length) ? '*' : '(optional)'}</label>
                       <Input
                         list="cash-sale-customer-list"
                         value={customerName}

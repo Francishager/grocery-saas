@@ -19,6 +19,8 @@ import { Pagination } from '@/components/Pagination'
 import { usePagination } from '@/hooks/usePagination'
 import { db } from '@/db/index'
 import ServiceList from '@/components/ServiceList'
+import IncludedServicesPicker from '@/components/IncludedServicesPicker'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 interface SellingUnit {
   id?: string
@@ -29,6 +31,7 @@ interface SellingUnit {
 }
 
 interface FormData {
+  linkedItemIds: string[]
   product_id: string
   product_name: string
   quantity: number | ''
@@ -110,6 +113,7 @@ interface PriceHistoryState {
 }
 
 const initialFormData: FormData = {
+  linkedItemIds: [],
   product_id: '',
   product_name: '',
   quantity: '',
@@ -186,6 +190,7 @@ const formatQty = (value: number | undefined | null) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value || 0))
 
 export default function InventoryPage() {
+  const { hasFeature } = useFeatureAccess()
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryQuery, setCategoryQuery] = useState('')
   const [categorySaving, setCategorySaving] = useState(false)
@@ -439,6 +444,10 @@ export default function InventoryPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!online && (formData.linkedItemIds.length || editingItem?.includedServices?.length || editingItem?.includedInProducts?.length)) {
+      toast({ variant: 'destructive', title: 'Connect to the internet to save included services' })
+      return
+    }
     if (!formData.product_name.trim()) {
       toast({ variant: 'destructive', title: `${isServicesPage ? 'Service' : 'Product'} name is required` })
       return
@@ -488,7 +497,7 @@ export default function InventoryPage() {
           return
         }
         if (online) {
-          await inventoryApi.update(String(editingItem.id), formData)
+          await inventoryApi.update(String(editingItem.id), { ...formData, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
           if (formData.itemType === 'product') await saveSellingUnits(String(editingItem.id))
         } else {
           await db.products.put({
@@ -523,7 +532,7 @@ export default function InventoryPage() {
           return
         }
         if (online) {
-          const result = await inventoryApi.create(formData)
+          const result = await inventoryApi.create({ ...formData, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
           if (formData.itemType === 'product') {
             const newId = result?.id || (result as any)?.product?.id
             if (newId) await saveSellingUnits(String(newId))
@@ -663,6 +672,7 @@ export default function InventoryPage() {
     setEditingItem(item)
     setFormData({
       product_id: item.product_id || '',
+      linkedItemIds: (item.itemType === 'service' ? item.includedInProducts : item.includedServices)?.map(link => link.id) || [],
       product_name: item.product_name || '',
       quantity: item.quantity || 0,
       unit_price: item.unit_price || 0,
@@ -1077,6 +1087,7 @@ export default function InventoryPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+              {hasFeature('service.job_cards') && ['product', 'service'].includes(formData.itemType) && <IncludedServicesPicker itemType={formData.itemType} branchId={formData.branchId} value={formData.linkedItemIds} onChange={linkedItemIds => setFormData(prev => ({ ...prev, linkedItemIds }))} />}
               {/* Item Type Toggle - removed service/rental, only product */}
               {!lockedType && (
               <div className="sm:col-span-2 space-y-2">

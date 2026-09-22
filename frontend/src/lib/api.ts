@@ -319,6 +319,7 @@ export const inventoryApi = {
   create: (data: any) =>
     api.post<InventoryItem>('/api/inventory', { body: {
       name: data.product_name,
+      linkedItemIds: data.linkedItemIds,
       price: data.unit_price,
       cost: data.cost_price !== '' && data.cost_price != null ? Number(data.cost_price) : 0,
       quantity: data.quantity !== '' && data.quantity != null ? Number(data.quantity) : 0,
@@ -343,6 +344,7 @@ export const inventoryApi = {
 
   update: (id: string, data: any) =>
     api.put<InventoryItem>(`/api/inventory/${id}`, { body: {
+      linkedItemIds: data.linkedItemIds,
       name: data.product_name,
       price: data.unit_price,
       cost: data.cost_price !== '' && data.cost_price != null ? Number(data.cost_price) : 0,
@@ -414,6 +416,8 @@ function mapProductToInventory(p: any): InventoryItem {
     baseUnit: p.baseUnit || 'Piece',
     units: p.units || [],
     itemType: p.itemType || 'product',
+    includedServices: p.includedServices || [],
+    includedInProducts: p.includedInProducts || [],
     isUncategorized: Boolean(p.isUncategorized || (!p.categoryId && !p.category?.id && !p.category)),
     serviceCategory: p.serviceCategory || null,
     estimatedHours: p.estimatedHours || null,
@@ -472,6 +476,7 @@ export const salesApi = {
     api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
       body: {
         cart: cart.map(c => ({
+          serviceJobs: c.serviceJobs,
           productId: c.productId || c.id,
           qty: c.qty,
           price: c.selling_price,
@@ -730,6 +735,7 @@ export const reportsApiV2 = {
   svcContracts: (params?: ReportParams) => api.get<any>('/api/reports/service-business/contracts', { params }),
   svcFeedback: (params?: ReportParams) => api.get<any>('/api/reports/service-business/feedback', { params }),
   svcJobCards: (params?: ReportParams) => api.get<any>('/api/reports/service-business/job-cards', { params }),
+  salesServiceJobs: (params?: ReportParams) => api.get<any>('/api/reports/sales/service-jobs', { params }),
   svcWorkOrders: (params?: ReportParams) => api.get<any>('/api/reports/service-business/work-orders', { params }),
 
   // Rental Reports
@@ -1072,6 +1078,8 @@ export interface DailyPerformanceData {
 }
 
 export interface InventoryItem {
+  includedServices?: IncludedService[]
+  includedInProducts?: IncludedService[]
   isActive?: boolean
   id: string | number
   business_id: string
@@ -1236,7 +1244,13 @@ export interface Purchase {
   staff_name: string
 }
 
+export interface IncludedService { id: string; name: string; description?: string | null }
+export interface SaleServiceJob { serviceProductId: string; technicianId: string; description: string; priority: string; scheduledStart?: string }
+
 export interface CartItem {
+  itemType?: string
+  includedServices?: IncludedService[]
+  serviceJobs?: SaleServiceJob[]
   id: string | number
   productId?: string | number
   product_id: string

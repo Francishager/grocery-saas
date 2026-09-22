@@ -102,6 +102,7 @@ export function NotificationBell() {
         createdAt: n.createdAt || new Date().toISOString(),
         channel: n.channel,
         source: 'api' as const,
+        link: typeof n.metadata?.link === 'string' && n.metadata.link.startsWith('/tenant/') ? n.metadata.link : undefined,
       }))
     } catch {
       return []
