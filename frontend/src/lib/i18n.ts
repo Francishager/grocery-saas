@@ -44,6 +44,9 @@ export const supportedLanguageOptions = languageOptions
 export const translate = (language: string | undefined, key: string, fallback = key) => translations[(language || 'en') as LanguageCode]?.[key] || (language === 'en' || !language ? fallback : key)
 export const languageLocale = (language: string) => ({ en: 'en-UG', sw: 'sw-KE', lg: 'lg-UG', nyn: 'nyn-UG', rw: 'rw-RW', nyo: 'nyo-UG', ach: 'ach-UG' } as Record<string, string>)[language] || 'en-UG'
 
+const originalText = new WeakMap<Text, string>()
+const originalAttributes = new WeakMap<Element, Record<string, string>>()
+
 const printExcluded = (element: Element | null) => {
   if (!element) return false
   if (element.closest('[data-print-exempt], .receipt-print, .print-receipt')) return true
@@ -54,11 +57,9 @@ const printExcluded = (element: Element | null) => {
 /** Translate live web UI text, including pages that render after navigation. Receipt/print surfaces are intentionally excluded. */
 export function translateDocument(language: string) {
   if (typeof document === 'undefined') return () => undefined
-  const originalText = new WeakMap<Text, string>()
-  const originalAttributes = new WeakMap<Element, Record<string, string>>()
   const attributes = ['placeholder', 'title', 'aria-label']
-  const apply = () => {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  const translateRoot = (root: Node) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
     let node: Node | null
     while ((node = walker.nextNode())) {
       const text = node as Text
@@ -73,7 +74,10 @@ export function translateDocument(language: string) {
       if (translated !== key) text.data = `${leading}${translated}${trailing}`
       else if (text.data !== source) text.data = source
     }
-    document.querySelectorAll('input, textarea, [title], [aria-label]').forEach((element) => {
+    const elements: Element[] = []
+    if (root instanceof Element && root.matches('input, textarea, [title], [aria-label]')) elements.push(root)
+    if ('querySelectorAll' in root) elements.push(...Array.from((root as Element).querySelectorAll('input, textarea, [title], [aria-label]')))
+    elements.forEach((element) => {
       if (printExcluded(element)) return
       const saved = originalAttributes.get(element) || {}
       originalAttributes.set(element, saved)
@@ -85,8 +89,18 @@ export function translateDocument(language: string) {
       })
     })
   }
-  apply()
-  const observer = new MutationObserver(() => apply())
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true })
-  return () => observer.disconnect()
+  translateRoot(document.body)
+  let frame = 0
+  const pending: Node[] = []
+  const flush = () => {
+    frame = 0
+    const nodes = pending.splice(0)
+    nodes.forEach((node) => translateRoot(node))
+  }
+  const observer = new MutationObserver((records) => {
+    records.forEach((record) => record.addedNodes.forEach((node) => pending.push(node)))
+    if (!frame && pending.length) frame = window.requestAnimationFrame(flush)
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
+  return () => { observer.disconnect(); if (frame) window.cancelAnimationFrame(frame) }
 }
