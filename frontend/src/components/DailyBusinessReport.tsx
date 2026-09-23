@@ -18,6 +18,7 @@ export interface DailyBusinessData {
   }
   summary: Record<string, number>
   cashMovement: Record<string, number>
+  cashLedger?: any[]
   profitability: Record<string, number>
   customerActivity: any[]
   staffActivity: any[]
@@ -349,6 +350,11 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
   const rowsForKinds = (kinds: string[], methods?: string[]) => {
     const rows = new Map<string, any>()
     transactions.forEach((row) => {
+      if (kinds.includes(row.kind) && methods?.length && row.paidByMethod) {
+        const amount = methods.reduce((sum, method) => sum + numberValue(row.paidByMethod[method]), 0)
+        if (amount) rows.set(rowKey(row), { ...row, amount, cashAmount: amount, debit: amount, credit: 0, creditAmount: 0, paymentMethod: methods.join(', ') })
+        return
+      }
       if (kinds.includes(row.kind) && (!methods?.length || methods.includes(row.paymentMethod))) {
         rows.set(rowKey(row), row)
       }
@@ -361,7 +367,25 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     return [...rows.values()]
   }
   const openKind = (title: string, kinds: string[], methods?: string[]) => {
-    setDrilldown({ title, rows: rowsForKinds(kinds, methods) })
+    if ((title === 'Cash at Hand' || title === 'Net Cash Movement') && Array.isArray(data.cashLedger)) {
+      const opening = numberValue(cash.openingCash)
+      const rows = title === 'Cash at Hand' ? [{
+        id: 'cash-opening', kind: 'opening-balance', date: data.header.date,
+        description: 'Opening Physical Cash', account: 'Cash tills', paymentMethod: 'cash',
+        amount: opening, debit: Math.max(0, opening), credit: Math.max(0, -opening),
+      }, ...data.cashLedger] : data.cashLedger
+      setDrilldown({ title, rows })
+      return
+    }
+    let rows = rowsForKinds(kinds, methods)
+    if (title === 'Credit Sales') rows = rows.filter((row) => numberValue(row.creditAmount) > 0)
+      .map((row) => ({ ...row, amount: numberValue(row.creditAmount), debit: 0, credit: numberValue(row.creditAmount) }))
+    if (title === 'Gross Profit' || title === 'Net Profit') rows = rows.map((row) => {
+      const amount = row.kind === 'expense' ? -numberValue(row.amount)
+        : numberValue(row.revenue ?? row.amount) - numberValue(row.cogs)
+      return { ...row, amount, debit: Math.max(0, amount), credit: Math.max(0, -amount) }
+    })
+    setDrilldown({ title, rows })
   }
   const openRows = (title: string, rows: any[]) => setDrilldown({ title, rows })
   const customerTransactions = useMemo(() => customer ? (customer.transactions || transactions.filter((row) => row.customerId === customerIdOf(customer) || row.customer === customer.name)) : [], [customer, transactions])
@@ -384,8 +408,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       return row.kind === 'credit-sale' ? numberValue(row.amount) : 0
     }
     const fromSummary = (value: unknown, derived: number) => {
-      const summaryValue = metricValue(value, derived)
-      return summaryValue === 0 && derived !== 0 ? derived : summaryValue
+      return metricValue(value, derived)
     }
     const methodTotal = (method: string) => sum(saleRows.filter((row) => row.paymentMethod === method), paidPortion)
     const expenseTotal = sum(expenseRows, (row) => numberValue(row.amount))
@@ -395,38 +418,17 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     const cashExpenseTotal = sum(expenseRows.filter(hasRealCashExpenseImpact), (row) => numberValue(row.amount))
     const movementAccountType = (row: any) => normalizePaymentMethod(row.accountType || row.paymentMethod || row.method)
     const physicalCashRows = cashMovementRows.filter((row) => movementAccountType(row) === 'cash')
-    const movementGroups = new Map<string, { outgoingTypes: Set<string> }>()
-    cashMovementRows.forEach((row) => {
-      const reference = String(row.reference || '').trim()
-      if (!reference) return
-      const direction = normalizeMovementDirection(row.direction)
-      const group = movementGroups.get(reference) || { outgoingTypes: new Set<string>() }
-      if (direction === 'out' || direction === 'transfer-out') group.outgoingTypes.add(movementAccountType(row))
-      movementGroups.set(reference, group)
-    })
+
     const physicalCashMovementTotal = (directions: string[]) => sum(
       physicalCashRows.filter((row) => directions.includes(normalizeMovementDirection(row.direction))),
       (row) => numberValue(row.amount)
     )
-    const unpairedNonCashInflowTotal = (accountType: string) => sum(
-      cashMovementRows.filter((row) => {
-        if (movementAccountType(row) !== accountType) return false
-        const direction = normalizeMovementDirection(row.direction)
-        if (direction !== 'in' && direction !== 'transfer-in') return false
-        const reference = String(row.reference || '').trim()
-        if (!reference) return true
-        const group = movementGroups.get(reference)
-        return !group || group.outgoingTypes.size === 0
-      }),
-      (row) => numberValue(row.amount)
-    )
+
     const otherPhysicalCashIn = metricValue(cash.otherPhysicalCashIn ?? cash.otherCashIn, physicalCashMovementTotal(['in']))
     const otherPhysicalCashOut = metricValue(cash.otherPhysicalCashOut ?? cash.otherCashOut, physicalCashMovementTotal(['out']))
     const cashTransfersInTotal = metricValue(cash.cashTransfersIn, physicalCashMovementTotal(['transfer-in']))
     const cashTransfersOutTotal = metricValue(cash.cashTransfersOut, physicalCashMovementTotal(['transfer-out']))
-    const cashToSafeTotal = metricValue(cash.cashToSafe, unpairedNonCashInflowTotal('safe'))
-    const cashToBankTotal = metricValue(cash.cashToBank, unpairedNonCashInflowTotal('bank'))
-    const cashToMobileMoneyTotal = metricValue(cash.cashToMobileMoney, unpairedNonCashInflowTotal('mobile_money'))
+
     const derivedCashAtHand =
       numberValue(cash.openingCash) +
       methodTotal('cash') +
@@ -435,10 +437,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       cashTransfersInTotal -
       cashExpenseTotal -
       otherPhysicalCashOut -
-      cashTransfersOutTotal -
-      cashToSafeTotal -
-      cashToBankTotal -
-      cashToMobileMoneyTotal
+      cashTransfersOutTotal
     const derivedNetCashMovement =
       methodTotal('cash') +
       metricValue(cash.cashCollections, cashCollectionTotal) +
@@ -446,10 +445,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       cashTransfersInTotal -
       cashExpenseTotal -
       numberValue(cash.otherCashOut) -
-      cashTransfersOutTotal -
-      cashToSafeTotal -
-      cashToBankTotal -
-      cashToMobileMoneyTotal
+      cashTransfersOutTotal
     const cogsTotal = sum(saleRows, (row) => Array.isArray(row.items)
       ? row.items.reduce((total: number, item: any) => total + numberValue(item.cost ?? item.cogs), 0)
       : numberValue(row.cogs ?? row.cost)
@@ -502,12 +498,12 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     ['Cash Retained / Float', cash.cashRetained],
   ]
   const balancingTotals = [
-    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Cash sales plus cash credit repayments, after real cash expenses and till transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Closing cash till balance for the selected branch, staff and period', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Cash Sales', value: cardTotals.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
     { label: 'Credit Sales', value: cardTotals.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
     { label: 'Debt Collections', value: cardTotals.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
-    { label: 'Expenses', value: cardTotals.expenses, note: 'Money spent today', kinds: ['expense'] },
-    { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash in minus real cash expenses and till transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Expenses', value: cardTotals.expenses, note: 'Expenses recognized in the selected period', kinds: ['expense'] },
+    { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash till receipts minus payments, refunds and transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Gross Profit', value: cardTotals.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
     { label: 'Net Profit', value: cardTotals.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
   ]
@@ -520,9 +516,6 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Cash Expenses', inflow: 0, outflow: metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0)) },
     { label: 'Other Cash Out', inflow: 0, outflow: cash.otherPhysicalCashOut ?? cash.otherCashOut },
     { label: 'Cash Transfers Out', inflow: 0, outflow: cash.cashTransfersOut },
-    { label: 'Moved to Safe', inflow: 0, outflow: cash.cashToSafe },
-    { label: 'Moved to Bank', inflow: 0, outflow: cash.cashToBank },
-    { label: 'Moved to Mobile Money', inflow: 0, outflow: cash.cashToMobileMoney },
   ].filter((row) => numberValue(row.inflow) || numberValue(row.outflow) || row.label === 'Opening Physical Cash')
 
   return (

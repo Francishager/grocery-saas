@@ -1405,28 +1405,26 @@ function BalanceSheetReport({ data }: { data: any }) {
         <Card>
           <CardHeader><CardTitle className="text-base">Assets</CardTitle></CardHeader>
           <CardContent className="space-y-1">
-            {line('Cash & Bank', data.assets?.cash || 0, 'cash')}
-            {line('Accounts Receivable', data.assets?.accountsReceivable || 0, 'accountsReceivable')}
-            {line('Inventory', data.assets?.inventory || 0, 'inventory')}
+            {(data.lineItems?.assets || []).map((item: any) => <div key={item.key}>{line(item.label, item.amount, item.key)}</div>)}
             {line('Total Assets', data.assets?.totalAssets || 0, 'totalAssets', true)}
           </CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-base">Liabilities</CardTitle></CardHeader>
           <CardContent className="space-y-1">
-            {line('Accounts Payable', data.liabilities?.accountsPayable || 0, 'accountsPayable')}
-            {line('Tax Payable', data.liabilities?.taxPayable || 0, 'taxPayable')}
+            {(data.lineItems?.liabilities || []).map((item: any) => <div key={item.key}>{line(item.label, item.amount, item.key)}</div>)}
             {line('Total Liabilities', data.liabilities?.totalLiabilities || 0, 'totalLiabilities', true)}
           </CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-base">Equity</CardTitle></CardHeader>
           <CardContent className="space-y-1">
-            {line('Retained Earnings', data.equity?.retainedEarnings || 0, 'retainedEarnings')}
+            {(data.lineItems?.equity || []).map((item: any) => <div key={item.key}>{line(item.label, item.amount, item.key)}</div>)}
             {line('Total Equity', data.equity?.totalEquity || 0, 'totalEquity', true)}
           </CardContent>
         </Card>
       </div>
+      {typeof data.difference === "number" && Math.abs(data.difference) >= 0.01 && <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Unreconciled difference: {formatCurrency(data.difference)}. Assets do not equal recorded liabilities and equity.</p>}
       {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
     </>
   )
@@ -1941,6 +1939,9 @@ export default function ReportsPage() {
     setLoading(true)
     setReportData(null)
     try {
+      if (!online && (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness")) {
+        throw new Error("Connect to the internet to load complete accounting data.")
+      }
       if (online) {
         const params: ReportParams = {}
         if (from) params.from = from
@@ -1965,6 +1966,11 @@ export default function ReportsPage() {
         setReportData(result)
       }
     } catch (error: any) {
+      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness") {
+        setReportData(null)
+        toast({ variant: "destructive", title: "Report unavailable", description: error.message })
+        return
+      }
       // API failed — try offline
       try {
         const result = await getLocalReportData(currentReport.id, { from, to })
@@ -2018,12 +2024,12 @@ export default function ReportsPage() {
     const cash = data?.cashMovement || {}
     const profitability = data?.profitability || {}
     ;[
-      ['Cash at Hand', cash.cashAtHand, 'Cash sales plus cash credit repayments, after real cash expenses and till transfers'],
+      ['Cash at Hand', cash.cashAtHand, 'Closing cash till balance for the selected branch, staff and period'],
       ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
       ['Credit Sales', summary.creditSales, 'Customer balances created by credit invoices; credit/debit notes are adjustments listed separately'],
       ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
-      ['Expenses', summary.expenses, 'Money spent today'],
-      ['Net Cash Movement', cash.netCashMovement, 'Cash in minus real cash expenses and till transfers'],
+      ['Expenses', summary.expenses, 'Expenses recognized in the selected period'],
+      ['Net Cash Movement', cash.netCashMovement, 'Cash till receipts minus payments, refunds and transfers'],
       ['Gross Profit', profitability.grossProfit, 'Sales minus COGS'],
       ['Net Profit', profitability.netProfit, 'Gross profit minus expenses'],
     ].forEach(([item, amount, details]) => pushAmount('Day Balancing Totals', String(item), amount, String(details)))
@@ -2039,18 +2045,30 @@ export default function ReportsPage() {
       return acc
     }, {})
     Object.entries(expenseCategoryTotals).forEach(([category, value]) => rows.push({ section: 'Expense Breakdown', item: category, details: `${value.count} transaction${value.count === 1 ? '' : 's'}`, amount: value.total, cashAmount: null, creditAmount: null, balance: null }))
-    expenseRows.forEach((row: any) => rows.push({ section: 'Expenses Paid Today', item: row.description || row.category || row.reference || row.id, details: `${row.category || 'Uncategorized'} - ${String(row.paymentMethod || 'cash').replace(/_/g, ' ')} - ${row.account || 'No account'} - ${row.staff || 'Unknown'}`, amount: row.amount || 0, cashAmount: 0, creditAmount: row.amount || 0, balance: null }))
+    expenseRows.forEach((row: any) => rows.push({ section: 'Recognized Expenses', item: row.description || row.category || row.reference || row.id, details: `${row.category || 'Uncategorized'} - ${String(row.paymentMethod || 'cash').replace(/_/g, ' ')} - ${row.account || 'No account'} - ${row.staff || 'Unknown'}`, amount: row.amount || 0, cashAmount: 0, creditAmount: row.amount || 0, balance: null }))
     ;(data?.customerActivity || []).forEach((row: any) => rows.push({ section: 'Customer Activity', item: row.name, details: row.phone || '', amount: Number(row.cashSales || 0) + Number(row.creditSales || 0), cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.currentBalance || 0 }))
     ;(data?.staffActivity || []).forEach((row: any) => rows.push({ section: 'Staff Activity', item: row.name, details: `Collections ${formatCurrency(row.collections || 0)}`, amount: row.sales || 0, cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.cashHeld || 0 }))
     ;(data?.productActivity || []).forEach((row: any) => rows.push({ section: 'Product Activity', item: row.name, details: `Qty ${row.quantitySold || 0}, Stock ${row.currentStock ?? ''}`, amount: row.salesValue || 0, cashAmount: row.cogs || 0, creditAmount: row.grossProfit || 0, balance: null }))
     ;(data?.staffTills || []).forEach((row: any) => rows.push({ section: 'Cash Accounts', item: row.name, details: `${String(row.type || '').replace(/_/g, ' ')} - ${row.staff || 'Unassigned'}`, amount: row.expectedClosing ?? row.balance ?? 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.openingCash || 0 }))
     ;(data?.transactions || []).filter((row: any) => row.kind === 'cash-movement' || row.kind === 'transfer').forEach((row: any) => rows.push({ section: 'Cash and Account Movements', item: row.reference || row.id, details: `${row.account || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.direction ? `- ${String(row.direction).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.balanceAfter || null }))
+    ;(data?.cashLedger || []).forEach((row: any) => rows.push({ section: 'Cash Till Ledger', item: row.reference || row.id, details: [row.account, row.description].filter(Boolean).join(' - '), amount: row.amount, cashAmount: row.debit, creditAmount: row.credit, balance: row.balance }))
     ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: row.reference || row.id, details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || row.cashAmount || 0, creditAmount: row.credit || row.creditAmount || 0, balance: row.customerBalance || 0 }))
     return rows
   }
 
   // Get data and columns for export based on report type
   const getExportData = () => {
+    if (currentReport?.renderType === 'trialBalance') {
+      return { data: reportData?.accounts || [], columns: currentReport.columns }
+    }
+    if (currentReport?.renderType === 'balanceSheet') {
+      const rows = ['assets', 'liabilities', 'equity'].flatMap((section) => [
+        ...(reportData?.lineItems?.[section] || []).map((item: any) => ({ section, account: item.label, amount: item.amount })),
+        { section, account: 'Total ' + section, amount: reportData?.[section]?.['total' + section[0].toUpperCase() + section.slice(1)] || 0 },
+      ])
+      rows.push({ section: 'Reconciliation', account: 'Difference', amount: reportData?.difference || 0 })
+      return { data: rows, columns: [textCol('section', 'Section'), textCol('account', 'Account'), currencyCol('amount', 'Amount')] }
+    }
     if (currentReport?.renderType === 'statement' && reportData?.transactions) {
       return { data: reportData.transactions, columns: statementColumns }
     }

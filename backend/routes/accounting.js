@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
+import { loadLedgerBalances, ledgerBalanceSheet } from "../src/utils/reportAccounting.js";
 import { authenticateToken, requirePermission, requireAnyPermission, getPaymentMethodPermissions, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
@@ -710,102 +711,49 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
   }
 });
 
-// Trial balance
+// Financial statements share the same account balances as the Reports page.
 router.get("/reports/trial-balance", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
   try {
-    const tenantId = req.user.tenantId || req.user.tenant_id;
-    const accounts = await prisma.account.findMany({
-      where: { tenantId, isActive: true },
-      orderBy: { code: "asc" },
-    });
-    const trialBalance = accounts.map((a) => {
-      const balance = Number(a.balance || 0);
-      const debitNormal = isDebitNormalAccount(a);
-      return {
-        code: a.code,
-        name: a.name,
-        type: a.type,
-        balance,
-        debit: debitNormal ? Math.max(balance, 0) : Math.max(-balance, 0),
-        credit: debitNormal ? Math.max(-balance, 0) : Math.max(balance, 0),
-      };
-    });
-    const totalDebit = trialBalance.reduce((s, r) => s + r.debit, 0);
-    const totalCredit = trialBalance.reduce((s, r) => s + r.credit, 0);
-    res.json({ accounts: trialBalance, totalDebit, totalCredit });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to generate trial balance" });
-  }
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
+    const accounts = await loadLedgerBalances(prisma, scope, reportEndDate(req.query.to));
+    const totalDebit = accounts.reduce((sum, account) => sum + account.debit, 0);
+    const totalCredit = accounts.reduce((sum, account) => sum + account.credit, 0);
+    const difference = Math.round((totalDebit - totalCredit) * 100) / 100;
+    res.json({ accounts, totalDebit, totalCredit, difference, isBalanced: Math.abs(difference) < 0.01 });
+  } catch (err) { handleBranchError(res, err, "Failed to generate trial balance"); }
 });
 
-// Profit & Loss
 router.get("/reports/profit-loss", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
   try {
-    const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { from, to } = req.query;
-    const dateFilter = {};
-    if (from || to) {
-      dateFilter.date = {};
-      if (from) dateFilter.date.gte = new Date(from);
-      if (to) dateFilter.date.lte = new Date(to);
-    }
-
-    const revenueAccounts = await prisma.account.findMany({ where: { tenantId, type: "revenue", isActive: true } });
-    const expenseAccounts = await prisma.account.findMany({ where: { tenantId, type: "expense", isActive: true } });
-
-    let totalRevenue = 0;
-    let totalExpenses = 0;
-
-    const revenues = [];
-    for (const acc of revenueAccounts) {
-      revenues.push({ code: acc.code, name: acc.name, balance: acc.balance });
-      totalRevenue += acc.balance;
-    }
-
-    const expenses = [];
-    for (const acc of expenseAccounts) {
-      expenses.push({ code: acc.code, name: acc.name, balance: acc.balance });
-      totalExpenses += acc.balance;
-    }
-
-    res.json({
-      revenues,
-      expenses,
-      totalRevenue,
-      totalExpenses,
-      netProfit: totalRevenue - totalExpenses,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to generate P&L report" });
-  }
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
+    const accounts = await loadLedgerBalances(prisma, scope, reportEndDate(req.query.to));
+    const from = req.query.from ? new Date(req.query.from) : null;
+    const periodBalance = (account) => !from ? account.balance : account.details
+      .filter((row) => new Date(row.date) >= from)
+      .reduce((sum, row) => sum + (["revenue", "income"].includes(account.type) ? row.credit - row.debit : row.debit - row.credit), 0);
+    const revenues = accounts.filter((account) => ["revenue", "income"].includes(account.type)).map((account) => ({ ...account, balance: periodBalance(account) }));
+    const expenses = accounts.filter((account) => ["expense", "expenses"].includes(account.type)).map((account) => ({ ...account, balance: periodBalance(account) }));
+    const totalRevenue = revenues.reduce((sum, account) => sum + account.balance, 0);
+    const totalExpenses = expenses.reduce((sum, account) => sum + account.balance, 0);
+    res.json({ revenues, expenses, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses });
+  } catch (err) { handleBranchError(res, err, "Failed to generate P&L report"); }
 });
 
-// Balance sheet
 router.get("/reports/balance-sheet", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
   try {
-    const tenantId = req.user.tenantId || req.user.tenant_id;
-    const accounts = await prisma.account.findMany({ where: { tenantId, isActive: true } });
-
-    const assets = accounts.filter((a) => a.type === "asset");
-    const liabilities = accounts.filter((a) => a.type === "liability");
-    const equity = accounts.filter((a) => a.type === "equity");
-
-    const totalAssets = assets.reduce((s, a) => s + a.balance, 0);
-    const totalLiabilities = liabilities.reduce((s, a) => s + a.balance, 0);
-    const totalEquity = equity.reduce((s, a) => s + a.balance, 0);
-
-    res.json({
-      assets: assets.map((a) => ({ code: a.code, name: a.name, balance: a.balance })),
-      liabilities: liabilities.map((a) => ({ code: a.code, name: a.name, balance: a.balance })),
-      equity: equity.map((a) => ({ code: a.code, name: a.name, balance: a.balance })),
-      totalAssets,
-      totalLiabilities,
-      totalEquity,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to generate balance sheet" });
-  }
+    const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
+    const accounts = await loadLedgerBalances(prisma, scope, reportEndDate(req.query.to));
+    const sheet = ledgerBalanceSheet(accounts);
+    res.json({ ...sheet, equity: [...sheet.equity, { code: "", name: "Unclosed Earnings", balance: sheet.retainedEarnings }] });
+  } catch (err) { handleBranchError(res, err, "Failed to generate balance sheet"); }
 });
+
+function reportEndDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (String(value).length <= 10) date.setHours(23, 59, 59, 999);
+  return date;
+}
 
 // List tax payments
 router.get("/tax-payments", authenticateToken, requirePermission("canViewAccounting"), requireFeature("accounting"), async (req, res) => {

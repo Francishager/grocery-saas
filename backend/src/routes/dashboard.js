@@ -4,6 +4,7 @@ import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { outstandingCustomerSummary } from '../utils/customerBalance.js';
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
+import { expenseDateWhere, loadJournalExpenseRows } from '../utils/reportAccounting.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -40,11 +41,6 @@ const aggregateTotal = (aggregate, field = "total") => Number(aggregate?._sum?.[
 const aggregateRevenue = (aggregate) => aggregateTotal(aggregate) - aggregateTotal(aggregate, 'tax');
 const aggregateCount = (aggregate) => Number(aggregate?._count || 0);
 
-function expenseDateWhere(dateRange) {
-  if (!dateRange || !Object.keys(dateRange).length) return {};
-  return { OR: [{ date: dateRange }, { createdAt: dateRange }] };
-}
-
 function scopedExpenseWhere(scope, extra = {}) {
   const { branchId, ...rest } = extra;
   const branchScope = branchId || scope.branchId;
@@ -78,34 +74,7 @@ function isExpenseAccount(account) {
 }
 
 async function journalExpenseRows(scope, dateRange) {
-  const entries = await prisma.journalEntry.findMany({
-    where: scopedJournalWhere(scope, {
-      date: dateRange,
-      status: { not: "reversed" },
-      lines: {
-        some: {
-          debit: { gt: 0 },
-          account: { type: { in: ["expense", "expenses"] } },
-        },
-      },
-    }),
-    select: {
-      date: true,
-      createdAt: true,
-      lines: {
-        select: {
-          debit: true,
-          account: { select: { type: true } },
-        },
-      },
-    },
-  });
-
-  return entries.flatMap((entry) => (
-    entry.lines
-      .filter((line) => isExpenseAccount(line.account) && Number(line.debit || 0) > 0)
-      .map((line) => ({ amount: Number(line.debit || 0), date: entry.date || entry.createdAt }))
-  ));
+  return loadJournalExpenseRows(prisma, scope, dateRange);
 }
 
 async function journalExpenseTotal(scope, dateRange) {
@@ -350,7 +319,7 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     [...expenses, ...journalExpenses].forEach((exp) => {
       const day = new Date(exp.date || exp.createdAt).getDate();
       if (dayMap[day]) {
-        dayMap[day].expenses += exp.amount || 0;
+        dayMap[day].expenses += Number(exp.amount || 0);
       }
     });
 
