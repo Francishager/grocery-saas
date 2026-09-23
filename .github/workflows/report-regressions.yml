@@ -1,0 +1,43 @@
+name: Report Regression Guard
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: report-regressions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report-regressions:
+    name: Report regressions (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 24]
+    env:
+      # These tests must never use a deployment database or production credentials.
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/report_tests?connect_timeout=1
+      JWT_SECRET: report-regression-tests-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run test:reports
+      - run: npm run build
+        working-directory: frontend

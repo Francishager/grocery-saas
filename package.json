@@ -11,7 +11,8 @@
     "build:client": "cd frontend && npm install && npm run build",
     "build:server": "npm install",
     "obfuscate:admin": "node scripts/obfuscate-admin.mjs",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run test:reports",
+    "test:reports": "npm --prefix backend run test:reports && npm --prefix frontend run test:reports"
   },
   "keywords": [],
   "author": "",

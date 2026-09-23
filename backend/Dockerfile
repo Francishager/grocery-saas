@@ -26,6 +26,10 @@ COPY routes ./routes
 COPY src ./src
 COPY start.sh ./
 
+# Fail the image build on reporting regressions; tests use an injected database.
+COPY tests ./tests
+RUN npm run test:reports
+
 # Production stage
 FROM base AS runner
 WORKDIR /app

@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "test:reports": "node --test tests/report-regressions.test.mjs",
+    "prebuild": "npm run test:reports",
     "dev": "vite",
     "build": "vite build",
     "deploy": "wrangler pages deploy dist",
