@@ -548,7 +548,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
               <Card className={item.label === 'Cash at Hand' ? 'h-full border-primary/60 bg-primary/5' : 'h-full transition hover:border-primary hover:shadow-sm'}>
                 <CardContent className="p-4">
                   <p className="text-xs font-semibold uppercase text-muted-foreground">{item.label}</p>
-                  <p className="mt-2 break-words text-xl font-bold leading-tight">{money(item.value)}</p>
+                  <p className="mt-2 min-h-[1.75rem] whitespace-nowrap overflow-visible text-xl font-bold leading-tight tabular-nums" aria-label={`${item.label}: ${money(item.value)}`}>{money(item.value)}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{item.note}</p>
                 </CardContent>
               </Card>
@@ -565,7 +565,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
               <Card className="h-full transition hover:border-primary hover:shadow-sm">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-2"><p className="min-w-0 text-xs font-semibold uppercase text-muted-foreground">{label}</p><Icon className="h-4 w-4 shrink-0 text-primary" /></div>
-                  <p className="mt-3 break-words text-lg font-bold leading-tight sm:text-xl">{money(value)}</p>
+                  <p className="mt-3 min-h-[1.75rem] whitespace-nowrap overflow-visible text-lg font-bold leading-tight tabular-nums sm:text-xl" aria-label={`${label}: ${money(value)}`}>{money(value)}</p>
                   <p className="mt-1 text-xs text-primary print:hidden">View transactions</p>
                 </CardContent>
               </Card>
@@ -577,7 +577,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><WalletCards className="h-4 w-4" />Cash Status Report</CardTitle></CardHeader>
-          <CardContent><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{cashRows.map(([label, value]) => <div key={label} className="rounded-md border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 break-words font-semibold">{money(value)}</p></div>)}</div></CardContent>
+          <CardContent><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{cashRows.map(([label, value]) => <div key={label} className="rounded-md border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 min-h-[1.5rem] whitespace-nowrap overflow-visible font-semibold tabular-nums" aria-label={`${label}: ${money(value)}`}>{money(value)}</p></div>)}</div></CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><BriefcaseBusiness className="h-4 w-4" />Profitability</CardTitle></CardHeader>
@@ -587,7 +587,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
               ['COGS', cardTotals.cogs],
               ['Gross Profit', cardTotals.grossProfit],
               ['Net Profit', cardTotals.netProfit],
-            ].map(([label, value]) => <button key={label} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openKind(`${label} Support`, ['sale', 'credit-sale'])}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 break-words font-semibold">{money(value)}</p></button>)}
+            ].map(([label, value]) => <button key={label} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openKind(`${label} Support`, ['sale', 'credit-sale'])}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 min-h-[1.5rem] whitespace-nowrap overflow-visible font-semibold tabular-nums" aria-label={`${label}: ${money(value)}`}>{money(value)}</p></button>)}
           </CardContent>
         </Card>
       </section>
