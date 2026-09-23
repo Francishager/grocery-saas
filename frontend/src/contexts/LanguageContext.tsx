@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { authApi } from '@/lib/api'
 import { useJWTAuth } from './JWTAuthContext'
-import { languageLocale, supportedLanguageOptions, translate, type LanguageCode } from '@/lib/i18n'
+import { languageLocale, supportedLanguageOptions, translate, translateDocument, type LanguageCode } from '@/lib/i18n'
 
 type LanguageContextValue = { language: LanguageCode; languages: typeof supportedLanguageOptions; setLanguage: (language: LanguageCode) => Promise<void>; t: (key: string, fallback?: string) => string }
 const LanguageContext = createContext<LanguageContextValue | null>(null)
@@ -11,6 +11,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<LanguageCode>(() => (localStorage.getItem('preferred_language') || 'en') as LanguageCode)
   useEffect(() => { if (user?.preferredLanguage) setLanguageState(user.preferredLanguage as LanguageCode) }, [user?.preferredLanguage])
   useEffect(() => { localStorage.setItem('preferred_language', language); document.documentElement.lang = languageLocale(language) }, [language])
+  useEffect(() => translateDocument(language), [language])
   const setLanguage = useCallback(async (next: LanguageCode) => {
     const previous = language
     setLanguageState(next)

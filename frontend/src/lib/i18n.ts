@@ -19,6 +19,18 @@ const common: Record<string, string> = {
   'Financial Reports': 'Ripoti za fedha', 'Sales Reports': 'Ripoti za mauzo', 'Inventory Reports': 'Ripoti za bidhaa',
   'Customer Reports': 'Ripoti za wateja', 'Supplier Reports': 'Ripoti za wasambazaji', 'Receivables Reports': 'Ripoti za madeni ya wateja',
   'Payables Reports': 'Ripoti za madeni ya wasambazaji', 'Language': 'Lugha', 'Preferred Language': 'Lugha unayopendelea',
+  'First Name': 'Jina la kwanza', 'Last Name': 'Jina la mwisho', 'Customer Name': 'Jina la mteja',
+  'Supplier Name': 'Jina la msambazaji', 'Product Name': 'Jina la bidhaa', 'Service Name': 'Jina la huduma',
+  'Quantity': 'Kiasi', 'Unit Price': 'Bei ya moja', 'Selling Price': 'Bei ya kuuza', 'Cost Price': 'Bei ya gharama',
+  'Payment Method': 'Njia ya malipo', 'Select Customer': 'Chagua mteja', 'Select Product': 'Chagua bidhaa',
+  'Select Service': 'Chagua huduma', 'Add Customer': 'Ongeza mteja', 'Add Product': 'Ongeza bidhaa',
+  'New Sale': 'Mauzo mapya', 'Record Sale': 'Rekodi mauzo', 'Record Payment': 'Rekodi malipo',
+  'Opening Balance': 'Salio la mwanzo', 'Credit Limit': 'Kikomo cha mkopo', 'Balance': 'Salio',
+  'Discount': 'Punguzo', 'Tax': 'Kodi', 'Subtotal': 'Jumla ndogo', 'Grand Total': 'Jumla kuu',
+  'Required': 'Inahitajika', 'Optional': 'Si lazima', 'Loading...': 'Inapakia...', 'No data found': 'Hakuna data iliyopatikana',
+  'Filter': 'Chuja', 'Clear': 'Futa', 'Refresh': 'Onyesha upya', 'Next': 'Ifuatayo', 'Previous': 'Iliyotangulia',
+  'Page': 'Ukurasa', 'of': 'ya', 'Start Date': 'Tarehe ya kuanza', 'End Date': 'Tarehe ya mwisho',
+  'Notes': 'Maelezo', 'Description': 'Maelezo', 'Reference': 'Rejea', 'Account': 'Akaunti',
 }
 
 const translations: Partial<Record<LanguageCode, Record<string, string>>> = {
@@ -31,3 +43,50 @@ const translations: Partial<Record<LanguageCode, Record<string, string>>> = {
 export const supportedLanguageOptions = languageOptions
 export const translate = (language: string | undefined, key: string, fallback = key) => translations[(language || 'en') as LanguageCode]?.[key] || (language === 'en' || !language ? fallback : key)
 export const languageLocale = (language: string) => ({ en: 'en-UG', sw: 'sw-KE', lg: 'lg-UG', nyn: 'nyn-UG', rw: 'rw-RW', nyo: 'nyo-UG', ach: 'ach-UG' } as Record<string, string>)[language] || 'en-UG'
+
+const printExcluded = (element: Element | null) => {
+  if (!element) return false
+  if (element.closest('[data-print-exempt], .receipt-print, .print-receipt')) return true
+  const marker = `${element.id} ${element.getAttribute('class') || ''}`.toLowerCase()
+  return /(^|[\s_-])(receipt|print)([\s_-]|$)/.test(marker)
+}
+
+/** Translate live web UI text, including pages that render after navigation. Receipt/print surfaces are intentionally excluded. */
+export function translateDocument(language: string) {
+  if (typeof document === 'undefined') return () => undefined
+  const originalText = new WeakMap<Text, string>()
+  const originalAttributes = new WeakMap<Element, Record<string, string>>()
+  const attributes = ['placeholder', 'title', 'aria-label']
+  const apply = () => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    let node: Node | null
+    while ((node = walker.nextNode())) {
+      const text = node as Text
+      const parent = text.parentElement
+      if (!parent || printExcluded(parent) || /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|OPTION)$/.test(parent.tagName)) continue
+      const source = originalText.get(text) || text.data
+      originalText.set(text, source)
+      const leading = source.match(/^\s*/)?.[0] || ''
+      const trailing = source.match(/\s*$/)?.[0] || ''
+      const key = source.trim()
+      const translated = key ? translate(language, key, key) : key
+      if (translated !== key) text.data = `${leading}${translated}${trailing}`
+      else if (text.data !== source) text.data = source
+    }
+    document.querySelectorAll('input, textarea, [title], [aria-label]').forEach((element) => {
+      if (printExcluded(element)) return
+      const saved = originalAttributes.get(element) || {}
+      originalAttributes.set(element, saved)
+      attributes.forEach((attribute) => {
+        const value = element.getAttribute(attribute)
+        if (value && !saved[attribute]) saved[attribute] = value
+        const source = saved[attribute]
+        if (source) element.setAttribute(attribute, translate(language, source, source))
+      })
+    })
+  }
+  apply()
+  const observer = new MutationObserver(() => apply())
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+  return () => observer.disconnect()
+}
