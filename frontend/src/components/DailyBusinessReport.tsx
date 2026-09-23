@@ -407,15 +407,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       if (row.creditAmount !== undefined && row.creditAmount !== null) return numberValue(row.creditAmount)
       return row.kind === 'credit-sale' ? numberValue(row.amount) : 0
     }
-    const fromSummary = (value: unknown, derived: number, useDerivedForZero = false) => {
-      // Some report responses carry a stale numeric zero while their detail rows
-      // contain the real period total. Keep the calculation source unchanged,
-      // but let the visible card use the already-derived detail total.
-      if (value === undefined || value === null || value === '') return derived
-      const numeric = Number(value)
-      if (!Number.isFinite(numeric)) return derived
-      return useDerivedForZero && numeric === 0 && derived !== 0 ? derived : numeric
-    }
+    const fromSummary = (value: unknown, derived: number) => metricValue(value, derived)
     const methodTotal = (method: string) => sum(saleRows.filter((row) => row.paymentMethod === method), paidPortion)
     const expenseTotal = sum(expenseRows, (row) => numberValue(row.amount))
     const transactionTotal = sum(saleRows, (row) => numberValue(row.amount))
@@ -457,7 +449,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       : numberValue(row.cogs ?? row.cost)
     )
     const revenueTotal = metricValue(profitability.revenue ?? summary.revenue, transactionTotal - numberValue(summary.taxCollected))
-    const grossProfitTotal = fromSummary(profitability.grossProfit ?? summary.grossProfit, revenueTotal - cogsTotal, true)
+    const grossProfitTotal = fromSummary(profitability.grossProfit ?? summary.grossProfit, revenueTotal - cogsTotal)
 
     return {
       totalSales: fromSummary(summary.totalSales ?? summary.grossSales, transactionTotal),
@@ -470,10 +462,10 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       cardSales: fromSummary(summary.cardSales, methodTotal('card')),
       debtCollections: fromSummary(summary.debtCollections, collectionTotal),
       expenses: fromSummary(summary.expenses, expenseTotal),
-      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand, true),
-      netCashMovement: fromSummary(cash.netCashMovement ?? summary.netCashMovement, derivedNetCashMovement, true),
+      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand),
+      netCashMovement: fromSummary(cash.netCashMovement ?? summary.netCashMovement, derivedNetCashMovement),
       grossProfit: grossProfitTotal,
-      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal, true),
+      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal),
     }
   }, [cash, cashMovementRows, expenseRows, profitability, summary, transactions])
 

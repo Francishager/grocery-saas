@@ -1,4 +1,5 @@
 import { languageOptions } from '@/components/Constants/user-types'
+import { translatedText, type TranslatedText } from './translatedText'
 
 export type LanguageCode = 'en' | 'sw' | 'lg' | 'nyn' | 'rw' | 'nyo' | 'ach'
 
@@ -44,12 +45,12 @@ export const supportedLanguageOptions = languageOptions
 export const translate = (language: string | undefined, key: string, fallback = key) => translations[(language || 'en') as LanguageCode]?.[key] || (language === 'en' || !language ? fallback : key)
 export const languageLocale = (language: string) => ({ en: 'en-UG', sw: 'sw-KE', lg: 'lg-UG', nyn: 'nyn-UG', rw: 'rw-RW', nyo: 'nyo-UG', ach: 'ach-UG' } as Record<string, string>)[language] || 'en-UG'
 
-const originalText = new WeakMap<Text, string>()
-const originalAttributes = new WeakMap<Element, Record<string, string>>()
+const translatedNodes = new WeakMap<Text, TranslatedText>()
+const translatedAttributes = new WeakMap<Element, Map<string, TranslatedText>>()
 
 const printExcluded = (element: Element | null) => {
   if (!element) return false
-  if (element.closest('[data-print-exempt], .receipt-print, .print-receipt')) return true
+  if (element.closest('[translate="no"], [data-i18n-skip], [data-print-exempt], .receipt-print, .print-receipt, script, style, noscript, textarea, input, option, [contenteditable="true"]')) return true
   const marker = `${element.id} ${element.getAttribute('class') || ''}`.toLowerCase()
   return /(^|[\s_-])(receipt|print)([\s_-]|$)/.test(marker)
 }
@@ -58,49 +59,76 @@ const printExcluded = (element: Element | null) => {
 export function translateDocument(language: string) {
   if (typeof document === 'undefined') return () => undefined
   const attributes = ['placeholder', 'title', 'aria-label']
+  const lookup = (key: string) => translate(language, key)
+  const updateText = (text: Text) => {
+    if (!text.parentElement || printExcluded(text.parentElement)) return
+    const next = translatedText(text.data, translatedNodes.get(text), lookup)
+    // Only cache text we actually translated. Financial values remain React-owned.
+    if (next.rendered !== next.source) translatedNodes.set(text, next)
+    else translatedNodes.delete(text)
+    if (text.data !== next.rendered) text.data = next.rendered
+  }
+  const updateAttributes = (element: Element) => {
+    // Input values are never translated; their placeholder/label can be.
+    if (printExcluded(element.parentElement) || element.matches('[translate="no"], [data-i18n-skip], [data-print-exempt], .receipt-print, .print-receipt')) return
+    const saved = translatedAttributes.get(element) || new Map<string, TranslatedText>()
+    for (const attribute of attributes) {
+      const current = element.getAttribute(attribute)
+      if (current === null) { saved.delete(attribute); continue }
+      const next = translatedText(current, saved.get(attribute), lookup)
+      if (next.rendered !== next.source) saved.set(attribute, next)
+      else saved.delete(attribute)
+      if (current !== next.rendered) element.setAttribute(attribute, next.rendered)
+    }
+    if (saved.size) translatedAttributes.set(element, saved)
+    else translatedAttributes.delete(element)
+  }
   const translateRoot = (root: Node) => {
+    if (!root.isConnected) return
+    if (root.nodeType === Node.TEXT_NODE) { updateText(root as Text); return }
+    if (root instanceof Element && printExcluded(root)) {
+      if (root.matches('input, textarea')) updateAttributes(root)
+      return
+    }
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
     let node: Node | null
     while ((node = walker.nextNode())) {
-      const text = node as Text
-      const parent = text.parentElement
-      if (!parent || printExcluded(parent) || /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|OPTION)$/.test(parent.tagName)) continue
-      const source = originalText.get(text) || text.data
-      originalText.set(text, source)
-      const leading = source.match(/^\s*/)?.[0] || ''
-      const trailing = source.match(/\s*$/)?.[0] || ''
-      const key = source.trim()
-      const translated = key ? translate(language, key, key) : key
-      if (translated !== key) text.data = `${leading}${translated}${trailing}`
-      else if (text.data !== source) text.data = source
+      updateText(node as Text)
     }
     const elements: Element[] = []
     if (root instanceof Element && root.matches('input, textarea, [title], [aria-label]')) elements.push(root)
     if ('querySelectorAll' in root) elements.push(...Array.from((root as Element).querySelectorAll('input, textarea, [title], [aria-label]')))
-    elements.forEach((element) => {
-      if (printExcluded(element)) return
-      const saved = originalAttributes.get(element) || {}
-      originalAttributes.set(element, saved)
-      attributes.forEach((attribute) => {
-        const value = element.getAttribute(attribute)
-        if (value && !saved[attribute]) saved[attribute] = value
-        const source = saved[attribute]
-        if (source) element.setAttribute(attribute, translate(language, source, source))
-      })
-    })
+    elements.forEach(updateAttributes)
   }
   translateRoot(document.body)
   let frame = 0
-  const pending: Node[] = []
+  const pending = new Set<Node>()
+  const pendingAttributes = new Set<Element>()
   const flush = () => {
     frame = 0
-    const nodes = pending.splice(0)
-    nodes.forEach((node) => translateRoot(node))
+    const roots = [...pending].filter(node => {
+      for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+        if (pending.has(parent)) return false
+      }
+      return true
+    })
+    pending.clear()
+    roots.forEach(translateRoot)
+    pendingAttributes.forEach(element => { if (element.isConnected) updateAttributes(element) })
+    pendingAttributes.clear()
   }
   const observer = new MutationObserver((records) => {
-    records.forEach((record) => record.addedNodes.forEach((node) => pending.push(node)))
-    if (!frame && pending.length) frame = window.requestAnimationFrame(flush)
+    for (const record of records) {
+      if (record.type === 'characterData') {
+        const text = record.target as Text
+        if (translatedNodes.get(text)?.rendered !== text.data) pending.add(text)
+      } else if (record.type === 'attributes') {
+        const element = record.target as Element
+        if (translatedAttributes.get(element)?.get(record.attributeName!)?.rendered !== element.getAttribute(record.attributeName!)) pendingAttributes.add(element)
+      } else record.addedNodes.forEach(node => pending.add(node))
+    }
+    if (!frame && (pending.size || pendingAttributes.size)) frame = window.requestAnimationFrame(flush)
   })
-  observer.observe(document.body, { childList: true, subtree: true })
-  return () => { observer.disconnect(); if (frame) window.cancelAnimationFrame(frame) }
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: attributes })
+  return () => { observer.disconnect(); if (frame) window.cancelAnimationFrame(frame); pending.clear(); pendingAttributes.clear() }
 }

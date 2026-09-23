@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test:reports": "node --test tests/report-regressions.test.mjs",
+    "test:reports": "node --test tests/report-regressions.test.mjs tests/translation-regressions.test.mjs",
+    "test:reports:browser": "node tests/report-translation.browser.mjs",
     "prebuild": "npm run test:reports",
     "dev": "vite",
     "build": "vite build",

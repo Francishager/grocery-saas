@@ -73,7 +73,7 @@ const total = rows => rows.reduce((sum, row) => sum + row.amount, 0);
 
 test.beforeEach(reset);
 
-test('ordinary explicit zero cards remain zero while balancing cards use populated detail rows', () => {
+test('explicit zero balances remain authoritative even with nonzero transaction rows', () => {
   const tree = render({
     summary: { totalSales: 0, cashSales: 0, creditSales: 0, debtCollections: 0, expenses: 0 },
     cashMovement: { cashAtHand: 0, netCashMovement: 0 },
@@ -84,11 +84,8 @@ test('ordinary explicit zero cards remain zero while balancing cards use populat
       { id: 'expense', kind: 'expense', paymentMethod: 'cash', amount: 50 },
     ],
   });
-  for (const label of ['Total Sales', 'Cash Sales', 'Credit Sales', 'Debt Collections', 'Expenses']) assert.equal(amount(tree, label), 0, label);
-  assert.equal(amount(tree, 'Cash at Hand'), 550);
-  assert.equal(amount(tree, 'Net Cash Movement'), 550);
-  assert.equal(amount(tree, 'Gross Profit'), 400);
-  assert.equal(amount(tree, 'Net Profit'), 350);
+  for (const label of ['Total Sales', 'Cash Sales', 'Credit Sales', 'Debt Collections', 'Expenses',
+    'Cash at Hand', 'Net Cash Movement', 'Gross Profit', 'Net Profit']) assert.equal(amount(tree, label), 0, label);
 });
 
 test('missing business header and an empty response cannot crash the report', () => {
