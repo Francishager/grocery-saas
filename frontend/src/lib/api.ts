@@ -243,7 +243,7 @@ export const authApi = {
   logout: () =>
     api.post<{ message: string }>('/api/auth/logout'),
 
-  updateProfile: (data: { fname?: string; lname?: string; phone?: string }) =>
+  updateProfile: (data: { fname?: string; lname?: string; phone?: string; preferredLanguage?: string }) =>
     api.put<{ message: string; user: any }>('/api/auth/profile', { body: data }),
 
   changePassword: (currentPassword: string, newPassword: string) =>

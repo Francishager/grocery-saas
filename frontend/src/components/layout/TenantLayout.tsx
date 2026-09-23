@@ -5,6 +5,7 @@ import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users
 import { useState, useEffect, type ComponentType } from 'react'
 import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
@@ -300,6 +301,7 @@ const settingsSubItems = [
 ]
 
 export function TenantLayout() {
+  const { t } = useLanguage()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [reportsExpanded, setReportsExpanded] = useState(false)
   const [settingsExpanded, setSettingsExpanded] = useState(false)
@@ -515,7 +517,7 @@ export function TenantLayout() {
             {(() => { const dashItem = visibleNavItems.find(i => i.feature === 'dashboard') || navItems[0]; const DashIcon = dashItem.icon; return (
             <NavLink to={dashItem.to} onClick={() => setSidebarOpen(false)}
               className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
-              <DashIcon className="h-6 w-6 lg:h-5 lg:w-5" />{dashItem.label}
+<DashIcon className="h-6 w-6 lg:h-5 lg:w-5" />{t(dashItem.label)}
             </NavLink>
             ) })()}
           </div>
@@ -529,7 +531,7 @@ export function TenantLayout() {
                     className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', inventoryExpanded || location.pathname.startsWith('/tenant/inventory') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
                   >
                     <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
-                    <span className="flex-1 text-left">{item.label}</span>
+              <span className="flex-1 text-left">{t(item.label)}</span>
                     {inventoryExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                   </button>
                   {inventoryExpanded && (
@@ -537,7 +539,7 @@ export function TenantLayout() {
                       {visibleInventorySubItems.map(sub => (
                         <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
                           className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
-                          <sub.icon className="h-4 w-4" />{sub.label}
+<sub.icon className="h-4 w-4" />{t(sub.label)}
                         </NavLink>
                       ))}
                     </div>
@@ -550,7 +552,7 @@ export function TenantLayout() {
                     className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', accountingExpanded || location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
                   >
                     <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
-                    <span className="flex-1 text-left">{item.label}</span>
+<span className="flex-1 text-left">{t(item.label)}</span>
                     {accountingExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                   </button>
                   {accountingExpanded && (
@@ -652,7 +654,7 @@ export function TenantLayout() {
                               className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white"
                             >
                               <cat.icon className="h-4 w-4" />
-                              <span className="flex-1 text-left">{cat.label}</span>
+<span className="flex-1 text-left">{t(cat.label)}</span>
                               {catExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                             </button>
                             {catExpanded && (
@@ -663,7 +665,7 @@ export function TenantLayout() {
                                     onClick={() => selectReport(rpt.id)}
                                     className={cn('flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors', activeReportId === rpt.id ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}
                                   >
-                                    {rpt.label}
+{t(rpt.label)}
                                   </button>
                                 ))}
                               </div>
@@ -701,7 +703,7 @@ export function TenantLayout() {
                                 )}
                               >
                                 <sub.icon className="h-4 w-4" />
-                                <span className="flex-1 text-left">{sub.label}</span>
+<span className="flex-1 text-left">{t(sub.label)}</span>
                                 {hrAccountingExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                               </button>
                               {hrAccountingExpanded && (
@@ -709,7 +711,7 @@ export function TenantLayout() {
                                   {childItems.map((child: any) => (
                                     <NavLink key={child.to} to={child.to} onClick={() => setSidebarOpen(false)}
                                       className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive || (child.to.endsWith('/overview') && location.pathname === '/tenant/hr/accounting') ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
-                                      <child.icon className="h-4 w-4" />{child.label}
+<child.icon className="h-4 w-4" />{t(child.label)}
                                     </NavLink>
                                   ))}
                                 </div>
@@ -755,7 +757,7 @@ export function TenantLayout() {
                     const isExact = fullPath === item.to || (isActive && !item.to.includes('?'))
                     return cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isExact ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')
                   }}>
-                  <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />{item.label}
+<item.icon className="h-6 w-6 lg:h-5 lg:w-5" />{t(item.label)}
                 </NavLink>
               )
             )}

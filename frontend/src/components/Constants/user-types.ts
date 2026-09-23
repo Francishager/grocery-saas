@@ -52,9 +52,12 @@ export const genderOptions = [
 // Language options
 export const languageOptions = [
   { value: 'en', label: 'English' },
-  { value: 'sw', label: 'Swahili' },
+  { value: 'sw', label: 'Kiswahili' },
   { value: 'lg', label: 'Luganda' },
-  { value: 'fr', label: 'French' },
+  { value: 'nyn', label: 'Runyankole / Nyankole' },
+  { value: 'rw', label: 'Kinyarwanda' },
+  { value: 'nyo', label: 'Runyoro / Rutooro' },
+  { value: 'ach', label: 'Acholi' },
 ]
 
 // Timezone options

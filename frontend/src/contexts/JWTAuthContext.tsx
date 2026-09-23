@@ -10,6 +10,7 @@ export interface User {
   fname?: string
   lname?: string
   phone?: string
+  preferredLanguage?: string
   role: string
   permissions: string[]
   workingHoursAccess?: { restricted: boolean; allowed?: boolean; timezone?: string }

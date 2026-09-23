@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { User, Camera, Lock, Save, Loader2 } from 'lucide-react'
 import { authApi } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,6 +11,7 @@ import { useToast } from '@/hooks/use-toast'
 
 export default function UserProfilePage() {
   const { user, updateUser } = useJWTAuth()
+  const { language, languages, setLanguage, t } = useLanguage()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -65,7 +67,7 @@ export default function UserProfilePage() {
           avatar: result.user.avatar,
         })
       }
-      toast({ title: 'Profile updated' })
+      toast({ title: t('Profile updated') })
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Failed to update', description: err?.message })
     } finally {
@@ -160,6 +162,18 @@ export default function UserProfilePage() {
           <Button onClick={handleSaveProfile} disabled={saving}>
             {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><Save className="h-4 w-4 mr-2" />Save Changes</>}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Change Password */}
+      <Card>
+        <CardHeader><CardTitle>{t('Language')}</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="preferred-language">{t('Preferred Language')}</Label>
+          <select id="preferred-language" value={language} onChange={async (event) => { try { await setLanguage(event.target.value as any); toast({ title: t('Language updated') }) } catch (err: any) { toast({ variant: 'destructive', title: t('Failed to update'), description: err?.message }) } }} className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+            {languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          <p className="text-xs text-muted-foreground">{t('Bundled translations are free and saved to your account.')}</p>
         </CardContent>
       </Card>
 

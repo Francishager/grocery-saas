@@ -390,6 +390,7 @@ model User {
   lname              String?
   phone              String?
   avatar             String?
+  preferredLanguage   String             @default("en")
   role               UserRole           @default(attendant)
   discountPermission DiscountPermission @default(none)
 

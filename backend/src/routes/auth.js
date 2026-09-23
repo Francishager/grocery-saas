@@ -20,6 +20,7 @@ cloudinary.v2.config({
 });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+const supportedLanguages = new Set(["en", "sw", "lg", "nyn", "rw", "nyo", "ach"]);
 
 function primaryBranchId(user) {
   const primary = user.branches?.find((item) => item.isPrimary) || user.branches?.[0];
@@ -36,6 +37,7 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     name: `${user.fname || ""} ${user.lname || ""}`.trim(),
     fname: user.fname,
     lname: user.lname,
+    preferredLanguage: supportedLanguages.has(user.preferredLanguage) ? user.preferredLanguage : "en",
     avatar: user.avatar || null,
     role: user.role,
     tenantId: user.tenantId,
@@ -290,12 +292,18 @@ router.post("/reset-password", async (req, res) => {
 // Update profile (name, phone, avatar)
 router.put("/profile", authenticateToken, async (req, res) => {
   try {
-    const { fname, lname, phone, avatar } = req.body;
+    const { fname, lname, phone, avatar, preferredLanguage } = req.body;
     const data = {};
     if (fname !== undefined) data.fname = fname;
     if (lname !== undefined) data.lname = lname;
     if (phone !== undefined) data.phone = phone || null;
     if (avatar !== undefined) data.avatar = avatar || null;
+    if (preferredLanguage !== undefined) {
+      if (!supportedLanguages.has(String(preferredLanguage))) {
+        return res.status(400).json({ error: "Unsupported language" });
+      }
+      data.preferredLanguage = String(preferredLanguage);
+    }
 
     const user = await prisma.user.update({
       where: { id: req.user.id },
