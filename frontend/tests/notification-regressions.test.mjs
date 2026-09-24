@@ -2,9 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import ts from 'typescript';
 
+const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../src/', import.meta.url));
+const notificationSource = readFileSync(root + '/lib/notificationDisplay.ts', 'utf8');
+const notificationModule = { exports: {} };
+new Function('exports', 'require', 'module', ts.transpileModule(notificationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(notificationModule.exports, require, notificationModule);
+const { notificationActionLink } = notificationModule.exports;
 function sourceFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const path = dir + '/' + entry.name;
@@ -46,4 +52,11 @@ test('stock alerts deep-link to a specific product stock-in form', () => {
   assert.match(backend, /productId=\$\{encodeURIComponent\(String\(product\.id\)\)\}&stockAction=stock_in/);
   assert.match(inventory, /await inventoryApi\.get\(productId\)/);
   assert.match(inventory, /openStockAdjust\(item, requestedAction\)/);
+});
+
+test('stock detail action is only available to users with stock-adjustment permission', () => {
+  const link = '/tenant/inventory/products?productId=product-1&stockAction=stock_in';
+  assert.equal(notificationActionLink(link, false), undefined);
+  assert.equal(notificationActionLink(link, true), link);
+  assert.equal(notificationActionLink('/tenant/reports', false), '/tenant/reports');
 });

@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { usePushNotifications } from '@/lib/usePushNotifications'
-import { notificationKey, notificationLink, sanitizeNotificationText } from '@/lib/notificationDisplay'
+import { notificationActionLink, notificationKey, notificationLink, sanitizeNotificationText } from '@/lib/notificationDisplay'
 import { getNotificationVisual } from '@/lib/notificationVisuals'
 import { toast } from '@/hooks/use-toast'
 import { ToastAction } from '@/components/ui/toast'
@@ -71,7 +71,7 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false)
   const online = useOnlineStatus()
   const navigate = useNavigate()
-  const { user } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const bellRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -102,7 +102,7 @@ export function NotificationBell() {
     const key = notificationKey(item)
     if (announcedRef.current.has(key)) return
     announcedRef.current.add(key)
-    const link = notificationLink(item.link)
+    const link = notificationActionLink(item.link, hasPermission('canAdjustStock'))
     toast({
       title: sanitizeNotificationText(item.title, 'Notification'),
       description: sanitizeNotificationText(item.message),
@@ -111,7 +111,7 @@ export function NotificationBell() {
       duration: item.type === 'sale' ? 20000 : 10000,
       action: link ? <ToastAction altText="Open notification details" onClick={() => navigate(link)}>Open details</ToastAction> : undefined,
     })
-  }, [navigate])
+  }, [hasPermission, navigate])
 
   // Auto-register FCM token when user is present and permission is granted
   useEffect(() => {
@@ -397,7 +397,7 @@ export function NotificationBell() {
         createdAt: detail.createdAt || new Date().toISOString(),
         source: 'immediate',
         metadata: detail.metadata,
-        link: notificationLink(detail.link),
+        link: notificationActionLink(detail.link, hasPermission('canAdjustStock')),
       }
       const key = notificationKey(item)
       announce(item)
@@ -406,7 +406,7 @@ export function NotificationBell() {
     }
     window.addEventListener('jibusales:notification', handleImmediateNotification)
     return () => window.removeEventListener('jibusales:notification', handleImmediateNotification)
-  }, [announce, user?.id])
+  }, [announce, hasPermission, user?.id])
 
   const playNotificationSound = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -488,8 +488,9 @@ export function NotificationBell() {
   // Handle notification click — navigate if link
   const handleNotificationClick = (n: NotificationItem) => {
     if (!n.isRead) handleMarkRead(n.id)
-    if (n.link) {
-      navigate(n.link)
+    const link = notificationActionLink(n.link, hasPermission('canAdjustStock'))
+    if (link) {
+      navigate(link)
       setOpen(false)
     }
   }
@@ -567,6 +568,7 @@ export function NotificationBell() {
               allNotifications.map((n) => {
                 const Icon = TYPE_ICONS[n.type] || Bell
                 const colorClass = getNotificationVisual(n.type).color
+                const actionLink = notificationActionLink(n.link, hasPermission('canAdjustStock'))
                 return (
                   <div
                     key={n.id}
@@ -602,7 +604,7 @@ export function NotificationBell() {
                     </div>
 
                     <div className="flex shrink-0 items-center gap-1">
-                      {n.link && <button type="button" onClick={event => { event.stopPropagation(); handleNotificationClick(n) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open details" aria-label="Open notification details"><ArrowUpRight className="h-4 w-4" /></button>}
+                        {actionLink && <button type="button" onClick={event => { event.stopPropagation(); handleNotificationClick(n) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open details" aria-label="Open notification details"><ArrowUpRight className="h-4 w-4" /></button>}
                       {!n.isRead && <button type="button" onClick={event => { event.stopPropagation(); handleMarkRead(n.id) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-green-600" title="Mark as read" aria-label="Mark notification as read"><Check className="h-4 w-4" /></button>}
                     </div>
                   </div>

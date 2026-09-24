@@ -16,6 +16,15 @@ export function notificationLink(value: unknown): string | undefined {
   return value
 }
 
+export function notificationActionLink(value: unknown, canAdjustStock: boolean): string | undefined {
+  const link = notificationLink(value)
+  if (!link) return undefined
+  const [path, query = ''] = link.split('?', 2)
+  const params = new URLSearchParams(query)
+  if (path === '/tenant/inventory/products' && params.has('stockAction') && !canAdjustStock) return undefined
+  return link
+}
+
 export function notificationKey(item: { id: string; type?: string; title?: string; metadata?: Record<string, any> }): string {
   const sale = item.type === 'sale' || /^(new sale recorded|sale completed!?|sale recorded offline)$/i.test(item.title || '')
   const reference = item.metadata?.saleId || item.metadata?.receiptNo

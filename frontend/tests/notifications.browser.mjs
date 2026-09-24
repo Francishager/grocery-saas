@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const assets = join(root, 'dist/assets');
 const stylesheet = readdirSync(assets).find(name => name.startsWith('index-') && name.endsWith('.css'));
 const stubs = {
-  JWTAuthContext: "const user = {id:'staff',role:'staff',tenantId:'tenant',name:'Test Staff'}; const hasPermission = () => true; export const useJWTAuth = () => ({user,hasPermission});",
+  JWTAuthContext: "const user = {id:'staff',role:'staff',tenantId:'tenant',name:'Test Staff'}; const hasPermission = permission => permission!=='canAdjustStock'||window.fixture.canAdjustStock; export const useJWTAuth = () => ({user,hasPermission});",
   featureAccessService: "const hasFeature = () => false; export const useFeatureAccess = () => ({hasFeature});",
   'db/hooks': "export const useOnlineStatus = () => window.fixture.online;",
   'db/hybrid': "export const getLocalNotifications = async () => []; export const getLocalProducts = async () => window.fixture.products; export const getLocalSales = async () => []; export const getLocalSettings = async () => ({name:'Test Business'});",
@@ -34,7 +34,7 @@ const bundle = await build({
   stdin: { resolveDir: root, loader: 'tsx', contents: [
     "import React from 'react'; import {createRoot} from 'react-dom/client'; import {MemoryRouter} from 'react-router-dom';",
     "import Sales from './src/pages/SalesPage'; import {NotificationBell} from './src/components/NotificationBell'; import {Toaster} from './src/components/ui/toaster'; import {toast} from './src/hooks/use-toast';",
-    "window.fixture={online:true,notifications:[],reads:[],checkouts:0,fail:false,products:[{id:'product',product_name:'Test Rice',unit_price:12500,cost_price:10000,quantity:10,categoryId:'rice',itemType:'product'}]};",
+    "window.fixture={online:true,notifications:[],reads:[],checkouts:0,fail:false,canAdjustStock:true,products:[{id:'product',product_name:'Test Rice',unit_price:12500,cost_price:10000,quantity:10,categoryId:'rice',itemType:'product'}]};",
     "window.nativeCalls=0; const permission=new URLSearchParams(location.search).get('permission')||'denied';",
     "window.Notification=class { static permission=permission; static requestPermission=async()=>permission; constructor(){window.nativeCalls++;throw Error('Native foreground alert must not run')}};",
     "const interval=window.setInterval; window.setInterval=(fn,ms,...args)=>{if(ms===30000)window.pollNotifications=fn;return interval(fn,ms,...args)};",
@@ -97,6 +97,19 @@ try {
     assert.deepEqual(await page.evaluate(() => window.fixture.reads), ['/api/notifications/database-notification-1/read']);
     await page.getByRole('button', { name: 'Notifications', exact: true }).click();
     console.log('PASS: immediate/poll/push sale is deduplicated and read uses the real server ID');
+
+    await page.evaluate(async () => {
+      window.fixture.notifications.push({id:'stock-detail-1',title:'Low stock alert',message:'Test Rice has 2 bags left.',type:'warning',isRead:false,createdAt:new Date().toISOString(),metadata:{link:'/tenant/inventory/products?productId=product&stockAction=stock_in'}});
+      await window.pollNotifications();
+    });
+    await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+    const stockRow = page.getByText('Low stock alert', { exact: true }).last().locator('xpath=../../..');
+    await stockRow.getByRole('button', { name: 'Open notification details' }).waitFor();
+    await page.evaluate(async () => { window.fixture.canAdjustStock = false; await window.pollNotifications(); });
+    await stockRow.getByRole('button', { name: 'Open notification details' }).waitFor({ state: 'detached' });
+    assert.equal(await stockRow.getByRole('button', { name: 'Open notification details' }).count(), 0);
+    await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+    console.log('PASS: stock-form Open details action hides immediately when stock permission is removed');
 
     await page.evaluate(async () => {
       window.fixture.notifications.push({id:'stock-1',title:'Low stock alert',message:'Test Rice has 2 bags left. https://example.com/stock /tenant/inventory/products',type:'low_stock',isRead:false,createdAt:new Date().toISOString()});
