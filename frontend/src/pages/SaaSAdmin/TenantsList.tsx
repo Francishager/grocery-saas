@@ -1,3 +1,4 @@
+import { appConfirm, appNotify } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { usePagination } from '@/hooks/usePagination'
@@ -108,7 +109,7 @@ export const TenantsList: React.FC<TenantsListProps> = ({
       ? `Are you sure you want to suspend ${tenant.name}?`
       : `Are you sure you want to activate ${tenant.name}?`
     
-    if (!confirm(confirmMsg)) return
+    if (!(await appConfirm(confirmMsg))) return
     
     setActionLoading(tenant.id)
     try {
@@ -119,7 +120,7 @@ export const TenantsList: React.FC<TenantsListProps> = ({
       }
       fetchTenants()
     } catch (err) {
-      alert(err instanceof Error ? err.message : `Failed to ${action} tenant`)
+      appNotify(err instanceof Error ? err.message : `Failed to ${action} tenant`)
     } finally {
       setActionLoading(null)
     }

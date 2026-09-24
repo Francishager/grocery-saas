@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -290,7 +291,7 @@ export default function TransactionAccountsPage() {
       toast({ variant: 'destructive', title: 'You do not have permission to deactivate transaction accounts' })
       return
     }
-    if (!confirm(`Deactivate ${account.name}? It will no longer be available for new transactions.`)) return
+    if (!(await appConfirm(`Deactivate ${account.name}? It will no longer be available for new transactions.`))) return
 
     try {
       const res = await apiFetch(`/api/expenses/cash-accounts/${account.id}`, { method: 'DELETE' })

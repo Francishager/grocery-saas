@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -207,7 +208,7 @@ export default function LeaveRequestPage() {
   }
 
   const handleCancel = async (requestId: string) => {
-    if (!confirm('Cancel this leave request?')) return
+    if (!(await appConfirm('Cancel this leave request?'))) return
     try {
       const res = await apiFetch(`/api/hr/leave-requests/${requestId}`, {
         method: 'DELETE',

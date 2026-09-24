@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
@@ -588,7 +589,7 @@ export default function EmployeeManagementPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this employee? This action cannot be undone.')) return
+    if (!(await appConfirm('Are you sure you want to delete this employee? This action cannot be undone.'))) return
 
     try {
       const res = await apiFetch(`/api/hr/employees/${id}`, { method: 'DELETE' })

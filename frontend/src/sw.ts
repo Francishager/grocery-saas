@@ -5,6 +5,7 @@ import { registerRoute } from 'workbox-routing'
 import { CacheFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { CacheableResponsePlugin } from 'workbox-cacheable-response'
+import { sanitizeNotificationText, notificationLink } from './lib/notificationDisplay'
 
 declare let self: ServiceWorkerGlobalScope
 
@@ -43,8 +44,8 @@ const messaging = getMessaging()
 // Handle background messages (when app is closed or screen locked)
 onBackgroundMessage(messaging, (payload) => {
   const { title, body, icon, badge, tag, data } = payload.notification || {}
-  const notificationTitle = title || 'jibuSales'
-  const cleanNotificationBody = String(body || '').replace(/https?:\/\/\S+/gi, '').replace(/www\.\S+/gi, '').trim()
+  const notificationTitle = sanitizeNotificationText(title || payload.data?.title, 'JibuSales')
+  const cleanNotificationBody = sanitizeNotificationText(body || payload.data?.body)
   const notificationOptions: NotificationOptions = {
     body: cleanNotificationBody,
     icon: icon || '/img/jibusales_logo.png',
@@ -61,7 +62,7 @@ onBackgroundMessage(messaging, (payload) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
-  const urlToOpen = (event.notification.data && event.notification.data.url) || '/'
+  const urlToOpen = notificationLink(event.notification.data?.link || event.notification.data?.url) || '/tenant/dashboard'
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {

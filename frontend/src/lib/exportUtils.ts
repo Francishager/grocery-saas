@@ -1,3 +1,4 @@
+import { appNotify } from '@/lib/appFeedback'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -282,7 +283,7 @@ export function printReport(
 
   const printWindow = window.open('', '_blank', 'width=900,height=700')
   if (!printWindow) {
-    alert('Please allow popups to print reports')
+    appNotify('Please allow popups to print reports')
     return
   }
 

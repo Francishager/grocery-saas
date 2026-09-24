@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useEffect, useState } from 'react'
 import {
   Dialog,
@@ -139,7 +140,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
         canManageOpeningBalances &&
         Number(formData.openingBalance || 0) !== Number(initialData?.openingBalance || 0)
       )
-      if (openingBalanceChanged && !window.confirm('Changing this opening balance will adjust the current supplier balance. Continue?')) {
+      if (openingBalanceChanged && !(await appConfirm('Changing this opening balance will adjust the current supplier balance. Continue?'))) {
         setLoading(false)
         return
       }

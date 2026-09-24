@@ -1,3 +1,4 @@
+import { appConfirm, appNotify } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
@@ -39,13 +40,13 @@ export const InvitationsList: React.FC = () => {
   }, [statusFilter, search])
 
   const handleCancel = async (id: string) => {
-    if (!confirm('Are you sure you want to cancel this invitation?')) return
+    if (!(await appConfirm('Are you sure you want to cancel this invitation?'))) return
     setActionLoading(id)
     try {
       await InviteService.cancel(id)
       fetchInvitations()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to cancel invitation')
+      appNotify(err instanceof Error ? err.message : 'Failed to cancel invitation')
     } finally {
       setActionLoading(null)
     }
@@ -56,13 +57,13 @@ export const InvitationsList: React.FC = () => {
     try {
       const result = await InviteService.resend(id)
       if (result.emailSent === false) {
-        alert(`Invitation updated, but email delivery failed.${result.otpCode ? ` Share this OTP manually: ${result.otpCode}` : ''}`)
+        appNotify(`Invitation updated, but email delivery failed.${result.otpCode ? ` Share this OTP manually: ${result.otpCode}` : ''}`)
       } else {
-        alert(result.message || 'Invitation resent successfully')
+        appNotify(result.message || 'Invitation resent successfully')
       }
       fetchInvitations()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to resend invitation')
+      appNotify(err instanceof Error ? err.message : 'Failed to resend invitation')
     } finally {
       setActionLoading(null)
     }

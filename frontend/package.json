@@ -6,7 +6,9 @@
   "scripts": {
     "test:reports": "node --test tests/report-regressions.test.mjs tests/translation-regressions.test.mjs",
     "test:reports:browser": "node tests/report-translation.browser.mjs",
-    "prebuild": "npm run test:reports",
+    "test:notifications": "node --test tests/notification-regressions.test.mjs",
+    "test:notifications:browser": "node tests/notifications.browser.mjs",
+    "prebuild": "npm run test:reports && npm run test:notifications",
     "dev": "vite",
     "build": "vite build",
     "deploy": "wrangler pages deploy dist",

@@ -1,3 +1,4 @@
+import { appNotify } from '@/lib/appFeedback'
 ﻿import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect, useMemo } from 'react'
 import { usePagination } from '@/hooks/usePagination'
@@ -109,8 +110,8 @@ export const SubscriptionsPage: React.FC = () => {
       if (autoEnd) body.autoEnd = true
       const res = await apiFetch(`/api/admin/subscriptions/${selected.id}`, { method: 'PUT', body: JSON.stringify(body) })
       if (res.ok) { fetchData(); setSelected(null) }
-      else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to update subscription') }
-    } catch { alert('Request failed') }
+      else { const d = await res.json().catch(() => ({})); appNotify(d.error || 'Failed to update subscription') }
+    } catch { appNotify('Request failed') }
     setChanging(null)
   }
 

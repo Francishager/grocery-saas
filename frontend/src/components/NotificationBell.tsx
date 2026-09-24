@@ -10,19 +10,22 @@ import { useNavigate } from 'react-router-dom'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { usePushNotifications } from '@/lib/usePushNotifications'
-import { sanitizeNotificationText } from '@/lib/notificationDisplay'
+import { notificationKey, notificationLink, sanitizeNotificationText } from '@/lib/notificationDisplay'
 import { getNotificationVisual } from '@/lib/notificationVisuals'
+import { toast } from '@/hooks/use-toast'
+import { ToastAction } from '@/components/ui/toast'
 
 interface NotificationItem {
   id: string
   title: string
   message: string
-  type: 'info' | 'success' | 'warning' | 'error' | 'low_stock' | 'out_of_stock' | 'overdue_rental' | 'overdue_payable' | 'leave_request'
+  type: string
   isRead: boolean
   createdAt: string
   channel?: string
   link?: string
-  source?: 'api' | 'local'
+  source?: 'api' | 'local' | 'immediate'
+  metadata?: Record<string, any>
 }
 
 const TYPE_ICONS: Record<string, typeof Bell> = {
@@ -64,7 +67,7 @@ function timeAgo(date: string | Date): string {
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
-  const [unreadCount, setUnreadCount] = useState(0)
+  const unreadCount = notifications.filter(n => !n.isRead).length
   const [loading, setLoading] = useState(false)
   const online = useOnlineStatus()
   const navigate = useNavigate()
@@ -72,13 +75,43 @@ export function NotificationBell() {
   const { hasFeature } = useFeatureAccess()
   const bellRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const previousUnreadCountRef = useRef(0)
+  const announcedRef = useRef(new Set<string>())
+  const readKeysRef = useRef(new Set<string>())
+  const immediateRef = useRef(new Map<string, NotificationItem>())
+  const startedAtRef = useRef(Date.now())
+  const loadedRef = useRef(false)
+  const userIdRef = useRef(user?.id)
   const permissionPromptedRef = useRef(false)
   const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
   const canUseBrowserNotifications = hasFeature('communication.notifications')
 
   // FCM push notifications
-  const { permission: pushPermission, registerToken, foregroundNotifications, dismissNotification } = usePushNotifications()
+  const { permission: pushPermission, registerToken } = usePushNotifications()
+
+  useEffect(() => {
+    userIdRef.current = user?.id
+    announcedRef.current.clear()
+    readKeysRef.current.clear()
+    immediateRef.current.clear()
+    loadedRef.current = false
+    startedAtRef.current = Date.now()
+    setNotifications([])
+  }, [user?.id])
+
+  const announce = useCallback((item: NotificationItem) => {
+    const key = notificationKey(item)
+    if (announcedRef.current.has(key)) return
+    announcedRef.current.add(key)
+    const link = notificationLink(item.link)
+    toast({
+      title: sanitizeNotificationText(item.title, 'Notification'),
+      description: sanitizeNotificationText(item.message),
+      notificationType: item.type,
+      variant: ['sale', 'success', 'payment'].includes(item.type) ? 'success' : item.type === 'error' ? 'destructive' : 'default',
+      duration: item.type === 'sale' ? 20000 : 10000,
+      action: link ? <ToastAction altText="Open notification details" onClick={() => navigate(link)}>Open details</ToastAction> : undefined,
+    })
+  }, [navigate])
 
   // Auto-register FCM token when user is present and permission is granted
   useEffect(() => {
@@ -95,7 +128,8 @@ export function NotificationBell() {
       const data = await res.json()
       const arr = Array.isArray(data) ? data : (data.notifications || [])
       return arr.map((n: any) => ({
-        id: n.metadata?.receiptNo ? ('sale:' + n.metadata.receiptNo) : n.id,
+        id: n.id,
+        metadata: n.metadata,
         title: sanitizeNotificationText(n.title, 'Notification'),
         message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
@@ -103,7 +137,7 @@ export function NotificationBell() {
         createdAt: n.createdAt || new Date().toISOString(),
         channel: n.channel,
         source: 'api' as const,
-        link: typeof n.metadata?.link === 'string' && n.metadata.link.startsWith('/tenant/') ? n.metadata.link : undefined,
+        link: notificationLink(n.metadata?.link),
       }))
     } catch {
       return []
@@ -115,7 +149,8 @@ export function NotificationBell() {
     try {
       const local = await getLocalNotifications()
       return local.map((n: any) => ({
-        id: n.metadata?.receiptNo ? ('sale:' + n.metadata.receiptNo) : n.id,
+        id: n.id,
+        metadata: n.metadata,
         title: sanitizeNotificationText(n.title, 'Notification'),
         message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
@@ -276,6 +311,8 @@ export function NotificationBell() {
 
   // Load all notifications
   const loadNotifications = useCallback(async () => {
+    const loadingForUser = user?.id
+    if (!loadingForUser) return
     setLoading(true)
     try {
       let apiNotifs: NotificationItem[] = []
@@ -298,77 +335,78 @@ export function NotificationBell() {
 
       // Add API notifications first
       for (const n of apiNotifs) {
-        mergedMap.set(n.id, n)
+        mergedMap.set(notificationKey(n), n)
       }
 
       // Add job notifications (these are always fresh)
       for (const n of jobNotifs) {
-        if (!mergedMap.has(n.id)) {
-          mergedMap.set(n.id, n)
+        if (!mergedMap.has(notificationKey(n))) {
+          mergedMap.set(notificationKey(n), n)
         }
       }
 
       // Add remaining local notifications
       for (const n of localNotifs) {
-        if (!mergedMap.has(n.id)) {
-          mergedMap.set(n.id, n)
+        if (!mergedMap.has(notificationKey(n))) {
+          mergedMap.set(notificationKey(n), n)
         }
       }
 
+      if (userIdRef.current !== loadingForUser) return
+      for (const [key, item] of immediateRef.current) {
+        if (mergedMap.has(key)) immediateRef.current.delete(key)
+        else mergedMap.set(key, item)
+      }
       const merged = Array.from(mergedMap.values()).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
       const withReminder = await addDailyReminderIfNeeded(merged)
+      if (userIdRef.current !== loadingForUser) return
 
-      setNotifications(withReminder)
-      setUnreadCount(withReminder.filter((n) => !n.isRead).length)
+      for (const item of withReminder) {
+        const key = notificationKey(item)
+        if (!item.isRead && (loadedRef.current || new Date(item.createdAt).getTime() >= startedAtRef.current)) announce(item)
+        else announcedRef.current.add(key)
+      }
+      loadedRef.current = true
+      setNotifications(withReminder.map(item => ({ ...item, isRead: item.isRead || readKeysRef.current.has(notificationKey(item)) })))
     } catch {
       // ignore
     } finally {
       setLoading(false)
     }
-  }, [online, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
+  }, [online, user?.id, announce, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
 
   // Initial load + polling plus immediate events emitted by completed workflows.
   useEffect(() => {
     loadNotifications()
     const interval = setInterval(loadNotifications, 30000)
+    return () => clearInterval(interval)
+  }, [loadNotifications])
+
+  useEffect(() => {
     const handleImmediateNotification = (event: Event) => {
       const detail = (event as CustomEvent).detail || {}
+      if (!user?.id) return
       const item: NotificationItem = {
         id: String(detail.id || ('local:' + Date.now())),
         title: sanitizeNotificationText(detail.title, 'Notification'),
         message: sanitizeNotificationText(detail.message),
         type: String(detail.type || 'info'),
         isRead: false,
-        createdAt: new Date().toISOString(),
-        source: 'local',
-        link: typeof detail.link === 'string' && detail.link.startsWith('/tenant/') ? detail.link : undefined,
+        createdAt: detail.createdAt || new Date().toISOString(),
+        source: 'immediate',
+        metadata: detail.metadata,
+        link: notificationLink(detail.link),
       }
-      setNotifications(prev => [item, ...prev.filter(existing => existing.id !== item.id)])
-      setUnreadCount(prev => prev + 1)
+      const key = notificationKey(item)
+      announce(item)
+      immediateRef.current.set(key, item)
+      setNotifications(prev => prev.some(existing => notificationKey(existing) === key) ? prev : [item, ...prev])
     }
     window.addEventListener('jibusales:notification', handleImmediateNotification)
-    return () => {
-      clearInterval(interval)
-      window.removeEventListener('jibusales:notification', handleImmediateNotification)
-    }
-  }, [loadNotifications])
-
-  useEffect(() => {
-    if (unreadCount > previousUnreadCountRef.current && unreadCount > 0) {
-      playNotificationSound()
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        const latest = notifications.find((n) => !n.isRead)
-        if (latest) {
-          try {
-            new Notification(latest.title, { body: latest.message, tag: latest.id })
-          } catch {}
-        }
-      }
-    }
-    previousUnreadCountRef.current = unreadCount
-  }, [notifications, unreadCount])
+    return () => window.removeEventListener('jibusales:notification', handleImmediateNotification)
+  }, [announce, user?.id])
 
   const playNotificationSound = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -414,22 +452,24 @@ export function NotificationBell() {
 
   // Mark single as read
   const handleMarkRead = async (id: string) => {
+    const item = notifications.find(n => n.id === id)
+    if (!item || item.isRead) return
+    readKeysRef.current.add(notificationKey(item))
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
-    setUnreadCount(prev => Math.max(0, prev - 1))
 
     // Update local DB
     try { await db.notifications.update(id, { isRead: true }) } catch {}
 
     // Push to API if online and it's an API notification
-    if (online && !id.startsWith('job_')) {
+    if (online && item.source === 'api') {
       try { await apiFetch(`/api/notifications/${id}/read`, { method: 'PUT' }) } catch {}
     }
   }
 
   // Mark all as read
   const handleMarkAllRead = async () => {
+    notifications.forEach(item => readKeysRef.current.add(notificationKey(item)))
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
-    setUnreadCount(0)
 
     // Update local DB
     try {
@@ -454,17 +494,7 @@ export function NotificationBell() {
     }
   }
 
-  const pushNotifs: NotificationItem[] = foregroundNotifications.map((n) => ({
-    id: n.id,
-    title: sanitizeNotificationText(n.title, 'Notification'),
-    message: sanitizeNotificationText(n.body),
-    type: 'info',
-    isRead: false,
-    createdAt: new Date(n.timestamp).toISOString(),
-    link: n.data?.url,
-    source: 'local',
-  }))
-  const allNotifications = [...pushNotifs, ...notifications]
+  const allNotifications = notifications
 
   return (
     <div ref={bellRef} className="relative">
@@ -554,12 +584,12 @@ export function NotificationBell() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-semibold">{n.title}</p>
+                        <p className="break-words text-sm font-semibold">{sanitizeNotificationText(n.title, 'Notification')}</p>
                         {!n.isRead && (
                           <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />
                         )}
                       </div>
-                      <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{n.message}</p>
+                      <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{sanitizeNotificationText(n.message)}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-[11px] text-muted-foreground/70">{timeAgo(n.createdAt)}</p><span className="text-[10px] font-medium text-muted-foreground/70">{getNotificationVisual(n.type).label}</span>
                         {n.source === 'local' && !n.id.startsWith('job_') && (
@@ -571,9 +601,9 @@ export function NotificationBell() {
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      {n.link && <button type="button" onClick={() => handleNotificationClick(n)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open details" aria-label="Open notification details"><ArrowUpRight className="h-4 w-4" /></button>}
-                      {!n.isRead && <button type="button" onClick={() => handleMarkRead(n.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-green-600" title="Mark as read" aria-label="Mark notification as read"><Check className="h-4 w-4" /></button>}
+                    <div className="flex shrink-0 items-center gap-1">
+                      {n.link && <button type="button" onClick={event => { event.stopPropagation(); handleNotificationClick(n) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open details" aria-label="Open notification details"><ArrowUpRight className="h-4 w-4" /></button>}
+                      {!n.isRead && <button type="button" onClick={event => { event.stopPropagation(); handleMarkRead(n.id) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-green-600" title="Mark as read" aria-label="Mark notification as read"><Check className="h-4 w-4" /></button>}
                     </div>
                   </div>
                 )

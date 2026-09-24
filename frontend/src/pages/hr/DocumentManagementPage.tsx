@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -173,7 +174,7 @@ export default function DocumentManagementPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this document?')) return
+    if (!(await appConfirm('Are you sure you want to delete this document?'))) return
 
     try {
       const res = await apiFetch(`/api/hr/documents/${id}`, { method: 'DELETE' })

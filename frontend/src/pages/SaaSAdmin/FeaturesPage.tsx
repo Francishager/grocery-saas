@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift } from 'lucide-react'
@@ -356,7 +357,7 @@ export const FeaturesPage: React.FC = () => {
   }
 
   const handleSeedFeatures = async () => {
-    if (!confirm('Create all jibuSales module features?')) return
+    if (!(await appConfirm('Create all jibuSales module features?'))) return
     setSaving(true)
     for (const mod of MODULES) {
       for (const f of mod.features) {
@@ -397,7 +398,7 @@ export const FeaturesPage: React.FC = () => {
   }
 
   const handleDeleteFeature = async (id: string) => {
-    if (!confirm('Delete this feature?')) return
+    if (!(await appConfirm('Delete this feature?'))) return
     try { const res = await apiFetch(`/api/platform/features/${id}`, { method: 'DELETE' }); if (res.ok) fetchData() } catch {}
   }
 

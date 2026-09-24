@@ -1,3 +1,4 @@
+import { appNotify } from '@/lib/appFeedback'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 
@@ -24,7 +25,7 @@ export default function PlatformStaffPage() {
 
   const createStaff = async () => {
     if (!form.name.trim() || !form.email.trim() || form.password.length < 6) {
-      alert('Name, email, and a password of at least 6 characters are required')
+      appNotify('Name, email, and a password of at least 6 characters are required')
       return
     }
     setLoading(true)
@@ -36,7 +37,7 @@ export default function PlatformStaffPage() {
       setSelected({})
       await load()
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to create platform staff')
+      appNotify(error instanceof Error ? error.message : 'Failed to create platform staff')
     } finally {
       setLoading(false)
     }

@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -348,7 +349,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   }
 
   const handleCancel = async (note: Note) => {
-    if (!confirm(`Cancel ${note.noteNo}? This will reverse the balance adjustment and any stock movement.`)) return
+    if (!(await appConfirm(`Cancel ${note.noteNo}? This will reverse the balance adjustment and any stock movement.`))) return
     try {
       const api = activeTab === 'credit' ? creditNotesApi : debitNotesApi
       await api.cancel(note.id)

@@ -1,3 +1,4 @@
+import { appNotify, appPrompt } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { usePagination } from '@/hooks/usePagination'
@@ -31,13 +32,13 @@ export const OwnersPage: React.FC = () => {
   useEffect(() => { fetchOwners() }, [])
 
   const handleResetPassword = async (id: string) => {
-    const newPass = prompt('Enter new password for this owner (min 6 chars):')
-    if (!newPass || newPass.length < 6) { alert('Password must be at least 6 characters'); return }
+    const newPass = await appPrompt('Enter new password for this owner (min 6 chars):', 'password')
+    if (!newPass || newPass.length < 6) { appNotify('Password must be at least 6 characters'); return }
     setResetting(id)
     try {
       const res = await apiFetch(`/api/admin/owners/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password: newPass }) })
-      if (res.ok) alert('Password reset successfully'); else alert('Failed to reset password')
-    } catch { alert('Request failed') }
+      if (res.ok) appNotify('Password reset successfully'); else appNotify('Failed to reset password')
+    } catch { appNotify('Request failed') }
     setResetting(null)
   }
 

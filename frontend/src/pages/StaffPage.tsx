@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useState } from 'react'
 import { Edit3, Loader2, RefreshCw, RotateCcw, ShieldCheck, UserPlus, UserX, CheckCircle, Copy, Eye, EyeOff, X, Wallet } from 'lucide-react'
 import { branchesApi, staffApi, type BranchOption, type StaffMember, type StaffPayload } from '@/lib/api'
@@ -171,7 +172,7 @@ export default function StaffPage() {
   }
 
   const deactivateStaff = async (member: StaffMember) => {
-    if (!confirm(`Deactivate ${member.name || member.email}?`)) return
+    if (!(await appConfirm(`Deactivate ${member.name || member.email}?`))) return
 
     setActionLoading(member.id)
     try {

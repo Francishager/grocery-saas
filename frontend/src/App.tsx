@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
+import { AppFeedback } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { initSync } from '@/db/sync'
 import { SaaSAdminLayout } from '@/components/layout/SaaSAdminLayout'
@@ -228,6 +229,7 @@ function App() {
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
       <Toaster />
+      <AppFeedback />
     </BrowserRouter>
   )
 }

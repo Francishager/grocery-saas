@@ -39,29 +39,20 @@ export function usePushNotifications() {
     if (permission !== 'granted') return
     const unsub = onForegroundMessage((payload) => {
       const notif: PushNotification = {
-        id: `${Date.now()}-${Math.random()}`,
-        title: sanitizeNotificationText(payload.notification?.title, 'Notification'),
-        body: sanitizeNotificationText(payload.notification?.body),
+        id: payload.data?.notificationId || payload.messageId || `${Date.now()}-${Math.random()}`,
+        title: sanitizeNotificationText(payload.notification?.title || payload.data?.title, 'Notification'),
+        body: sanitizeNotificationText(payload.notification?.body || payload.data?.body),
         data: payload.data,
         timestamp: Date.now(),
       }
       setForegroundNotifications((prev) => [notif, ...prev].slice(0, 20))
-      // Also show a real browser notification so it's visible even if the tab isn't focused
-      if (Notification.permission === 'granted') {
-        try {
-          const n = new Notification(notif.title, {
-            body: sanitizeNotificationText(notif.body),
-            icon: '/img/jibusales_logo.png',
-            badge: '/img/jibusales_logo.png',
-            tag: notif.id,
-            data: notif.data,
-          })
-          n.onclick = () => {
-            window.focus()
-            n.close()
-          }
-        } catch {}
-      }
+      window.dispatchEvent(new CustomEvent('jibusales:notification', {
+        detail: {
+          id: notif.id, title: notif.title, message: notif.body,
+          type: payload.data?.type || 'info', metadata: payload.data,
+          link: payload.data?.link || payload.data?.url,
+        },
+      }))
     })
     unregisterRef.current = unsub
     return () => {

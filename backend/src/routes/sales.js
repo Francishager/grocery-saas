@@ -7,7 +7,7 @@ import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
-import { createTenantNotification, notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
+import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
 import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
@@ -436,15 +436,13 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     await notifyOwnerOfSale({
       tenantId: scope.tenantId,
       sale,
-      user: await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null),
+      user: { id: userId },
       itemDetails: saleItems.map((item) => ({
         name: item.productName || item.productId,
         price: item.price,
       })),
       branchName: sale.branch?.name || null,
-    });
-
-    await createTenantNotification({ tenantId: scope.tenantId, userId, title: 'Sale completed', message: 'Sale ' + sale.receiptNo + ' was recorded successfully.', type: 'success', metadata: { saleId: sale.id, receiptNo: sale.receiptNo } });
+    }).catch(err => console.error("Sale notification failed after sale was saved:", err));
 
     res.status(201).json({ message: "Sale recorded", sale });
   } catch (err) {
@@ -555,15 +553,13 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     await notifyOwnerOfSale({
       tenantId: scope.tenantId,
       sale,
-      user: await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null),
+      user: { id: userId },
       itemDetails: saleItems.map((item) => ({
         name: item.productName || item.productId,
         price: item.price,
       })),
       branchName: sale.branch?.name || null,
-    });
-
-    await createTenantNotification({ tenantId: scope.tenantId, userId, title: 'Sale completed', message: 'Sale ' + sale.receiptNo + ' was recorded successfully.', type: 'success', metadata: { saleId: sale.id, receiptNo: sale.receiptNo } });
+    }).catch(err => console.error("Sale notification failed after checkout was saved:", err));
 
     res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale });
   } catch (err) {

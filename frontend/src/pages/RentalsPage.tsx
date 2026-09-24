@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useRef, useState } from 'react'
 import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X } from 'lucide-react'
 import { rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
@@ -315,7 +316,7 @@ export default function RentalsPage() {
   }
 
   const handleCancel = async (id: string) => {
-    if (!confirm('Cancel this rental? Stock will be restored.')) return
+    if (!(await appConfirm('Cancel this rental? Stock will be restored.'))) return
     try {
       await rentalsApi.cancel(id)
       toast({ title: 'Success', description: 'Rental cancelled' })

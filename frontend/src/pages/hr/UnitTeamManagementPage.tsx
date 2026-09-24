@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -189,7 +190,7 @@ export default function UnitTeamManagementPage() {
   }
 
   const handleDelete = async (id: string, type: 'unit' | 'team') => {
-    if (!confirm(`Delete this ${type}?`)) return
+    if (!(await appConfirm(`Delete this ${type}?`))) return
 
     try {
       const url = type === 'unit' ? `/api/hr/units/${id}` : `/api/hr/teams/${id}`

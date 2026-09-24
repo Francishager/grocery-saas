@@ -1,3 +1,4 @@
+import { appNotify, appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { usePagination } from '@/hooks/usePagination'
@@ -337,14 +338,14 @@ export const PlansPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.name.trim()) { alert('Plan name is required'); return }
-    if (!form.slug.trim()) { alert('Plan slug is required'); return }
-    if (form.price < 0) { alert('Price cannot be negative'); return }
-    if (!form.currency.trim()) { alert('Currency is required'); return }
-    if (!form.billingCycle.trim()) { alert('Billing cycle is required'); return }
-    if (form.maxUsers < 1) { alert('Max users must be at least 1'); return }
-    if (form.maxProducts < 1) { alert('Max products must be at least 1'); return }
-    if (form.maxBranches < 1) { alert('Max branches must be at least 1'); return }
+    if (!form.name.trim()) { appNotify('Plan name is required'); return }
+    if (!form.slug.trim()) { appNotify('Plan slug is required'); return }
+    if (form.price < 0) { appNotify('Price cannot be negative'); return }
+    if (!form.currency.trim()) { appNotify('Currency is required'); return }
+    if (!form.billingCycle.trim()) { appNotify('Billing cycle is required'); return }
+    if (form.maxUsers < 1) { appNotify('Max users must be at least 1'); return }
+    if (form.maxProducts < 1) { appNotify('Max products must be at least 1'); return }
+    if (form.maxBranches < 1) { appNotify('Max branches must be at least 1'); return }
     setSaving(true)
     try {
       const payload = { ...form, features: form.features.split(',').map((f: string) => f.trim()).filter(Boolean) }
@@ -353,16 +354,16 @@ export const PlansPage: React.FC = () => {
       const res = await apiFetch(url, { method, body: JSON.stringify(payload) })
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || d.message || 'Failed') }
       setShowForm(false); fetchPlans()
-    } catch (err) { alert(err instanceof Error ? err.message : 'Failed') }
+    } catch (err) { appNotify(err instanceof Error ? err.message : 'Failed') }
     setSaving(false)
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this plan? Tenants on this plan will need reassignment.')) return
+    if (!(await appConfirm('Delete this plan? Tenants on this plan will need reassignment.'))) return
     try {
       const res = await apiFetch(`/api/platform/plans/${id}`, { method: 'DELETE' })
-      if (res.ok) fetchPlans(); else alert('Failed to delete')
-    } catch { alert('Request failed') }
+      if (res.ok) fetchPlans(); else appNotify('Failed to delete')
+    } catch { appNotify('Request failed') }
   }
 
   const fmt = (n: number, c: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)

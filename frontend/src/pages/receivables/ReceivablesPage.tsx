@@ -483,7 +483,7 @@ export default function ReceivablesPage() {
   }
 
   const reloadFuelCard = async (id: string) => {
-    const amount = window.prompt('Enter reload amount:')
+    const amount = await appPrompt('Enter reload amount:', 'number')
     if (!amount || Number(amount) <= 0) return
     try {
       const response = await apiFetch(`/api/receivables/fuel-cards/${id}/reload`, {
@@ -2759,3 +2759,4 @@ export default function ReceivablesPage() {
     </div>
   )
 }
+import { appPrompt } from '@/lib/appFeedback'

@@ -1,3 +1,4 @@
+import { appNotify, appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
@@ -134,21 +135,21 @@ export const TenantDetailPage: React.FC = () => {
       else {
         const d = await res.json().catch(() => ({}))
         console.error('Save limits failed:', res.status, d)
-        alert(d.error || d.message || `Failed to save limits (HTTP ${res.status})`)
+        appNotify(d.error || d.message || `Failed to save limits (HTTP ${res.status})`)
       }
     } catch (err) {
       console.error('Save limits request error:', err)
-      alert('Request failed — please check your connection')
+      appNotify('Request failed — please check your connection')
     }
     setSavingLimits(false)
   }
 
   const handleSaveInfo = async () => {
     if (!tenantId) return
-    if (!infoForm.name.trim()) { alert('Business name is required'); return }
-    if (!infoForm.email.trim()) { alert('Business email is required'); return }
-    if (!infoForm.currency.trim()) { alert('Currency is required'); return }
-    if (!infoForm.timezone.trim()) { alert('Timezone is required'); return }
+    if (!infoForm.name.trim()) { appNotify('Business name is required'); return }
+    if (!infoForm.email.trim()) { appNotify('Business email is required'); return }
+    if (!infoForm.currency.trim()) { appNotify('Currency is required'); return }
+    if (!infoForm.timezone.trim()) { appNotify('Timezone is required'); return }
     setSavingInfo(true)
     try {
       const res = await apiFetch(`/api/platform/tenants/${tenantId}`, {
@@ -158,11 +159,11 @@ export const TenantDetailPage: React.FC = () => {
       else {
         const d = await res.json().catch(() => ({}))
         console.error('Save tenant info failed:', res.status, d)
-        alert(d.error || d.message || `Failed to save (HTTP ${res.status})`)
+        appNotify(d.error || d.message || `Failed to save (HTTP ${res.status})`)
       }
     } catch (err) {
       console.error('Save tenant info request error:', err)
-      alert('Request failed — please check your connection')
+      appNotify('Request failed — please check your connection')
     }
     setSavingInfo(false)
   }
@@ -177,24 +178,24 @@ export const TenantDetailPage: React.FC = () => {
       if (res.ok) {
         setFeatureOverrides(prev => ({ ...prev, [featureName]: enabled }))
         fetchDetail()
-      } else { alert('Failed to update feature') }
-    } catch { alert('Request failed') }
+      } else { appNotify('Failed to update feature') }
+    } catch { appNotify('Request failed') }
     setSavingFeatures(false)
   }
 
   const handleAction = async (action: 'activate' | 'suspend' | 'delete') => {
     if (!tenantId || !detail) return
     if (action === 'delete') {
-      if (!confirm(`Are you sure you want to DELETE "${detail.name}"? This will permanently delete all data including users, products, sales, etc. This action cannot be undone.`)) return
+      if (!(await appConfirm(`Are you sure you want to DELETE "${detail.name}"? This will permanently delete all data including users, products, sales, etc. This action cannot be undone.`))) return
     } else {
-      if (!confirm(`Are you sure you want to ${action} this tenant?`)) return
+      if (!(await appConfirm(`Are you sure you want to ${action} this tenant?`))) return
     }
     setActionLoading(action)
     try {
       if (action === 'delete') {
         const res = await apiFetch(`/api/platform/tenants/${tenantId}`, { method: 'DELETE' })
         if (res.ok) { navigate('/saas/businesses'); return }
-        else { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to delete') }
+        else { const d = await res.json().catch(() => ({})); appNotify(d.error || 'Failed to delete') }
       } else {
         const res = await apiFetch(`/api/platform/tenants/${tenantId}/status`, {
           method: 'PUT', body: JSON.stringify({ status: action === 'activate' ? 'active' : 'suspended' })
@@ -202,10 +203,10 @@ export const TenantDetailPage: React.FC = () => {
         if (res.ok) fetchDetail()
         else {
           const d = await res.json().catch(() => ({}))
-          alert(d.error || d.message || `Failed to ${action}`)
+          appNotify(d.error || d.message || `Failed to ${action}`)
         }
       }
-    } catch { alert('Request failed') }
+    } catch { appNotify('Request failed') }
     setActionLoading(null)
   }
 

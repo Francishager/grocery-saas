@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Building2, Edit3, Loader2, Plus, RefreshCw, Trash2, X, MoreVertical, Ban, AlertTriangle } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -186,7 +187,7 @@ export default function BranchesPage() {
   }
 
   const deleteBranch = async (branch: Branch) => {
-    if (!confirm(`Delete ${branch.name}?`)) return
+    if (!(await appConfirm(`Delete ${branch.name}?`))) return
 
     setActionLoading(branch.id)
     try {

@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -142,7 +143,7 @@ export default function ShiftManagementPage() {
   }
 
   const handleDeleteTemplate = async (id: string) => {
-    if (!confirm('Delete this shift?')) return
+    if (!(await appConfirm('Delete this shift?'))) return
     try {
       const res = await apiFetch(`/api/hr/shifts/templates/${id}`, { method: 'DELETE' })
       if (res.ok) {
@@ -155,7 +156,7 @@ export default function ShiftManagementPage() {
   }
 
   const handleEndAssignment = async (id: string) => {
-    if (!confirm('End this shift assignment?')) return
+    if (!(await appConfirm('End this shift assignment?'))) return
     try {
       const res = await apiFetch(`/api/hr/shifts/assignments/${id}`, { method: 'DELETE' })
       if (res.ok) {

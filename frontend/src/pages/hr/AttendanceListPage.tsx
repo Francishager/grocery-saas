@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -135,7 +136,7 @@ export default function AttendanceListPage() {
   }
 
   const handleDelete = async (recordId: string) => {
-    if (!confirm('Delete this record?')) return
+    if (!(await appConfirm('Delete this record?'))) return
     try {
       const res = await apiFetch(`/api/hr/attendance/${recordId}`, {
         method: 'DELETE',

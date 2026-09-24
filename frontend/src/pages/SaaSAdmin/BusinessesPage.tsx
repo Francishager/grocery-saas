@@ -1,3 +1,4 @@
+import { appConfirm, appNotify } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -72,7 +73,7 @@ export const BusinessesPage: React.FC = () => {
   }, [])
 
   const handleAction = async (id: string, action: 'activate' | 'suspend') => {
-    if (!confirm(`Are you sure you want to ${action} this tenant?`)) return
+    if (!(await appConfirm(`Are you sure you want to ${action} this tenant?`))) return
     setActionLoading(id)
     try {
       const res = await apiFetch(`/api/tenants/${id}/${action}`, { method: 'POST' })
@@ -83,9 +84,9 @@ export const BusinessesPage: React.FC = () => {
           setSelected(prev => prev ? { ...prev, status: data?.tenant?.status || (action === 'activate' ? 'active' : 'suspended') } : null)
         }
       } else {
-        alert(data.error || data.message || `Failed to ${action} tenant`)
+        appNotify(data.error || data.message || `Failed to ${action} tenant`)
       }
-    } catch { alert('Request failed') }
+    } catch { appNotify('Request failed') }
     setActionLoading(null)
   }
 
@@ -109,7 +110,7 @@ export const BusinessesPage: React.FC = () => {
       setAutoEnd(true)
       if (selected?.id === tenant.id) setSelected(null)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to change plan')
+      appNotify(err instanceof Error ? err.message : 'Failed to change plan')
     } finally {
       setPlanChanging(null)
     }

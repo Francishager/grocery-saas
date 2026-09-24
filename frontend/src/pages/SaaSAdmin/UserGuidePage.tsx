@@ -1,3 +1,4 @@
+import { appNotify, appConfirm } from '@/lib/appFeedback'
 import { useState, useEffect, useRef } from 'react'
 import { userGuideApi, type UserGuideStep } from '@/lib/api'
 import { Plus, Trash2, Upload, X, Image as ImageIcon, ChevronDown, ChevronRight, Pencil, Loader2 } from 'lucide-react'
@@ -80,7 +81,7 @@ export default function UserGuidePage() {
       }
     } catch (err) {
       console.error('Upload failed:', err)
-      alert('Failed to upload image')
+      appNotify('Failed to upload image')
     } finally {
       setUploadingId(null)
       setPendingUploadId(null)
@@ -89,24 +90,24 @@ export default function UserGuidePage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this guide step?')) return
+    if (!(await appConfirm('Delete this guide step?'))) return
     try {
       await userGuideApi.delete(id)
       setSteps(prev => prev.filter(s => s.id !== id))
     } catch (err) {
       console.error('Delete failed:', err)
-      alert('Failed to delete step')
+      appNotify('Failed to delete step')
     }
   }
 
   async function handleDeleteImage(step: UserGuideStep) {
-    if (!confirm('Remove the image from this step?')) return
+    if (!(await appConfirm('Remove the image from this step?'))) return
     try {
       const result = await userGuideApi.update(step.id, { imageUrl: null, imagePublicId: null })
       setSteps(prev => prev.map(s => s.id === result.step.id ? result.step : s))
     } catch (err) {
       console.error('Remove image failed:', err)
-      alert('Failed to remove image')
+      appNotify('Failed to remove image')
     }
   }
 

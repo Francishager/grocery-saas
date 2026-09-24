@@ -546,10 +546,13 @@ export default function SalesPage() {
           changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
         })
 
-        toast({
-          title: 'Sale recorded offline',
-          description: `${cart.length} items — will sync when online`,
-        })
+        window.dispatchEvent(new CustomEvent('jibusales:notification', {
+          detail: {
+            id: 'sale:' + saleId, title: 'Sale recorded offline', type: 'sale',
+            message: `${cart.length} items sold for ${formatCurrency(total)}. Saved on this device, pending sync.`,
+            metadata: { saleId, receiptNo },
+          },
+        }))
         setCart([])
         setInvoiceCashDiscount(0)
         setAmountPaid('')
@@ -578,12 +581,13 @@ export default function SalesPage() {
         changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
       })
       const completedSaleId = String(result?.sale?.id || result?.sale?.receiptNo || Date.now())
-      const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(cartTotal)
-      window.dispatchEvent(new CustomEvent('jibusales:notification', { detail: { id: 'sale:' + (result?.sale?.receiptNo || completedSaleId), title: 'Sale completed', message: completedSaleMessage, type: 'success' } }))
-      toast({
-        title: 'Sale completed!',
-        description: `${cart.length} items sold for ${formatCurrency(cartTotal)}`,
-      })
+      const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(result?.sale?.total ?? result.total ?? cartTotal)
+      window.dispatchEvent(new CustomEvent('jibusales:notification', {
+        detail: {
+          id: 'sale:' + completedSaleId, title: 'Sale completed', message: completedSaleMessage, type: 'sale',
+          metadata: { saleId: completedSaleId, receiptNo: result?.sale?.receiptNo },
+        },
+      }))
       setCart([])
       setInvoiceCashDiscount(0)
       setAmountPaid('')

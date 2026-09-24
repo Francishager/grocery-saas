@@ -1,3 +1,4 @@
+import { appNotify } from '@/lib/appFeedback'
 import React, { useState, useRef, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { ZoomIn, ZoomOut, RotateCw, RotateCcw, Move, Check, X, Upload } from 'lucide-react'
@@ -80,12 +81,12 @@ export const ImageCropper: React.FC<ImageCropperProps> = ({
     if (!file) return
 
     if (!acceptedTypes.includes(file.type)) {
-      alert('Invalid file type')
+      appNotify('Invalid file type')
       return
     }
 
     if (maxSize && file.size > maxSize) {
-      alert(`File size must be less than ${Math.round(maxSize / 1024 / 1024)}MB`)
+      appNotify(`File size must be less than ${Math.round(maxSize / 1024 / 1024)}MB`)
       return
     }
 

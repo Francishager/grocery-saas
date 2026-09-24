@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal } from 'lucide-react'
@@ -575,7 +576,7 @@ export default function InventoryPage() {
   }
 
   const handleDelete = async (id: string | number) => {
-    if (!confirm('Are you sure you want to delete this item?')) return
+    if (!(await appConfirm('Are you sure you want to delete this item?'))) return
 
     try {
       if (online) {

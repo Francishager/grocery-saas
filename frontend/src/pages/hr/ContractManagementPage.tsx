@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
@@ -158,7 +159,7 @@ export default function ContractManagementPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Contracts should not be deleted. Terminate instead.')) return
+    if (!(await appConfirm('Contracts should not be deleted. Terminate instead.'))) return
   }
 
   const handleSave = async () => {

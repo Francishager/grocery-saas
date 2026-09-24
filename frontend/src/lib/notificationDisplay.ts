@@ -1,11 +1,23 @@
-const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<]+|(?:^|\s)(?:\/tenant|\/notifications|\/api)\/[A-Za-z0-9_?&=./%-]+/gi
+const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s<>]+|(?:^|\s)(?:\/tenant|\/notifications|\/api)(?:\/[^\s<>]*)?/gi
 
 /** Keep notification copy user-facing; routes and service URLs belong to actions, not message text. */
 export function sanitizeNotificationText(value: unknown, fallback = ''): string {
   const text = String(value ?? fallback)
+    .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/gi, '$1')
     .replace(URL_PATTERN, ' ')
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+([,.;!?])/g, '$1')
     .trim()
   return text || fallback
+}
+
+export function notificationLink(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.startsWith('/tenant/') || /[\\\s]/.test(value)) return undefined
+  return value
+}
+
+export function notificationKey(item: { id: string; type?: string; title?: string; metadata?: Record<string, any> }): string {
+  const sale = item.type === 'sale' || /^(new sale recorded|sale completed!?|sale recorded offline)$/i.test(item.title || '')
+  const reference = item.metadata?.saleId || item.metadata?.receiptNo
+  return sale && reference ? 'sale:' + reference : item.id
 }

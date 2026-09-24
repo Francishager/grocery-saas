@@ -23,7 +23,7 @@ export function buildDailySalesSummaryMessage(summary = {}) {
   return `Today's sales summary: ${salesCount} sales, revenue ${formatCurrency(totalRevenue, currency)}, discount ${formatCurrency(totalDiscount, currency)}, tax ${formatCurrency(totalTax, currency)}. ${inventorySentence}`;
 }
 
-export async function createTenantNotification({ prismaClient = prisma, tenantId, userId = null, title, message, type = 'info', metadata = null, channel = 'in_app' }) {
+export async function createTenantNotification({ prismaClient = prisma, sendPush = sendNotificationToUser, tenantId, userId = null, title, message, type = 'info', metadata = null, channel = 'in_app' }) {
   if (!tenantId || !title || !message) return null;
   const notif = await prismaClient.notification.create({
     data: {
@@ -38,16 +38,19 @@ export async function createTenantNotification({ prismaClient = prisma, tenantId
   });
   // Also send FCM push to the user (if they have registered devices)
   if (userId) {
-    sendNotificationToUser(userId, {
+    const pushMetadata = Object.fromEntries(Object.entries(metadata && typeof metadata === 'object' ? metadata : {})
+      .filter(([, value]) => value != null)
+      .map(([key, value]) => [key, typeof value === 'string' ? value : JSON.stringify(value)]));
+    sendPush(userId, {
       title,
       body: message,
-      data: { url: '/notifications', ...(metadata ? typeof metadata === 'object' ? metadata : { metadata: String(metadata) } : {}) },
+      data: { url: '/tenant/dashboard', ...pushMetadata, notificationId: notif.id, type },
     }).catch((err) => console.error('FCM push failed for notification:', err));
   }
   return notif;
 }
 
-export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale, user, productNames = [], branchName = null, itemDetails = [] }) {
+export async function notifyOwnerOfSale({ prismaClient = prisma, sendPush = sendNotificationToUser, tenantId, sale, user, productNames = [], branchName = null, itemDetails = [] }) {
   if (!tenantId) return null;
   const [owner, tenant] = await Promise.all([
     prismaClient.user.findFirst({
@@ -59,7 +62,6 @@ export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale,
       select: { currency: true },
     }).catch(() => null),
   ]);
-  if (!owner) return null;
   const currency = sale?.currency || tenant?.currency || 'UGX';
   let summary;
   if (itemDetails.length) {
@@ -71,15 +73,15 @@ export async function notifyOwnerOfSale({ prismaClient = prisma, tenantId, sale,
     summary = 'A new sale was recorded.';
   }
   const branchInfo = branchName ? ` Branch: ${branchName}.` : '';
-  return createTenantNotification({
-    prismaClient,
-    tenantId,
-    userId: owner.id,
-    title: 'New sale recorded',
+  const recipients = [...new Set([owner?.id, user?.id].filter(Boolean))];
+  const notifications = await Promise.all(recipients.map(userId => createTenantNotification({
+    prismaClient, sendPush, tenantId, userId,
+    title: userId === user?.id ? 'Sale completed' : 'New sale recorded',
     message: `${summary} Total ${formatCurrency(sale?.total || 0, currency)}.${branchInfo}`,
-    type: 'success',
+    type: 'sale',
     metadata: { saleId: sale?.id, receiptNo: sale?.receiptNo, userId: user?.id, branchName, itemDetails },
-  });
+  })));
+  return notifications[0] || null;
 }
 
 export async function notifyOwnerOfLowStock({ prismaClient = prisma, tenantId, product }) {

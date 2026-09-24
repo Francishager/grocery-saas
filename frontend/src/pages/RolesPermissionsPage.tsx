@@ -1,3 +1,4 @@
+import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useState, useRef } from 'react'
 import { Shield, Plus, MoreVertical, Edit, Ban, Key, Trash2, CheckCheck, Square, Wallet } from 'lucide-react'
 import { staffApi, branchesApi } from '@/lib/api'
@@ -532,7 +533,7 @@ export default function RolesPermissionsPage() {
   }
 
   const handleDeactivate = async (id: string) => {
-    if (!confirm('Deactivate this staff member?')) return
+    if (!(await appConfirm('Deactivate this staff member?'))) return
     try {
       await staffApi.deactivate(id)
       toast({ title: 'Staff deactivated' })
