@@ -95,7 +95,7 @@ export function NotificationBell() {
       const data = await res.json()
       const arr = Array.isArray(data) ? data : (data.notifications || [])
       return arr.map((n: any) => ({
-        id: n.id,
+        id: n.metadata?.receiptNo ? ('sale:' + n.metadata.receiptNo) : n.id,
         title: sanitizeNotificationText(n.title, 'Notification'),
         message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
@@ -115,7 +115,7 @@ export function NotificationBell() {
     try {
       const local = await getLocalNotifications()
       return local.map((n: any) => ({
-        id: n.id,
+        id: n.metadata?.receiptNo ? ('sale:' + n.metadata.receiptNo) : n.id,
         title: sanitizeNotificationText(n.title, 'Notification'),
         message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
@@ -329,11 +329,30 @@ export function NotificationBell() {
     }
   }, [online, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
 
-  // Initial load + polling
+  // Initial load + polling plus immediate events emitted by completed workflows.
   useEffect(() => {
     loadNotifications()
-    const interval = setInterval(loadNotifications, 60000) // poll every 60s
-    return () => clearInterval(interval)
+    const interval = setInterval(loadNotifications, 30000)
+    const handleImmediateNotification = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {}
+      const item: NotificationItem = {
+        id: String(detail.id || ('local:' + Date.now())),
+        title: sanitizeNotificationText(detail.title, 'Notification'),
+        message: sanitizeNotificationText(detail.message),
+        type: String(detail.type || 'info'),
+        isRead: false,
+        createdAt: new Date().toISOString(),
+        source: 'local',
+        link: typeof detail.link === 'string' && detail.link.startsWith('/tenant/') ? detail.link : undefined,
+      }
+      setNotifications(prev => [item, ...prev.filter(existing => existing.id !== item.id)])
+      setUnreadCount(prev => prev + 1)
+    }
+    window.addEventListener('jibusales:notification', handleImmediateNotification)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('jibusales:notification', handleImmediateNotification)
+    }
   }, [loadNotifications])
 
   useEffect(() => {

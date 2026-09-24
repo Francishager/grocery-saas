@@ -577,6 +577,9 @@ export default function SalesPage() {
         amountPaid: amountPaid !== '' ? amountPaid : undefined,
         changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
       })
+      const completedSaleId = String(result?.sale?.id || result?.sale?.receiptNo || Date.now())
+      const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(cartTotal)
+      window.dispatchEvent(new CustomEvent('jibusales:notification', { detail: { id: 'sale:' + (result?.sale?.receiptNo || completedSaleId), title: 'Sale completed', message: completedSaleMessage, type: 'success' } }))
       toast({
         title: 'Sale completed!',
         description: `${cart.length} items sold for ${formatCurrency(cartTotal)}`,

@@ -7,7 +7,7 @@ import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
-import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
+import { createTenantNotification, notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
 import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
@@ -444,6 +444,8 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       branchName: sale.branch?.name || null,
     });
 
+    await createTenantNotification({ tenantId: scope.tenantId, userId, title: 'Sale completed', message: 'Sale ' + sale.receiptNo + ' was recorded successfully.', type: 'success', metadata: { saleId: sale.id, receiptNo: sale.receiptNo } });
+
     res.status(201).json({ message: "Sale recorded", sale });
   } catch (err) {
     console.error("Sale create error:", err);
@@ -560,6 +562,8 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       })),
       branchName: sale.branch?.name || null,
     });
+
+    await createTenantNotification({ tenantId: scope.tenantId, userId, title: 'Sale completed', message: 'Sale ' + sale.receiptNo + ' was recorded successfully.', type: 'success', metadata: { saleId: sale.id, receiptNo: sale.receiptNo } });
 
     res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale });
   } catch (err) {
