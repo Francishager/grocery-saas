@@ -15,6 +15,7 @@ import { getLocalNotifications } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
 import { sanitizeNotificationText } from '@/lib/notificationDisplay'
+import { getNotificationVisual } from '@/lib/notificationVisuals'
 
 interface Notification {
   id: string
@@ -286,7 +287,7 @@ export default function CommunicationPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium">{sanitizeNotificationText(notif.title, 'Notification')}</p>
-                        <Badge className={typeColor[notif.type] || 'bg-gray-100'}>{notif.type}</Badge>
+                        <Badge className={getNotificationVisual(notif.type).badge}>{getNotificationVisual(notif.type).label}</Badge>
                         {ch && <Badge variant="outline" className="text-xs">{ch.label}</Badge>}
                         {!notif.isRead && <Badge variant="default">New</Badge>}
                         {!notif.userId && <Badge variant="secondary" className="text-xs"><Radio className="h-3 w-3 mr-1" /> Broadcast</Badge>}
@@ -330,7 +331,7 @@ export default function CommunicationPage() {
                         <div key={n.id} className={`rounded-lg border p-3 ${!n.isRead ? 'border-primary/20 bg-primary/5' : ''}`}>
                           <div className="flex items-center justify-between">
                             <p className="truncate text-sm font-medium">{sanitizeNotificationText(n.title, 'Notification')}</p>
-                            <Badge className={typeColor[n.type] || 'bg-gray-100'}>{n.type}</Badge>
+                            <Badge className={getNotificationVisual(n.type).badge}>{getNotificationVisual(n.type).label}</Badge>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{sanitizeNotificationText(n.message)}</p>
                           <p className="text-xs text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleString()}</p>

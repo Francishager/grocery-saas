@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight } from 'lucide-react'
+import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '@/lib/api'
@@ -11,6 +11,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { usePushNotifications } from '@/lib/usePushNotifications'
 import { sanitizeNotificationText } from '@/lib/notificationDisplay'
+import { getNotificationVisual } from '@/lib/notificationVisuals'
 
 interface NotificationItem {
   id: string
@@ -25,15 +26,14 @@ interface NotificationItem {
 }
 
 const TYPE_ICONS: Record<string, typeof Bell> = {
-  info: Bell,
-  success: Check,
-  warning: AlertTriangle,
-  error: AlertTriangle,
-  low_stock: Package,
-  out_of_stock: Package,
-  overdue_rental: Clock,
-  overdue_payable: TrendingDown,
-  leave_request: FileText,
+  info: Bell, success: Check, warning: AlertTriangle, error: AlertTriangle,
+  sale: ShoppingCart, purchase: Truck, payment: CreditCard, expense: Wallet,
+  payroll: BriefcaseBusiness, inventory: Package, low_stock: Package, out_of_stock: Package,
+  overdue_rental: Clock, overdue_payable: TrendingDown, leave_request: FileText,
+  hr: Users, service: Wrench, job_card: Receipt, receivable: CircleDollarSign,
+  payable: CircleDollarSign, refund: ArrowLeftRight, transfer: ArrowLeftRight,
+  account: Settings2, customer: UserRound, supplier: Truck, user: UserRound,
+  approval: UserCheck, system: Settings2, communication: Bell,
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -517,7 +517,7 @@ export function NotificationBell() {
             ) : (
               allNotifications.map((n) => {
                 const Icon = TYPE_ICONS[n.type] || Bell
-                const colorClass = TYPE_COLORS[n.type] || TYPE_COLORS.info
+                const colorClass = getNotificationVisual(n.type).color
                 return (
                   <div
                     key={n.id}
@@ -542,7 +542,7 @@ export function NotificationBell() {
                       </div>
                       <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{n.message}</p>
                       <div className="flex items-center gap-2 mt-1">
-                        <p className="text-[11px] text-muted-foreground/70">{timeAgo(n.createdAt)}</p>
+                        <p className="text-[11px] text-muted-foreground/70">{timeAgo(n.createdAt)}</p><span className="text-[10px] font-medium text-muted-foreground/70">{getNotificationVisual(n.type).label}</span>
                         {n.source === 'local' && !n.id.startsWith('job_') && (
                           <span className="text-[10px] text-muted-foreground/50 bg-muted px-1.5 rounded">offline</span>
                         )}

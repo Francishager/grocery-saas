@@ -44,8 +44,9 @@ const messaging = getMessaging()
 onBackgroundMessage(messaging, (payload) => {
   const { title, body, icon, badge, tag, data } = payload.notification || {}
   const notificationTitle = title || 'jibuSales'
+  const cleanNotificationBody = String(body || '').replace(/https?:\/\/\S+/gi, '').replace(/www\.\S+/gi, '').trim()
   const notificationOptions: NotificationOptions = {
-    body: body || '',
+    body: cleanNotificationBody,
     icon: icon || '/img/jibusales_logo.png',
     badge: badge || '/img/jibusales_logo.png',
     tag: tag || 'jibusales-notification',
