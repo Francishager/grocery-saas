@@ -37,3 +37,13 @@ test('global feedback hosts remain mounted and sale/print messages can coexist',
   const limit = readFileSync(root + '/hooks/use-toast.ts', 'utf8').match(/TOAST_LIMIT\s*=\s*(\d+)/);
   assert.ok(Number(limit?.[1]) >= 4);
 });
+
+test('stock alerts deep-link to a specific product stock-in form', () => {
+  const bell = readFileSync(root + '/components/NotificationBell.tsx', 'utf8');
+  const inventory = readFileSync(root + '/pages/InventoryPage.tsx', 'utf8');
+  const backend = readFileSync(new URL('../../backend/src/utils/notifications.js', import.meta.url), 'utf8');
+  assert.match(bell, /inventory\/products\?productId=\$\{encodeURIComponent\(String\(p\.id\)\)\}&stockAction=stock_in/);
+  assert.match(backend, /productId=\$\{encodeURIComponent\(String\(product\.id\)\)\}&stockAction=stock_in/);
+  assert.match(inventory, /await inventoryApi\.get\(productId\)/);
+  assert.match(inventory, /openStockAdjust\(item, requestedAction\)/);
+});

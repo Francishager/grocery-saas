@@ -1,6 +1,6 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
@@ -226,6 +226,8 @@ export default function InventoryPage() {
   const [priceHistory, setPriceHistory] = useState<PriceHistoryState | null>(null)
   const [openActionMenu, setOpenActionMenu] = useState<string | number | null>(null)
   const { tab: urlTab } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const handledStockLink = useRef<string | null>(null)
   const lockedType = urlTab === 'products' ? 'product' : urlTab === 'services' ? 'service' : null
   const isServicesPage = lockedType === 'service'
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
@@ -612,6 +614,44 @@ export default function InventoryPage() {
       reason: adjustmentType === 'stock_in' ? 'Restock' : '',
     })
   }
+
+  useEffect(() => {
+    const productId = searchParams.get('productId')
+    const requestedAction = searchParams.get('stockAction')
+    if (!productId || (requestedAction !== 'stock_in' && requestedAction !== 'stock_out')) {
+      handledStockLink.current = null
+      return
+    }
+    const requestKey = `${productId}:${requestedAction}`
+    if (handledStockLink.current === requestKey) return
+    handledStockLink.current = requestKey
+
+    let cancelled = false
+    const openLinkedProduct = async () => {
+      try {
+        const item = online
+          ? await inventoryApi.get(productId)
+          : (await getLocalProducts(undefined, undefined, 'product')).find(product => String(product.id) === productId)
+        if (!cancelled && item) openStockAdjust(item, requestedAction)
+        else if (!cancelled) toast({ variant: 'destructive', title: 'Product not found', description: 'This notification may refer to a product that is no longer available.' })
+      } catch (error: any) {
+        if (!cancelled) toast({ variant: 'destructive', title: 'Unable to open product stock form', description: error?.message || 'Please open the product from inventory and try again.' })
+      } finally {
+        if (!cancelled) {
+          const next = new URLSearchParams(searchParams)
+          next.delete('productId')
+          next.delete('stockAction')
+          setSearchParams(next, { replace: true })
+        }
+      }
+    }
+
+    void openLinkedProduct()
+    return () => {
+      cancelled = true
+      if (handledStockLink.current === requestKey) handledStockLink.current = null
+    }
+  }, [searchParams, online, setSearchParams, toast])
 
   const closeStockAdjust = () => {
     setStockAdjust(null)

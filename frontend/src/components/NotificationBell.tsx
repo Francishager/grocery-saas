@@ -190,7 +190,7 @@ export function NotificationBell() {
             type: 'low_stock',
             isRead: false,
             createdAt: new Date().toISOString(),
-            link: '/tenant/inventory',
+            link: `/tenant/inventory/products?productId=${encodeURIComponent(String(p.id))}&stockAction=stock_in`,
             source: 'local',
           })
         }
@@ -206,7 +206,7 @@ export function NotificationBell() {
             type: 'out_of_stock',
             isRead: false,
             createdAt: new Date().toISOString(),
-            link: '/tenant/inventory',
+            link: `/tenant/inventory/products?productId=${encodeURIComponent(String(p.id))}&stockAction=stock_in`,
             source: 'local',
           })
         }

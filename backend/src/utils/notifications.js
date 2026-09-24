@@ -98,7 +98,12 @@ export async function notifyOwnerOfLowStock({ prismaClient = prisma, tenantId, p
     title: 'Low stock alert',
     message: `${product.name} is running low. Current stock: ${product.quantity} ${product.baseUnit || 'units'} (min: ${product.minStock || 0}).`,
     type: 'warning',
-    metadata: { productId: product.id, quantity: product.quantity, minStock: product.minStock },
+    metadata: {
+      productId: product.id,
+      quantity: product.quantity,
+      minStock: product.minStock,
+      link: `/tenant/inventory/products?productId=${encodeURIComponent(String(product.id))}&stockAction=stock_in`,
+    },
   });
 }
 
