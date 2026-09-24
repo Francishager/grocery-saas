@@ -73,7 +73,7 @@ const total = rows => rows.reduce((sum, row) => sum + row.amount, 0);
 
 test.beforeEach(reset);
 
-test('explicit zero balances remain authoritative even with nonzero transaction rows', () => {
+test('stale zero summaries are corrected from loaded report rows', () => {
   const tree = render({
     summary: { totalSales: 0, cashSales: 0, creditSales: 0, debtCollections: 0, expenses: 0 },
     cashMovement: { cashAtHand: 0, netCashMovement: 0 },
@@ -83,6 +83,25 @@ test('explicit zero balances remain authoritative even with nonzero transaction 
       { id: 'payment', kind: 'collection', paymentMethod: 'cash', amount: 100 },
       { id: 'expense', kind: 'expense', paymentMethod: 'cash', amount: 50 },
     ],
+  });
+  assert.equal(amount(tree, 'Total Sales'), 500);
+  assert.equal(amount(tree, 'Cash Sales'), 500);
+  assert.equal(amount(tree, 'Credit Sales'), 0);
+  assert.equal(amount(tree, 'Debt Collections'), 100);
+  assert.equal(amount(tree, 'Expenses'), 50);
+  assert.equal(amount(tree, 'Cash at Hand'), 550);
+  assert.equal(amount(tree, 'Net Cash Movement'), 550);
+  assert.equal(amount(tree, 'Gross Profit'), 400);
+  assert.equal(amount(tree, 'Net Profit'), 350);
+});
+
+test('real empty zero balances stay zero when there are no detail rows', () => {
+  const tree = render({
+    summary: { totalSales: 0, cashSales: 0, creditSales: 0, debtCollections: 0, expenses: 0 },
+    cashMovement: { cashAtHand: 0, netCashMovement: 0 },
+    profitability: { grossProfit: 0, netProfit: 0 },
+    transactions: [],
+    expenses: [],
   });
   for (const label of ['Total Sales', 'Cash Sales', 'Credit Sales', 'Debt Collections', 'Expenses',
     'Cash at Hand', 'Net Cash Movement', 'Gross Profit', 'Net Profit']) assert.equal(amount(tree, label), 0, label);

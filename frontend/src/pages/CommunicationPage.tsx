@@ -14,6 +14,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalNotifications } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { sanitizeNotificationText } from '@/lib/notificationDisplay'
 
 interface Notification {
   id: string
@@ -284,13 +285,13 @@ export default function CommunicationPage() {
                     <div className={`mt-0.5 h-9 w-9 rounded-lg ${ch?.bg || 'bg-muted'} flex items-center justify-center ${ch?.color || 'text-muted-foreground'}`}>{channelIcon[notif.channel] || <Bell className="h-4 w-4" />}</div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium">{notif.title}</p>
+                        <p className="font-medium">{sanitizeNotificationText(notif.title, 'Notification')}</p>
                         <Badge className={typeColor[notif.type] || 'bg-gray-100'}>{notif.type}</Badge>
                         {ch && <Badge variant="outline" className="text-xs">{ch.label}</Badge>}
                         {!notif.isRead && <Badge variant="default">New</Badge>}
                         {!notif.userId && <Badge variant="secondary" className="text-xs"><Radio className="h-3 w-3 mr-1" /> Broadcast</Badge>}
                       </div>
-                      <p className="text-sm text-muted-foreground mt-1">{notif.message}</p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{sanitizeNotificationText(notif.message)}</p>
                       <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1"><Clock className="h-3 w-3" /> {new Date(notif.createdAt).toLocaleString()}</p>
                     </div>
                   </div>
@@ -328,10 +329,10 @@ export default function CommunicationPage() {
                       {channelNotifs.slice(0, 5).map(n => (
                         <div key={n.id} className={`rounded-lg border p-3 ${!n.isRead ? 'border-primary/20 bg-primary/5' : ''}`}>
                           <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium truncate">{n.title}</p>
+                            <p className="truncate text-sm font-medium">{sanitizeNotificationText(n.title, 'Notification')}</p>
                             <Badge className={typeColor[n.type] || 'bg-gray-100'}>{n.type}</Badge>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{n.message}</p>
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{sanitizeNotificationText(n.message)}</p>
                           <p className="text-xs text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleString()}</p>
                         </div>
                       ))}

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Bell, Check, X, Trash2, Settings } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import { sanitizeNotificationText } from '@/lib/notificationDisplay'
 
 export interface Notification {
   id: string
@@ -163,10 +164,10 @@ export const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {notification.title}
+                    {sanitizeNotificationText(notification.title, 'Notification')}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
-                    {notification.message}
+                    {sanitizeNotificationText(notification.message)}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
                     {formatDate(notification.createdAt)}

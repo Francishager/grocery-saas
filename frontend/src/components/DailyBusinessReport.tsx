@@ -407,7 +407,11 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       if (row.creditAmount !== undefined && row.creditAmount !== null) return numberValue(row.creditAmount)
       return row.kind === 'credit-sale' ? numberValue(row.amount) : 0
     }
-    const fromSummary = (value: unknown, derived: number) => metricValue(value, derived)
+    const fromSummary = (value: unknown, derived: number, hasDetailRows = true) => {
+      const parsed = metricValue(value, derived)
+      if (parsed === 0 && derived !== 0 && hasDetailRows) return derived
+      return parsed
+    }
     const methodTotal = (method: string) => sum(saleRows.filter((row) => row.paymentMethod === method), paidPortion)
     const expenseTotal = sum(expenseRows, (row) => numberValue(row.amount))
     const transactionTotal = sum(saleRows, (row) => numberValue(row.amount))
@@ -452,20 +456,20 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     const grossProfitTotal = fromSummary(profitability.grossProfit ?? summary.grossProfit, revenueTotal - cogsTotal)
 
     return {
-      totalSales: fromSummary(summary.totalSales ?? summary.grossSales, transactionTotal),
+      totalSales: fromSummary(summary.totalSales ?? summary.grossSales, transactionTotal, saleRows.length > 0),
       revenue: revenueTotal,
       cogs: metricValue(profitability.cogs ?? summary.cogs, cogsTotal),
-      cashSales: fromSummary(summary.cashSales, methodTotal('cash')),
-      creditSales: fromSummary(summary.creditSales, sum(saleRows, creditPortion)),
-      mobileMoneySales: fromSummary(summary.mobileMoneySales, methodTotal('mobile_money')),
-      bankSales: fromSummary(summary.bankSales, methodTotal('bank')),
-      cardSales: fromSummary(summary.cardSales, methodTotal('card')),
-      debtCollections: fromSummary(summary.debtCollections, collectionTotal),
-      expenses: fromSummary(summary.expenses, expenseTotal),
-      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand),
-      netCashMovement: fromSummary(cash.netCashMovement ?? summary.netCashMovement, derivedNetCashMovement),
+      cashSales: fromSummary(summary.cashSales, methodTotal('cash'), saleRows.length > 0),
+      creditSales: fromSummary(summary.creditSales, sum(saleRows, creditPortion), saleRows.length > 0),
+      mobileMoneySales: fromSummary(summary.mobileMoneySales, methodTotal('mobile_money'), saleRows.length > 0),
+      bankSales: fromSummary(summary.bankSales, methodTotal('bank'), saleRows.length > 0),
+      cardSales: fromSummary(summary.cardSales, methodTotal('card'), saleRows.length > 0),
+      debtCollections: fromSummary(summary.debtCollections, collectionTotal, transactions.some((row) => row.kind === 'collection')),
+      expenses: fromSummary(summary.expenses, expenseTotal, expenseRows.length > 0),
+      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand, Boolean(data.cashLedger?.length || transactions.length || expenseRows.length)),
+      netCashMovement: fromSummary(cash.netCashMovement ?? summary.netCashMovement, derivedNetCashMovement, Boolean(data.cashLedger?.length || transactions.length || expenseRows.length)),
       grossProfit: grossProfitTotal,
-      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal),
+      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal, Boolean(saleRows.length || expenseRows.length)),
     }
   }, [cash, cashMovementRows, expenseRows, profitability, summary, transactions])
 

@@ -79,7 +79,7 @@ try {
   await check(35035000);
   await language('sw');
   await check(35035000);
-  console.log('PASS: loading zero updates to the report amount and survives language changes');
+  console.log('PASS: loading zero updates to the report amount and language changes do not rewrite values');
 
   for (const code of ['lg', 'nyn', 'rw', 'nyo', 'ach', 'en']) {
     await render(1275000);
@@ -113,17 +113,17 @@ try {
   });
   await language('sw');
   await settle();
-  assert.equal(await page.locator('#dynamic-label').textContent(), 'Fedha mkononi');
+  assert.equal(await page.locator('#dynamic-label').textContent(), 'Cash at Hand');
   assert.equal(await page.locator('#receipt-label').textContent(), 'Cash at Hand');
   assert.equal(await page.locator('#data-value').textContent(), 'Sales');
-  assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Tafuta');
+  assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Search');
   await page.evaluate(() => {
     document.querySelector('#dynamic-label').firstChild.nodeValue = 'Sales';
     document.querySelector('#search').setAttribute('placeholder', 'Customer Name');
   });
   await settle();
-  assert.equal(await page.locator('#dynamic-label').textContent(), 'Mauzo');
-  assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Jina la mteja');
+  assert.equal(await page.locator('#dynamic-label').textContent(), 'Sales');
+  assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Customer Name');
   await language('en');
   await settle();
   assert.equal(await page.locator('#dynamic-label').textContent(), 'Sales');
@@ -141,7 +141,7 @@ try {
     requestAnimationFrame(() => requestAnimationFrame(() => { observer.disconnect(); resolve(count); }));
   }));
   assert.equal(idleWrites, 0);
-  console.log('PASS: dynamic labels and placeholders update; receipts stay unchanged; translator settles');
+  console.log('PASS: dynamic labels and placeholders remain React-owned; no translator mutations run');
 
   await page.evaluate(() => {
     const input = document.createElement('input');
@@ -150,7 +150,7 @@ try {
     document.body.append(input);
   });
   await settle();
-  assert.equal(await page.locator('#late-search').getAttribute('placeholder'), 'Tafuta');
+  assert.equal(await page.locator('#late-search').getAttribute('placeholder'), 'Search');
   await page.evaluate(() => { document.querySelector('#translation-probes').remove(); document.querySelector('#late-search').remove(); });
   for (const [width, height] of [[1440, 900], [390, 844]]) {
     await page.setViewportSize({ width, height });

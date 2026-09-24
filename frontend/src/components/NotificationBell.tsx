@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X } from 'lucide-react'
+import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '@/lib/api'
@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { usePushNotifications } from '@/lib/usePushNotifications'
+import { sanitizeNotificationText } from '@/lib/notificationDisplay'
 
 interface NotificationItem {
   id: string
@@ -95,8 +96,8 @@ export function NotificationBell() {
       const arr = Array.isArray(data) ? data : (data.notifications || [])
       return arr.map((n: any) => ({
         id: n.id,
-        title: n.title || '',
-        message: n.message || '',
+        title: sanitizeNotificationText(n.title, 'Notification'),
+        message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
         isRead: n.isRead ?? false,
         createdAt: n.createdAt || new Date().toISOString(),
@@ -115,8 +116,8 @@ export function NotificationBell() {
       const local = await getLocalNotifications()
       return local.map((n: any) => ({
         id: n.id,
-        title: n.title || '',
-        message: n.message || '',
+        title: sanitizeNotificationText(n.title, 'Notification'),
+        message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
         isRead: n.isRead ?? false,
         createdAt: n.createdAt || new Date().toISOString(),
@@ -436,8 +437,8 @@ export function NotificationBell() {
 
   const pushNotifs: NotificationItem[] = foregroundNotifications.map((n) => ({
     id: n.id,
-    title: n.title,
-    message: n.body,
+    title: sanitizeNotificationText(n.title, 'Notification'),
+    message: sanitizeNotificationText(n.body),
     type: 'info',
     isRead: false,
     createdAt: new Date(n.timestamp).toISOString(),
@@ -468,12 +469,12 @@ export function NotificationBell() {
       {open && createPortal(
         <div
           ref={panelRef}
-          className="fixed right-0 top-14 z-[60] w-[380px] max-w-[calc(100vw-1rem)] bg-card border border-border rounded-xl shadow-2xl"
+          className="fixed right-2 top-14 z-[60] w-[420px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl sm:right-4"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold">Notifications</h3>
+              <div><h3 className="text-sm font-semibold">Notifications</h3><p className="mt-0.5 text-[11px] text-muted-foreground">Your latest business updates</p></div>
               {unreadCount > 0 && (
                 <span className="text-xs font-medium text-white bg-red-500 rounded-full px-2 py-0.5">
                   {unreadCount} new
@@ -502,7 +503,7 @@ export function NotificationBell() {
           </div>
 
           {/* List */}
-          <div className="max-h-[480px] overflow-y-auto">
+          <div className="max-h-[min(60vh,520px)] overflow-y-auto">
             {loading && notifications.length === 0 ? (
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
@@ -521,25 +522,25 @@ export function NotificationBell() {
                   <div
                     key={n.id}
                     className={cn(
-                      'flex items-start gap-3 p-3 border-b border-border/50 hover:bg-muted/50 cursor-pointer transition-colors',
-                      !n.isRead && 'bg-primary/5'
+                      'group flex items-start gap-3 border-b border-border/50 p-4 transition-colors hover:bg-muted/50',
+                      !n.isRead && 'bg-primary/[0.06]'
                     )}
                     onClick={() => handleNotificationClick(n)}
                   >
                     {/* Icon */}
-                    <div className={cn('p-2 rounded-full shrink-0', colorClass)}>
+                    <div className={cn('mt-0.5 rounded-xl p-2.5 shrink-0', colorClass)}>
                       <Icon className="h-3.5 w-3.5" />
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium truncate">{n.title}</p>
+                        <p className="truncate text-sm font-semibold">{n.title}</p>
                         {!n.isRead && (
                           <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
+                      <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{n.message}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-[11px] text-muted-foreground/70">{timeAgo(n.createdAt)}</p>
                         {n.source === 'local' && !n.id.startsWith('job_') && (
@@ -551,24 +552,18 @@ export function NotificationBell() {
                       </div>
                     </div>
 
-                    {/* Mark read button */}
-                    {!n.isRead && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleMarkRead(n.id)
-                        }}
-                        className="p-1 text-muted-foreground hover:text-green-600 shrink-0"
-                        title="Mark as read"
-                      >
-                        <Check className="h-4 w-4" />
-                      </button>
-                    )}
+                    <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      {n.link && <button type="button" onClick={() => handleNotificationClick(n)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open details" aria-label="Open notification details"><ArrowUpRight className="h-4 w-4" /></button>}
+                      {!n.isRead && <button type="button" onClick={() => handleMarkRead(n.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-green-600" title="Mark as read" aria-label="Mark notification as read"><Check className="h-4 w-4" /></button>}
+                    </div>
                   </div>
                 )
               })
             )}
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border bg-muted/20 px-4 py-3">
+            <span className="text-[11px] text-muted-foreground">Notifications refresh automatically</span>
+            <button type="button" onClick={() => { navigate('/tenant/communication'); setOpen(false) }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">Open notification center <ArrowUpRight className="h-3.5 w-3.5" /></button>
           </div>
 
         </div>,

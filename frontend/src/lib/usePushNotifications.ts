@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { apiFetch } from './api'
 import { requestNotificationPermission, getFCMToken, onForegroundMessage, isFirebaseConfigured } from './firebase'
+import { sanitizeNotificationText } from './notificationDisplay'
 import { getAuthToken } from './api'
 
 export type PushPermissionState = 'default' | 'granted' | 'denied' | 'unsupported' | 'not-configured'
@@ -39,8 +40,8 @@ export function usePushNotifications() {
     const unsub = onForegroundMessage((payload) => {
       const notif: PushNotification = {
         id: `${Date.now()}-${Math.random()}`,
-        title: payload.notification?.title || 'Notification',
-        body: payload.notification?.body || '',
+        title: sanitizeNotificationText(payload.notification?.title, 'Notification'),
+        body: sanitizeNotificationText(payload.notification?.body),
         data: payload.data,
         timestamp: Date.now(),
       }
@@ -49,7 +50,7 @@ export function usePushNotifications() {
       if (Notification.permission === 'granted') {
         try {
           const n = new Notification(notif.title, {
-            body: notif.body,
+            body: sanitizeNotificationText(notif.body),
             icon: '/img/jibusales_logo.png',
             badge: '/img/jibusales_logo.png',
             tag: notif.id,
