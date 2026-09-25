@@ -3,10 +3,12 @@ ALTER TABLE "subscription_payments"
     ALTER COLUMN "paidAt" DROP NOT NULL,
     ADD COLUMN "status" TEXT NOT NULL DEFAULT 'completed',
     ADD COLUMN "provider" TEXT,
+    ADD COLUMN "gatewayPaymentMethod" TEXT,
     ADD COLUMN "merchantReference" TEXT,
     ADD COLUMN "gatewayTrackingId" TEXT,
     ADD COLUMN "checkoutUrl" TEXT,
     ADD COLUMN "checkoutReturnPath" TEXT,
+    ADD COLUMN "payerName" TEXT,
     ADD COLUMN "payerPhone" TEXT,
     ADD COLUMN "payerEmail" TEXT;
 

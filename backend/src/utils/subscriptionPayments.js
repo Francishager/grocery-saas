@@ -13,9 +13,13 @@ export function normalizeSubscriptionPaymentAmount(value) {
 
 export async function syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus) {
   const { normalizePesapalStatus } = await import('../services/pesapal.js');
-  const gatewayMerchantReference = gatewayStatus?.merchant_reference;
+  const gatewayMerchantReference = gatewayStatus?.merchant_reference || gatewayStatus?.merchantReference;
   if (gatewayMerchantReference && gatewayMerchantReference !== payment.merchantReference) {
     throw new Error('Pesapal merchant reference did not match this payment');
+  }
+  const gatewayTrackingId = gatewayStatus?.order_tracking_id || gatewayStatus?.orderTrackingId;
+  if (gatewayTrackingId && gatewayTrackingId !== payment.gatewayTrackingId) {
+    throw new Error('Pesapal tracking ID did not match this payment');
   }
 
   let status = normalizePesapalStatus(gatewayStatus);
@@ -40,8 +44,8 @@ export async function syncPesapalSubscriptionPayment(prisma, payment, gatewaySta
       data: {
         status,
         ...(gatewayStatus?.confirmation_code ? { reference: String(gatewayStatus.confirmation_code).slice(0, 200) } : {}),
-        ...(gatewayStatus?.payment_method ? { paymentMethod: String(gatewayStatus.payment_method).slice(0, 40) } : {}),
-        ...(gatewayStatus?.created_date && !Number.isNaN(new Date(gatewayStatus.created_date).getTime())
+        ...(gatewayStatus?.payment_method ? { gatewayPaymentMethod: String(gatewayStatus.payment_method).slice(0, 40) } : {}),
+        ...(status === 'completed' && gatewayStatus?.created_date && !Number.isNaN(new Date(gatewayStatus.created_date).getTime())
           ? { paidAt: new Date(gatewayStatus.created_date) }
           : {}),
       },
@@ -57,11 +61,53 @@ export async function syncPesapalSubscriptionPayment(prisma, payment, gatewaySta
         },
       });
     } else if (status === 'reversed') {
-      await tx.tenant.update({
-        where: { id: current.tenantId },
-        data: { paymentReminderStatus: 'due_soon' },
+      const otherCompletedPayments = await tx.subscriptionPayment.count({
+        where: { tenantId: current.tenantId, status: 'completed', id: { not: current.id } },
       });
+      if (otherCompletedPayments === 0) {
+        await tx.tenant.update({
+          where: { id: current.tenantId },
+          data: { paymentReminderStatus: 'due_soon' },
+        });
+      }
     }
     return updated;
+  });
+}
+
+export async function cancelManualSubscriptionPayment(prisma, { paymentId, adminId, adminEmail, reason }) {
+  return prisma.$transaction(async (tx) => {
+    const payment = await tx.subscriptionPayment.findUnique({ where: { id: paymentId } });
+    if (!payment) return { error: 'not_found' };
+    if (payment.provider !== 'manual' && (payment.provider || payment.gatewayTrackingId || payment.merchantReference)) return { error: 'not_manual' };
+    if (payment.status !== 'completed') return { error: 'not_completed' };
+
+    const cancelledAt = new Date();
+    const update = await tx.subscriptionPayment.updateMany({
+      where: { id: payment.id, provider: payment.provider, status: 'completed', gatewayTrackingId: payment.gatewayTrackingId, merchantReference: payment.merchantReference },
+      data: {
+        status: 'cancelled',
+        cancelledAt,
+        cancelledById: adminId || null,
+        cancelledByEmail: adminEmail || null,
+        cancellationReason: reason,
+      },
+    });
+    if (update.count !== 1) return { error: 'already_changed' };
+
+    const remainingCompleted = await tx.subscriptionPayment.count({
+      where: { tenantId: payment.tenantId, status: 'completed' },
+    });
+    const tenantData = remainingCompleted > 0 ? {} : { paymentReminderStatus: 'due_soon' };
+    if (Object.keys(tenantData).length) {
+      const tenant = await tx.tenant.findUnique({ where: { id: payment.tenantId }, select: { billingPaymentReference: true } });
+      if (tenant?.billingPaymentReference === payment.reference) {
+        tenantData.billingPaymentReference = null;
+        tenantData.billingPaymentMethod = null;
+      }
+      if (payment.paidAt) tenantData.paymentReminderSentAt = payment.paidAt;
+      await tx.tenant.update({ where: { id: payment.tenantId }, data: tenantData });
+    }
+    return { payment: await tx.subscriptionPayment.findUnique({ where: { id: payment.id } }), remainingCompleted };
   });
 }

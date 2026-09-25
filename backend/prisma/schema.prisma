@@ -396,12 +396,18 @@ model SubscriptionPayment {
   recordedByEmail String?
   status          String   @default("completed")
   provider        String?
+  gatewayPaymentMethod String?
   merchantReference String? @unique
   gatewayTrackingId String? @unique
   checkoutUrl     String?
   checkoutReturnPath String?
+  payerName       String?
   payerPhone      String?
   payerEmail      String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledByEmail String?
+  cancellationReason String?
   createdAt       DateTime @default(now())
 
   @@index([tenantId, paidAt])

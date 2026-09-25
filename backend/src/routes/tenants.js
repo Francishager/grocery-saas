@@ -5,7 +5,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
-import { buildBillingPaymentRequest, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
+import { buildBillingPaymentRequest, getBillingGatewaySummary, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 import { getPesapalCallbackUrl, getPesapalTransactionStatus, normalizePesapalStatus, submitPesapalOrder } from "../services/pesapal.js";
 import { normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
@@ -13,7 +13,7 @@ import { normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } fr
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
 
-async function startPesapalSubscriptionPayment({ tenant, amount, currency, paymentMethod, phone, email, firstName, lastName, returnPath, recordedBy }) {
+async function startPesapalSubscriptionPayment({ tenant, amount, currency, paymentMethod, phone, email, payerName, firstName, lastName, returnPath, recordedBy }) {
   const merchantReference = `JS-${tenant.id.slice(0, 18)}-${Date.now()}-${randomBytes(3).toString("hex")}`;
   const normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
   const attempt = await prisma.subscriptionPayment.create({
@@ -25,6 +25,7 @@ async function startPesapalSubscriptionPayment({ tenant, amount, currency, payme
       provider: "pesapal",
       merchantReference,
       checkoutReturnPath: returnPath,
+      payerName: payerName || null,
       payerPhone: phone || null,
       payerEmail: email || null,
       recordedById: recordedBy?.id || null,
@@ -248,6 +249,7 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
         paymentMethod: method,
         phone: payerPhone,
         email: payerEmail,
+        payerName: [req.user?.fname, req.user?.lname].filter(Boolean).join(" ") || tenant.name,
         firstName: names[0],
         lastName: names.slice(1).join(" ") || "Business",
         returnPath: "/tenant/dashboard",
@@ -264,6 +266,9 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
 
     if (String(gateway).toLowerCase() !== "relworx") return res.status(400).json({ error: "Choose Pesapal or Relworx" });
     if (!networkProvider || !phoneNumber) return res.status(400).json({ error: "Network provider and phone number are required for Relworx" });
+    if (!getBillingGatewaySummary().configured) {
+      return res.status(503).json({ error: "Relworx is not configured, so no payment was taken. Select Pesapal or contact the administrator." });
+    }
 
     const paymentRequest = buildBillingPaymentRequest({
       amount: amountDue,
@@ -317,6 +322,12 @@ async function processPesapalNotification(req, res, isIpn) {
   const payment = trackingId && merchantReference
     ? await prisma.subscriptionPayment.findFirst({ where: { provider: "pesapal", gatewayTrackingId: trackingId, merchantReference } })
     : null;
+  if (!trackingId || !merchantReference) return res.status(400).json({ error: "Pesapal tracking ID and merchant reference are required" });
+  if (!payment) {
+    if (isIpn) return res.status(200).json({ orderNotificationType: payload.OrderNotificationType || "IPNCHANGE", orderTrackingId: trackingId, orderMerchantReference: merchantReference, status: 200 });
+    const origin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173";
+    return res.redirect(302, `${origin.replace(/\/$/, "")}/tenant/dashboard?billingError=payment_not_found`);
+  }
   if (payment) {
     const gatewayStatus = await getPesapalTransactionStatus(trackingId);
     await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
@@ -335,7 +346,10 @@ router.get("/billing-reminder/pesapal/callback", async (req, res) => {
   } catch (err) {
     console.error("Pesapal callback verification failed:", err);
     const origin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173";
-    return res.redirect(302, `${origin.replace(/\/$/, "")}/tenant/dashboard?billingError=verification`);
+    const paymentReference = String(req.query.OrderMerchantReference || req.query.merchantReference || "");
+    const payment = paymentReference ? await prisma.subscriptionPayment.findUnique({ where: { merchantReference: paymentReference }, select: { checkoutReturnPath: true } }).catch(() => null) : null;
+    const path = payment?.checkoutReturnPath === "/saas/subscriptions" ? "/saas/subscriptions" : "/tenant/dashboard";
+    return res.redirect(302, `${origin.replace(/\/$/, "")}${path}?billingError=verification&billingRef=${encodeURIComponent(paymentReference)}`);
   }
 });
 

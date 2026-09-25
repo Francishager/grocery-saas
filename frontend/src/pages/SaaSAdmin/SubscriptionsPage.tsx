@@ -3,7 +3,7 @@ import { appNotify } from '@/lib/appFeedback'
 import React, { useState, useEffect, useMemo } from 'react'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar, Banknote, Receipt } from 'lucide-react'
+import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar, Banknote, Receipt, ChevronLeft, ChevronRight, Ban } from 'lucide-react'
 
 interface Subscription {
   id: string; status: string; startDate: string; endDate: string | null; trialEndsAt: string | null
@@ -24,7 +24,16 @@ interface SubscriptionPayment {
   id: string; amount: string; currency: string; paymentMethod: string
   reference: string | null; notes: string | null; paidAt: string | null; status?: string; provider?: string | null
   merchantReference?: string | null; checkoutUrl?: string | null
+  gatewayPaymentMethod?: string | null
   recordedByEmail: string | null
+  payerPhone?: string | null
+  payerEmail?: string | null
+  payerName?: string | null
+  cancelledAt?: string | null
+  cancelledByEmail?: string | null
+  cancellationReason?: string | null
+  createdAt?: string
+  tenant?: { id: string; name: string; slug: string; status: string }
 }
 
 export const SubscriptionsPage: React.FC = () => {
@@ -54,6 +63,17 @@ export const SubscriptionsPage: React.FC = () => {
   const [planMaxUsers, setPlanMaxUsers] = useState('')
   const [planMaxProducts, setPlanMaxProducts] = useState('')
   const [payments, setPayments] = useState<SubscriptionPayment[]>([])
+  const [allPayments, setAllPayments] = useState<SubscriptionPayment[]>([])
+  const [allPaymentsLoading, setAllPaymentsLoading] = useState(false)
+  const [paymentLedgerSearch, setPaymentLedgerSearch] = useState('')
+  const [paymentLedgerStatus, setPaymentLedgerStatus] = useState('all')
+  const [paymentLedgerMethod, setPaymentLedgerMethod] = useState('all')
+  const [paymentLedgerPage, setPaymentLedgerPage] = useState(1)
+  const [paymentLedgerPages, setPaymentLedgerPages] = useState(1)
+  const [paymentLedgerTotal, setPaymentLedgerTotal] = useState(0)
+  const [paymentToCancel, setPaymentToCancel] = useState<SubscriptionPayment | null>(null)
+  const [paymentCancelReason, setPaymentCancelReason] = useState('')
+  const [paymentCancelling, setPaymentCancelling] = useState(false)
   const [paymentsLoading, setPaymentsLoading] = useState(false)
   const [paymentSaving, setPaymentSaving] = useState(false)
   const [ipnRegistering, setIpnRegistering] = useState(false)
@@ -61,12 +81,36 @@ export const SubscriptionsPage: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [paymentPhone, setPaymentPhone] = useState('')
   const [paymentEmail, setPaymentEmail] = useState('')
+  const [paymentPayerName, setPaymentPayerName] = useState('')
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentDate, setPaymentDate] = useState(() => {
     const now = new Date()
     return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
   })
+
+  const fetchPaymentLedger = async () => {
+    setAllPaymentsLoading(true)
+    try {
+      const params = new URLSearchParams({
+        page: String(paymentLedgerPage),
+        limit: '20',
+        status: paymentLedgerStatus,
+        method: paymentLedgerMethod,
+        search: paymentLedgerSearch.trim(),
+      })
+      const response = await apiFetch('/api/admin/subscription-payments?' + params.toString(), {})
+      if (!response.ok) throw new Error('Unable to load subscription payment ledger')
+      const data = await response.json()
+      setAllPayments(Array.isArray(data?.payments) ? data.payments : [])
+      setPaymentLedgerPages(Math.max(1, Number(data?.pages) || 1))
+      setPaymentLedgerTotal(Number(data?.total) || 0)
+    } catch {
+      setAllPayments([])
+    } finally {
+      setAllPaymentsLoading(false)
+    }
+  }
 
   const fetchData = async () => {
     setLoading(true)
@@ -84,7 +128,17 @@ export const SubscriptionsPage: React.FC = () => {
   useEffect(() => { fetchData() }, [])
 
   useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchPaymentLedger() }, 250)
+    return () => window.clearTimeout(timer)
+  }, [paymentLedgerPage, paymentLedgerStatus, paymentLedgerMethod, paymentLedgerSearch])
+
+  useEffect(() => {
     const reference = new URLSearchParams(window.location.search).get('billingRef')
+    const billingError = new URLSearchParams(window.location.search).get('billingError')
+    if (billingError) {
+      appNotify('Pesapal could not verify this payment. Check the ledger status or retry checkout.')
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
     if (!reference) return
     void (async () => {
       const response = await apiFetch('/api/admin/subscription-payments/' + encodeURIComponent(reference), {})
@@ -119,6 +173,7 @@ export const SubscriptionsPage: React.FC = () => {
     setPaymentMethod('cash')
     setPaymentPhone('')
     setPaymentEmail('')
+    setPaymentPayerName('')
     setPaymentReference('')
     setPaymentNotes('')
     const now = new Date()
@@ -154,7 +209,7 @@ export const SubscriptionsPage: React.FC = () => {
     try {
       const res = await apiFetch('/api/admin/subscriptions/' + selected.id + '/payments', {
         method: 'POST',
-        body: JSON.stringify({ amount: paymentAmount, paymentMethod, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate, phone: paymentPhone, email: paymentEmail }),
+        body: JSON.stringify({ amount: paymentAmount, paymentMethod, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate, phone: paymentPhone, email: paymentEmail, payerName: paymentPayerName }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -169,9 +224,11 @@ export const SubscriptionsPage: React.FC = () => {
       setPaymentReference('')
       setPaymentPhone('')
       setPaymentEmail('')
+      setPaymentPayerName('')
       setPaymentNotes('')
       await fetchPayments(selected.id)
       await fetchData()
+      await fetchPaymentLedger()
       appNotify('Subscription payment recorded')
     } catch {
       appNotify('Unable to record subscription payment')
@@ -191,6 +248,32 @@ export const SubscriptionsPage: React.FC = () => {
       appNotify(error?.message || 'Pesapal IPN registration failed')
     } finally {
       setIpnRegistering(false)
+    }
+  }
+
+  const handleCancelPayment = async () => {
+    if (!paymentToCancel || !paymentCancelReason.trim()) {
+      appNotify('Enter a reason before cancelling this receipt')
+      return
+    }
+    setPaymentCancelling(true)
+    try {
+      const response = await apiFetch(`/api/admin/subscription-payments/${paymentToCancel.id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: paymentCancelReason.trim() }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.error || 'Could not cancel payment receipt')
+      setPaymentToCancel(null)
+      setPaymentCancelReason('')
+      await fetchPaymentLedger()
+      if (selected) await fetchPayments(selected.id)
+      await fetchData()
+      appNotify('Payment receipt cancelled. The audit record was kept.')
+    } catch (error: any) {
+      appNotify(error?.message || 'Could not cancel payment receipt')
+    } finally {
+      setPaymentCancelling(false)
     }
   }
 
@@ -244,7 +327,7 @@ export const SubscriptionsPage: React.FC = () => {
   }
 
   const statusBadge = (s: string) => {
-    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', trial: 'bg-blue-100 text-blue-800', past_due: 'bg-yellow-100 text-yellow-800', cancelled: 'bg-red-100 text-red-800', expired: 'bg-gray-100 text-gray-800', suspended: 'bg-red-100 text-red-800' }
+    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', completed: 'bg-green-100 text-green-800', trial: 'bg-blue-100 text-blue-800', pending: 'bg-amber-100 text-amber-800', past_due: 'bg-yellow-100 text-yellow-800', failed: 'bg-red-100 text-red-800', reversed: 'bg-red-100 text-red-800', cancelled: 'bg-red-100 text-red-800', expired: 'bg-gray-100 text-gray-800', suspended: 'bg-red-100 text-red-800' }
     const label = (s || 'unknown').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
     return <span className={`px-2 py-1 rounded text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-800'}`}>{label}</span>
   }
@@ -256,13 +339,77 @@ export const SubscriptionsPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold">Subscriptions</h1><p className="text-gray-500">View and manage tenant subscriptions</p></div>
-        <button onClick={fetchData} className="px-3 py-2 border rounded-lg hover:bg-gray-50"><RefreshCw size={18} /></button>
+        <button onClick={() => { void fetchData(); void fetchPaymentLedger() }} className="p-2 border rounded-md hover:bg-gray-50" title="Refresh subscriptions and payments" aria-label="Refresh subscriptions and payments"><RefreshCw size={18} /></button>
       </div>
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
         <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by business name..." className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
       </div>
+
+      <section className="overflow-hidden rounded-lg border bg-white" aria-labelledby="subscription-payment-ledger-heading">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h2 id="subscription-payment-ledger-heading" className="text-base font-semibold">Subscription Payments</h2>
+            <p className="text-xs text-gray-500">Payments received and gateway checkouts across all businesses · {paymentLedgerTotal} records</p>
+          </div>
+          <button onClick={() => void fetchPaymentLedger()} disabled={allPaymentsLoading} className="p-2 border rounded-md hover:bg-gray-50 disabled:opacity-50" title="Refresh payment ledger" aria-label="Refresh payment ledger">
+            {allPaymentsLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-2 border-b p-3 sm:grid-cols-3">
+          <div className="relative sm:col-span-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input value={paymentLedgerSearch} onChange={e => { setPaymentLedgerSearch(e.target.value); setPaymentLedgerPage(1) }} placeholder="Search business, payer, reference..." className="w-full rounded-md border py-2 pl-9 pr-3 text-sm" />
+          </div>
+          <select aria-label="Filter payment status" value={paymentLedgerStatus} onChange={e => { setPaymentLedgerStatus(e.target.value); setPaymentLedgerPage(1) }} className="rounded-md border px-3 py-2 text-sm">
+            <option value="all">All statuses</option><option value="completed">Received</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="reversed">Provider reversed</option><option value="cancelled">Admin cancelled</option>
+          </select>
+          <select aria-label="Filter payment method" value={paymentLedgerMethod} onChange={e => { setPaymentLedgerMethod(e.target.value); setPaymentLedgerPage(1) }} className="rounded-md border px-3 py-2 text-sm">
+            <option value="all">All methods</option><option value="cash">Cash</option><option value="mobile_money">Mobile money</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option><option value="other">Other</option>
+          </select>
+        </div>
+        {allPaymentsLoading && allPayments.length === 0 ? (
+          <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-blue-600" /></div>
+        ) : allPayments.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-500">No subscription payments match these filters.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[960px] text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500">
+                <tr><th className="px-4 py-3 font-medium">Business</th><th className="px-4 py-3 font-medium">Payer</th><th className="px-4 py-3 font-medium">Method / status</th><th className="px-4 py-3 font-medium">Reference</th><th className="px-4 py-3 font-medium">Received / recorded by</th><th className="px-4 py-3 font-medium">Date</th><th className="px-4 py-3 text-right font-medium">Amount</th><th className="px-4 py-3 text-right font-medium">Action</th></tr>
+              </thead>
+              <tbody className="divide-y">
+                {allPayments.map(payment => (
+                  <tr key={payment.id} className="align-top hover:bg-gray-50">
+                    <td className="px-4 py-3"><div className="font-medium">{payment.tenant?.name || 'Business unavailable'}</div><div className="text-xs text-gray-500">{payment.tenant?.slug || payment.tenant?.id || ''}</div></td>
+                    <td className="px-4 py-3 text-xs text-gray-600"><div>{payment.payerName || (payment.provider === 'manual' ? 'Recorded payment' : 'Business account')}</div>{(payment.payerPhone || payment.payerEmail) && <div className="mt-0.5 text-gray-500">{payment.payerPhone || payment.payerEmail}</div>}</td>
+                    <td className="px-4 py-3"><div className="capitalize">{(payment.gatewayPaymentMethod || payment.paymentMethod || '').replaceAll('_', ' ')}</div><div className="mt-1">{statusBadge(payment.status || 'completed')}</div></td>
+                    <td className="max-w-48 break-all px-4 py-3 text-xs text-gray-600">{payment.reference || payment.merchantReference || '-'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600"><div>{payment.recordedByEmail || 'System / gateway'}</div>{payment.cancelledByEmail && <div className="mt-1 text-red-700">Cancelled by {payment.cancelledByEmail}</div>}{payment.cancellationReason && <div className="mt-0.5 max-w-56 text-red-700">{payment.cancellationReason}</div>}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600">{fmtDate(payment.paidAt || payment.createdAt || null)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold">{fmt(Number(payment.amount), payment.currency)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {payment.status === 'completed' && (!payment.provider || payment.provider === 'manual') ? (
+                        <button type="button" onClick={() => { setPaymentToCancel(payment); setPaymentCancelReason('') }} className="rounded-md p-1.5 text-red-700 hover:bg-red-50" title="Cancel duplicate/manual receipt" aria-label={`Cancel payment for ${payment.tenant?.name || 'business'}`}>
+                          <Ban size={16} />
+                        </button>
+                      ) : payment.status === 'cancelled' ? <span className="text-xs text-gray-500">Cancelled</span> : <span className="text-xs text-gray-400">-</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-gray-500">
+          <span>Page {paymentLedgerPage} of {paymentLedgerPages}</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPaymentLedgerPage(page => Math.max(1, page - 1))} disabled={paymentLedgerPage <= 1 || allPaymentsLoading} className="rounded-md border p-1.5 disabled:opacity-40" aria-label="Previous payments page"><ChevronLeft size={16} /></button>
+            <button onClick={() => setPaymentLedgerPage(page => Math.min(paymentLedgerPages, page + 1))} disabled={paymentLedgerPage >= paymentLedgerPages || allPaymentsLoading} className="rounded-md border p-1.5 disabled:opacity-40" aria-label="Next payments page"><ChevronRight size={16} /></button>
+          </div>
+        </div>
+      </section>
 
       <div className="bg-white rounded-lg border overflow-hidden">
         {loading ? (
@@ -316,6 +463,29 @@ export const SubscriptionsPage: React.FC = () => {
         />
       </div>
 
+      {paymentToCancel && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="cancel-payment-title">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div><h2 id="cancel-payment-title" className="text-base font-semibold">Cancel payment receipt?</h2><p className="mt-1 text-sm text-gray-600">This voids the SaaS ledger entry. It does not refund or move real money.</p></div>
+              <button type="button" onClick={() => setPaymentToCancel(null)} className="rounded-md p-1 text-gray-500 hover:bg-gray-100" aria-label="Close cancellation dialog"><X size={18} /></button>
+            </div>
+            <div className="mb-3 rounded-md bg-gray-50 p-3 text-sm">
+              <div className="font-medium">{paymentToCancel.tenant?.name || 'Business'}</div>
+              <div className="text-gray-600">{fmt(Number(paymentToCancel.amount), paymentToCancel.currency)} · {paymentToCancel.reference || paymentToCancel.merchantReference || 'No reference'}</div>
+            </div>
+            <label htmlFor="cancel-payment-reason" className="mb-1 block text-sm font-medium">Reason</label>
+            <textarea id="cancel-payment-reason" value={paymentCancelReason} onChange={event => setPaymentCancelReason(event.target.value)} maxLength={500} rows={3} className="w-full rounded-md border px-3 py-2 text-sm" placeholder="For example: duplicate receipt entered by mistake" />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setPaymentToCancel(null)} disabled={paymentCancelling} className="rounded-md border px-3 py-2 text-sm">Keep receipt</button>
+              <button type="button" onClick={handleCancelPayment} disabled={paymentCancelling || !paymentCancelReason.trim()} className="inline-flex items-center gap-2 rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                {paymentCancelling && <Loader2 size={15} className="animate-spin" />}Cancel receipt
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -364,6 +534,10 @@ export const SubscriptionsPage: React.FC = () => {
                   </div>
                   <p className="sm:col-span-2 text-xs text-gray-500">Pesapal will open its secure checkout. The payment stays pending until Pesapal confirms it.</p>
                 </>}
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Payer name (optional)</label>
+                  <input value={paymentPayerName} onChange={e => setPaymentPayerName(e.target.value)} maxLength={160} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                </div>
                 <div>
                   {!['mobile_money', 'card'].includes(paymentMethod) && <>
                     <label className="mb-1 block text-xs font-medium text-gray-500">Date received</label>

@@ -10,7 +10,7 @@ import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
-import { syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { cancelManualSubscriptionPayment, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
@@ -661,6 +661,110 @@ router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req
 
 const SUBSCRIPTION_PAYMENT_METHODS = new Set(["cash", "mobile_money", "bank_transfer", "card", "other"]);
 
+router.get("/subscription-payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "20"), 10) || 20));
+    const status = String(req.query.status || "all").trim().toLowerCase();
+    const method = String(req.query.method || "all").trim().toLowerCase();
+    const search = String(req.query.search || "").trim().slice(0, 100);
+    const where = {};
+    if (status !== "all") {
+      if (!["pending", "completed", "failed", "reversed", "cancelled"].includes(status)) return res.status(400).json({ error: "Invalid payment status filter" });
+      where.status = status;
+    }
+    if (method !== "all") {
+      if (!SUBSCRIPTION_PAYMENT_METHODS.has(method)) return res.status(400).json({ error: "Invalid payment method filter" });
+      where.paymentMethod = method;
+    }
+    if (search) {
+      where.OR = [
+        { merchantReference: { contains: search, mode: "insensitive" } },
+        { reference: { contains: search, mode: "insensitive" } },
+        { payerName: { contains: search, mode: "insensitive" } },
+        { payerEmail: { contains: search, mode: "insensitive" } },
+        { payerPhone: { contains: search } },
+        { recordedByEmail: { contains: search, mode: "insensitive" } },
+        { tenant: { is: { OR: [
+          { name: { contains: search, mode: "insensitive" } },
+          { slug: { contains: search, mode: "insensitive" } },
+        ] } } },
+      ];
+    }
+    const pageRows = await prisma.subscriptionPayment.findMany({
+      where,
+      select: { id: true, provider: true, gatewayTrackingId: true, status: true },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    for (const payment of pageRows) {
+      if (payment.provider === "pesapal" && payment.gatewayTrackingId && payment.status === "pending") {
+        try {
+          const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+          const fullPayment = await prisma.subscriptionPayment.findUnique({ where: { id: payment.id } });
+          if (fullPayment) await syncPesapalSubscriptionPayment(prisma, fullPayment, gatewayStatus);
+        } catch (error) {
+          console.warn("Pesapal ledger refresh failed:", error.message);
+        }
+      }
+    }
+    const [payments, total] = await Promise.all([
+      prisma.subscriptionPayment.findMany({
+        where,
+        include: { tenant: { select: { id: true, name: true, slug: true, status: true } } },
+        orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.subscriptionPayment.count({ where }),
+    ]);
+    res.json({
+      payments: payments.map(payment => ({ ...payment, amount: payment.amount.toString() })),
+      total,
+      page,
+      limit,
+      pages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (err) {
+    console.error("All subscription payments list error:", err);
+    res.status(500).json({ error: "Failed to load subscription payments" });
+  }
+});
+
+router.post("/subscription-payments/:paymentId/cancel", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ error: "Enter a reason for cancelling this receipt" });
+    const result = await cancelManualSubscriptionPayment(prisma, {
+      paymentId: req.params.paymentId,
+      adminId: req.user?.id,
+      adminEmail: req.user?.email,
+      reason,
+    });
+    if (result.error === "not_found") return res.status(404).json({ error: "Payment record not found" });
+    if (result.error === "not_manual") return res.status(409).json({ error: "Gateway payments cannot be cancelled here. Confirm the provider transaction and use the provider refund process if money was charged." });
+    if (result.error === "not_completed" || result.error === "already_changed") return res.status(409).json({ error: "This payment is no longer an active received receipt" });
+
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: result.payment.tenantId,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "subscription_payment_cancelled",
+      model: "SubscriptionPayment",
+      recordId: result.payment.id,
+      changes: { amount: result.payment.amount.toString(), reference: result.payment.reference, reason },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "warning",
+    }).catch(() => {});
+    res.json({ message: "Payment receipt cancelled", payment: { ...result.payment, amount: result.payment.amount.toString() } });
+  } catch (err) {
+    console.error("Subscription payment cancellation error:", err);
+    res.status(500).json({ error: "Failed to cancel subscription payment" });
+  }
+});
+
 router.get("/subscription-payments/:reference", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const payment = await prisma.subscriptionPayment.findUnique({ where: { merchantReference: req.params.reference }, include: { tenant: { include: { plan: true } } } });
@@ -713,7 +817,7 @@ router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmi
 
 router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { amount, paymentMethod, reference, notes, paidAt, phone, email } = req.body || {};
+    const { amount, paymentMethod, reference, notes, paidAt, phone, email, payerName } = req.body || {};
     let normalizedAmount;
     try {
       normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
@@ -730,6 +834,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
     const currency = resolveSubscriptionCharge(tenant.plan || {}, tenant).currency;
     const cleanReference = typeof reference === "string" ? reference.trim().slice(0, 200) || null : null;
     const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 2000) || null : null;
+    const cleanPayerName = typeof payerName === "string" ? payerName.trim().slice(0, 160) || null : null;
 
     if (["mobile_money", "card"].includes(method)) {
       const payerPhone = String(phone || tenant.owner?.phone || "").trim();
@@ -747,6 +852,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           checkoutReturnPath: "/saas/subscriptions",
           payerPhone: payerPhone || null,
           payerEmail: payerEmail || null,
+          payerName: cleanPayerName || [tenant.owner?.fname, tenant.owner?.lname].filter(Boolean).join(" ") || tenant.name,
           reference: cleanReference,
           notes: cleanNotes,
           recordedById: req.user?.id || null,
@@ -785,6 +891,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           amount: paymentAmount,
           currency,
           paymentMethod: method,
+          payerName: cleanPayerName,
           reference: cleanReference,
           notes: cleanNotes,
           paidAt: paymentDate,
