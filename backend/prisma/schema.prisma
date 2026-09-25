@@ -391,9 +391,17 @@ model SubscriptionPayment {
   paymentMethod   String
   reference       String?
   notes           String?
-  paidAt          DateTime @default(now())
+  paidAt          DateTime?
   recordedById    String?
   recordedByEmail String?
+  status          String   @default("completed")
+  provider        String?
+  merchantReference String? @unique
+  gatewayTrackingId String? @unique
+  checkoutUrl     String?
+  checkoutReturnPath String?
+  payerPhone      String?
+  payerEmail      String?
   createdAt       DateTime @default(now())
 
   @@index([tenantId, paidAt])

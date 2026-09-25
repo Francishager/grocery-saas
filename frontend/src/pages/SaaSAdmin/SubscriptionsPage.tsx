@@ -22,7 +22,8 @@ interface Subscription {
 interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string; maxUsers?: number; maxProducts?: number }
 interface SubscriptionPayment {
   id: string; amount: string; currency: string; paymentMethod: string
-  reference: string | null; notes: string | null; paidAt: string
+  reference: string | null; notes: string | null; paidAt: string | null; status?: string; provider?: string | null
+  merchantReference?: string | null; checkoutUrl?: string | null
   recordedByEmail: string | null
 }
 
@@ -55,8 +56,11 @@ export const SubscriptionsPage: React.FC = () => {
   const [payments, setPayments] = useState<SubscriptionPayment[]>([])
   const [paymentsLoading, setPaymentsLoading] = useState(false)
   const [paymentSaving, setPaymentSaving] = useState(false)
+  const [ipnRegistering, setIpnRegistering] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentPhone, setPaymentPhone] = useState('')
+  const [paymentEmail, setPaymentEmail] = useState('')
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentDate, setPaymentDate] = useState(() => {
@@ -79,6 +83,20 @@ export const SubscriptionsPage: React.FC = () => {
 
   useEffect(() => { fetchData() }, [])
 
+  useEffect(() => {
+    const reference = new URLSearchParams(window.location.search).get('billingRef')
+    if (!reference) return
+    void (async () => {
+      const response = await apiFetch('/api/admin/subscription-payments/' + encodeURIComponent(reference), {})
+      if (!response.ok) return
+      const data = await response.json()
+      if (data?.subscription?.id) {
+        openModal(data.subscription)
+        window.history.replaceState({}, document.title, window.location.pathname)
+      }
+    })()
+  }, [])
+
   const fetchPayments = async (subscriptionId: string) => {
     setPaymentsLoading(true)
     try {
@@ -99,6 +117,8 @@ export const SubscriptionsPage: React.FC = () => {
     setPayments([])
     setPaymentAmount('')
     setPaymentMethod('cash')
+    setPaymentPhone('')
+    setPaymentEmail('')
     setPaymentReference('')
     setPaymentNotes('')
     const now = new Date()
@@ -134,15 +154,21 @@ export const SubscriptionsPage: React.FC = () => {
     try {
       const res = await apiFetch('/api/admin/subscriptions/' + selected.id + '/payments', {
         method: 'POST',
-        body: JSON.stringify({ amount: paymentAmount, paymentMethod, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate }),
+        body: JSON.stringify({ amount: paymentAmount, paymentMethod, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate, phone: paymentPhone, email: paymentEmail }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         appNotify(data.error || 'Failed to record subscription payment')
         return
       }
+      if (data.checkoutUrl) {
+        window.location.assign(data.checkoutUrl)
+        return
+      }
       setPaymentAmount('')
       setPaymentReference('')
+      setPaymentPhone('')
+      setPaymentEmail('')
       setPaymentNotes('')
       await fetchPayments(selected.id)
       await fetchData()
@@ -151,6 +177,20 @@ export const SubscriptionsPage: React.FC = () => {
       appNotify('Unable to record subscription payment')
     } finally {
       setPaymentSaving(false)
+    }
+  }
+
+  const handleRegisterPesapalIpn = async () => {
+    setIpnRegistering(true)
+    try {
+      const response = await apiFetch('/api/admin/billing/pesapal/register-ipn', { method: 'POST', body: JSON.stringify({}) })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.error || 'Pesapal IPN registration failed')
+      appNotify(`Pesapal IPN registered. Set PESAPAL_IPN_ID=${data.ipnId} in the backend deployment environment, then restart the backend.`)
+    } catch (error: any) {
+      appNotify(error?.message || 'Pesapal IPN registration failed')
+    } finally {
+      setIpnRegistering(false)
     }
   }
 
@@ -293,25 +333,42 @@ export const SubscriptionsPage: React.FC = () => {
                 <Banknote className="h-4 w-4 text-emerald-700" />
                 <h3 id="subscription-payment-heading" className="text-sm font-semibold">Record payment received</h3>
               </div>
-              <p className="mb-3 text-xs text-gray-500">For a payment already received from this business. This tenant-specific receipt does not change the plan price.</p>
+              <button type="button" onClick={handleRegisterPesapalIpn} disabled={ipnRegistering} className="mb-3 inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-50">
+                {ipnRegistering ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Register Pesapal notifications
+              </button>
+              <p className="mb-3 text-xs text-gray-500">Record money already received, or send the business to Pesapal checkout. This tenant-specific amount never changes the shared plan price.</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Amount received ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">{['mobile_money', 'card'].includes(paymentMethod) ? 'Amount to charge' : 'Amount received'} ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
                   <input type="number" min="0.01" step="0.01" inputMode="decimal" required value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
                   <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
                     <option value="cash">Cash</option>
-                    <option value="mobile_money">Mobile money</option>
+                    <option value="mobile_money">Mobile money via Pesapal</option>
                     <option value="bank_transfer">Bank transfer</option>
-                    <option value="card">Card</option>
+                    <option value="card">Card via Pesapal</option>
                     <option value="other">Other</option>
                   </select>
                 </div>
+                {['mobile_money', 'card'].includes(paymentMethod) && <>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Payer phone</label>
+                    <input type="tel" value={paymentPhone} onChange={e => setPaymentPhone(e.target.value)} placeholder="+256..." className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Payer email</label>
+                    <input type="email" value={paymentEmail} onChange={e => setPaymentEmail(e.target.value)} placeholder="payer@example.com" className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </div>
+                  <p className="sm:col-span-2 text-xs text-gray-500">Pesapal will open its secure checkout. The payment stays pending until Pesapal confirms it.</p>
+                </>}
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Date received</label>
-                  <input type="date" required value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  {!['mobile_money', 'card'].includes(paymentMethod) && <>
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Date received</label>
+                    <input type="date" required value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </>}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-500">Receipt / reference</label>
@@ -324,7 +381,7 @@ export const SubscriptionsPage: React.FC = () => {
               </div>
               <button type="button" onClick={handleRecordPayment} disabled={paymentSaving || !paymentAmount || Number(paymentAmount) <= 0} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
                 {paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
-                Record payment received
+                {['mobile_money', 'card'].includes(paymentMethod) ? 'Continue to Pesapal' : 'Record payment received'}
               </button>
               <div className="mt-4 border-t pt-3">
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Payment history</h4>
@@ -333,8 +390,8 @@ export const SubscriptionsPage: React.FC = () => {
                     {payments.map(payment => (
                       <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs">
                         <div className="min-w-0">
-                          <div className="font-medium">{payment.paymentMethod.replace('_', ' ')}{payment.reference ? ' · ' + payment.reference : ''}</div>
-                          <div className="mt-0.5 text-gray-500">{fmtDate(payment.paidAt)}{payment.recordedByEmail ? ' · recorded by ' + payment.recordedByEmail : ''}</div>
+                          <div className="font-medium">{payment.paymentMethod.replace('_', ' ')} · {payment.status || 'completed'}{payment.reference ? ' · ' + payment.reference : payment.merchantReference ? ' · ' + payment.merchantReference : ''}</div>
+                          <div className="mt-0.5 text-gray-500">{payment.paidAt ? fmtDate(payment.paidAt) : 'Payment date pending'}{payment.recordedByEmail ? ' · recorded by ' + payment.recordedByEmail : ''}</div>
                           {payment.notes && <div className="mt-1 break-words text-gray-500">{payment.notes}</div>}
                         </div>
                         <strong className="whitespace-nowrap">{fmt(Number(payment.amount), payment.currency)}</strong>

@@ -1,13 +1,70 @@
 import { Router } from "express";
+import { randomBytes } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
 import { buildBillingPaymentRequest, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
+import { getPesapalCallbackUrl, getPesapalTransactionStatus, normalizePesapalStatus, submitPesapalOrder } from "../services/pesapal.js";
+import { normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
+
+async function startPesapalSubscriptionPayment({ tenant, amount, currency, paymentMethod, phone, email, firstName, lastName, returnPath, recordedBy }) {
+  const merchantReference = `JS-${tenant.id.slice(0, 18)}-${Date.now()}-${randomBytes(3).toString("hex")}`;
+  const normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
+  const attempt = await prisma.subscriptionPayment.create({
+    data: {
+      tenantId: tenant.id,
+      amount: new Prisma.Decimal(normalizedAmount),
+      currency,
+      paymentMethod,
+      provider: "pesapal",
+      merchantReference,
+      checkoutReturnPath: returnPath,
+      payerPhone: phone || null,
+      payerEmail: email || null,
+      recordedById: recordedBy?.id || null,
+      recordedByEmail: recordedBy?.email || null,
+      status: "pending",
+      notes: "Pesapal checkout initiated",
+    },
+  });
+
+  try {
+    const order = await submitPesapalOrder({
+      merchantReference,
+      amount: normalizedAmount,
+      currency,
+      description: `JibuSales subscription for ${tenant.name}`,
+      callbackUrl: getPesapalCallbackUrl(),
+      phone,
+      email,
+      firstName,
+      lastName,
+    });
+    const payment = await prisma.subscriptionPayment.update({
+      where: { id: attempt.id },
+      data: { gatewayTrackingId: order.trackingId, checkoutUrl: order.checkoutUrl },
+    });
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: {
+        billingPaymentMethod: paymentMethod,
+        billingPaymentReference: merchantReference,
+        paymentReminderStatus: "due_soon",
+        paymentReminderSentAt: new Date(),
+      },
+    });
+    return payment;
+  } catch (error) {
+    await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { status: "failed", notes: String(error?.message || "Pesapal order setup failed").slice(0, 2000) } });
+    throw error;
+  }
+}
 
 function withOwnerSummary(tenant) {
   const owner = tenant.users?.find((user) => user.role === "owner") || tenant.owner || null;
@@ -131,13 +188,24 @@ router.get("/me/billing-reminder/status", authenticateToken, async (req, res) =>
 
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
-    const status = tenant.paymentReminderStatus === "paid" ? "COMPLETED" : tenant.billingPaymentReference ? "PENDING" : "NOT_STARTED";
+    const reference = String(req.query.reference || tenant.billingPaymentReference || "");
+    let payment = reference ? await prisma.subscriptionPayment.findFirst({ where: { tenantId, merchantReference: reference } }) : null;
+    if (req.query.reference && !payment) return res.status(404).json({ error: "Subscription payment attempt not found" });
+    if (payment?.provider === "pesapal" && payment.gatewayTrackingId && !["completed", "failed", "reversed"].includes(payment.status)) {
+      try {
+        const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+        payment = await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
+      } catch (error) {
+        console.warn("Pesapal billing status refresh failed:", error.message);
+      }
+    }
+    const status = payment?.status?.toUpperCase() || (tenant.paymentReminderStatus === "paid" ? "COMPLETED" : tenant.billingPaymentReference ? "PENDING" : "NOT_STARTED");
 
     res.json({
       status,
       payment: {
         status,
-        reference: tenant.billingPaymentReference,
+        reference: payment?.merchantReference || tenant.billingPaymentReference,
       },
     });
   } catch (err) {
@@ -151,10 +219,7 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
-    const { networkProvider, phoneNumber, paymentMethod } = req.body || {};
-    if (!networkProvider || !phoneNumber) {
-      return res.status(400).json({ error: "Network provider and phone number are required" });
-    }
+    const { networkProvider, phoneNumber, paymentMethod = "mobile_money", gateway = "pesapal", email } = req.body || {};
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -168,6 +233,37 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
     const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
     const amountDue = Number(charge.price || 0);
     const provider = String(networkProvider).toUpperCase();
+
+    if (String(gateway).toLowerCase() === "pesapal") {
+      const method = String(paymentMethod).toLowerCase();
+      if (!["mobile_money", "card"].includes(method)) return res.status(400).json({ error: "Pesapal supports mobile money and card checkout here" });
+      const payerPhone = String(phoneNumber || req.user?.phone || "").trim();
+      const payerEmail = String(email || req.user?.email || "").trim();
+      if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter a phone number or email for Pesapal checkout" });
+      const names = String(tenant.name || "Business").trim().split(/\s+/);
+      const payment = await startPesapalSubscriptionPayment({
+        tenant,
+        amount: amountDue,
+        currency: charge.currency,
+        paymentMethod: method,
+        phone: payerPhone,
+        email: payerEmail,
+        firstName: names[0],
+        lastName: names.slice(1).join(" ") || "Business",
+        returnPath: "/tenant/dashboard",
+        recordedBy: req.user,
+      });
+      return res.status(201).json({
+        message: "Pesapal checkout is ready",
+        status: "PENDING",
+        amountDue,
+        payment: { id: payment.id, reference: payment.merchantReference, status: payment.status, checkoutUrl: payment.checkoutUrl },
+        gateway: { provider: "pesapal", mode: String(process.env.PESAPAL_ENV || "sandbox").toLowerCase() },
+      });
+    }
+
+    if (String(gateway).toLowerCase() !== "relworx") return res.status(400).json({ error: "Choose Pesapal or Relworx" });
+    if (!networkProvider || !phoneNumber) return res.status(400).json({ error: "Network provider and phone number are required for Relworx" });
 
     const paymentRequest = buildBillingPaymentRequest({
       amount: amountDue,
@@ -211,6 +307,44 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
     console.error("Billing reminder save error:", err);
     const message = err instanceof Error ? err.message : "Failed to save payment prompt";
     res.status(500).json({ error: message });
+  }
+});
+
+async function processPesapalNotification(req, res, isIpn) {
+  const payload = { ...(req.body || {}), ...(req.query || {}) };
+  const trackingId = String(payload.OrderTrackingId || payload.orderTrackingId || "");
+  const merchantReference = String(payload.OrderMerchantReference || payload.merchantReference || "");
+  const payment = trackingId && merchantReference
+    ? await prisma.subscriptionPayment.findFirst({ where: { provider: "pesapal", gatewayTrackingId: trackingId, merchantReference } })
+    : null;
+  if (payment) {
+    const gatewayStatus = await getPesapalTransactionStatus(trackingId);
+    await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
+  }
+  if (isIpn) {
+    return res.status(200).json({ orderNotificationType: payload.OrderNotificationType || "IPNCHANGE", orderTrackingId: trackingId, orderMerchantReference: merchantReference, status: 200 });
+  }
+  const origin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173";
+  const returnPath = payment?.checkoutReturnPath === "/saas/subscriptions" ? "/saas/subscriptions" : "/tenant/dashboard";
+  return res.redirect(302, `${origin.replace(/\/$/, "")}${returnPath}?billingRef=${encodeURIComponent(merchantReference)}`);
+}
+
+router.get("/billing-reminder/pesapal/callback", async (req, res) => {
+  try {
+    return await processPesapalNotification(req, res, false);
+  } catch (err) {
+    console.error("Pesapal callback verification failed:", err);
+    const origin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173";
+    return res.redirect(302, `${origin.replace(/\/$/, "")}/tenant/dashboard?billingError=verification`);
+  }
+});
+
+router.get("/billing-reminder/pesapal/ipn", async (req, res) => {
+  try {
+    return await processPesapalNotification(req, res, true);
+  } catch (err) {
+    console.error("Pesapal IPN verification failed:", err);
+    return res.status(500).json({ status: 500, message: "IPN verification failed" });
   }
 });
 

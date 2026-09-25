@@ -1,5 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { normalizeSubscriptionPaymentAmount } from "../utils/subscriptionPayments.js";
 import prisma from "../db.js";
@@ -8,6 +9,8 @@ import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
+import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
+import { syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
@@ -658,6 +661,27 @@ router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req
 
 const SUBSCRIPTION_PAYMENT_METHODS = new Set(["cash", "mobile_money", "bank_transfer", "card", "other"]);
 
+router.get("/subscription-payments/:reference", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const payment = await prisma.subscriptionPayment.findUnique({ where: { merchantReference: req.params.reference }, include: { tenant: { include: { plan: true } } } });
+    if (!payment) return res.status(404).json({ error: "Subscription payment not found" });
+    if (payment.provider === "pesapal" && payment.gatewayTrackingId && payment.status === "pending") {
+      try {
+        const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+        await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
+      } catch (error) {
+        console.warn("Pesapal subscription status refresh failed:", error.message);
+      }
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: payment.tenantId }, include: { plan: true } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+    res.json({ subscription: subscriptionPayload({ ...tenant, createdAt: tenant.createdAt }) });
+  } catch (err) {
+    console.error("Subscription payment lookup error:", err);
+    res.status(500).json({ error: "Failed to load subscription payment" });
+  }
+});
+
 router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
@@ -666,7 +690,21 @@ router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmi
       where: { tenantId: tenant.id },
       orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
     });
-    res.json({ payments: payments.map(payment => ({ ...payment, amount: payment.amount.toString() })) });
+    for (const payment of payments) {
+      if (payment.provider === "pesapal" && payment.gatewayTrackingId && payment.status === "pending") {
+        try {
+          const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+          await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
+        } catch (error) {
+          console.warn("Pesapal subscription status refresh failed:", error.message);
+        }
+      }
+    }
+    const refreshedPayments = await prisma.subscriptionPayment.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+    });
+    res.json({ payments: refreshedPayments.map(payment => ({ ...payment, amount: payment.amount.toString() })) });
   } catch (err) {
     console.error("Subscription payments list error:", err);
     res.status(500).json({ error: "Failed to load subscription payments" });
@@ -675,7 +713,7 @@ router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmi
 
 router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { amount, paymentMethod, reference, notes, paidAt } = req.body || {};
+    const { amount, paymentMethod, reference, notes, paidAt, phone, email } = req.body || {};
     let normalizedAmount;
     try {
       normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
@@ -687,14 +725,58 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
     if (!SUBSCRIPTION_PAYMENT_METHODS.has(method)) {
       return res.status(400).json({ error: "Choose a supported payment method" });
     }
-    const paymentDate = paidAt ? new Date(paidAt) : new Date();
-    if (Number.isNaN(paymentDate.getTime())) return res.status(400).json({ error: "Enter a valid payment date" });
-
-    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true } });
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true, owner: { select: { fname: true, lname: true, email: true, phone: true } } } });
     if (!tenant) return res.status(404).json({ error: "Business not found" });
     const currency = resolveSubscriptionCharge(tenant.plan || {}, tenant).currency;
     const cleanReference = typeof reference === "string" ? reference.trim().slice(0, 200) || null : null;
     const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 2000) || null : null;
+
+    if (["mobile_money", "card"].includes(method)) {
+      const payerPhone = String(phone || tenant.owner?.phone || "").trim();
+      const payerEmail = String(email || tenant.owner?.email || tenant.email || "").trim();
+      if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter the payer phone number or email for Pesapal checkout" });
+      const merchantReference = `JS-${tenant.id.slice(0, 18)}-${Date.now()}-${randomBytes(3).toString("hex")}`;
+      const attempt = await prisma.subscriptionPayment.create({
+        data: {
+          tenantId: tenant.id,
+          amount: paymentAmount,
+          currency,
+          paymentMethod: method,
+          provider: "pesapal",
+          merchantReference,
+          checkoutReturnPath: "/saas/subscriptions",
+          payerPhone: payerPhone || null,
+          payerEmail: payerEmail || null,
+          reference: cleanReference,
+          notes: cleanNotes,
+          recordedById: req.user?.id || null,
+          recordedByEmail: req.user?.email || null,
+          status: "pending",
+        },
+      });
+      try {
+        const order = await submitPesapalOrder({
+          merchantReference,
+          amount: normalizedAmount,
+          currency,
+          description: `JibuSales subscription for ${tenant.name}`,
+          callbackUrl: getPesapalCallbackUrl(),
+          phone: payerPhone,
+          email: payerEmail,
+          firstName: tenant.owner?.fname || tenant.name,
+          lastName: tenant.owner?.lname || "Business",
+        });
+        const payment = await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { gatewayTrackingId: order.trackingId, checkoutUrl: order.checkoutUrl } });
+        await prisma.tenant.update({ where: { id: tenant.id }, data: { billingPaymentMethod: method, billingPaymentReference: merchantReference, billingNotes: cleanNotes ?? tenant.billingNotes, paymentReminderStatus: "due_soon", paymentReminderSentAt: new Date() } });
+        return res.status(201).json({ message: "Pesapal checkout is ready", payment: { ...payment, amount: payment.amount.toString() }, checkoutUrl: payment.checkoutUrl, status: "pending" });
+      } catch (error) {
+        await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { status: "failed", notes: String(error?.message || "Pesapal order setup failed").slice(0, 2000) } });
+        throw error;
+      }
+    }
+
+    const paymentDate = paidAt ? new Date(paidAt) : new Date();
+    if (Number.isNaN(paymentDate.getTime())) return res.status(400).json({ error: "Enter a valid payment date" });
 
     const payment = await prisma.$transaction(async tx => {
       const receipt = await tx.subscriptionPayment.create({
@@ -706,6 +788,8 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           reference: cleanReference,
           notes: cleanNotes,
           paidAt: paymentDate,
+          status: "completed",
+          provider: "manual",
           recordedById: req.user?.id || null,
           recordedByEmail: req.user?.email || null,
         },
@@ -740,6 +824,17 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
   } catch (err) {
     console.error("Subscription payment record error:", err);
     res.status(500).json({ error: "Failed to record subscription payment" });
+  }
+});
+
+router.post("/billing/pesapal/register-ipn", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const result = await registerPesapalIpn(getPesapalIpnUrl());
+    if (!result?.ipn_id) return res.status(502).json({ error: result?.message || "Pesapal did not return an IPN ID" });
+    res.json({ message: "Pesapal IPN registered. Add the returned ID to PESAPAL_IPN_ID in the backend environment.", ipnId: result.ipn_id, url: getPesapalIpnUrl(), environment: String(process.env.PESAPAL_ENV || "sandbox") });
+  } catch (err) {
+    console.error("Pesapal IPN registration error:", err);
+    res.status(502).json({ error: err.message || "Failed to register Pesapal IPN" });
   }
 });
 router.put("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
