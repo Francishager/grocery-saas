@@ -3,7 +3,7 @@ import { appNotify } from '@/lib/appFeedback'
 import React, { useState, useEffect, useMemo } from 'react'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar } from 'lucide-react'
+import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar, Banknote, Receipt } from 'lucide-react'
 
 interface Subscription {
   id: string; status: string; startDate: string; endDate: string | null; trialEndsAt: string | null
@@ -20,6 +20,11 @@ interface Subscription {
 }
 
 interface Plan { id: string; name: string; price: number; currency: string; billingCycle: string; maxUsers?: number; maxProducts?: number }
+interface SubscriptionPayment {
+  id: string; amount: string; currency: string; paymentMethod: string
+  reference: string | null; notes: string | null; paidAt: string
+  recordedByEmail: string | null
+}
 
 export const SubscriptionsPage: React.FC = () => {
   const [subs, setSubs] = useState<Subscription[]>([])
@@ -38,7 +43,6 @@ export const SubscriptionsPage: React.FC = () => {
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [tenantStatus, setTenantStatus] = useState('active')
   const [planPrice, setPlanPrice] = useState('')
-  const [planBillingCycle, setPlanBillingCycle] = useState('monthly')
   const [customCurrency, setCustomCurrency] = useState('UGX')
   const [customBillingCycle, setCustomBillingCycle] = useState('monthly')
   const [monthlyServiceFee, setMonthlyServiceFee] = useState('0')
@@ -48,6 +52,17 @@ export const SubscriptionsPage: React.FC = () => {
   const [reminderDaysBeforeDue, setReminderDaysBeforeDue] = useState('10')
   const [planMaxUsers, setPlanMaxUsers] = useState('')
   const [planMaxProducts, setPlanMaxProducts] = useState('')
+  const [payments, setPayments] = useState<SubscriptionPayment[]>([])
+  const [paymentsLoading, setPaymentsLoading] = useState(false)
+  const [paymentSaving, setPaymentSaving] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentNotes, setPaymentNotes] = useState('')
+  const [paymentDate, setPaymentDate] = useState(() => {
+    const now = new Date()
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+  })
 
   const fetchData = async () => {
     setLoading(true)
@@ -64,8 +79,31 @@ export const SubscriptionsPage: React.FC = () => {
 
   useEffect(() => { fetchData() }, [])
 
+  const fetchPayments = async (subscriptionId: string) => {
+    setPaymentsLoading(true)
+    try {
+      const res = await apiFetch('/api/admin/subscriptions/' + subscriptionId + '/payments', {})
+      if (res.ok) {
+        const data = await res.json()
+        setPayments(Array.isArray(data?.payments) ? data.payments : [])
+      } else appNotify('Unable to load payment history')
+    } catch {
+      appNotify('Unable to load payment history')
+    } finally {
+      setPaymentsLoading(false)
+    }
+  }
+
   const openModal = (sub: Subscription) => {
     setSelected(sub)
+    setPayments([])
+    setPaymentAmount('')
+    setPaymentMethod('cash')
+    setPaymentReference('')
+    setPaymentNotes('')
+    const now = new Date()
+    setPaymentDate(new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10))
+    void fetchPayments(sub.id)
     setEditDates(false)
     setSubStart(sub.startDate ? sub.startDate.split('T')[0] : new Date().toISOString().split('T')[0])
     setSubEnd(sub.endDate ? sub.endDate.split('T')[0] : '')
@@ -81,9 +119,39 @@ export const SubscriptionsPage: React.FC = () => {
     setStaticIpFee(String(sub.staticIpFee ?? 0))
     setGracePeriodDays(String(sub.gracePeriodDays ?? 0))
     setReminderDaysBeforeDue(String(sub.reminderDaysBeforeDue ?? 10))
-    setPlanBillingCycle(sub.plan?.billingCycle || 'monthly')
     setPlanMaxUsers(String(sub.plan?.maxUsers || ''))
     setPlanMaxProducts(String(sub.plan?.maxProducts || ''))
+  }
+
+  const handleRecordPayment = async () => {
+    if (!selected) return
+    const amount = Number(paymentAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      appNotify('Enter an amount greater than zero')
+      return
+    }
+    setPaymentSaving(true)
+    try {
+      const res = await apiFetch('/api/admin/subscriptions/' + selected.id + '/payments', {
+        method: 'POST',
+        body: JSON.stringify({ amount: paymentAmount, paymentMethod, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        appNotify(data.error || 'Failed to record subscription payment')
+        return
+      }
+      setPaymentAmount('')
+      setPaymentReference('')
+      setPaymentNotes('')
+      await fetchPayments(selected.id)
+      await fetchData()
+      appNotify('Subscription payment recorded')
+    } catch {
+      appNotify('Unable to record subscription payment')
+    } finally {
+      setPaymentSaving(false)
+    }
   }
 
   const handleSave = async () => {
@@ -104,7 +172,6 @@ export const SubscriptionsPage: React.FC = () => {
       if (staticIpFee !== '') body.staticIpFee = staticIpFee
       if (gracePeriodDays !== '') body.gracePeriodDays = gracePeriodDays
       if (reminderDaysBeforeDue !== '') body.reminderDaysBeforeDue = reminderDaysBeforeDue
-      if (planBillingCycle) body.billingCycle = planBillingCycle
       if (planMaxUsers) body.maxUsers = planMaxUsers
       if (planMaxProducts) body.maxProducts = planMaxProducts
       if (autoEnd) body.autoEnd = true
@@ -120,7 +187,6 @@ export const SubscriptionsPage: React.FC = () => {
     setSelectedPlanId(planId)
     if (plan) {
       setPlanPrice(String(plan.price || ''))
-      setPlanBillingCycle(plan.billingCycle || 'monthly')
       setPlanMaxUsers(String(plan.maxUsers || ''))
       setPlanMaxProducts(String(plan.maxProducts || ''))
     }
@@ -222,6 +288,63 @@ export const SubscriptionsPage: React.FC = () => {
               {selected.trialEndsAt && <div className="flex justify-between"><span className="text-gray-500">Trial Ends</span><span>{fmtDate(selected.trialEndsAt)}</span></div>}
             </div>
 
+            <section className="mb-4 border-t pt-4" aria-labelledby="subscription-payment-heading">
+              <div className="mb-3 flex items-center gap-2">
+                <Banknote className="h-4 w-4 text-emerald-700" />
+                <h3 id="subscription-payment-heading" className="text-sm font-semibold">Record payment received</h3>
+              </div>
+              <p className="mb-3 text-xs text-gray-500">For a payment already received from this business. This tenant-specific receipt does not change the plan price.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Amount received ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
+                  <input type="number" min="0.01" step="0.01" inputMode="decimal" required value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
+                  <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
+                    <option value="cash">Cash</option>
+                    <option value="mobile_money">Mobile money</option>
+                    <option value="bank_transfer">Bank transfer</option>
+                    <option value="card">Card</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Date received</label>
+                  <input type="date" required value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Receipt / reference</label>
+                  <input value={paymentReference} onChange={e => setPaymentReference(e.target.value)} maxLength={200} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Notes</label>
+                  <textarea value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} maxLength={2000} rows={2} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <button type="button" onClick={handleRecordPayment} disabled={paymentSaving || !paymentAmount || Number(paymentAmount) <= 0} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
+                {paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
+                Record payment received
+              </button>
+              <div className="mt-4 border-t pt-3">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Payment history</h4>
+                {paymentsLoading ? <div className="py-3 text-center text-xs text-gray-500">Loading payments...</div> : payments.length === 0 ? <div className="py-3 text-center text-xs text-gray-500">No payments recorded</div> : (
+                  <div className="max-h-48 divide-y overflow-y-auto rounded-lg border">
+                    {payments.map(payment => (
+                      <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs">
+                        <div className="min-w-0">
+                          <div className="font-medium">{payment.paymentMethod.replace('_', ' ')}{payment.reference ? ' · ' + payment.reference : ''}</div>
+                          <div className="mt-0.5 text-gray-500">{fmtDate(payment.paidAt)}{payment.recordedByEmail ? ' · recorded by ' + payment.recordedByEmail : ''}</div>
+                          {payment.notes && <div className="mt-1 break-words text-gray-500">{payment.notes}</div>}
+                        </div>
+                        <strong className="whitespace-nowrap">{fmt(Number(payment.amount), payment.currency)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
             <div className="border-t pt-4 mb-4">
               <label className="block text-sm font-medium mb-2">Tenant Status</label>
               <select value={tenantStatus} onChange={(e) => setTenantStatus(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
@@ -276,15 +399,11 @@ export const SubscriptionsPage: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Price</label>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Tenant-specific price override</label>
                     <input type="number" min="0" step="0.01" value={planPrice} onChange={(e) => setPlanPrice(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                    <p className="mt-1 text-xs text-gray-500">Applies to this business only. The plan catalog price stays unchanged.</p>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Billing Cycle</label>
-                    <select value={planBillingCycle} onChange={(e) => setPlanBillingCycle(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

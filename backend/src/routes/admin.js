@@ -1,5 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
+import { normalizeSubscriptionPaymentAmount } from "../utils/subscriptionPayments.js";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js";
@@ -651,6 +653,93 @@ router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req
   } catch (err) {
     console.error("List subscriptions error:", err);
     res.status(500).json({ error: "Failed to load subscriptions" });
+  }
+});
+
+const SUBSCRIPTION_PAYMENT_METHODS = new Set(["cash", "mobile_money", "bank_transfer", "card", "other"]);
+
+router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+    const payments = await prisma.subscriptionPayment.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+    });
+    res.json({ payments: payments.map(payment => ({ ...payment, amount: payment.amount.toString() })) });
+  } catch (err) {
+    console.error("Subscription payments list error:", err);
+    res.status(500).json({ error: "Failed to load subscription payments" });
+  }
+});
+
+router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { amount, paymentMethod, reference, notes, paidAt } = req.body || {};
+    let normalizedAmount;
+    try {
+      normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    const paymentAmount = new Prisma.Decimal(normalizedAmount);
+    const method = String(paymentMethod || "cash").trim().toLowerCase();
+    if (!SUBSCRIPTION_PAYMENT_METHODS.has(method)) {
+      return res.status(400).json({ error: "Choose a supported payment method" });
+    }
+    const paymentDate = paidAt ? new Date(paidAt) : new Date();
+    if (Number.isNaN(paymentDate.getTime())) return res.status(400).json({ error: "Enter a valid payment date" });
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+    const currency = resolveSubscriptionCharge(tenant.plan || {}, tenant).currency;
+    const cleanReference = typeof reference === "string" ? reference.trim().slice(0, 200) || null : null;
+    const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 2000) || null : null;
+
+    const payment = await prisma.$transaction(async tx => {
+      const receipt = await tx.subscriptionPayment.create({
+        data: {
+          tenantId: tenant.id,
+          amount: paymentAmount,
+          currency,
+          paymentMethod: method,
+          reference: cleanReference,
+          notes: cleanNotes,
+          paidAt: paymentDate,
+          recordedById: req.user?.id || null,
+          recordedByEmail: req.user?.email || null,
+        },
+      });
+      await tx.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          billingPaymentMethod: method,
+          billingPaymentReference: cleanReference,
+          billingNotes: cleanNotes ?? tenant.billingNotes,
+          paymentReminderStatus: "paid",
+          paymentReminderSentAt: paymentDate,
+        },
+      });
+      return receipt;
+    });
+
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: tenant.id,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "subscription_payment_recorded",
+      model: "SubscriptionPayment",
+      recordId: payment.id,
+      changes: { amount: payment.amount.toString(), currency, paymentMethod: method, reference: cleanReference, paidAt: paymentDate.toISOString() },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "info",
+    }).catch(() => {});
+
+    res.status(201).json({ message: "Subscription payment recorded", payment: { ...payment, amount: payment.amount.toString() } });
+  } catch (err) {
+    console.error("Subscription payment record error:", err);
+    res.status(500).json({ error: "Failed to record subscription payment" });
   }
 });
 router.put("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
