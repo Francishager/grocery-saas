@@ -3,10 +3,13 @@ const API_PATHS = {
   submit: "/api/Transactions/SubmitOrderRequest",
   status: "/api/Transactions/GetTransactionStatus",
   registerIpn: "/api/URLSetup/RegisterIPN",
+  listIpns: "/api/URLSetup/GetIpnList",
 };
 
 let cachedToken = null;
 let tokenExpiresAt = 0;
+const ipnIdByUrl = new Map();
+const ipnRegistrationByUrl = new Map();
 
 function pesapalBaseUrl() {
   if (process.env.PESAPAL_BASE_URL) return process.env.PESAPAL_BASE_URL.replace(/\/$/, "");
@@ -55,8 +58,7 @@ export async function getPesapalToken() {
 
 export async function submitPesapalOrder({ merchantReference, amount, currency, description, callbackUrl, phone, email, firstName, lastName }) {
   const token = await getPesapalToken();
-  const notificationId = process.env.PESAPAL_IPN_ID;
-  if (!notificationId) throw new Error("Pesapal IPN is not configured; register the notification URL and set PESAPAL_IPN_ID");
+  const notificationId = await ensurePesapalIpnId(getPesapalIpnUrl(), token);
   if (!phone && !email) throw new Error("A payer phone number or email is required for Pesapal checkout");
   const data = await pesapalFetch(API_PATHS.submit, {
     token,
@@ -101,6 +103,29 @@ export async function registerPesapalIpn(url) {
     method: "POST",
     body: { url, ipn_notification_type: "GET" },
   });
+}
+
+async function ensurePesapalIpnId(url, token) {
+  const configuredId = process.env.PESAPAL_IPN_ID?.trim();
+  if (configuredId) return configuredId;
+  if (ipnIdByUrl.has(url)) return ipnIdByUrl.get(url);
+  if (ipnRegistrationByUrl.has(url)) return ipnRegistrationByUrl.get(url);
+
+  const registration = (async () => {
+    const registered = await pesapalFetch(API_PATHS.listIpns, { token });
+    const entries = Array.isArray(registered) ? registered : registered?.ipn_list || registered?.data || [];
+    const existing = entries.find((entry) => String(entry?.url || "").replace(/\/$/, "") === url.replace(/\/$/, ""));
+    const ipnId = existing?.ipn_id || (await registerPesapalIpn(url))?.ipn_id;
+    if (!ipnId) throw new Error("Pesapal did not return an IPN ID; register the notification URL in the Pesapal account");
+    ipnIdByUrl.set(url, ipnId);
+    return ipnId;
+  })();
+  ipnRegistrationByUrl.set(url, registration);
+  try {
+    return await registration;
+  } finally {
+    ipnRegistrationByUrl.delete(url);
+  }
 }
 
 export function normalizePesapalStatus(data) {
