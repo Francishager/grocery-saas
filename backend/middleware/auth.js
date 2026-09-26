@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../src/db.js';
 import { resolveEffectivePermissions, ROLE_DEFAULTS } from '../src/utils/permissions.js';
+import { platformPermissionForRequest } from '../src/utils/platformPermissions.js';
 import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
 import { workingHoursAccessPayload } from '../src/utils/workingHours.js';
 
@@ -189,25 +190,24 @@ export const requireRole = (roles) => {
 /**
  * Require platform admin role (SaaS Admin only)
  */
-export const requirePlatformAdmin = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ message: 'Authentication required' });
+export const requirePlatformAdmin = async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+  const isPlatformUser = PLATFORM_ROLES.includes(req.user.role) || req.user.isPlatformUser === true || req.user.is_platform_user === true;
+  if (!isPlatformUser) return res.status(403).json({ message: 'JibuSales Admin access required', code: 'PLATFORM_ADMIN_REQUIRED' });
+  if (req.user.role === 'saas_admin' || ['platform_admin', 'super_admin'].includes(req.user.role)) return next();
+
+  const permission = platformPermissionForRequest(req.method, req.originalUrl || req.path);
+  if (!permission) return res.status(403).json({ message: 'This platform task is not assigned to your role.', code: 'PLATFORM_PERMISSION_REQUIRED' });
+  try {
+    const record = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+    const permissions = resolveEffectivePermissions(req.user, record, [], new Set());
+    req.user.permissions = permissions;
+    if (permissions.includes(permission)) return next();
+    return res.status(403).json({ message: 'Your SaaS staff assignment does not include this task.', required: permission, code: 'PLATFORM_PERMISSION_DENIED' });
+  } catch (error) {
+    console.error('Platform permission check failed:', error);
+    return res.status(500).json({ message: 'Unable to verify platform staff permissions.' });
   }
-  
-  // Check if user is platform admin
-  const isPlatformAdmin = 
-    PLATFORM_ROLES.includes(req.user.role) || 
-    req.user.isPlatformUser === true ||
-    req.user.is_platform_user === true;
-  
-  if (!isPlatformAdmin) {
-    return res.status(403).json({ 
-      message: 'JibuSales Admin access required',
-      code: 'PLATFORM_ADMIN_REQUIRED',
-    });
-  }
-  
-  next();
 };
 
 /**

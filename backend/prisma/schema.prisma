@@ -599,6 +599,7 @@ model UserPermission {
   id                           String   @id @default(cuid())
   userId                       String
   user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platformPermissions          Json?
   // Dashboard
   canViewDashboard             Boolean  @default(false)
   canUseBusinessAI             Boolean  @default(false)

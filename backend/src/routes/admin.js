@@ -11,6 +11,7 @@ import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
 import { cancelManualSubscriptionPayment, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
@@ -448,22 +449,44 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
   }
 });
 
+router.get("/platform-staff/permission-schema", authenticateToken, requirePlatformAdmin, async (_req, res) => {
+  res.json({ permissions: PLATFORM_PERMISSION_DEFINITIONS, jobPresets: PLATFORM_JOB_PRESETS });
+});
+
 router.get("/platform-staff", authenticateToken, requirePlatformAdmin, async (req, res) => {
-  const staff = await prisma.user.findMany({ where: { role: "platform_staff" }, orderBy: { createdAt: "desc" }, select: { id: true, email: true, fname: true, lname: true, phone: true, role: true, isActive: true, createdAt: true } });
+  const rows = await prisma.user.findMany({ where: { role: "platform_staff" }, orderBy: { createdAt: "desc" }, select: { id: true, email: true, fname: true, lname: true, phone: true, role: true, isActive: true, createdAt: true, permissions: { select: { platformPermissions: true } } } });
+  const staff = rows.map(({ permissions, ...member }) => ({ ...member, platformPermissions: permissions[0]?.platformPermissions || [] }));
   res.json({ staff });
+});
+
+router.put("/platform-staff/:id/permissions", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  const platformPermissions = sanitizePlatformPermissions(req.body?.platformPermissions);
+  if (!platformPermissions.length) return res.status(400).json({ error: "Assign at least one SaaS platform task" });
+  if (req.user.role === "platform_staff" && (req.params.id === req.user.id || !canDelegatePlatformPermissions(req.user.permissions, platformPermissions))) {
+    return res.status(403).json({ error: "You can only assign your own SaaS permissions to another staff member, and cannot edit your own access." });
+  }
+  const user = await prisma.user.findFirst({ where: { id: req.params.id, role: "platform_staff" }, select: { id: true } });
+  if (!user) return res.status(404).json({ error: "Platform staff member not found" });
+  await prisma.userPermission.upsert({ where: { userId: user.id }, create: { userId: user.id, platformPermissions }, update: { platformPermissions } });
+  res.json({ message: "Platform staff assignment updated", platformPermissions });
 });
 
 router.post("/platform-staff", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
-    const { name, email, password, phone, permissions = {} } = req.body;
+    const { name, email, password, phone } = req.body;
+    const platformPermissions = sanitizePlatformPermissions(req.body?.platformPermissions);
+    if (req.user.role === "platform_staff" && !canDelegatePlatformPermissions(req.user.permissions, platformPermissions)) {
+      return res.status(403).json({ error: "You can only assign SaaS tasks already granted to your own role." });
+    }
     const normalizedEmail = String(email || "").trim().toLowerCase();
     if (!name?.trim() || !normalizedEmail || !password) return res.status(400).json({ error: "Name, email, and password are required" });
-    if (String(password).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (String(password).length < 10) return res.status(400).json({ error: "Password must be at least 10 characters" });
+    if (!platformPermissions.length) return res.status(400).json({ error: "Assign at least one SaaS platform task" });
     if (await prisma.user.findUnique({ where: { email: normalizedEmail } })) return res.status(409).json({ error: "User already exists" });
-    const parsed = splitStaffName(name);
+    const parsed = splitName(name);
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({ data: { email: normalizedEmail, password: await bcrypt.hash(String(password), 12), fname: parsed.fname || normalizedEmail.split("@")[0], lname: parsed.lname, phone, role: "platform_staff", tenantId: null, isActive: true } });
-      await tx.userPermission.create({ data: { userId: created.id, ...Object.fromEntries(ALL_PERMISSION_KEYS.map((key) => [key, Boolean(permissions[key])])) } });
+      await tx.userPermission.create({ data: { userId: created.id, platformPermissions } });
       return created;
     });
     res.status(201).json({ message: "Platform staff created", staff: { id: user.id, email: user.email, name: `${user.fname} ${user.lname}`.trim(), role: user.role } });

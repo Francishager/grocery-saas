@@ -2,6 +2,7 @@
 // SINGLE SOURCE OF TRUTH for all permission keys
 // =====================================================
 import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_KEYS, SERVICE_PERMISSION_CATEGORIES, LEGACY_SERVICE_PERMISSION_KEYS } from './servicePermissions.js';
+import { sanitizePlatformPermissions } from './platformPermissions.js';
 const PERMISSION_TO_FEATURES = {
   ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, [p.feature, 'service']])),
   canViewDashboard: [],
@@ -1125,8 +1126,7 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
   if (!user) return [];
   if (user.role === "saas_admin") return ["*"];
   if (user.role === "platform_staff") {
-    const normalized = normalizePermissionRecord(permissionRecord || {});
-    return Object.entries(normalized).filter(([, enabled]) => enabled).map(([key]) => key);
+    return sanitizePlatformPermissions(permissionRecord?.platformPermissions);
   }
   if (user.role === "owner") {
     const granted = new Set();
