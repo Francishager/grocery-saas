@@ -557,6 +557,12 @@ export const SubscriptionsPage: React.FC = () => {
                 {paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
                 {['mobile_money', 'card'].includes(paymentMethod) ? 'Continue to Pesapal' : 'Record payment received'}
               </button>
+              {['mobile_money', 'card'].includes(paymentMethod) && (
+                <button type="button" onClick={() => window.open('/saas/payment', '_blank')} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-600 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50">
+                  <CreditCard size={16} />
+                  Open PesaPal Payment Page
+                </button>
+              )}
               <div className="mt-4 border-t pt-3">
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Payment history</h4>
                 {paymentsLoading ? <div className="py-3 text-center text-xs text-gray-500">Loading payments...</div> : payments.length === 0 ? <div className="py-3 text-center text-xs text-gray-500">No payments recorded</div> : (
