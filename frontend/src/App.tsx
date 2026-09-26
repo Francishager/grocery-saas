@@ -66,6 +66,7 @@ import UserProfilePage from '@/pages/UserProfilePage'
 import ReferralPage from '@/pages/ReferralPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
 import CreditDebitNotesPage from '@/pages/CreditDebitNotesPage'
+import PaymentPage from '@/pages/PaymentPage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -153,6 +154,7 @@ function App() {
           <Route path="referrals" element={<ReferralDashboard />} />
           <Route path="user-guide" element={<UserGuidePage />} />
           <Route path="manufacturing-guide" element={<ManufacturingGuidePage />} />
+          <Route path="payment" element={<PaymentPage />} />
         </Route>
  
         {/* ========== Tenant (Business) Routes — /tenant/* ========== */}
@@ -223,6 +225,7 @@ function App() {
           <Route path="receipt-settings" element={<FeatureGuard feature="settings"><ReceiptSettingsPage /></FeatureGuard>} />
           <Route path="roles" element={<FeatureGuard feature="settings.roles"><RolesPermissionsPage /></FeatureGuard>} />
           <Route path="admin" element={<Navigate to="/tenant/roles" replace />} />
+          <Route path="payment" element={<PaymentPage />} />
         </Route>
 
         {/* ========== Catch-all ========== */}
