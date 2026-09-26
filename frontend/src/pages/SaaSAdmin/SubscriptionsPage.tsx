@@ -508,59 +508,62 @@ export const SubscriptionsPage: React.FC = () => {
                 Register Pesapal notifications
               </button>
               <p className="mb-3 text-xs text-gray-500">Record money already received, or send the business to Pesapal checkout. This tenant-specific amount never changes the shared plan price.</p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">{['mobile_money', 'card'].includes(paymentMethod) ? 'Amount to charge' : 'Amount received'} ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
-                  <input type="number" min="0.01" step="0.01" inputMode="decimal" required value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
-                  <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
-                    <option value="cash">Cash</option>
-                    <option value="mobile_money">Mobile money via Pesapal</option>
-                    <option value="bank_transfer">Bank transfer</option>
-                    <option value="card">Card via Pesapal</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                {['mobile_money', 'card'].includes(paymentMethod) && <>
+              {['mobile_money', 'card'].includes(paymentMethod) ? (
+                <div className="space-y-3">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-500">Payer phone</label>
-                    <input type="tel" value={paymentPhone} onChange={e => setPaymentPhone(e.target.value)} placeholder="+256..." className="w-full rounded-lg border px-3 py-2 text-sm" />
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
+                    <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
+                      <option value="cash">Cash</option>
+                      <option value="mobile_money">Mobile money via Pesapal</option>
+                      <option value="bank_transfer">Bank transfer</option>
+                      <option value="card">Card via Pesapal</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-gray-500">Click below to open the PesaPal payment page to complete the payment.</p>
+                  <button type="button" onClick={() => window.open('/saas/payment', '_blank')} className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800">
+                    <CreditCard size={16} />
+                    Make Payment via PesaPal
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Amount received ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
+                    <input type="number" min="0.01" step="0.01" inputMode="decimal" required value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-500">Payer email</label>
-                    <input type="email" value={paymentEmail} onChange={e => setPaymentEmail(e.target.value)} placeholder="payer@example.com" className="w-full rounded-lg border px-3 py-2 text-sm" />
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
+                    <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
+                      <option value="cash">Cash</option>
+                      <option value="mobile_money">Mobile money via Pesapal</option>
+                      <option value="bank_transfer">Bank transfer</option>
+                      <option value="card">Card via Pesapal</option>
+                      <option value="other">Other</option>
+                    </select>
                   </div>
-                  <p className="sm:col-span-2 text-xs text-gray-500">Pesapal will open its secure checkout. The payment stays pending until Pesapal confirms it.</p>
-                </>}
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Payer name (optional)</label>
-                  <input value={paymentPayerName} onChange={e => setPaymentPayerName(e.target.value)} maxLength={160} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  {!['mobile_money', 'card'].includes(paymentMethod) && <>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Payer name (optional)</label>
+                    <input value={paymentPayerName} onChange={e => setPaymentPayerName(e.target.value)} maxLength={160} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </div>
+                  <div>
                     <label className="mb-1 block text-xs font-medium text-gray-500">Date received</label>
                     <input type="date" required value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                  </>}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Receipt / reference</label>
+                    <input value={paymentReference} onChange={e => setPaymentReference(e.target.value)} maxLength={200} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-gray-500">Notes</label>
+                    <textarea value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} maxLength={2000} rows={2} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Receipt / reference</label>
-                  <input value={paymentReference} onChange={e => setPaymentReference(e.target.value)} maxLength={200} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Notes</label>
-                  <textarea value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} maxLength={2000} rows={2} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                </div>
-              </div>
-              <button type="button" onClick={handleRecordPayment} disabled={paymentSaving || !paymentAmount || Number(paymentAmount) <= 0} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
-                {paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
-                {['mobile_money', 'card'].includes(paymentMethod) ? 'Continue to Pesapal' : 'Record payment received'}
-              </button>
-              {['mobile_money', 'card'].includes(paymentMethod) && (
-                <button type="button" onClick={() => window.open('/saas/payment', '_blank')} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-600 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50">
-                  <CreditCard size={16} />
-                  Open PesaPal Payment Page
+              )}
+              {!['mobile_money', 'card'].includes(paymentMethod) && (
+                <button type="button" onClick={handleRecordPayment} disabled={paymentSaving || !paymentAmount || Number(paymentAmount) <= 0} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
+                  {paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
+                  Record payment received
                 </button>
               )}
               <div className="mt-4 border-t pt-3">

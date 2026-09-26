@@ -580,73 +580,84 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Payment provider</label>
-                  <select
-                    value={billingForm.gateway}
-                    onChange={(e) => setBillingForm({ ...billingForm, gateway: e.target.value, paymentMethod: 'mobile_money' })}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="pesapal">Pesapal (Mobile Money or Card)</option>
-                    <option value="relworx">Relworx Mobile Money</option>
-                  </select>
-                </div>
+                {billingForm.gateway === 'pesapal' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Payment provider</label>
+                      <select
+                        value={billingForm.gateway}
+                        onChange={(e) => setBillingForm({ ...billingForm, gateway: e.target.value, paymentMethod: 'mobile_money' })}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="pesapal">Pesapal (Mobile Money or Card)</option>
+                        <option value="relworx">Relworx Mobile Money</option>
+                      </select>
+                    </div>
+                    <p className="text-sm text-gray-500">Click below to open the PesaPal payment page to complete your subscription payment.</p>
+                    <button
+                      onClick={() => window.open('/tenant/payment', '_blank')}
+                      className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                    >
+                      Make Payment via PesaPal
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Payment provider</label>
+                      <select
+                        value={billingForm.gateway}
+                        onChange={(e) => setBillingForm({ ...billingForm, gateway: e.target.value, paymentMethod: 'mobile_money' })}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="pesapal">Pesapal (Mobile Money or Card)</option>
+                        <option value="relworx">Relworx Mobile Money</option>
+                      </select>
+                    </div>
 
-                {billingForm.gateway === 'relworx' && <div>
-                  <label className="mb-1 block text-sm font-medium">Network provider</label>
-                  <select
-                    value={billingForm.networkProvider}
-                    onChange={(e) => setBillingForm({ ...billingForm, networkProvider: e.target.value })}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="MTN">MTN</option>
-                    <option value="Airtel">Airtel</option>
-                    <option value="MPS">MPS</option>
-                  </select>
-                </div>}
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Network provider</label>
+                      <select
+                        value={billingForm.networkProvider}
+                        onChange={(e) => setBillingForm({ ...billingForm, networkProvider: e.target.value })}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="MTN">MTN</option>
+                        <option value="Airtel">Airtel</option>
+                        <option value="MPS">MPS</option>
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Phone number {billingForm.gateway === 'pesapal' ? '(optional when email is entered)' : 'with country code'}</label>
-                  <input
-                    type="tel"
-                    value={billingForm.phoneNumber}
-                    onChange={(e) => setBillingForm({ ...billingForm, phoneNumber: e.target.value })}
-                    placeholder="+256700000000"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Phone number with country code</label>
+                      <input
+                        type="tel"
+                        value={billingForm.phoneNumber}
+                        onChange={(e) => setBillingForm({ ...billingForm, phoneNumber: e.target.value })}
+                        placeholder="+256700000000"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      />
+                    </div>
 
-                {billingForm.gateway === 'pesapal' && <div>
-                  <label className="mb-1 block text-sm font-medium">Email address (optional when phone is entered)</label>
-                  <input
-                    type="email"
-                    value={billingForm.email}
-                    onChange={(e) => setBillingForm({ ...billingForm, email: e.target.value })}
-                    placeholder="you@example.com"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                </div>}
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Payment method</label>
+                      <select
+                        value={billingForm.paymentMethod}
+                        onChange={(e) => setBillingForm({ ...billingForm, paymentMethod: e.target.value })}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="mobile_money">Mobile Money</option>
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Payment method</label>
-                  <select
-                    value={billingForm.paymentMethod}
-                    onChange={(e) => setBillingForm({ ...billingForm, paymentMethod: e.target.value })}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    {billingForm.gateway === 'pesapal' ? <>
-                      <option value="mobile_money">Mobile Money</option>
-                      <option value="card">Card</option>
-                    </> : <option value="mobile_money">Mobile Money</option>}
-                  </select>
-                </div>
+                    <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                      <p className="font-medium">Amount due</p>
+                      <p>{billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'Your subscription amount'}</p>
+                    </div>
 
-                <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                  <p className="font-medium">Amount due</p>
-                  <p>{billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'Your subscription amount'}</p>
-                </div>
-
-                <button onClick={confirmBillingPrompt} className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">{billingForm.gateway === 'pesapal' ? 'Continue to secure checkout' : 'Send payment prompt'}</button>
+                    <button onClick={confirmBillingPrompt} className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Send payment prompt</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
