@@ -1,5 +1,5 @@
 import prisma from '../db.js';
-import { businessAttendanceLocation, validCoordinates } from '../utils/attendanceLocation.js';
+import { branchAttendanceLocation, validCoordinates } from '../utils/attendanceLocation.js';
 
 function dayRange(value = new Date()) {
   const start = new Date(value);
@@ -32,23 +32,44 @@ function mapRecord(record) {
 }
 
 class AttendanceService {
-  async assertWithinBusinessLocation(tenantId, coordinates) {
+  async getBranchLocation(tenantId, branchId = null) {
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       select: { address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true },
     });
-    if (!businessAttendanceLocation(tenant).configured) {
-      throw new Error('Attendance is unavailable until the business owner saves the business address and location in Business Settings.');
+    const branch = branchId ? await prisma.branch.findFirst({ where: { id: branchId, tenantId } }) : null;
+    if (branchId && !branch) throw new Error('Employee branch is unavailable. Contact your HR administrator.');
+    return branchAttendanceLocation(tenant, branch);
+  }
+
+  async getEmployeeLocation(tenantId, employeeId) {
+    const employee = await this.requireEmployee(tenantId, employeeId);
+    const { start, end } = dayRange();
+    const record = await prisma.attendanceRecord.findFirst({
+      where: { tenantId, employeeId, attendanceDate: { gte: start, lt: end }, isActive: true },
+      select: { checkInTime: true, checkOutTime: true, branchId: true },
+    });
+    // Finish an open shift at its recorded branch, even if HR reassigns the employee.
+    const branchId = record?.checkInTime && !record.checkOutTime ? record.branchId : employee.branchId;
+    return this.getBranchLocation(tenantId, branchId || null);
+  }
+
+  async assertWithinBusinessLocation(tenantId, coordinates, branchId = null) {
+    const location = await this.getBranchLocation(tenantId, branchId);
+    if (!location.configured) {
+      throw new Error(location.branchId
+        ? `Attendance is unavailable for ${location.branchName}. Activate the branch and save its attendance address and GPS location in Branches.`
+        : 'Attendance is unavailable until the business owner saves the business address and location in Business Settings.');
     }
     if (!validCoordinates(coordinates)) throw new Error('Device location is required to check in or out. Enable location access and try again.');
     const distanceMeters = haversineDistanceMeters(
-      { latitude: tenant.attendanceLatitude, longitude: tenant.attendanceLongitude },
+      location,
       { latitude: Number(coordinates.latitude), longitude: Number(coordinates.longitude) },
     );
-    if (distanceMeters > Number(tenant.attendanceRadiusMeters || 200)) {
-      throw new Error(`You are ${Math.round(distanceMeters)} metres from the business location. Check-in and check-out are allowed within ${tenant.attendanceRadiusMeters || 200} metres.`);
+    if (distanceMeters > location.radiusMeters) {
+      throw new Error(`You are ${Math.round(distanceMeters)} metres from ${location.branchName || 'the business location'}. Check-in and check-out are allowed within ${location.radiusMeters} metres.`);
     }
-    return { address: tenant.address, distanceMeters };
+    return { ...location, distanceMeters };
   }
   async requireEmployee(tenantId, employeeId) {
     if (!employeeId) throw new Error('Select an employee first');
@@ -91,9 +112,9 @@ class AttendanceService {
   }
 
   async checkIn(tenantId, employeeId, method = 'MANUAL', location = null, changedBy = 'SYSTEM', coordinates = null) {
-    const businessLocation = await this.assertWithinBusinessLocation(tenantId, coordinates);
-    location = businessLocation.address;
     const employee = await this.requireEmployee(tenantId, employeeId);
+    const businessLocation = await this.assertWithinBusinessLocation(tenantId, coordinates, employee.branchId);
+    location = businessLocation.address;
     const { start, end } = dayRange();
     const checkInTime = new Date();
 
@@ -112,12 +133,13 @@ class AttendanceService {
     const record = existing
       ? await prisma.attendanceRecord.update({
           where: { id: existing.id },
-          data: { checkInTime, method, location, status: 'present' },
+          data: { checkInTime, method, location, branchId: businessLocation.branchId, status: 'present' },
         })
       : await prisma.attendanceRecord.create({
           data: {
             tenantId,
             employeeId,
+            branchId: businessLocation.branchId,
             attendanceDate: start,
             checkInTime,
             method,
@@ -132,8 +154,6 @@ class AttendanceService {
   }
 
   async checkOut(tenantId, employeeId, location = null, changedBy = 'SYSTEM', coordinates = null) {
-    const businessLocation = await this.assertWithinBusinessLocation(tenantId, coordinates);
-    location = businessLocation.address;
     const employee = await this.requireEmployee(tenantId, employeeId);
     const { start, end } = dayRange();
     const checkOutTime = new Date();
@@ -150,8 +170,13 @@ class AttendanceService {
     if (!record?.checkInTime) throw new Error('No check-in found for today');
     if (record.checkOutTime) throw new Error('Employee already checked out');
 
+    const businessLocation = await this.assertWithinBusinessLocation(tenantId, coordinates, record.branchId || null);
+    location = businessLocation.address;
+
     const duration = Math.max(0, (checkOutTime.getTime() - record.checkInTime.getTime()) / (1000 * 60 * 60));
-    const config = await prisma.attendanceConfiguration.findFirst({ where: { tenantId, branchId: null, isActive: true } });
+    const branchConfig = record.branchId
+      ? await prisma.attendanceConfiguration.findFirst({ where: { tenantId, branchId: record.branchId, isActive: true } }) : null;
+    const config = branchConfig || await prisma.attendanceConfiguration.findFirst({ where: { tenantId, branchId: null, isActive: true } });
     const workingHours = Number(config?.workingHoursPerDay || 8);
     const scheduledStart = new Date(start);
     scheduledStart.setHours(9, Number(config?.lateTolerance || 0), 0, 0);

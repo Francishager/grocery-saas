@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
+import { branchAttendanceUpdates } from "../utils/attendanceLocation.js";
 
 const router = Router();
 
@@ -21,8 +22,8 @@ function requireTenantUser(req, res, next) {
   next();
 }
 
-function cleanBranchPayload(body = {}) {
-  const data = {};
+function cleanBranchPayload(body = {}, existing = {}) {
+  const data = branchAttendanceUpdates(body, existing);
 
   if (Object.prototype.hasOwnProperty.call(body, "name")) {
     data.name = String(body.name || "").trim();
@@ -160,8 +161,7 @@ router.post(
 
       const branch = await prisma.branch.create({
         data: {
-          name: data.name,
-          address: data.address,
+          ...data,
           isActive: data.isActive ?? true,
           tenantId: req.tenantId,
         },
@@ -170,6 +170,7 @@ router.post(
 
       res.status(201).json({ message: "Branch created", branch: branchResponse(branch) });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ error: err.message });
       if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
       if (err?.code === "P2002") {
         return res.status(409).json({ error: "A branch with this name already exists" });
@@ -190,7 +191,7 @@ router.put(
       const existing = await findTenantBranch(req, res);
       if (!existing) return;
 
-      const data = cleanBranchPayload(req.body);
+      const data = cleanBranchPayload(req.body, existing);
       if (Object.prototype.hasOwnProperty.call(data, "name") && !data.name) {
         return res.status(400).json({ error: "Branch name required" });
       }
@@ -203,6 +204,7 @@ router.put(
 
       res.json({ message: "Branch updated", branch: branchResponse(branch) });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ error: err.message });
       if (err?.code === "P2002") {
         return res.status(409).json({ error: "A branch with this name already exists" });
       }
@@ -222,7 +224,7 @@ router.patch(
       const existing = await findTenantBranch(req, res);
       if (!existing) return;
 
-      const data = cleanBranchPayload(req.body);
+      const data = cleanBranchPayload(req.body, existing);
       if (Object.prototype.hasOwnProperty.call(data, "name") && !data.name) {
         return res.status(400).json({ error: "Branch name required" });
       }
@@ -235,6 +237,7 @@ router.patch(
 
       res.json({ message: "Branch updated", branch: branchResponse(branch) });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ error: err.message });
       if (err?.code === "P2002") {
         return res.status(409).json({ error: "A branch with this name already exists" });
       }

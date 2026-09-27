@@ -9,7 +9,6 @@ import attendanceService from '../services/attendanceService.js';
 import attendanceConfigService from '../services/attendanceConfigService.js';
 import hrPermissionService from '../services/hrPermissionService.js';
 import prisma from '../db.js';
-import { businessAttendanceLocation } from '../utils/attendanceLocation.js';
 
 const router = express.Router();
 
@@ -120,11 +119,8 @@ router.post('/attendance/checkout', requireAttendanceRecordPermission, async (re
 
 router.get('/attendance/geofence', requireAttendanceRecordPermission, async (req, res) => {
   try {
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: req.tenant.id },
-      select: { address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true },
-    });
-    const location = businessAttendanceLocation(tenant);
+    const employeeId = await attendanceEmployeeId(req, req.query.employeeId);
+    const location = await attendanceService.getEmployeeLocation(req.tenant.id, employeeId);
     res.set('Cache-Control', 'no-store');
     res.json({
       success: true,
@@ -132,7 +128,7 @@ router.get('/attendance/geofence', requireAttendanceRecordPermission, async (req
       configured: location.configured,
     });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.status || 400).json({ success: false, message: error.message });
   }
 });
 // Limited directory for attendance staff. This excludes employee profiles,

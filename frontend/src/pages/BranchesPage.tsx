@@ -1,6 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { Building2, Edit3, Loader2, Plus, RefreshCw, Trash2, X, MoreVertical, Ban, AlertTriangle } from 'lucide-react'
+import { Building2, Edit3, Loader2, Plus, RefreshCw, Trash2, X, MoreVertical, Ban, AlertTriangle, MapPin } from 'lucide-react'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +18,10 @@ interface Branch {
   id: string
   name: string
   address?: string | null
+  attendanceUseBusinessLocation?: boolean
+  attendanceLatitude?: number | null
+  attendanceLongitude?: number | null
+  attendanceRadiusMeters?: number
   isActive: boolean
   status?: 'active' | 'inactive'
   userCount?: number
@@ -28,6 +33,10 @@ const emptyForm = {
   name: '',
   address: '',
   isActive: true,
+  attendanceUseBusinessLocation: true,
+  attendanceLatitude: null as number | null,
+  attendanceLongitude: null as number | null,
+  attendanceRadiusMeters: 200,
 }
 
 export default function BranchesPage() {
@@ -37,13 +46,21 @@ export default function BranchesPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [capturingLocation, setCapturingLocation] = useState(false)
+  const captureVersion = useRef(0)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [dropdownId, setDropdownId] = useState<string | null>(null)
   const [branchLimit, setBranchLimit] = useState<number | null>(null)
   const [branchUsagePct, setBranchUsagePct] = useState(0)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+  const { hasPermission } = useJWTAuth()
+  const canCreate = hasPermission('canCreateBranch')
+  const canEdit = hasPermission('canEditBranch')
+  const canDelete = hasPermission('canDeleteBranch')
   const online = useOnlineStatus()
+
+  useEffect(() => () => { captureVersion.current++ }, [])
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -104,14 +121,47 @@ export default function BranchesPage() {
   }, [])
 
   const resetForm = () => {
+    captureVersion.current++
+    setCapturingLocation(false)
     setForm(emptyForm)
     setEditingId(null)
   }
 
+  const captureBranchLocation = () => {
+    if (!form.address.trim()) {
+      toast({ variant: 'destructive', title: 'Set the branch address first' })
+      return
+    }
+    if (!window.isSecureContext || !navigator.geolocation) {
+      toast({ variant: 'destructive', title: 'Device location is unavailable', description: 'Open the secure JibuSales site and enable device location.' })
+      return
+    }
+    const version = ++captureVersion.current
+    setCapturingLocation(true)
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      if (version !== captureVersion.current) return
+      setForm(current => ({ ...current, attendanceLatitude: coords.latitude, attendanceLongitude: coords.longitude }))
+      setCapturingLocation(false)
+      toast({ title: 'Branch location captured', description: 'Save the branch to activate its attendance location.' })
+    }, (error) => {
+      if (version !== captureVersion.current) return
+      setCapturingLocation(false)
+      toast({ variant: 'destructive', title: 'Unable to capture branch location', description: error.code === 1
+        ? 'Allow Location in your browser site settings and device settings, then try again.'
+        : 'Check device location settings and try again while at this branch.' })
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 })
+  }
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
+    if (saving || capturingLocation || (editingId ? !canEdit : !canCreate)) return
     if (!form.name.trim()) {
       toast({ variant: 'destructive', title: 'Branch name is required' })
+      return
+    }
+
+    if (!form.attendanceUseBusinessLocation && (!form.address.trim() || form.attendanceLatitude === null || form.attendanceLongitude === null)) {
+      toast({ variant: 'destructive', title: 'Branch attendance location required', description: 'Set the branch address and capture its GPS location before saving.' })
       return
     }
 
@@ -134,6 +184,10 @@ export default function BranchesPage() {
           name: form.name.trim(),
           address: form.address.trim() || null,
           isActive: form.isActive,
+          attendanceUseBusinessLocation: form.attendanceUseBusinessLocation,
+          attendanceLatitude: form.attendanceLatitude,
+          attendanceLongitude: form.attendanceLongitude,
+          attendanceRadiusMeters: form.attendanceRadiusMeters,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -157,11 +211,18 @@ export default function BranchesPage() {
   }
 
   const startEdit = (branch: Branch) => {
+    if (!canEdit) return
+    captureVersion.current++
+    setCapturingLocation(false)
     setEditingId(branch.id)
     setForm({
       name: branch.name,
       address: branch.address || '',
       isActive: branch.isActive,
+      attendanceUseBusinessLocation: branch.attendanceUseBusinessLocation !== false,
+      attendanceLatitude: branch.attendanceLatitude ?? null,
+      attendanceLongitude: branch.attendanceLongitude ?? null,
+      attendanceRadiusMeters: branch.attendanceRadiusMeters ?? 200,
     })
   }
 
@@ -264,7 +325,7 @@ export default function BranchesPage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-4">
+      {(editingId ? canEdit : canCreate) && <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-4">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
             <Building2 className="h-5 w-5" />
@@ -313,11 +374,39 @@ export default function BranchesPage() {
           </div>
         </div>
 
-        <Button type="submit" className="mt-4" disabled={saving || !form.name.trim()}>
+        <fieldset className="mt-5 space-y-4 border-t pt-4" disabled={saving || capturingLocation}>
+          <legend className="px-1 text-sm font-semibold">Check-In/Out Location</legend>
+          <div className="flex items-center gap-3">
+            <input id="branch-attendance-inherit" type="checkbox" className="h-4 w-4 shrink-0"
+              checked={form.attendanceUseBusinessLocation}
+              onChange={event => setForm(current => ({ ...current, attendanceUseBusinessLocation: event.target.checked }))} />
+            <Label htmlFor="branch-attendance-inherit">Use business profile attendance location</Label>
+          </div>
+          {!form.attendanceUseBusinessLocation && <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <div className="min-w-0 space-y-2">
+              <Button type="button" variant="outline" onClick={captureBranchLocation} disabled={!online || capturingLocation}>
+                {capturingLocation ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
+                Capture Branch Location
+              </Button>
+              <div role="status" className="break-words text-sm text-muted-foreground">
+                {capturingLocation ? 'Capturing branch location...' : form.attendanceLatitude !== null && form.attendanceLongitude !== null
+                  ? `${form.attendanceLatitude.toFixed(6)}, ${form.attendanceLongitude.toFixed(6)}` : 'Branch GPS not configured'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="branch-attendance-radius">Allowed Radius (metres)</Label>
+              <Input id="branch-attendance-radius" type="number" min="25" max="2000" step="1" required
+                value={form.attendanceRadiusMeters}
+                onChange={event => setForm(current => ({ ...current, attendanceRadiusMeters: Number(event.target.value) }))} />
+            </div>
+          </div>}
+        </fieldset>
+
+        <Button type="submit" className="mt-4" disabled={saving || capturingLocation || !form.name.trim()}>
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
           {editingId ? 'Save Branch' : 'Create Branch'}
         </Button>
-      </form>
+      </form>}
 
       <div className="overflow-hidden rounded-lg border bg-card">
         {loading ? (
@@ -337,6 +426,7 @@ export default function BranchesPage() {
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Branch</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Address</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Attendance Location</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Staff</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Status</th>
                   <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">Actions</th>
@@ -352,6 +442,10 @@ export default function BranchesPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{branch.address || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {branch.attendanceUseBusinessLocation !== false ? 'Business profile' : branch.attendanceLatitude != null && branch.attendanceLongitude != null
+                        ? `Branch GPS (${branch.attendanceRadiusMeters ?? 200}m)` : 'Not configured'}
+                    </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{branch.userCount ?? 0}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${branch.isActive ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>
@@ -360,23 +454,24 @@ export default function BranchesPage() {
                     </td>
                     <td className="px-4 py-3 overflow-visible">
                       <div className="relative flex items-center justify-end" ref={dropdownId === branch.id ? dropdownRef : undefined}>
-                        <button
+                        {(canEdit || canDelete) && <button
+                          aria-label={`Actions for ${branch.name}`}
                           onClick={() => setDropdownId(dropdownId === branch.id ? null : branch.id)}
-                          className="p-1.5 rounded-md hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="p-1.5 rounded-md hover:bg-muted"
                         >
                           <MoreVertical className="h-4 w-4 text-muted-foreground" />
-                        </button>
+                        </button>}
                         {dropdownId === branch.id && (
                           <div className="absolute right-0 top-full mt-1 z-[100] w-40 rounded-md border bg-popover p-1 shadow-lg">
-                            <button onClick={() => { startEdit(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
+                            {canEdit && <button onClick={() => { startEdit(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
                               <Edit3 className="h-3.5 w-3.5" /> Edit
-                            </button>
-                            <button onClick={() => { toggleStatus(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-orange-600" disabled={actionLoading === branch.id}>
+                            </button>}
+                            {canEdit && <button onClick={() => { toggleStatus(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-orange-600" disabled={actionLoading === branch.id}>
                               <Ban className="h-3.5 w-3.5" /> {branch.isActive ? 'Deactivate' : 'Activate'}
-                            </button>
-                            <button onClick={() => { deleteBranch(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-destructive" disabled={actionLoading === branch.id}>
+                            </button>}
+                            {canDelete && <button onClick={() => { deleteBranch(branch); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-destructive" disabled={actionLoading === branch.id}>
                               <Trash2 className="h-3.5 w-3.5" /> Delete
-                            </button>
+                            </button>}
                           </div>
                         )}
                       </div>

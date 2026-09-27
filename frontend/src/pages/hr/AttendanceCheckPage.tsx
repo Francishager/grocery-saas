@@ -19,6 +19,9 @@ interface EmployeeOption {
 }
 
 interface Geofence {
+  branchId?: string | null
+  branchName?: string | null
+  source?: 'business' | 'branch'
   address: string
   latitude: number | null
   longitude: number | null
@@ -54,6 +57,7 @@ export default function AttendanceCheckPage() {
   const [loading, setLoading] = useState(false)
   const submitting = useRef(false)
   const [geofence, setGeofence] = useState<Geofence | null>(null)
+  const [geofenceEmployeeId, setGeofenceEmployeeId] = useState('')
   const [configured, setConfigured] = useState(false)
   const [setupLoading, setSetupLoading] = useState(true)
   const [setupError, setSetupError] = useState('')
@@ -117,23 +121,7 @@ export default function AttendanceCheckPage() {
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    setSetupLoading(true)
-    setSetupError('')
     setEmployeeError('')
-    const loadLocation = async () => {
-      try {
-        const body = await attendanceRequest('/api/hr/attendance/geofence', { signal: controller.signal })
-        if (!active) return
-        setGeofence(body.data)
-        setConfigured(Boolean(body.configured))
-      } catch (error) {
-        if (!active) return
-        setConfigured(false)
-        setSetupError((error as Error).message)
-      } finally {
-        if (active) setSetupLoading(false)
-      }
-    }
     const loadEmployees = async () => {
       try {
         const body = await attendanceRequest('/api/hr/attendance/employee-options', { signal: controller.signal })
@@ -152,10 +140,31 @@ export default function AttendanceCheckPage() {
         setEmployeeError((error as Error).message)
       }
     }
-    void loadLocation()
     void loadEmployees()
     return () => { active = false; controller.abort() }
   }, [refreshVersion])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setGeofenceEmployeeId('')
+    setGeofence(null)
+    setConfigured(false)
+    setSetupError('')
+    setSetupLoading(Boolean(employeeId))
+    if (employeeId) {
+      attendanceRequest('/api/hr/attendance/geofence?employeeId=' + encodeURIComponent(employeeId), { signal: controller.signal })
+        .then(body => {
+          if (!active) return
+          setGeofence(body.data)
+          setConfigured(Boolean(body.configured))
+          setGeofenceEmployeeId(employeeId)
+        })
+        .catch(error => { if (active) setSetupError(error.message) })
+        .finally(() => { if (active) setSetupLoading(false) })
+    }
+    return () => { active = false; controller.abort() }
+  }, [employeeId, refreshVersion])
 
   useEffect(() => {
     setStatusEmployeeId('')
@@ -181,14 +190,18 @@ export default function AttendanceCheckPage() {
   const statusReady = Boolean(employeeId && statusEmployeeId === employeeId && !statusError)
   const checkedIn = Boolean(status?.checkInTime && !status?.checkOutTime)
   const completed = Boolean(status?.checkOutTime)
-  const canRecordAttendance = Boolean(statusReady && !setupLoading && !setupError && !employeeError && !locationError && withinBusinessLocation)
-  const disabledReason = setupLoading ? 'Loading saved business location...'
+  const locationReady = Boolean(employeeId && geofenceEmployeeId === employeeId)
+  const canRecordAttendance = Boolean(statusReady && locationReady && !setupLoading && !setupError && !employeeError && !locationError && withinBusinessLocation)
+  const disabledReason = setupLoading ? 'Loading saved attendance location...'
     : setupError || employeeError || statusError || locationError
-      || (!configured ? 'The business owner must capture the business GPS location in Business Profile and save changes.'
-        : !employeeId ? 'Select an employee.'
+      || (!employeeId ? 'Select an employee.'
+        : !locationReady ? 'Loading employee attendance location...'
+        : !configured ? geofence?.branchId
+          ? 'The business owner must activate this branch and configure its attendance location in Branches.'
+          : 'The business owner must capture the business GPS location in Business Profile and save changes.'
           : !statusReady ? 'Loading employee attendance status...'
             : !geoLocation ? 'Waiting for your device location...'
-              : !withinBusinessLocation ? 'You are outside the saved business attendance area.'
+              : !withinBusinessLocation ? 'You are outside the saved attendance area.'
                 : completed ? 'Attendance is completed for today.' : '')
 
   const recordAttendance = async (action: 'checkin' | 'checkout') => {
@@ -246,10 +259,12 @@ export default function AttendanceCheckPage() {
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="attendance-location" className="text-sm font-medium">Business Location</label>
+            <label htmlFor="attendance-location" className="text-sm font-medium">Attendance Location</label>
+            <div className="break-words text-sm font-medium">{geofence?.branchName || (locationReady ? 'Business profile (no branch assigned)' : '')}</div>
             <div id="attendance-location" className="min-h-10 break-words rounded border bg-muted p-2 text-sm">
-              {geofence?.address || (setupLoading ? 'Loading business address...' : 'Business address unavailable')}
+              {geofence?.address || (setupLoading ? 'Loading attendance address...' : 'Attendance address unavailable')}
             </div>
+            {geofence?.branchId && geofence.source === 'business' && <p className="text-sm text-muted-foreground">Location source: Business profile</p>}
             <Button type="button" size="sm" variant="outline" disabled={loading}
               onClick={() => { setRefreshVersion((value) => value + 1); refreshDeviceLocation() }}>
               <RefreshCw className={'mr-2 h-3.5 w-3.5' + (locating ? ' animate-spin' : '')} />
@@ -258,7 +273,7 @@ export default function AttendanceCheckPage() {
             {geoLocation && configured && geofence && (
               <p className={withinBusinessLocation ? 'text-sm text-green-700' : 'text-sm text-destructive'}>
                 <MapPin className="mr-1 inline h-4 w-4" />
-                {Math.round(currentDistance || 0)}m from business; allowed radius {geofence.radiusMeters}m.
+                {Math.round(currentDistance || 0)}m from attendance location; allowed radius {geofence.radiusMeters}m.
                 {' '}Device accuracy: {Math.round(geoLocation.accuracy)}m.
               </p>
             )}

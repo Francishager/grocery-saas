@@ -11,13 +11,19 @@ const server = await createServer({
   root: fileURLToPath(new URL('..', import.meta.url)),
   plugins: [{
     name: 'attendance-test-entry',
-    resolveId(id) { if (id === '/__attendance-test-entry.jsx') return id; },
+    enforce: 'pre',
+    resolveId(id) {
+      if (id === '/__attendance-test-entry.jsx') return id;
+      if (id.endsWith('/contexts/JWTAuthContext') || id.endsWith('/contexts/JWTAuthContext.tsx')) return '\0attendance-test-auth';
+    },
     load(id) {
+      if (id === '\0attendance-test-auth') return `export const useJWTAuth = () => ({user:{role:'owner'},hasPermission:permission => window.branchPermissions?.includes(permission) ?? true});`;
       if (id === '/__attendance-test-entry.jsx') return `import React from 'react';
         import { createRoot } from 'react-dom/client';
         import Page from '/src/pages/hr/AttendanceCheckPage.tsx';
+        import Branches from '/src/pages/BranchesPage.tsx';
         import '/src/index.css';
-        createRoot(document.getElementById('root')).render(React.createElement(Page));`;
+        createRoot(document.getElementById('root')).render(React.createElement(location.search.includes('branches') ? Branches : Page));`;
     },
   }],
   server: { host: '127.0.0.1', port: 5187, strictPort: false, open: false, hmr: false },
@@ -35,6 +41,7 @@ try {
   let configured = true;
   let failEmployees = false;
   let locationRequests = 0;
+  let canRecordAnyone = false;
   const errors = [];
   page.on('pageerror', (error) => { errors.push(error.message); console.error(error.message); });
   page.on('console', (message) => { if (message.type() === 'error') console.error(message.text()); });
@@ -43,18 +50,23 @@ try {
     let data, status = 200;
     if (path.endsWith('/geofence')) {
       locationRequests++;
-      data = { configured, data: { address: 'Kampala Store', latitude: configured ? 0.3476 : null, longitude: configured ? 32.5825 : null, radiusMeters: 200 } };
+      const employeeId = new URL(route.request().url()).searchParams.get('employeeId');
+      assert.ok(employeeId, 'Geofence must identify the selected employee');
+      if (employeeId === 'employee-b') {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        data = { configured, data: { branchId: 'branch-b', branchName: 'Entebbe Branch', source: 'branch', address: 'Entebbe Store', latitude: 0.05, longitude: 32.46, radiusMeters: 100 } };
+      } else data = { configured, data: { address: 'Kampala Store', latitude: configured ? 0.3476 : null, longitude: configured ? 32.5825 : null, radiusMeters: 200 } };
     } else if (path.endsWith('/employee-options')) {
       status = failEmployees ? 403 : 200;
       data = failEmployees ? { message: 'Your login is not linked to an employee profile.' }
-        : { data: [{ id: 'employee-a', firstName: 'Alex', lastName: 'Test', employeeNumber: 'AT00001' }], ownEmployeeId: 'employee-a', canRecordAnyone: false };
+        : { data: [{ id: 'employee-a', firstName: 'Alex', lastName: 'Test', employeeNumber: 'AT00001' }, ...(canRecordAnyone ? [{ id: 'employee-b', firstName: 'Branch', lastName: 'Employee' }] : [])], ownEmployeeId: 'employee-a', canRecordAnyone };
     } else if (path.endsWith('/current-status')) data = { data: record };
     else if (path.endsWith('/checkout')) { record = { ...record, checkOutTime: new Date().toISOString() }; data = { data: record }; }
     else if (path.endsWith('/checkin')) { record = { checkInTime: new Date().toISOString(), checkOutTime: null }; data = { data: record }; }
     else throw new Error('Unexpected attendance endpoint: ' + path);
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(data) });
   });
-  await page.route('**/__attendance-check-test', (route) => route.fulfill({
+  await page.route(/\/__attendance-check-test(?:\?.*)?$/, (route) => route.fulfill({
     contentType: 'text/html',
     body: `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div>
       <script type="module">
@@ -89,20 +101,19 @@ try {
   await enabled('Check In');
   await context.setGeolocation({ latitude: 1, longitude: 33, accuracy: 10 });
   await disabled('Check In');
-  await page.getByText('You are outside the saved business attendance area.', { exact: true }).waitFor();
+  await page.getByText('You are outside the saved attendance area.', { exact: true }).waitFor();
   await context.setGeolocation({ latitude: 0.3476, longitude: 32.5825, accuracy: 10 });
   await enabled('Check In');
   console.log('PASS: live location disables outside and re-enables inside the attendance radius');
 
   failEmployees = true;
   await page.reload();
-  await page.locator('#attendance-location').filter({ hasText: 'Kampala Store' }).waitFor();
   await page.getByRole('alert').filter({ hasText: 'not linked' }).waitFor();
   await disabled('Check In');
   failEmployees = false;
   await page.getByRole('button', { name: 'Refresh Location' }).click();
   await enabled('Check In');
-  console.log('PASS: employee lookup failure preserves business location; retry recovers');
+  console.log('PASS: employee lookup failure blocks attendance; retry recovers');
 
   configured = false;
   await page.reload();
@@ -124,6 +135,22 @@ try {
   await enabled('Check In');
   console.log('PASS: denied location explains the block and recovers after permission is restored');
 
+  canRecordAnyone = true;
+  await page.reload();
+  await enabled('Check In');
+  await page.locator('#attendance-employee').selectOption('employee-b');
+  await disabled('Check In');
+  await page.getByText('Entebbe Branch', { exact: true }).waitFor();
+  await page.getByText('You are outside the saved attendance area.', { exact: true }).waitFor();
+  await context.setGeolocation({ latitude: 0.05, longitude: 32.46, accuracy: 10 });
+  await enabled('Check In');
+  await page.locator('#attendance-employee').selectOption('employee-a');
+  await disabled('Check In');
+  await page.locator('#attendance-location').filter({ hasText: 'Kampala Store' }).waitFor();
+  await page.locator('#attendance-employee').selectOption('employee-b');
+  await enabled('Check In');
+  console.log('PASS: changing employee refreshes the branch geofence and never enables stale-location check-in');
+
   for (const [width, height] of [[1440, 900], [390, 844]]) {
     await page.setViewportSize({ width, height });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
@@ -131,6 +158,43 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log('PASS: desktop/mobile layouts fit; no page runtime errors');
+
+  let savedBranch;
+  const branches = [{ id: 'branch-b', name: 'Entebbe Branch', address: 'Entebbe Store', isActive: true, createdAt: new Date().toISOString(), attendanceUseBusinessLocation: true }];
+  await page.route('**/api/branches{,/**}', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { branches } });
+      return;
+    }
+    savedBranch = route.request().postDataJSON();
+    branches[0] = { ...branches[0], ...savedBranch };
+    await route.fulfill({ json: { branch: branches[0] } });
+  });
+  await page.route('**/api/tenants/me/limits', route => route.fulfill({ json: {} }));
+  await page.goto('http://127.0.0.1:' + server.httpServer.address().port + '/__attendance-check-test?branches');
+  await page.getByRole('button', { name: 'Actions for Entebbe Branch' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByLabel('Use business profile attendance location').uncheck();
+  await page.getByRole('button', { name: 'Capture Branch Location' }).click();
+  await page.getByRole('status').filter({ hasText: '0.050000, 32.460000' }).waitFor();
+  await page.getByLabel('Allowed Radius (metres)').fill('125');
+  await page.getByRole('button', { name: 'Save Branch', exact: true }).click();
+  await page.getByText('Branch GPS (125m)', { exact: true }).waitFor();
+  assert.equal(savedBranch.attendanceUseBusinessLocation, false);
+  assert.equal(savedBranch.attendanceLatitude, 0.05);
+  assert.equal(savedBranch.attendanceLongitude, 32.46);
+  assert.equal(savedBranch.attendanceRadiusMeters, 125);
+  await page.getByRole('button', { name: 'Actions for Entebbe Branch' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  assert.equal(await page.getByLabel('Use business profile attendance location').isChecked(), false);
+  assert.equal(await page.getByLabel('Allowed Radius (metres)').inputValue(), '125');
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.screenshot({ path: join(tmpdir(), 'branch-attendance-' + width + '.png'), fullPage: true });
+  }
+  assert.deepEqual(errors, []);
+  console.log('PASS: branch GPS capture saves independently and reloads correctly on mobile and desktop');
 } finally {
   await browser?.close();
   await server.close();
