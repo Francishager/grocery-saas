@@ -28,7 +28,7 @@ export function Toaster() {
   const { toasts } = useToast()
 
   return (
-    <ToastProvider duration={8000}>
+    <ToastProvider duration={4000}>
       {toasts.map(function ({ id, title, description, action, variant, notificationType, ...props }) {
         const type = notificationType || (variant === 'destructive' ? 'error' : variant === 'success' ? 'success' : 'info')
         return (

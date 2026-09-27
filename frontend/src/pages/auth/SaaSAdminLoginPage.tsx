@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { loginGreeting } from '@/lib/loginGreeting'
 
 export default function SaaSAdminLoginPage() {
   const [email, setEmail] = useState('')
@@ -51,7 +52,7 @@ export default function SaaSAdminLoginPage() {
       }
 
       toast({
-        title: 'Welcome, JibuSales Admin',
+        title: loginGreeting(result.user),
         description: 'Logged in successfully',
       })
 

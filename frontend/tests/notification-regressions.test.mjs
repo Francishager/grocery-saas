@@ -11,6 +11,10 @@ const notificationSource = readFileSync(root + '/lib/notificationDisplay.ts', 'u
 const notificationModule = { exports: {} };
 new Function('exports', 'require', 'module', ts.transpileModule(notificationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(notificationModule.exports, require, notificationModule);
 const { notificationActionLink } = notificationModule.exports;
+const greetingSource = readFileSync(root + '/lib/loginGreeting.ts', 'utf8');
+const greetingModule = { exports: {} };
+new Function('exports', 'require', 'module', ts.transpileModule(greetingSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(greetingModule.exports, require, greetingModule);
+const { loginGreeting } = greetingModule.exports;
 function sourceFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const path = dir + '/' + entry.name;
@@ -42,6 +46,26 @@ test('global feedback hosts remain mounted and sale/print messages can coexist',
   assert.match(app, /<Toaster\s*\/>/);
   const limit = readFileSync(root + '/hooks/use-toast.ts', 'utf8').match(/TOAST_LIMIT\s*=\s*(\d+)/);
   assert.ok(Number(limit?.[1]) >= 4);
+});
+
+test('transient notifications share a four-second timer and fully fade out', () => {
+  assert.match(readFileSync(root + '/components/ui/toaster.tsx', 'utf8'), /ToastProvider duration=\{4000\}/);
+  for (const file of ['/components/NotificationBell.tsx', '/lib/appFeedback.tsx']) {
+    assert.doesNotMatch(readFileSync(root + file, 'utf8'), /duration\s*:/, 'Do not extend popup timers per notification type');
+  }
+  assert.match(readFileSync(root + '/components/ui/toast.tsx', 'utf8'), /data-\[state=closed\]:fade-out-0/);
+});
+
+test('login greetings use the account holder name, including older first/last-name profiles', () => {
+  assert.equal(loginGreeting({ name: '  Delice  ', fname: 'Other', lname: 'Name' }), 'Welcome back, Delice!');
+  assert.equal(loginGreeting({ name: ' ', fname: ' Aimable ', lname: ' Cyuzuzo ' }), 'Welcome back, Aimable Cyuzuzo!');
+  assert.equal(loginGreeting({ fname: 'Jane' }), 'Welcome back, Jane!');
+  assert.equal(loginGreeting({ name: '<Admin>' }), 'Welcome back, <Admin>!');
+  assert.equal(loginGreeting({}), 'Welcome back!');
+  assert.equal(loginGreeting(), 'Welcome back!');
+  for (const file of ['/pages/auth/LoginPage.tsx', '/pages/auth/SaaSAdminLoginPage.tsx']) {
+    assert.match(readFileSync(root + file, 'utf8'), /title: loginGreeting\(result.user\)/, 'Use the successful response, not a previous session');
+  }
 });
 
 test('stock alerts deep-link to a specific product stock-in form', () => {

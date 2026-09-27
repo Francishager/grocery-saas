@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const assets = join(root, 'dist/assets');
 const stylesheet = readdirSync(assets).find(name => name.startsWith('index-') && name.endsWith('.css'));
 const stubs = {
-  JWTAuthContext: "const user = {id:'staff',role:'staff',tenantId:'tenant',name:'Test Staff'}; const hasPermission = permission => permission!=='canAdjustStock'||window.fixture.canAdjustStock; export const useJWTAuth = () => ({user,hasPermission});",
+  JWTAuthContext: "const user = {id:'staff',role:'staff',tenantId:'tenant',name:'Test Staff'}; const hasPermission = permission => permission!=='canAdjustStock'||window.fixture.canAdjustStock; export const useJWTAuth = () => ({user,hasPermission,isAuthenticated:false,login:async()=>({user:{...user,name:window.fixture.loginName,role:location.search.includes('admin-login')?'saas_admin':'staff'}})});",
   featureAccessService: "const hasFeature = () => false; export const useFeatureAccess = () => ({hasFeature});",
   'db/hooks': "export const useOnlineStatus = () => window.fixture.online;",
   'db/hybrid': "export const getLocalNotifications = async () => []; export const getLocalProducts = async () => window.fixture.products; export const getLocalSales = async () => []; export const getLocalSettings = async () => ({name:'Test Business'});",
@@ -34,6 +34,7 @@ const bundle = await build({
   stdin: { resolveDir: root, loader: 'tsx', contents: [
     "import React from 'react'; import {createRoot} from 'react-dom/client'; import {MemoryRouter} from 'react-router-dom';",
     "import Sales from './src/pages/SalesPage'; import {NotificationBell} from './src/components/NotificationBell'; import {Toaster} from './src/components/ui/toaster'; import {toast} from './src/hooks/use-toast';",
+    "import LoginPage from './src/pages/auth/LoginPage'; import SaaSAdminLoginPage from './src/pages/auth/SaaSAdminLoginPage';",
     "window.fixture={online:true,notifications:[],reads:[],checkouts:0,fail:false,canAdjustStock:true,products:[{id:'product',product_name:'Test Rice',unit_price:12500,cost_price:10000,quantity:10,categoryId:'rice',itemType:'product'}]};",
     "window.nativeCalls=0; const permission=new URLSearchParams(location.search).get('permission')||'denied';",
     "window.Notification=class { static permission=permission; static requestPermission=async()=>permission; constructor(){window.nativeCalls++;throw Error('Native foreground alert must not run')}};",
@@ -43,7 +44,7 @@ const bundle = await build({
     "window.askConfirm=()=>{window.confirmResult='pending';appConfirm('Delete this item? This action cannot be undone. https://example.com/private').then(answer=>{window.confirmResult=answer})};",
     "window.notice=()=>appNotify('Changes saved. https://example.com/private');",
     "window.askPrompt=()=>{window.promptResult='pending';appPrompt('Enter reload amount:', 'number').then(answer=>{window.promptResult=answer})};",
-    "createRoot(document.getElementById('root')).render(<React.StrictMode><MemoryRouter><header><NotificationBell/></header><Sales/><Toaster/><AppFeedback/></MemoryRouter></React.StrictMode>);",
+    "const screen=new URLSearchParams(location.search).get('screen'); createRoot(document.getElementById('root')).render(<React.StrictMode><MemoryRouter>{screen==='admin-login'?<SaaSAdminLoginPage/>:screen==='login'?<LoginPage/>:<><header><NotificationBell/></header><Sales/></>}<Toaster/><AppFeedback/></MemoryRouter></React.StrictMode>);",
   ].join('\n') },
   bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
   define: { 'process.env.NODE_ENV': '"production"' },
@@ -116,7 +117,7 @@ try {
       await window.pollNotifications();
       window.extraToast();
     });
-    await page.getByText('Low stock alert', { exact: true }).waitFor();
+    await page.getByText('Low stock alert', { exact: true }).first().waitFor();
     const popups = page.locator('li[data-state="open"]');
     assert.ok(!(await popups.allTextContents()).join(' ').match(/https?:|example\.com|\/tenant\//));
     for (const element of await popups.all()) {
@@ -125,6 +126,16 @@ try {
     }
     await page.screenshot({ path: join(tmpdir(), 'jibusales-notifications-' + width + '.png') });
     console.log('PASS: low-stock and global toasts are styled, URL-free, and fit ' + width + 'px');
+
+    await page.mouse.move(1, height - 1);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.waitForFunction(() => document.querySelectorAll('li[data-state="open"]').length === 0, undefined, { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelectorAll('li[data-state="closed"]').length === 0, undefined, { timeout: 1500 });
+    await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+    await page.getByText('Sale completed', { exact: true }).waitFor();
+    assert.ok(await page.getByText('Low stock alert', { exact: true }).count() > 0);
+    await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+    console.log('PASS: popups expire within five seconds; saved notification history remains available');
 
     await page.reload();
     await page.evaluate(() => { window.fixture.fail = true; });
@@ -161,6 +172,8 @@ try {
     await page.waitForFunction(() => window.confirmResult === true);
     await page.evaluate(() => window.notice());
     await page.getByText('Changes saved.', { exact: true }).waitFor();
+    await page.mouse.move(1, height - 1);
+    await page.getByText('Changes saved.', { exact: true }).waitFor({ state: 'detached', timeout: 5500 });
     await page.evaluate(() => window.askPrompt());
     await page.getByRole('spinbutton').fill('25000');
     await page.getByRole('button', { name: 'Confirm', exact: true }).click();
@@ -170,6 +183,21 @@ try {
     await page.waitForFunction(() => window.promptResult === null);
     assert.deepEqual(errors, []);
     console.log('PASS: centered URL-free confirmation safely handles Cancel, Escape and Confirm; notices use in-app toasts');
+    for (const screen of ['login', 'admin-login']) {
+      await page.goto('http://127.0.0.1:' + server.address().port + '?screen=' + screen);
+      for (const name of ['Delice', 'Aimable Cyuzuzo']) {
+        await page.evaluate(value => { window.fixture.loginName = value; }, name);
+        await page.getByLabel(/Email/).fill('account@example.com');
+        await page.getByLabel('Password', { exact: true }).fill('test-password');
+        await page.locator('button[type="submit"]').click();
+        const welcome = page.getByText('Welcome back, ' + name + '!', { exact: true });
+        await welcome.waitFor();
+        await page.mouse.move(1, height - 1);
+        await welcome.waitFor({ state: 'detached', timeout: 5500 });
+      }
+    }
+    assert.deepEqual(errors, []);
+    console.log('PASS: tenant and admin logins greet the latest account holder on every login and auto-dismiss');
     await page.close();
   }
 } finally {

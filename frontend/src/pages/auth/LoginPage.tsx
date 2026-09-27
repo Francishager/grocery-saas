@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
+import { loginGreeting } from '@/lib/loginGreeting'
 
 const carouselImages = [
   { src: '/img/Tracking-Time-in-Sales.png', caption: 'Track sales and profit in real-time' },
@@ -75,7 +76,7 @@ export default function LoginPage() {
       }
 
       toast({
-        title: 'Welcome back!',
+        title: loginGreeting(result.user),
         description: 'Logged in successfully',
       })
 

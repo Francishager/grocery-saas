@@ -23,7 +23,7 @@ const snapshot = () => confirmations[0]
 const emit = () => listeners.forEach(listener => listener())
 
 export function appNotify(message: unknown) {
-  toast({ title: 'Notice', description: sanitizeNotificationText(String(message ?? '')), duration: 10000 })
+  toast({ title: 'Notice', description: sanitizeNotificationText(String(message ?? '')) })
 }
 
 // The caller must await the answer before performing the protected action.

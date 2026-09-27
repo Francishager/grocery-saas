@@ -108,7 +108,6 @@ export function NotificationBell() {
       description: sanitizeNotificationText(item.message),
       notificationType: item.type,
       variant: ['sale', 'success', 'payment'].includes(item.type) ? 'success' : item.type === 'error' ? 'destructive' : 'default',
-      duration: item.type === 'sale' ? 20000 : 10000,
       action: link ? <ToastAction altText="Open notification details" onClick={() => navigate(link)}>Open details</ToastAction> : undefined,
     })
   }, [hasPermission, navigate])
