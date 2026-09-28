@@ -68,6 +68,7 @@ function timeAgo(date: string | Date): string {
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [advisorTipQueue, setAdvisorTipQueue] = useState<NotificationItem[]>([])
   const unreadCount = notifications.filter(n => !n.isRead).length
   const [loading, setLoading] = useState(false)
   const online = useOnlineStatus()
@@ -97,12 +98,17 @@ export function NotificationBell() {
     loadedRef.current = false
     startedAtRef.current = Date.now()
     setNotifications([])
+    setAdvisorTipQueue([])
   }, [user?.id])
 
   const announce = useCallback((item: NotificationItem) => {
     const key = notificationKey(item)
     if (announcedRef.current.has(key)) return
     announcedRef.current.add(key)
+    if (item.type === 'advisor_tip') {
+      setAdvisorTipQueue(previous => previous.some(tip => tip.id === item.id) ? previous : [...previous, item])
+      return
+    }
     const link = notificationActionLink(item.link, hasPermission('canAdjustStock'))
     toast({
       title: sanitizeNotificationText(item.title, 'Notification'),
@@ -368,7 +374,7 @@ export function NotificationBell() {
 
       for (const item of withReminder) {
         const key = notificationKey(item)
-        if (!item.isRead && (loadedRef.current || new Date(item.createdAt).getTime() >= startedAtRef.current)) announce(item)
+        if (!item.isRead && (item.type === 'advisor_tip' || loadedRef.current || new Date(item.createdAt).getTime() >= startedAtRef.current)) announce(item)
         else announcedRef.current.add(key)
       }
       loadedRef.current = true
@@ -459,6 +465,7 @@ export function NotificationBell() {
     if (!item || item.isRead) return
     readKeysRef.current.add(notificationKey(item))
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+    setAdvisorTipQueue(previous => previous.filter(tip => tip.id !== id))
 
     // Update local DB
     try { await db.notifications.update(id, { isRead: true }) } catch {}
@@ -469,10 +476,20 @@ export function NotificationBell() {
     }
   }
 
+  const dismissAdvisorTip = () => setAdvisorTipQueue(previous => previous.slice(1))
+
+  const openAdvisorTip = (item: NotificationItem) => {
+    if (!item.isRead) void handleMarkRead(item.id)
+    else setAdvisorTipQueue(previous => previous.filter(tip => tip.id !== item.id))
+    setOpen(false)
+    navigate(item.link || '/tenant/ai-advisor')
+  }
+
   // Mark all as read
   const handleMarkAllRead = async () => {
     notifications.forEach(item => readKeysRef.current.add(notificationKey(item)))
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+    setAdvisorTipQueue([])
 
     // Update local DB
     try {
@@ -490,6 +507,11 @@ export function NotificationBell() {
 
   // Handle notification click — navigate if link
   const handleNotificationClick = (n: NotificationItem) => {
+    if (n.type === 'advisor_tip') {
+      setAdvisorTipQueue(previous => previous.some(tip => tip.id === n.id) ? previous : [...previous, n])
+      setOpen(false)
+      return
+    }
     if (!n.isRead) handleMarkRead(n.id)
     const link = notificationActionLink(n.link, hasPermission('canAdjustStock'))
     if (link) {
@@ -501,6 +523,7 @@ export function NotificationBell() {
   const allNotifications = notifications
 
   return (
+    <>
     <div ref={bellRef} className="relative">
       <button
         type="button"
@@ -624,6 +647,25 @@ export function NotificationBell() {
         document.body
       )}
     </div>
+    {advisorTipQueue[0] && createPortal(
+      <aside role="dialog" aria-label="New Advisor tip" aria-live="assertive"
+        className="fixed right-3 top-20 z-[80] w-[min(26rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-emerald-300 bg-card text-card-foreground shadow-2xl sm:right-5">
+        <div className="flex items-start gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/50">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200"><Sparkles className="h-5 w-5" /></div>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase text-emerald-800 dark:text-emerald-200">New Advisor tip</p><h2 className="mt-0.5 break-words text-base font-semibold leading-5">{sanitizeNotificationText(advisorTipQueue[0].title.replace(/^Advisor tip:\s*/i, ''), 'Business insight')}</h2></div>
+          <button type="button" onClick={dismissAdvisorTip} className="rounded-md p-1 text-muted-foreground hover:bg-emerald-100 hover:text-foreground" aria-label="Dismiss Advisor tip"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="max-h-[45vh] overflow-y-auto px-4 py-4"><p className="whitespace-pre-line break-words text-sm leading-6">{sanitizeNotificationText(advisorTipQueue[0].message)}</p>
+          {advisorTipQueue.length > 1 && <p className="mt-3 text-xs text-muted-foreground">{advisorTipQueue.length - 1} more tip{advisorTipQueue.length > 2 ? 's' : ''} waiting</p>}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t bg-muted/20 px-4 py-3">
+          <button type="button" onClick={() => { void handleMarkRead(advisorTipQueue[0].id) }} className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Mark read</button>
+          <button type="button" onClick={() => openAdvisorTip(advisorTipQueue[0])} className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Open Advisor</button>
+        </div>
+      </aside>,
+      document.body
+    )}
+    </>
   )
 }
 
