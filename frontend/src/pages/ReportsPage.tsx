@@ -1112,6 +1112,114 @@ function SummaryCards({ data, keys }: { data: any; keys: ReportItem['summaryKeys
   )
 }
 
+function PerformanceAxisTick({ x, y, payload }: any) {
+  const label = String(payload?.value ?? '')
+  const shortened = label.length > 17 ? `${label.slice(0, 16)}…` : label
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={-8} y={4} textAnchor="end" fill="hsl(var(--muted-foreground))" fontSize={11}>
+        {shortened}
+      </text>
+    </g>
+  )
+}
+
+function PerformanceChart({
+  title,
+  rows,
+  labelKey,
+  series,
+}: {
+  title: string
+  rows: any[]
+  labelKey: string
+  series: Array<{ key: string; label: string; color: string; format: 'currency' | 'number' }>
+}) {
+  const formatter = (value: number, name: string, props: any) => {
+    const item = series.find(metric => metric.key === props?.dataKey)
+    const formatted = item?.format === 'currency' ? formatCurrency(Number(value) || 0) : Number(value || 0).toLocaleString()
+    return [formatted, item?.label || name]
+  }
+  const tickFormatter = (value: number) => {
+    const currencyMetric = series.some(metric => metric.format === 'currency')
+    return currencyMetric ? formatCurrency(Number(value) || 0) : Number(value || 0).toLocaleString()
+  }
+
+  return (
+    <section className="min-w-0 border-t pt-4 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <div className="mt-3 h-[270px] min-w-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 14, bottom: 4, left: 0 }} barCategoryGap="24%">
+            <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis type="number" tickFormatter={tickFormatter} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey={labelKey} width={128} tick={<PerformanceAxisTick />} axisLine={false} tickLine={false} />
+            <Tooltip
+              formatter={formatter}
+              contentStyle={{ borderRadius: 8, border: '1px solid hsl(var(--border))', background: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)' }}
+              labelStyle={{ fontWeight: 600, marginBottom: 4 }}
+              cursor={{ fill: 'hsl(var(--muted))', opacity: 0.45 }}
+            />
+            {series.map(metric => (
+              <Bar key={metric.key} dataKey={metric.key} name={metric.label} fill={metric.color} radius={[0, 4, 4, 0]} maxBarSize={20} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  )
+}
+
+function BusinessPerformanceCharts({ reportId, data }: { reportId: string; data: any }) {
+  const labelKey = reportId === 'performanceBranch' ? 'branch' : reportId === 'performanceCategory' ? 'category' : 'product'
+  const allRows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  if (!allRows.length) return null
+
+  const limit = reportId === 'performanceBranch' || reportId === 'performanceCategory' ? 10 : 10
+  const rows = allRows.slice(0, limit)
+  const rankLabel = reportId === 'performanceLeastProducts'
+    ? `Least-selling ${Math.min(limit, allRows.length)} of ${allRows.length}`
+    : reportId === 'performanceTopProducts'
+      ? `Top-selling ${Math.min(limit, allRows.length)} of ${allRows.length}`
+      : `Top ${Math.min(limit, allRows.length)} of ${allRows.length} by ${reportId === 'performanceBranch' ? 'revenue' : reportId === 'performanceCategory' ? 'revenue' : 'revenue'}`
+
+  const charts = reportId === 'performanceBranch'
+    ? [
+        { title: 'Revenue and discounts by branch', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' as const }, { key: 'discount', label: 'Discount', color: '#e5a11a', format: 'currency' as const }] },
+        { title: 'Sales volume by branch', labelKey, rows, series: [{ key: 'count', label: 'Sales', color: '#3987d7', format: 'number' as const }] },
+        { title: 'Average sale value by branch', labelKey, rows, series: [{ key: 'avgSale', label: 'Average sale', color: '#7765c4', format: 'currency' as const }] },
+      ]
+    : reportId === 'performanceCategory'
+      ? [
+          { title: 'Revenue and gross profit by category', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' as const }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' as const }] },
+          { title: 'Quantity sold by category', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' as const }] },
+        ]
+      : reportId === 'performanceProduct'
+        ? [
+            { title: 'Revenue and gross profit by product', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' as const }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' as const }] },
+            { title: 'Quantity sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' as const }] },
+            { title: 'Sales transactions by product', labelKey, rows, series: [{ key: 'transactions', label: 'Transactions', color: '#7765c4', format: 'number' as const }] },
+          ]
+        : [
+            { title: 'Units sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity sold', color: reportId === 'performanceLeastProducts' ? '#d97745' : '#0f9f6e', format: 'number' as const }] },
+            { title: 'Revenue and gross profit', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#3987d7', format: 'currency' as const }, { key: 'profit', label: 'Gross profit', color: '#e5a11a', format: 'currency' as const }] },
+          ]
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-2">
+        <h2 className="text-base font-semibold">Performance at a glance</h2>
+        <p className="text-xs text-muted-foreground">{rankLabel} · values match the report rows below</p>
+      </div>
+      <div className={cn('grid gap-x-8 gap-y-7', charts.length === 3 ? 'lg:grid-cols-2 xl:grid-cols-3' : 'lg:grid-cols-2')}>
+        {charts.map(chart => (
+          <PerformanceChart key={chart.title} title={chart.title} rows={chart.rows} labelKey={chart.labelKey} series={chart.series} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AdvancedSalesSummary({ data }: { data: any }) {
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
 
@@ -2295,6 +2403,9 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {currentReport.id === 'svcJobCards' && <SummaryCards data={reportData} keys={currentReport.summaryKeys} />}
+                    {['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id) && (
+                      <BusinessPerformanceCharts reportId={currentReport.id} data={reportData} />
+                    )}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
