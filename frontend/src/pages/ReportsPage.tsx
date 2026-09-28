@@ -813,7 +813,7 @@ function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['colu
           </tbody>
         </table>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm text-muted-foreground">
         <span>Showing {rows.length ? startIndex + 1 : 0}-{Math.min(startIndex + pageSize, rows.length)} of {rows.length} rows</span>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page === 1}>Previous</Button>
@@ -2418,10 +2418,10 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {currentReport.id === 'svcJobCards' && <SummaryCards data={reportData} keys={currentReport.summaryKeys} />}
-                    {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id) && (
                       <BusinessPerformanceCharts reportId={currentReport.id} data={reportData} />
                     )}
+                    {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
                     {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}
