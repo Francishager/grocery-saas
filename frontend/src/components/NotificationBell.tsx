@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles } from 'lucide-react'
+import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles, Lightbulb } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '@/lib/api'
@@ -36,7 +36,7 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   hr: Users, service: Wrench, job_card: Receipt, receivable: CircleDollarSign,
   payable: CircleDollarSign, refund: ArrowLeftRight, transfer: ArrowLeftRight,
   account: Settings2, customer: UserRound, supplier: Truck, user: UserRound,
-  approval: UserCheck, system: Settings2, communication: Bell, advisor_tip: Sparkles,
+  approval: UserCheck, system: Settings2, communication: Bell, advisor_tip: Lightbulb,
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -520,11 +520,44 @@ export function NotificationBell() {
     }
   }
 
+  const openAdvisorTips = () => {
+    const tip = notifications.find(item => item.type === 'advisor_tip' && !item.isRead)
+      || notifications.find(item => item.type === 'advisor_tip')
+    setOpen(false)
+    if (tip) {
+      setAdvisorTipQueue(previous => previous.some(item => item.id === tip.id) ? previous : [tip, ...previous])
+      return
+    }
+    navigate('/tenant/ai-advisor')
+  }
+
   const allNotifications = notifications
+  const unreadAdvisorCount = notifications.filter(item => item.type === 'advisor_tip' && !item.isRead).length
 
   return (
     <>
     <div ref={bellRef} className="relative">
+      {hasPermission('canUseBusinessAI') && (
+        <button
+          type="button"
+          onClick={openAdvisorTips}
+          className={cn(
+            'relative mr-1 inline-flex h-9 w-9 items-center justify-center rounded-xl border transition-all',
+            unreadAdvisorCount > 0
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 shadow-sm hover:border-emerald-400 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/70'
+              : 'border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'
+          )}
+          aria-label={unreadAdvisorCount > 0 ? `Advisor tips, ${unreadAdvisorCount} unread` : 'Open Business Advisor'}
+          title={unreadAdvisorCount > 0 ? `${unreadAdvisorCount} unread Advisor tip${unreadAdvisorCount === 1 ? '' : 's'}` : 'Business Advisor'}
+        >
+          <Lightbulb className="h-[19px] w-[19px]" strokeWidth={2.1} />
+          {unreadAdvisorCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background">
+              {unreadAdvisorCount > 9 ? '9+' : unreadAdvisorCount}
+            </span>
+          )}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => {
