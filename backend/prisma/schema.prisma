@@ -100,6 +100,7 @@ model UserBranch {
 
 // Tenant/Business - each business is a tenant in the SaaS
 model Tenant {
+  trashEntries TrashEntry[]
   id           String       @id @default(cuid())
   name         String
   slug         String       @unique
@@ -1000,6 +1001,29 @@ model ProductUnit {
 }
 
 // Audit Log — tracks all data mutations
+model TrashEntry {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  model       String
+  recordId    String
+  label       String
+  permission  String
+  branchId    String?
+  deletedById String
+  deletedBy   String
+  deletedAt   DateTime @default(now())
+  expiresAt   DateTime
+  restoreFields Json
+  deletedFields Json
+  status      String   @default("active")
+  resolvedAt  DateTime?
+
+  @@unique([tenantId, model, recordId])
+  @@index([tenantId, status, expiresAt])
+  @@map("trash_entries")
+}
+
 model AuditLog {
   id             String   @id @default(cuid())
   tenantId       String // tenant ID or "platform" for SaaS admin operations

@@ -91,7 +91,7 @@ router.delete('/leave-types/:id', requireHRPermission('LEAVE_TYPE_MANAGE'), asyn
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    const leaveType = await leaveTypeService.deactivateLeaveType(tenantId, id);
+    const leaveType = await leaveTypeService.deactivateLeaveType(tenantId, id, req.user);
     res.json({ success: true, data: leaveType, message: 'Leave type deactivated' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });

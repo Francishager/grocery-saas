@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { moveToTrash, assertOutsideTrash } from './trashService.js';
 
 class LeaveTypeService {
   async createLeaveType(tenantId, data) {
@@ -25,6 +26,7 @@ class LeaveTypeService {
   }
 
   async updateLeaveType(tenantId, typeId, updates) {
+    await assertOutsideTrash('leaveType', tenantId, typeId);
     await this.getLeaveType(tenantId, typeId);
     return prisma.leaveType.update({
       where: { id: typeId },
@@ -57,8 +59,9 @@ class LeaveTypeService {
     return leaveType;
   }
 
-  async deactivateLeaveType(tenantId, typeId) {
-    return this.updateLeaveType(tenantId, typeId, { isActive: false });
+  async deactivateLeaveType(tenantId, typeId, actor) {
+    await this.getLeaveType(tenantId, typeId);
+    return moveToTrash('leaveType', { id: typeId, tenantId }, actor);
   }
 
   async getLeaveBalance(tenantId, employeeId, leaveTypeId, year) {

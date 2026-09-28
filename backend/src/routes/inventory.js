@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { moveToTrash, assertOutsideTrash } from '../services/trashService.js';
 import { createHash } from "node:crypto";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission, requireFeature } from "../../middleware/auth.js";
@@ -1035,6 +1036,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
     if (!existing) return res.status(404).json({ error: "Product not found" });
 
     // Check permission based on the existing item's type
+    await assertOutsideTrash('product', scope.tenantId, existing.id);
     const existingType = existing.itemType || 'product';
     const editPermMap = { product: 'canEditProduct', service: 'canEditService', rental: 'canEditRental' };
     const requiredPerm = editPermMap[existingType] || 'canEditProduct';
@@ -1314,8 +1316,8 @@ router.delete("/:id", authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `Permission denied: ${requiredPerm} required` });
     }
 
-    await prisma.product.update({ where: { id: product.id }, data: { isActive: false } });
-    res.json({ message: "Product deactivated" });
+    await moveToTrash('product', { id: product.id, tenantId: scope.tenantId }, req.user);
+    res.json({ message: "Item moved to Trash for 30 days" });
   } catch (err) {
     handleBranchError(res, err);
   }

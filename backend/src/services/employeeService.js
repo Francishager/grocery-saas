@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { moveToTrash, trashedRecordIds, assertOutsideTrash } from './trashService.js';
 import { nextEmployeeNumber } from '../utils/employeeNumber.js';
 import hrAccountingService from './hrAccountingService.js';
 
@@ -458,6 +459,7 @@ class EmployeeService {
 
     const where = {
       tenantId,
+      id: { notIn: await trashedRecordIds('employee', tenantId) },
       ...(status && status !== 'all' ? { status } : {}),
       ...(departmentId && { departmentId }),
       ...(unitId && { unitId }),
@@ -520,6 +522,7 @@ class EmployeeService {
   }
 
   async updateEmployee(tenantId, employeeId, data) {
+    await assertOutsideTrash('employee', tenantId, employeeId);
     const employee = await this.getEmployeeById(tenantId, employeeId);
     const openingInputProvided = hasOpeningInput(data);
     if (data.supervisorId && data.supervisorId !== employee.supervisorId) {
@@ -645,15 +648,9 @@ class EmployeeService {
     });
   }
 
-  async softDeleteEmployee(tenantId, employeeId) {
+  async softDeleteEmployee(tenantId, employeeId, actor) {
     await this.getEmployeeById(tenantId, employeeId);
-    return prisma.employee.update({
-      where: { id: employeeId },
-      data: {
-        status: 'inactive',
-        terminationDate: new Date(),
-      },
-    });
+    return moveToTrash('employee', { id: employeeId, tenantId }, actor);
   }
 
   async transferEmployee(tenantId, employeeId, data, transferredBy) {
@@ -857,7 +854,7 @@ class EmployeeService {
 
   async getEmployeeCount(tenantId, options = {}) {
     return prisma.employee.count({
-      where: { tenantId, ...(options.status ? { status: options.status } : {}) },
+      where: { tenantId, id: { notIn: await trashedRecordIds('employee', tenantId) }, ...(options.status && options.status !== 'all' ? { status: options.status } : {}) },
     });
   }
 }

@@ -25,6 +25,7 @@ import BusinessAdvisorPage from '@/pages/BusinessAdvisorPage'
 import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import BranchesPage from '@/pages/BranchesPage'
+import TrashPage from '@/pages/TrashPage'
 import StaffPage from '@/pages/StaffPage'
 import BusinessSettingsPage from '@/pages/BusinessSettingsPage'
 import RolesPermissionsPage from '@/pages/RolesPermissionsPage'
@@ -217,6 +218,7 @@ function App() {
           <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />
+          <Route path="trash" element={<TrashPage />} />
           <Route path="staff" element={<FeatureGuard feature="settings.users"><StaffPage /></FeatureGuard>} />
           <Route path="profile" element={<UserProfilePage />} />
           <Route path="referrals" element={<FeatureGuard feature="referrals"><ReferralPage /></FeatureGuard>} />

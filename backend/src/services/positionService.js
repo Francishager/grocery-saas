@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { moveToTrash, assertOutsideTrash } from './trashService.js';
 const prisma = new PrismaClient();
 
 /**
@@ -127,6 +128,7 @@ class PositionService {
    * @returns {Promise<object>} Updated position
    */
   async updatePosition(tenantId, positionId, data) {
+    await assertOutsideTrash('position', tenantId, positionId);
     // Verify position exists
     await this.getPositionById(tenantId, positionId);
 
@@ -165,7 +167,7 @@ class PositionService {
    * @param {string} positionId - Position ID
    * @returns {Promise<object>} Deleted position
    */
-  async deletePosition(tenantId, positionId) {
+  async deletePosition(tenantId, positionId, actor) {
     // Verify position exists
     await this.getPositionById(tenantId, positionId);
 
@@ -182,10 +184,7 @@ class PositionService {
     }
 
     // Soft delete
-    return await prisma.position.update({
-      where: { id: positionId },
-      data: { isActive: false },
-    });
+    return moveToTrash('position', { id: positionId, tenantId }, actor);
   }
 
   /**

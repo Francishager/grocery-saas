@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { moveToTrash, trashedRecordIds, assertOutsideTrash } from '../services/trashService.js';
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
@@ -86,7 +87,7 @@ router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
 
     const staff = await prisma.user.findMany({
-      where: { tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
+      where: { tenantId, id: { notIn: await trashedRecordIds('user', tenantId) }, role: { in: [...Array.from(staffRoles), "owner"] } },
       include: {
         branches: {
           include: { branch: { select: { id: true, name: true, isActive: true } } },
@@ -206,6 +207,7 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
     if (!existing) return res.status(404).json({ error: "Staff not found" });
 
     const data = {};
+    await assertOutsideTrash('user', tenantId, existing.id);
     const { name, fname, lname, phone, role, isActive, branchId, password, cashAccountId, workingHours } = req.body;
     if (workingHours !== undefined) {
       if (existing.id === req.user.id && !workingHoursAdmin(req.user)) {
@@ -292,9 +294,9 @@ router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), as
     });
     if (!existing) return res.status(404).json({ error: "Staff not found" });
 
-    const user = await prisma.user.update({
+    await moveToTrash('user', { id: existing.id, tenantId }, req.user);
+    const user = await prisma.user.findUnique({
       where: { id: existing.id },
-      data: { isActive: false },
       include: {
         branches: {
           include: { branch: { select: { id: true, name: true, isActive: true } } },

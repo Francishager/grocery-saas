@@ -87,7 +87,7 @@ router.delete('/shifts/templates/:id', requireHRPermission('SHIFT_MANAGE'), asyn
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    const template = await shiftService.deleteTemplate(tenantId, id);
+    const template = await shiftService.deleteTemplate(tenantId, id, req.user);
     res.json({ success: true, data: template, message: 'Template deleted' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -166,7 +166,7 @@ router.delete('/shifts/assignments/:id', requireHRPermission('SHIFT_ASSIGN'), as
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    const assignment = await shiftService.endAssignment(tenantId, id);
+    const assignment = await shiftService.endAssignment(tenantId, id, req.user);
     res.json({ success: true, data: assignment, message: 'Assignment ended' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });

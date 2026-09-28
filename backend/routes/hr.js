@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
+import { moveToTrash, trashedRecordIds } from '../src/services/trashService.js';
 import { authenticateToken, requirePermission } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
@@ -552,7 +553,7 @@ router.get("/", authenticateToken, requirePermission("canViewHR"), async (req, r
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const employees = await prisma.employee.findMany({
-      where: scopedWhere(scope, {}),
+      where: scopedWhere(scope, { id: { notIn: await trashedRecordIds('employee', scope.tenantId) } }),
       include: { branch: { select: { id: true, name: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -617,10 +618,12 @@ router.put("/:id", authenticateToken, requirePermission("canEditHREmployee"), as
 // Delete employee
 router.delete("/:id", authenticateToken, requirePermission("canDeleteHREmployee"), async (req, res) => {
   try {
-    await prisma.employee.delete({ where: { id: req.params.id } });
-    res.json({ message: "Employee deleted" });
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    await moveToTrash('employee', scopedWhere(scope, { id: req.params.id }), req.user);
+    res.json({ message: "Employee moved to Trash for 30 days" });
   } catch (err) {
-    res.status(500).json({ error: "Failed to delete employee" });
+    if (handleBranchError(res, err)) return;
+    res.status(err.status || err.statusCode || 500).json({ error: err.message || "Failed to delete employee" });
   }
 });
 

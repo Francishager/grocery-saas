@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { moveToTrash } from './trashService.js';
 import { branchAttendanceLocation, validCoordinates } from '../utils/attendanceLocation.js';
 
 function dayRange(value = new Date()) {
@@ -287,12 +288,9 @@ class AttendanceService {
     const record = await prisma.attendanceRecord.findFirst({ where: { id: recordId, tenantId, isActive: true } });
     if (!record) throw new Error('Attendance record not found');
 
-    const updated = await prisma.attendanceRecord.update({
-      where: { id: recordId },
-      data: { isActive: false },
-    });
+    const updated = await moveToTrash('attendanceRecord', { id: recordId, tenantId }, typeof changedBy === 'object' ? changedBy : { id: changedBy });
 
-    await this.createAudit(tenantId, recordId, changedBy, 'deleted', record, updated);
+    await this.createAudit(tenantId, recordId, typeof changedBy === 'object' ? changedBy.id : changedBy, 'deleted', record, updated);
     return mapRecord(await this.attachEmployees(tenantId, updated));
   }
 

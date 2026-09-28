@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { moveToTrash, assertOutsideTrash } from './trashService.js';
 const prisma = new PrismaClient();
 
 /**
@@ -152,6 +153,7 @@ class UnitService {
    * @returns {Promise<object>} Updated unit
    */
   async updateUnit(tenantId, unitId, data) {
+    await assertOutsideTrash('unit', tenantId, unitId);
     await this.getUnitById(tenantId, unitId);
 
     const { name, code, description, headId, isActive } = data;
@@ -182,17 +184,14 @@ class UnitService {
    * @param {string} unitId - Unit ID
    * @returns {Promise<object>} Deleted unit
    */
-  async deleteUnit(tenantId, unitId) {
+  async deleteUnit(tenantId, unitId, actor) {
     const unit = await this.getUnitById(tenantId, unitId);
 
     if (unit.employees.length > 0 || unit.teams.length > 0) {
       throw new Error('Cannot delete unit with active employees or teams');
     }
 
-    return await prisma.unit.update({
-      where: { id: unitId },
-      data: { isActive: false },
-    });
+    return moveToTrash('unit', { id: unitId, tenantId }, actor);
   }
 
   /**

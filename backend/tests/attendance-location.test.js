@@ -39,6 +39,7 @@ const db = {
 globalThis.attendanceTest = { db, permissions: { hasPermission: async (_tenant, _user, code) => permission.includes(code) } };
 let source = await readFile(new URL('../src/services/attendanceService.js', import.meta.url), 'utf8');
 source = source.replace("import prisma from '../db.js';", 'const prisma = globalThis.attendanceTest.db;')
+  .replace("import { moveToTrash } from './trashService.js';", "const moveToTrash = async () => { throw new Error('Not used by location tests'); };")
   .replace("'../utils/attendanceLocation.js'", utilsUrl);
 const load = async (text) => import('data:text/javascript;base64,' + Buffer.from(text).toString('base64'));
 const { default: service } = await load(source);

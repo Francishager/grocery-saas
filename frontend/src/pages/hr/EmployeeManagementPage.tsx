@@ -589,7 +589,7 @@ export default function EmployeeManagementPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!(await appConfirm('Are you sure you want to delete this employee? This action cannot be undone.'))) return
+    if (!(await appConfirm('Move this employee to Trash? You can restore them within 30 days.'))) return
 
     try {
       const res = await apiFetch(`/api/hr/employees/${id}`, { method: 'DELETE' })

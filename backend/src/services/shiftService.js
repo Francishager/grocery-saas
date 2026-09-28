@@ -1,4 +1,5 @@
 import prisma from '../db.js';
+import { moveToTrash, assertOutsideTrash } from './trashService.js';
 
 function employeeName(employee) {
   return [employee?.firstName, employee?.lastName].filter(Boolean).join(' ').trim();
@@ -44,6 +45,7 @@ class ShiftService {
   }
 
   async updateTemplate(tenantId, templateId, updates) {
+    await assertOutsideTrash('shiftTemplate', tenantId, templateId);
     const template = await this.getTemplate(tenantId, templateId);
     const startTime = updates.startTime || template.startTime;
     const endTime = updates.endTime || template.endTime;
@@ -65,12 +67,9 @@ class ShiftService {
     });
   }
 
-  async deleteTemplate(tenantId, templateId) {
+  async deleteTemplate(tenantId, templateId, actor) {
     await this.getTemplate(tenantId, templateId);
-    return prisma.shiftTemplate.update({
-      where: { id: templateId },
-      data: { isActive: false },
-    });
+    return moveToTrash('shiftTemplate', { id: templateId, tenantId }, actor);
   }
 
   async getTemplates(tenantId, branchId = null) {
@@ -166,6 +165,7 @@ class ShiftService {
   }
 
   async updateAssignment(tenantId, assignmentId, updates) {
+    await assertOutsideTrash('shiftAssignment', tenantId, assignmentId);
     await this.getAssignment(tenantId, assignmentId);
     return prisma.shiftAssignment.update({
       where: { id: assignmentId },
@@ -205,16 +205,9 @@ class ShiftService {
     });
   }
 
-  async endAssignment(tenantId, assignmentId) {
+  async endAssignment(tenantId, assignmentId, actor) {
     await this.getAssignment(tenantId, assignmentId);
-    return prisma.shiftAssignment.update({
-      where: { id: assignmentId },
-      data: {
-        assignmentEndDate: new Date(),
-        status: 'ended',
-        isActive: false,
-      },
-    });
+    return moveToTrash('shiftAssignment', { id: assignmentId, tenantId }, actor);
   }
 
   calculateWorkingHours(startTime, endTime, breakDuration = 0) {

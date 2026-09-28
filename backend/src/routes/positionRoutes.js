@@ -146,7 +146,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
-    const position = await positionService.deletePosition(tenantId, id);
+    const position = await positionService.deletePosition(tenantId, id, req.user);
 
     res.json({
       success: true,

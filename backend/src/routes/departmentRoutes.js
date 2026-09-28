@@ -104,7 +104,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
-    const department = await departmentService.deleteDepartment(tenantId, req.params.id);
+    const department = await departmentService.deleteDepartment(tenantId, req.params.id, req.user);
     res.json({ success: true, data: department });
   } catch (error) {
     res.status(400).json({ error: error.message });

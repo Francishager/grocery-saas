@@ -1,4 +1,5 @@
 import express from 'express'
+import { moveToTrash, assertOutsideTrash } from '../src/services/trashService.js';
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
@@ -615,6 +616,7 @@ router.post('/cash-accounts', authenticateToken, requirePermission('canCreateTra
 router.put('/cash-accounts/:id', authenticateToken, requirePermission('canEditTransactionAccount'), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { id } = req.params
+    await assertOutsideTrash('cashAccount', req.tenant.id, id);
     const { name, type, currency, accountNumber, bankName, accountHolder, branchName, balance, assignedStaffId, isActive, phoneNumber, mobileMoneyName, network, branchId, depletionAlertThreshold } = req.body
 
     // Map frontend mobile money fields to schema columns
@@ -718,10 +720,7 @@ router.delete('/cash-accounts/:id', authenticateToken, requirePermission('canDel
       return res.status(404).json({ error: 'Cash account not found' })
     }
 
-    const account = await prisma.cashAccount.update({
-      where: { id },
-      data: { isActive: false }
-    })
+    const account = await moveToTrash('cashAccount', { id, tenantId: req.tenant.id }, req.user)
 
     await syncLinkedTransactionAccountBalance(prisma, req.tenant.id, id).catch(() => null)
     res.json({ message: 'Transaction account deactivated', account })

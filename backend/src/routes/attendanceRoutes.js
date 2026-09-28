@@ -211,7 +211,7 @@ router.delete('/attendance/:id', requireHRPermission('ATTENDANCE_DELETE'), async
     const tenantId = req.tenant.id;
     const { id } = req.params;
 
-    const record = await attendanceService.deleteRecord(tenantId, id, req.user.id);
+    const record = await attendanceService.deleteRecord(tenantId, id, req.user);
     res.json({ success: true, data: record, message: 'Record deleted' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });

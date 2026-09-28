@@ -143,7 +143,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
-    const employee = await employeeService.softDeleteEmployee(tenantId, req.params.id);
+    const employee = await employeeService.softDeleteEmployee(tenantId, req.params.id, req.user);
     res.json({ success: true, data: employee });
   } catch (error) {
     res.status(400).json({ error: error.message });

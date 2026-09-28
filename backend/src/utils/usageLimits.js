@@ -5,8 +5,8 @@ import prisma from '../db.js'
  * @param {string} tenantId
  * @returns {Promise<{maxUsers:number,maxProducts:number,maxBranches:number,maxCustomers:number,maxSuppliers:number}>}
  */
-export async function getTenantLimits(tenantId) {
-  const tenant = await prisma.tenant.findUnique({
+export async function getTenantLimits(tenantId, client = prisma) {
+  const tenant = await client.tenant.findUnique({
     where: { id: tenantId },
     include: { plan: true, usageLimit: true },
   })
@@ -27,8 +27,8 @@ export async function getTenantLimits(tenantId) {
  * @param {string} tenantId
  * @param {'users'|'products'|'branches'|'customers'|'suppliers'} resource
  */
-export async function checkUsageLimit(tenantId, resource) {
-  const limits = await getTenantLimits(tenantId)
+export async function checkUsageLimit(tenantId, resource, client = prisma) {
+  const limits = await getTenantLimits(tenantId, client)
   if (!limits) return
 
   const limit = limits[resource === 'users' ? 'maxUsers'
@@ -43,19 +43,19 @@ export async function checkUsageLimit(tenantId, resource) {
   let count
   switch (resource) {
     case 'users':
-      count = await prisma.user.count({ where: { tenantId, isActive: true } })
+      count = await client.user.count({ where: { tenantId, isActive: true } })
       break
     case 'products':
-      count = await prisma.product.count({ where: { tenantId, isActive: { not: false } } })
+      count = await client.product.count({ where: { tenantId, isActive: { not: false } } })
       break
     case 'branches':
-      count = await prisma.branch.count({ where: { tenantId } })
+      count = await client.branch.count({ where: { tenantId } })
       break
     case 'customers':
-      count = await prisma.customer.count({ where: { tenantId } })
+      count = await client.customer.count({ where: { tenantId } })
       break
     case 'suppliers':
-      count = await prisma.supplier.count({ where: { tenantId } })
+      count = await client.supplier.count({ where: { tenantId } })
       break
     default:
       return

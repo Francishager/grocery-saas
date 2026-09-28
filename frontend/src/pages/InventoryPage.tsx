@@ -578,7 +578,7 @@ export default function InventoryPage() {
   }
 
   const handleDelete = async (id: string | number) => {
-    if (!(await appConfirm('Are you sure you want to delete this item?'))) return
+    if (!(await appConfirm('Move this item to Trash? You can restore it within 30 days.'))) return
 
     try {
       if (online) {
