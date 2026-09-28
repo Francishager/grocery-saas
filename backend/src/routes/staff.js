@@ -305,8 +305,9 @@ router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), as
       },
     });
 
-    res.json({ message: "Staff deactivated", staff: staffResponse(user) });
+    res.json({ message: "Staff moved to Trash for 30 days", staff: staffResponse(user) });
   } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error("Deactivate staff error:", err);
     res.status(500).json({ error: "Failed to deactivate staff" });
   }

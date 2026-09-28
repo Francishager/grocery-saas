@@ -723,8 +723,9 @@ router.delete('/cash-accounts/:id', authenticateToken, requirePermission('canDel
     const account = await moveToTrash('cashAccount', { id, tenantId: req.tenant.id }, req.user)
 
     await syncLinkedTransactionAccountBalance(prisma, req.tenant.id, id).catch(() => null)
-    res.json({ message: 'Transaction account deactivated', account })
+    res.json({ message: 'Transaction account moved to Trash for 30 days', account })
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message })
     console.error('Deactivate cash account error:', error)
     res.status(500).json({ error: 'Failed to deactivate cash account' })
   }

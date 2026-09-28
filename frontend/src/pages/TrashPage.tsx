@@ -5,7 +5,7 @@ import { appConfirm } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { trashPermissions } from '@/lib/trashPermissions'
 import { useToast } from '@/hooks/use-toast'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/Pagination'
 import { Root as DropdownMenu, Content as DropdownMenuContent, Item as DropdownMenuItem, Trigger as DropdownMenuTrigger, Portal as DropdownMenuPortal } from '@radix-ui/react-dropdown-menu'
@@ -101,7 +101,7 @@ export default function TrashPage() {
       <div><h1 className="text-2xl font-semibold">Trash</h1><p className="mt-1 text-sm text-muted-foreground">30-day recovery period</p></div>
       <div className="flex items-center gap-2">
         <Button variant="outline" size="icon" title="Refresh Trash" aria-label="Refresh Trash" disabled={busy || loading} onClick={() => void load()}><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></Button>
-        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" disabled={busy || loading || total === 0}>All Items <MoreVertical className="ml-2 h-4 w-4" /></Button></DropdownMenuTrigger>
+        <DropdownMenu><DropdownMenuTrigger className={buttonVariants({ variant: 'outline' })} disabled={busy || loading || total === 0}>All Items <MoreVertical className="ml-2 h-4 w-4" /></DropdownMenuTrigger>
           <DropdownMenuPortal><DropdownMenuContent align="end" sideOffset={4} className={menuClass}>
             <DropdownMenuItem className={menuItemClass} onSelect={() => void act('restore')}><ArchiveRestore className="mr-2 h-4 w-4" />Restore All</DropdownMenuItem>
             <DropdownMenuItem className={`${menuItemClass} text-destructive`} onSelect={() => void act('delete')}><Trash2 className="mr-2 h-4 w-4" />Delete All</DropdownMenuItem>
@@ -123,7 +123,7 @@ export default function TrashPage() {
           <td className="max-w-xs p-3"><div className="break-words font-medium">{item.label}</div><div className="text-xs text-muted-foreground">{item.type}</div></td>
           <td className="max-w-40 break-words p-3">{item.deletedBy}</td><td className="whitespace-nowrap p-3 tabular-nums">{date(item.deletedAt)}</td>
           <td className="whitespace-nowrap p-3 tabular-nums">{date(item.expiresAt)}<div className="text-xs text-muted-foreground">{Math.max(0, Math.ceil((new Date(item.expiresAt).getTime() - Date.now()) / 86400000))} days left</div></td>
-          <td className="p-2"><DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" aria-label={`Actions for ${item.label}`} disabled={busy || loading}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+          <td className="p-2"><DropdownMenu><DropdownMenuTrigger className={buttonVariants({ variant: 'ghost', size: 'icon' })} title="Record actions" aria-label={`Actions for ${item.label}`} disabled={busy || loading}><MoreVertical className="h-4 w-4" /></DropdownMenuTrigger>
             <DropdownMenuPortal><DropdownMenuContent align="end" sideOffset={4} className={menuClass}><DropdownMenuItem className={menuItemClass} onSelect={() => void act('restore', item)}><ArchiveRestore className="mr-2 h-4 w-4" />Restore</DropdownMenuItem><DropdownMenuItem className={`${menuItemClass} text-destructive`} onSelect={() => void act('delete', item)}><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem></DropdownMenuContent></DropdownMenuPortal>
           </DropdownMenu></td>
         </tr>)}</tbody>

@@ -61,10 +61,10 @@ router.post('/bulk', async (req, res) => {
 
 router.post('/:id/restore', async (req, res) => {
   try { res.json(await resolveTrash(req.trashScope, req.params.id, 'restore', req.user)); }
-  catch (error) { res.status(error.status || (error.code ? 409 : 500)).json({ error: friendlyError(error) }); }
+  catch (error) { res.status(error.status || error.statusCode || (error.code ? 409 : 500)).json({ error: friendlyError(error) }); }
 });
 router.delete('/:id', async (req, res) => {
   try { res.json(await resolveTrash(req.trashScope, req.params.id, 'delete', req.user)); }
-  catch (error) { res.status(error.status || (error.code ? 409 : 500)).json({ error: friendlyError(error) }); }
+  catch (error) { res.status(error.status || error.statusCode || (error.code ? 409 : 500)).json({ error: friendlyError(error) }); }
 });
 export default router;

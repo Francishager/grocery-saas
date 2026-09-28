@@ -59,7 +59,6 @@ const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard', feature: 'dashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
   { to: '/tenant/ai-advisor', label: 'AI Advisor', icon: MessageSquare, permission: 'canUseBusinessAI' },
-  { to: '/tenant/trash', label: 'Trash', icon: Trash2, permission: trashPermissions },
   { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
   { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable', isReceivables: true },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
@@ -769,6 +768,12 @@ export function TenantLayout() {
               onStatusChange={completeOnboarding}
             />
             <UserGuideMenu />
+            {trashPermissions.some(hasPermission) && (
+              <NavLink to="/tenant/trash" onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                <Trash2 className="h-6 w-6 lg:h-5 lg:w-5" />{t('Trash')}
+              </NavLink>
+            )}
           </nav>
         </div>
       </aside>

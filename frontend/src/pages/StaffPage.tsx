@@ -172,12 +172,12 @@ export default function StaffPage() {
   }
 
   const deactivateStaff = async (member: StaffMember) => {
-    if (!(await appConfirm(`Deactivate ${member.name || member.email}?`))) return
+    if (!(await appConfirm(`Move ${member.name || member.email} to Trash? Their login will be disabled. You can restore them within 30 days.`))) return
 
     setActionLoading(member.id)
     try {
       await staffApi.deactivate(member.id)
-      toast({ title: 'Staff deactivated' })
+      toast({ title: 'Staff moved to Trash' })
       await loadData()
     } catch (error) {
       toast({
@@ -415,7 +415,7 @@ export default function StaffPage() {
                             disabled={actionLoading === member.id}
                           >
                             {actionLoading === member.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserX className="mr-2 h-4 w-4" />}
-                            Deactivate
+                            Delete
                           </Button>
                         ) : (
                           <Button
