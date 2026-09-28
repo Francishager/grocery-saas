@@ -54,10 +54,13 @@ router.post("/", authenticateToken, requirePermission("canCreateCommunication"),
 // Mark as read
 router.put("/:id/read", authenticateToken, async (req, res) => {
   try {
-    const notif = await prisma.notification.update({
-      where: { id: req.params.id },
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const updated = await prisma.notification.updateMany({
+      where: { id: req.params.id, tenantId, OR: [{ userId: req.user.id }, { userId: null }] },
       data: { isRead: true },
     });
+    if (!updated.count) return res.status(404).json({ error: "Notification not found" });
+    const notif = await prisma.notification.findFirst({ where: { id: req.params.id, tenantId } });
     res.json(notif);
   } catch (err) {
     res.status(500).json({ error: "Failed to mark notification as read" });
@@ -67,7 +70,7 @@ router.put("/:id/read", authenticateToken, async (req, res) => {
 // Mark all as read
 router.put("/read-all", authenticateToken, async (req, res) => {
   try {
-    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     await prisma.notification.updateMany({
       where: { tenantId, userId: req.user.id, isRead: false },
       data: { isRead: true },

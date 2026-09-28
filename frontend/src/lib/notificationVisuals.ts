@@ -34,6 +34,7 @@ const visuals: Record<string, NotificationVisual> = {
   approval: { label: 'Approval', color: 'bg-indigo-100 text-indigo-700', badge: 'bg-indigo-100 text-indigo-800' },
   system: { label: 'System', color: 'bg-gray-100 text-gray-700', badge: 'bg-gray-100 text-gray-800' },
   communication: { label: 'Communication', color: 'bg-blue-100 text-blue-700', badge: 'bg-blue-100 text-blue-800' },
+  advisor_tip: { label: 'Advisor tip', color: 'bg-emerald-100 text-emerald-700', badge: 'bg-emerald-100 text-emerald-800' },
 }
 
 export function getNotificationVisual(type?: string | null): NotificationVisual {

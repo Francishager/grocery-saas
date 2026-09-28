@@ -8,6 +8,7 @@ import { privateWhere, advisorScopeKey, ownedConversation, ownedCollection, begi
 import { addAdvisorPeopleContext } from '../services/advisorPeopleContext.js';
 import { fetchAdvisorResearch } from '../services/advisorResearch.js';
 import { artifactSelect, createArtifact, creativeOptions, ownedArtifact, validateArtifactInput } from '../services/advisorArtifacts.js';
+import { deliverDueAdvisorTips } from '../services/advisorDailyTips.js';
 
 const router = Router();
 const acquire = createAdvisorLimiter();
@@ -31,6 +32,9 @@ function validateKeys(body, keys) {
 const publicChat = ({ id, title, collectionId, updatedAt, scopeKey }, currentScope) => ({ id, title: scopeKey === currentScope ? title : 'Conversation from previous access', collectionId, updatedAt, locked: scopeKey !== currentScope });
 
 router.get('/status', (req, res) => res.json({ configured: Boolean(process.env.NVIDIA_API_KEY), memory: true, research: true }));
+router.post('/daily-tips', action(async (req, res) => {
+  res.json(await deliverDueAdvisorTips(prisma, req));
+}));
 router.get('/collections', action(async (req, res) => {
   res.json({ collections: await prisma.advisorCollection.findMany({ where: privateWhere(req), orderBy: [{ kind: 'asc' }, { name: 'asc' }] }) });
 }));

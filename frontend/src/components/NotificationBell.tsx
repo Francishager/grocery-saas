@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2 } from 'lucide-react'
+import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '@/lib/api'
@@ -36,7 +36,7 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   hr: Users, service: Wrench, job_card: Receipt, receivable: CircleDollarSign,
   payable: CircleDollarSign, refund: ArrowLeftRight, transfer: ArrowLeftRight,
   account: Settings2, customer: UserRound, supplier: Truck, user: UserRound,
-  approval: UserCheck, system: Settings2, communication: Bell,
+  approval: UserCheck, system: Settings2, communication: Bell, advisor_tip: Sparkles,
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -49,6 +49,7 @@ const TYPE_COLORS: Record<string, string> = {
   overdue_rental: 'bg-purple-100 text-purple-600',
   overdue_payable: 'bg-amber-100 text-amber-600',
   leave_request: 'bg-indigo-100 text-indigo-600',
+  advisor_tip: 'bg-emerald-100 text-emerald-700',
 }
 
 function timeAgo(date: string | Date): string {
@@ -318,6 +319,9 @@ export function NotificationBell() {
       let localNotifs: NotificationItem[] = []
 
       if (online) {
+        if (hasPermission('canUseBusinessAI')) {
+          await apiFetch('/api/ai/daily-tips', { method: 'POST' }).catch(() => null)
+        }
         const [api, local] = await Promise.all([fetchApiNotifications(), fetchLocalNotifications()])
         apiNotifs = api
         localNotifs = local
@@ -374,7 +378,7 @@ export function NotificationBell() {
     } finally {
       setLoading(false)
     }
-  }, [online, user?.id, announce, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
+  }, [online, user?.id, hasPermission, announce, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
 
   // Initial load + polling plus immediate events emitted by completed workflows.
   useEffect(() => {
