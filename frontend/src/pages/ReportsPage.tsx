@@ -797,14 +797,6 @@ function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['colu
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-        <span>Showing {rows.length ? startIndex + 1 : 0}-{Math.min(startIndex + pageSize, rows.length)} of {rows.length} rows</span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page === 1}>Previous</Button>
-          <span>Page {page} of {totalPages}</span>
-          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>Next</Button>
-        </div>
-      </div>
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
@@ -820,6 +812,14 @@ function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['colu
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>Showing {rows.length ? startIndex + 1 : 0}-{Math.min(startIndex + pageSize, rows.length)} of {rows.length} rows</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page === 1}>Previous</Button>
+          <span>Page {page} of {totalPages}</span>
+          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>Next</Button>
+        </div>
       </div>
     </div>
   )
@@ -1112,6 +1112,38 @@ function SummaryCards({ data, keys }: { data: any; keys: ReportItem['summaryKeys
   )
 }
 
+type PerformanceSeries = { key: string; label: string; color: string; format: 'currency' | 'number' }
+type PerformanceChartSpec = { title: string; labelKey: string; rows: any[]; series: PerformanceSeries[] }
+
+function getPerformanceChartSpecs(reportId: string, data: any): PerformanceChartSpec[] {
+  const labelKey = reportId === 'performanceBranch' ? 'branch' : reportId === 'performanceCategory' ? 'category' : 'product'
+  const allRows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  const rows = allRows.slice(0, 10)
+  if (!rows.length) return []
+
+  return reportId === 'performanceBranch'
+    ? [
+        { title: 'Revenue and discounts by branch', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' }, { key: 'discount', label: 'Discount', color: '#e5a11a', format: 'currency' }] },
+        { title: 'Sales volume by branch', labelKey, rows, series: [{ key: 'count', label: 'Sales', color: '#3987d7', format: 'number' }] },
+        { title: 'Average sale value by branch', labelKey, rows, series: [{ key: 'avgSale', label: 'Average sale', color: '#7765c4', format: 'currency' }] },
+      ]
+    : reportId === 'performanceCategory'
+      ? [
+          { title: 'Revenue and gross profit by category', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' }] },
+          { title: 'Quantity sold by category', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' }] },
+        ]
+      : reportId === 'performanceProduct'
+        ? [
+            { title: 'Revenue and gross profit by product', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' }] },
+            { title: 'Quantity sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' }] },
+            { title: 'Sales transactions by product', labelKey, rows, series: [{ key: 'transactions', label: 'Transactions', color: '#7765c4', format: 'number' }] },
+          ]
+        : [
+            { title: 'Units sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity sold', color: reportId === 'performanceLeastProducts' ? '#d97745' : '#0f9f6e', format: 'number' }] },
+            { title: 'Revenue and gross profit', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#3987d7', format: 'currency' }, { key: 'profit', label: 'Gross profit', color: '#e5a11a', format: 'currency' }] },
+          ]
+}
+
 function PerformanceAxisTick({ x, y, payload }: any) {
   const label = String(payload?.value ?? '')
   const shortened = label.length > 17 ? `${label.slice(0, 16)}…` : label
@@ -1171,39 +1203,15 @@ function PerformanceChart({
 }
 
 function BusinessPerformanceCharts({ reportId, data }: { reportId: string; data: any }) {
-  const labelKey = reportId === 'performanceBranch' ? 'branch' : reportId === 'performanceCategory' ? 'category' : 'product'
   const allRows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
   if (!allRows.length) return null
-
-  const limit = reportId === 'performanceBranch' || reportId === 'performanceCategory' ? 10 : 10
-  const rows = allRows.slice(0, limit)
+  const charts = getPerformanceChartSpecs(reportId, data)
+  const limit = 10
   const rankLabel = reportId === 'performanceLeastProducts'
     ? `Least-selling ${Math.min(limit, allRows.length)} of ${allRows.length}`
     : reportId === 'performanceTopProducts'
       ? `Top-selling ${Math.min(limit, allRows.length)} of ${allRows.length}`
       : `Top ${Math.min(limit, allRows.length)} of ${allRows.length} by ${reportId === 'performanceBranch' ? 'revenue' : reportId === 'performanceCategory' ? 'revenue' : 'revenue'}`
-
-  const charts = reportId === 'performanceBranch'
-    ? [
-        { title: 'Revenue and discounts by branch', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' as const }, { key: 'discount', label: 'Discount', color: '#e5a11a', format: 'currency' as const }] },
-        { title: 'Sales volume by branch', labelKey, rows, series: [{ key: 'count', label: 'Sales', color: '#3987d7', format: 'number' as const }] },
-        { title: 'Average sale value by branch', labelKey, rows, series: [{ key: 'avgSale', label: 'Average sale', color: '#7765c4', format: 'currency' as const }] },
-      ]
-    : reportId === 'performanceCategory'
-      ? [
-          { title: 'Revenue and gross profit by category', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' as const }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' as const }] },
-          { title: 'Quantity sold by category', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' as const }] },
-        ]
-      : reportId === 'performanceProduct'
-        ? [
-            { title: 'Revenue and gross profit by product', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' as const }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' as const }] },
-            { title: 'Quantity sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' as const }] },
-            { title: 'Sales transactions by product', labelKey, rows, series: [{ key: 'transactions', label: 'Transactions', color: '#7765c4', format: 'number' as const }] },
-          ]
-        : [
-            { title: 'Units sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity sold', color: reportId === 'performanceLeastProducts' ? '#d97745' : '#0f9f6e', format: 'number' as const }] },
-            { title: 'Revenue and gross profit', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#3987d7', format: 'currency' as const }, { key: 'profit', label: 'Gross profit', color: '#e5a11a', format: 'currency' as const }] },
-          ]
 
   return (
     <div className="space-y-3">
@@ -2193,6 +2201,10 @@ export default function ReportsPage() {
     return currentReport?.label || 'Report'
   }
 
+  const getExportCharts = () => currentReport && [
+    'performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts',
+  ].includes(currentReport.id) ? getPerformanceChartSpecs(currentReport.id, reportData) : []
+
   const handlePrint = () => {
     const { data, columns } = getExportData()
     printReport(
@@ -2201,7 +2213,8 @@ export default function ReportsPage() {
       currentReport?.categoryLabel || '',
       columns,
       reportData?.summary,
-      businessInfo || undefined
+      businessInfo || undefined,
+      getExportCharts()
     )
   }
 
@@ -2212,7 +2225,8 @@ export default function ReportsPage() {
       reportTitle(),
       columns,
       reportData?.summary,
-      businessInfo || undefined
+      businessInfo || undefined,
+      getExportCharts()
     )
   }
 
@@ -2224,7 +2238,8 @@ export default function ReportsPage() {
       currentReport?.categoryLabel,
       columns,
       reportData?.summary,
-      businessInfo || undefined
+      businessInfo || undefined,
+      getExportCharts()
     )
   }
 
@@ -2403,10 +2418,10 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {currentReport.id === 'svcJobCards' && <SummaryCards data={reportData} keys={currentReport.summaryKeys} />}
+                    {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id) && (
                       <BusinessPerformanceCharts reportId={currentReport.id} data={reportData} />
                     )}
-                    {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
                     {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}

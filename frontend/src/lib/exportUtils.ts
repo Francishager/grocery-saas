@@ -10,6 +10,13 @@ type ExportColumn = {
   format?: 'currency' | 'number' | 'date' | 'text'
 }
 
+type ExportChart = {
+  title: string
+  labelKey: string
+  rows: any[]
+  series: Array<{ key: string; label: string; color: string; format: 'currency' | 'number' }>
+}
+
 export type BusinessInfo = {
   name?: string
   address?: string | null
@@ -127,7 +134,8 @@ export function exportToExcel(
   reportLabel: string,
   columns?: ExportColumn[],
   summary?: Record<string, any>,
-  businessInfo?: BusinessInfo
+  businessInfo?: BusinessInfo,
+  charts: ExportChart[] = []
 ) {
   const { headers, rows } = extractRows(data, columns)
   const wb = XLSX.utils.book_new()
@@ -174,7 +182,155 @@ export function exportToExcel(
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData.length > 0 ? sheetData : [[reportLabel], ['No data available']])
   XLSX.utils.book_append_sheet(wb, ws, 'Report')
+  if (charts.length) {
+    const chartRows: any[][] = []
+    charts.forEach(chart => {
+      chartRows.push([chart.title])
+      chartRows.push([chart.labelKey, ...chart.series.map(metric => metric.label)])
+      chart.rows.forEach(row => chartRows.push([row[chart.labelKey], ...chart.series.map(metric => row[metric.key] ?? 0)]))
+      chartRows.push([])
+    })
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(chartRows), 'Chart Data')
+  }
   XLSX.writeFile(wb, `${reportLabel.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`)
+}
+
+function appendPerformanceCharts(doc: jsPDF, charts: ExportChart[]) {
+  if (!charts.length) return
+
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const margin = 14
+  doc.addPage()
+  let y = 18
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(15)
+  doc.text('Performance charts', margin, y)
+  y += 10
+
+  charts.forEach(chart => {
+    const rowHeight = chart.series.length > 1 ? 7.2 : 5.8
+    const legendHeight = 6
+    const blockHeight = 12 + legendHeight + chart.rows.length * rowHeight + 9
+    if (y + blockHeight > pageHeight - margin) {
+      doc.addPage()
+      y = 18
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.setTextColor(35, 45, 55)
+    doc.text(chart.title, margin, y)
+    y += 6
+
+    let legendX = margin
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7)
+    chart.series.forEach(metric => {
+      const rgb = hexToRgb(metric.color)
+      doc.setFillColor(rgb.r, rgb.g, rgb.b)
+      doc.rect(legendX, y - 2.4, 3, 3, 'F')
+      doc.setTextColor(75, 85, 95)
+      doc.text(metric.label, legendX + 4.5, y)
+      legendX += 4.5 + doc.getTextWidth(metric.label) + 9
+    })
+    y += 4
+
+    const labelWidth = 58
+    const plotX = margin + labelWidth
+    const plotWidth = pageWidth - margin * 2 - labelWidth - 4
+    const values = chart.rows.flatMap(row => chart.series.map(metric => Number(row[metric.key]) || 0))
+    const minValue = Math.min(0, ...values)
+    const maxValue = Math.max(0, ...values)
+    const range = maxValue - minValue || 1
+    const zeroX = plotX + ((0 - minValue) / range) * plotWidth
+
+    for (let tick = 0; tick <= 4; tick++) {
+      const gridX = plotX + (plotWidth * tick) / 4
+      doc.setDrawColor(225, 230, 235)
+      doc.setLineWidth(0.15)
+      doc.line(gridX, y - 1, gridX, y + chart.rows.length * rowHeight - 1)
+      const tickValue = minValue + (range * tick) / 4
+      doc.setFontSize(6)
+      doc.setTextColor(110, 120, 130)
+      const tickText = chart.series[0]?.format === 'currency'
+        ? formatCurrency(tickValue)
+        : Math.round(tickValue).toLocaleString()
+      doc.text(tickText, gridX, y + chart.rows.length * rowHeight + 3, { align: tick === 0 ? 'left' : tick === 4 ? 'right' : 'center' })
+    }
+    doc.setDrawColor(120, 130, 140)
+    doc.setLineWidth(0.25)
+    doc.line(zeroX, y - 1, zeroX, y + chart.rows.length * rowHeight - 1)
+
+    chart.rows.forEach((row, rowIndex) => {
+      const rowY = y + rowIndex * rowHeight
+      const label = String(row[chart.labelKey] ?? 'Unknown')
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7)
+      doc.setTextColor(55, 65, 75)
+      doc.text(label.length > 25 ? `${label.slice(0, 22)}...` : label, margin, rowY + rowHeight / 2 + 1)
+      chart.series.forEach((metric, seriesIndex) => {
+        const value = Number(row[metric.key]) || 0
+        const valueX = plotX + ((value - minValue) / range) * plotWidth
+        const barY = rowY + 0.5 + seriesIndex * (chart.series.length > 1 ? 3 : 0)
+        const rgb = hexToRgb(metric.color)
+        doc.setFillColor(rgb.r, rgb.g, rgb.b)
+        doc.rect(Math.min(zeroX, valueX), barY, Math.max(Math.abs(valueX - zeroX), 0.35), 2.2, 'F')
+      })
+    })
+    y += chart.rows.length * rowHeight + 12
+  })
+}
+
+function hexToRgb(color: string) {
+  const hex = color.replace('#', '')
+  return {
+    r: parseInt(hex.slice(0, 2), 16) || 0,
+    g: parseInt(hex.slice(2, 4), 16) || 0,
+    b: parseInt(hex.slice(4, 6), 16) || 0,
+  }
+}
+
+function escapeHtml(value: any): string {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!))
+}
+
+function performanceChartsHtml(charts: ExportChart[]): string {
+  if (!charts.length) return ''
+  return `<h2 class="chart-heading">Performance charts</h2>${charts.map(chart => {
+    const width = 1000
+    const labelWidth = 230
+    const plotWidth = 540
+    const valueX = labelWidth + plotWidth + 12
+    const rowHeight = chart.series.length > 1 ? 34 : 26
+    const top = 58
+    const height = top + chart.rows.length * rowHeight + 20
+    const values = chart.rows.flatMap(row => chart.series.map(metric => Number(row[metric.key]) || 0))
+    const minValue = Math.min(0, ...values)
+    const maxValue = Math.max(0, ...values)
+    const range = maxValue - minValue || 1
+    const zeroX = labelWidth + ((0 - minValue) / range) * plotWidth
+    const grid = Array.from({ length: 5 }, (_, index) => {
+      const x = labelWidth + (plotWidth * index) / 4
+      return `<line x1="${x}" y1="${top - 8}" x2="${x}" y2="${height - 14}" stroke="#e2e8f0"/><text x="${x}" y="${height - 1}" text-anchor="middle" fill="#64748b" font-size="11">${escapeHtml(chart.series[0]?.format === 'currency' ? formatCurrency(minValue + (range * index) / 4) : Math.round(minValue + (range * index) / 4).toLocaleString())}</text>`
+    }).join('')
+    const legend = chart.series.map((metric, index) => `<g transform="translate(${labelWidth + index * 170},34)"><rect width="12" height="12" rx="3" fill="${metric.color}"/><text x="18" y="10" fill="#475569" font-size="12">${escapeHtml(metric.label)}</text></g>`).join('')
+    const bars = chart.rows.map((row, rowIndex) => {
+      const rowY = top + rowIndex * rowHeight
+      const label = String(row[chart.labelKey] ?? 'Unknown')
+      const shortLabel = label.length > 32 ? `${label.slice(0, 29)}...` : label
+      const metricBars = chart.series.map((metric, seriesIndex) => {
+        const value = Number(row[metric.key]) || 0
+        const x = labelWidth + ((Math.min(0, value) - minValue) / range) * plotWidth
+        const endX = labelWidth + ((Math.max(0, value) - minValue) / range) * plotWidth
+        const y = rowY + (chart.series.length > 1 ? seriesIndex * 13 : 4)
+        const text = metric.format === 'currency' ? formatCurrency(value) : value.toLocaleString()
+        return `<rect x="${x}" y="${y}" width="${Math.max(endX - x, 1)}" height="9" rx="3" fill="${metric.color}"/><text x="${valueX}" y="${y + 8}" fill="#334155" font-size="11">${escapeHtml(text)}</text>`
+      }).join('')
+      return `<text x="${labelWidth - 12}" y="${rowY + rowHeight / 2 + 4}" text-anchor="end" fill="#334155" font-size="12">${escapeHtml(shortLabel)}</text>${metricBars}`
+    }).join('')
+    return `<section class="chart-block"><h3>${escapeHtml(chart.title)}</h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(chart.title)}">${grid}${legend}<line x1="${zeroX}" y1="${top - 8}" x2="${zeroX}" y2="${height - 14}" stroke="#64748b" stroke-width="1.5"/>${bars}</svg></section>`
+  }).join('')}`
 }
 
 export function exportToPDF(
@@ -183,7 +339,8 @@ export function exportToPDF(
   categoryLabel?: string,
   columns?: ExportColumn[],
   summary?: Record<string, any>,
-  businessInfo?: BusinessInfo
+  businessInfo?: BusinessInfo,
+  charts: ExportChart[] = []
 ) {
   const doc = new jsPDF({ orientation: 'landscape' })
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -268,6 +425,8 @@ export function exportToPDF(
     doc.text('No data available for this report.', margin, startY + 6)
   }
 
+  appendPerformanceCharts(doc, charts)
+
   doc.save(`${reportLabel.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`)
 }
 
@@ -277,7 +436,8 @@ export function printReport(
   categoryLabel: string,
   columns?: ExportColumn[],
   summary?: Record<string, any>,
-  businessInfo?: BusinessInfo
+  businessInfo?: BusinessInfo,
+  charts: ExportChart[] = []
 ) {
   const { headers, rows } = extractRows(data, columns)
 
@@ -313,6 +473,10 @@ export function printReport(
       .currency { text-align: right; font-family: 'Courier New', monospace; }
       .number { text-align: right; font-family: 'Courier New', monospace; }
       .no-data { text-align: center; padding: 40px; color: #999; }
+      .chart-heading { font-size: 18px; margin: 28px 0 12px; page-break-before: always; }
+      .chart-block { margin: 0 0 24px; page-break-inside: avoid; }
+      .chart-block h3 { font-size: 13px; margin: 0 0 8px; color: #1f2937; }
+      .chart-block svg { display: block; width: 100%; height: auto; max-height: 175mm; }
       @media print { 
         body { padding: 12px; } 
         table { page-break-inside: avoid; }
@@ -379,6 +543,7 @@ export function printReport(
   } else {
     tableHtml = '<p class="no-data">No data available for this report.</p>'
   }
+  const chartsHtml = performanceChartsHtml(charts)
 
   printWindow.document.write(`
     <html>
@@ -393,6 +558,7 @@ export function printReport(
         <div class="generated">Generated: ${new Date().toLocaleString()}</div>
         ${summaryHtml}
         ${tableHtml}
+        ${chartsHtml}
       </body>
     </html>
   `)
