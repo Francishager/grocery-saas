@@ -1,6 +1,7 @@
 import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
+import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 
 const router = Router();
 
@@ -157,7 +158,11 @@ router.post("/seed", authenticateToken, requirePlatformAdmin, async (req, res) =
     });
 
     // Create tenant
-    const tenant = await prisma.tenant.create({ data: { name: "Dev Business", slug: "dev-business", email: "dev@example.com", status: "active", planId: plan.id } });
+    const tenant = await prisma.$transaction(async (tx) => {
+      const created = await tx.tenant.create({ data: { name: "Dev Business", slug: "dev-business", email: "dev@example.com", status: "active", planId: plan.id } });
+      await ensureTenantAccountingSetup(tx, { tenantId: created.id, userId: req.user?.id, enableNewSetups: true });
+      return created;
+    });
 
     // Create owner
     const hashed = await bcrypt.hash("password123", 12);

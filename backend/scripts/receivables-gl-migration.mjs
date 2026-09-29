@@ -5,6 +5,7 @@ import { findPotentialLegacyJournalMatches, journalSummary } from '../src/servic
 import {
   cashSaleRecognitionLines,
   creditNoteRecognitionLines,
+  customerOpeningBalanceLines,
   customerRefundLines,
   getReceivablesAccountingConfig,
   postReceivablesJournal,
@@ -46,7 +47,7 @@ if (!tenantId || tenantId.startsWith('--')) {
         throw new Error('Sign-off is missing, incomplete, or does not match the current tenant plan fingerprint. No writes were made.')
       }
       if (plan.blocked.length) throw new Error(`Apply refused: ${plan.blocked.length} records have unresolved or potentially duplicate postings. Resolve them and generate a new plan; no writes were made.`)
-      if (!plan.actions.length) throw new Error('Apply refused: the plan has no missing source journals to create.')
+      if (!plan.actions.length && !plan.alreadyPosted) throw new Error('Apply refused: the plan contains no verifiable receivables journal history.')
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { ownerId: true } })
       const approver = await prisma.user.findFirst({
         where: {
@@ -66,7 +67,7 @@ if (!tenantId || tenantId.startsWith('--')) {
         if (current.fingerprint !== approval.fingerprint) throw new Error('Source records changed after sign-off. No migration entries were written; prepare and review a new plan.')
         if (current.blocked.length) throw new Error('The refreshed plan contains blocked records. No migration entries were written.')
         for (const action of current.actions) {
-          await postReceivablesJournal(tx, action)
+          await postReceivablesJournal(tx, { ...action, allowDisabled: true })
         }
         await tx.receivablesGlMigrationBatch.create({
           data: {
@@ -79,6 +80,10 @@ if (!tenantId || tenantId.startsWith('--')) {
             blockedCount: current.blocked.length,
             plan: JSON.parse(JSON.stringify(current)),
           },
+        })
+        await tx.receivablesAccountingConfig.update({
+          where: { tenantId },
+          data: { isEnabled: true, configuredBy: approver.id, configuredAt: new Date(), updatedBy: approver.id },
         })
       }, { isolationLevel: 'Serializable', timeout: 120000 })
       console.log(JSON.stringify({ tenantId, applied: plan.actions.length, fingerprint: plan.fingerprint, approvedByUserId: approver.id, approvedAt: approvedAt.toISOString() }, null, 2))
@@ -93,10 +98,14 @@ if (!tenantId || tenantId.startsWith('--')) {
 
 async function buildPlan(db, scopedTenantId) {
   const config = await getReceivablesAccountingConfig(db, scopedTenantId)
-  const validation = await validateReceivablesAccountingConfig(db, scopedTenantId, config, { requireEnabled: true })
+  const validation = await validateReceivablesAccountingConfig(db, scopedTenantId, config)
   const actions = []
   const blocked = []
   let alreadyPosted = 0
+  const tenantOwner = await db.tenant.findUnique({ where: { id: scopedTenantId }, select: { ownerId: true } })
+  const openingBalanceActor = (tenantOwner?.ownerId
+    ? await db.user.findFirst({ where: { id: tenantOwner.ownerId, isActive: true }, select: { id: true } })
+    : null) || await db.user.findFirst({ where: { tenantId: scopedTenantId, isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } })
   if (!validation.valid) {
     blocked.push({ sourceType: 'TENANT_CONFIG', sourceId: scopedTenantId, reason: validation.errors?.join('; ') || 'Receivables accounting mappings are not enabled and complete.' })
   } else {
@@ -239,9 +248,19 @@ async function buildPlan(db, scopedTenantId) {
       }
     }
 
-    const openingBalanceCustomers = await db.customer.findMany({ where: { tenantId: scopedTenantId, openingBalance: { not: 0 } }, select: { id: true, name: true, openingBalance: true } })
+    const openingBalanceCustomers = await db.customer.findMany({ where: { tenantId: scopedTenantId, openingBalance: { gt: 0 } }, select: { id: true, name: true, openingBalance: true, openingBalanceDate: true, createdAt: true } })
     for (const customer of openingBalanceCustomers) {
-      blocked.push({ sourceType: 'CUSTOMER_OPENING_BALANCE', sourceId: customer.id, reason: `Customer ${customer.name} has an opening balance. The opening-balance offset account and signed opening entry are not configured by this migration.` })
+      if (!openingBalanceActor) {
+        blocked.push({ sourceType: 'CUSTOMER_OPENING_BALANCE', sourceId: customer.id, reason: 'No active tenant user is available to attribute this opening-balance journal.' })
+        continue
+      }
+      addAction({
+        tenantId: scopedTenantId, branchId: null, userId: openingBalanceActor.id,
+        sourceType: 'CUSTOMER_OPENING_BALANCE', sourceId: customer.id,
+        date: customer.openingBalanceDate || customer.createdAt,
+        reference: customer.name, description: `Opening balance for customer ${customer.name}`,
+        lines: customerOpeningBalanceLines(config, customer.openingBalance, `Opening receivable for ${customer.name}`),
+      })
     }
     const withdrawals = await db.customerWithdrawal.findMany({ where: { tenantId: scopedTenantId }, select: { id: true, reference: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
     const noteWithdrawalIds = new Set(creditNotes.map((note) => note.refundWithdrawalId).filter(Boolean))

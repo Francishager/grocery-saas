@@ -5,6 +5,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { permissionsForUser } from "../utils/permissions.js";
 import { sendMail } from "../../mailer.js";
+import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
@@ -220,8 +221,12 @@ router.post("/accept", async (req, res) => {
     let tenantId = inv.tenantId;
     if (!tenantId && finalBusinessName) {
       const slug = finalBusinessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-      const tenant = await prisma.tenant.create({
-        data: { name: finalBusinessName, slug, email: inv.email, phone: phone || inv.phone || businessDetail(inv.message, "Business phone"), address: businessDetail(inv.message, "Business location") || undefined, status: "active", planId: inv.planId, dateFormat: "DD/MM/YY" },
+      const tenant = await prisma.$transaction(async (tx) => {
+        const created = await tx.tenant.create({
+          data: { name: finalBusinessName, slug, email: inv.email, phone: phone || inv.phone || businessDetail(inv.message, "Business phone"), address: businessDetail(inv.message, "Business location") || undefined, status: "active", planId: inv.planId, dateFormat: "DD/MM/YY" },
+        });
+        await ensureTenantAccountingSetup(tx, { tenantId: created.id, userId: null, enableNewSetups: true });
+        return created;
       });
       tenantId = tenant.id;
     }

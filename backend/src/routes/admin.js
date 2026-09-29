@@ -11,6 +11,7 @@ import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
 import { cancelManualSubscriptionPayment, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
 
 const router = Router();
@@ -377,7 +378,11 @@ router.post("/businesses", authenticateToken, requirePlatformAdmin, async (req, 
     if (!name) return res.status(400).json({ error: "Business name required" });
 
     const slug = (requestedSlug || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    const tenant = await prisma.tenant.create({ data: { name, slug, email: email || `${slug}@placeholder.com`, phone, address, planId, status: "active", dateFormat: "DD/MM/YY" } });
+    const tenant = await prisma.$transaction(async (tx) => {
+      const createdTenant = await tx.tenant.create({ data: { name, slug, email: email || `${slug}@placeholder.com`, phone, address, planId, status: "active", dateFormat: "DD/MM/YY" } });
+      await ensureTenantAccountingSetup(tx, { tenantId: createdTenant.id, userId: req.user?.id, enableNewSetups: true });
+      return createdTenant;
+    });
     res.status(201).json({ message: "Business created", tenant, id: tenant.id, tenantId: tenant.id });
   } catch (err) {
     console.error("Create business error:", err);
@@ -1112,6 +1117,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       });
 
       await tx.tenant.update({ where: { id: createdTenant.id }, data: { ownerId: user.id } });
+      await ensureTenantAccountingSetup(tx, { tenantId: createdTenant.id, userId: user.id, enableNewSetups: true });
 
       return { tenant: createdTenant, user };
     });

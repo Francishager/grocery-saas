@@ -15,6 +15,8 @@ CREATE TABLE "payables_accounting_configs" (
     CONSTRAINT "payables_accounting_configs_pkey" PRIMARY KEY ("id")
 );
 
+ALTER TABLE "accounts" ADD COLUMN "isSystemManaged" BOOLEAN NOT NULL DEFAULT false;
+
 CREATE UNIQUE INDEX "payables_accounting_configs_tenantId_key" ON "payables_accounting_configs"("tenantId");
 CREATE INDEX "payables_accounting_configs_tenantId_idx" ON "payables_accounting_configs"("tenantId");
 ALTER TABLE "payables_accounting_configs" ADD CONSTRAINT "payables_accounting_configs_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;

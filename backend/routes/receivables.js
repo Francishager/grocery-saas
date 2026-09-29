@@ -1,4 +1,5 @@
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
@@ -12,7 +13,8 @@ import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
-import { getReceivablesAccountingConfig, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines, saveReceivablesAccountingConfig } from '../src/services/receivablesAccountingService.js'
+import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines, saveReceivablesAccountingConfig } from '../src/services/receivablesAccountingService.js'
+import { countAccountingHistory } from '../src/services/tenantAccountingSetupService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -791,7 +793,7 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
           throw error
         }
 
-        return tx.customer.create({
+        const created = await tx.customer.create({
           data: {
             name: name.trim(),
             email: email?.trim() || null,
@@ -808,6 +810,17 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
             branchId: scope.branchId
           }
         })
+        if (openingBalance > 0) {
+          const config = await getReceivablesAccountingConfig(tx, scope.tenantId)
+          if (config?.isEnabled) await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+            sourceType: 'CUSTOMER_OPENING_BALANCE', sourceId: created.id,
+            date: openingBalanceDate || new Date(), reference: created.name,
+            description: `Opening balance for customer ${created.name}`,
+            lines: customerOpeningBalanceLines(config, openingBalance, `Opening receivable for ${created.name}`),
+          })
+        }
+        return created
       })
     } catch (error) {
       if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
@@ -937,6 +950,25 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
         where: { id },
         data
       })
+      if (openingBalanceDelta !== 0) {
+        const config = await getReceivablesAccountingConfig(tx, scope.tenantId)
+        if (config?.isEnabled) {
+          const amount = Math.abs(openingBalanceDelta)
+          const lines = openingBalanceDelta > 0
+            ? customerOpeningBalanceLines(config, amount, `Increase opening receivable for ${updatedCustomer.name}`)
+            : [
+                { accountId: config.openingBalanceEquityAccountId, debit: amount, credit: 0, description: `Reduce opening balance equity for ${updatedCustomer.name}` },
+                { accountId: config.receivableAccountId, debit: 0, credit: amount, description: `Reduce opening receivable for ${updatedCustomer.name}` },
+              ]
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: updatedCustomer.branchId, userId: req.user.id,
+            sourceType: 'CUSTOMER_OPENING_BALANCE_ADJUSTMENT', sourceId: `${updatedCustomer.id}-${randomUUID()}`,
+            date: new Date(), reference: updatedCustomer.name,
+            description: `Opening balance adjustment for customer ${updatedCustomer.name}`,
+            lines,
+          })
+        }
+      }
       if (Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')) {
         const reconciled = await reconcileCustomerReceivableBalance(tx, scope, id)
         return reconciled?.customer || updatedCustomer
@@ -1327,9 +1359,15 @@ router.get('/reconciliation/accounting-config', authenticateToken, requirePermis
 router.put('/reconciliation/accounting-config', authenticateToken, requirePermission('canEditAccounting'), requireTenant, async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id
-    const fields = ['receivableAccountId', 'salesRevenueAccountId', 'taxPayableAccountId', 'salesReturnsAccountId', 'costOfGoodsSoldAccountId', 'inventoryAccountId', 'customerAdvancesAccountId']
+    const fields = ['receivableAccountId', 'salesRevenueAccountId', 'taxPayableAccountId', 'salesReturnsAccountId', 'costOfGoodsSoldAccountId', 'inventoryAccountId', 'customerAdvancesAccountId', 'openingBalanceEquityAccountId']
     const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
     values.isEnabled = req.body?.isEnabled === true
+    const previous = await getReceivablesAccountingConfig(prisma, tenantId)
+    const hasHistory = await countAccountingHistory(prisma, tenantId) > 0
+    const mappingsChanged = fields.some((field) => (previous?.[field] || null) !== values[field])
+    if (hasHistory && ((values.isEnabled && !previous?.isEnabled) || mappingsChanged)) {
+      return res.status(409).json({ error: 'Accounting mappings cannot be enabled or changed while historical transactions exist until a reviewed general-ledger migration is complete.', code: 'HISTORICAL_GL_REVIEW_REQUIRED' })
+    }
     const config = await saveReceivablesAccountingConfig(prisma, tenantId, req.user.id, values)
     res.json({ config })
   } catch (error) {

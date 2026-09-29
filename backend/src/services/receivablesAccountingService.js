@@ -11,6 +11,7 @@ const accountRoles = {
   costOfGoodsSoldAccountId: 'expense',
   inventoryAccountId: 'asset',
   customerAdvancesAccountId: 'liability',
+  openingBalanceEquityAccountId: 'equity',
 }
 
 export async function validateReceivablesAccountingConfig(client, tenantId, config, { requireEnabled = false } = {}) {
@@ -58,11 +59,11 @@ function normalBalanceDelta(account, debit, credit) {
 }
 
 export async function postReceivablesJournal(client, {
-  tenantId, branchId = null, userId, sourceType, sourceId, date = new Date(), reference, description, lines,
+  tenantId, branchId = null, userId, sourceType, sourceId, date = new Date(), reference, description, lines, allowDisabled = false,
 }) {
   const config = await getReceivablesAccountingConfig(client, tenantId)
-  if (!config?.isEnabled) return { posted: false, disabled: true }
-  const validation = await validateReceivablesAccountingConfig(client, tenantId, config, { requireEnabled: true })
+  if (!config?.isEnabled && !allowDisabled) return { posted: false, disabled: true }
+  const validation = await validateReceivablesAccountingConfig(client, tenantId, config, { requireEnabled: !allowDisabled })
   if (!validation.valid) throw Object.assign(new Error(validation.errors?.join('. ') || 'Receivables accounting mappings are incomplete.'), { statusCode: 409 })
 
   const normalized = lines.map((line) => ({
@@ -160,6 +161,15 @@ export function receiptCollectionLines(config, { transactionAccountId, amount, r
   ]
   if (advance > 0) lines.push({ accountId: config.customerAdvancesAccountId, debit: 0, credit: advance, description: 'Unapplied customer receipt / advance' })
   return lines
+}
+
+export function customerOpeningBalanceLines(config, amount, description = 'Customer opening balance') {
+  const value = money(amount)
+  if (value < 0) throw Object.assign(new Error('Customer opening balance cannot be negative.'), { statusCode: 400 })
+  return [
+    { accountId: config.receivableAccountId, debit: value, credit: 0, description },
+    { accountId: config.openingBalanceEquityAccountId, debit: 0, credit: value, description: 'Opening balance equity offset' },
+  ]
 }
 
 export function creditNoteRecognitionLines(config, { amount, taxAmount = 0, refundAmount = 0, returnedCogs = 0, reference }) {

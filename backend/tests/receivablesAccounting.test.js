@@ -18,6 +18,7 @@ const config = {
   costOfGoodsSoldAccountId: 'cogs',
   inventoryAccountId: 'inventory',
   customerAdvancesAccountId: 'advances',
+  openingBalanceEquityAccountId: 'opening-equity',
 }
 
 function assertBalanced(lines) {
@@ -55,6 +56,15 @@ test('receipt splits applied receivable and unapplied customer advance without c
   assert.equal(lines.find((line) => line.accountId === 'advances').credit, 20)
 })
 
+test('customer opening balance is recognized as receivable against opening equity', async () => {
+  const { customerOpeningBalanceLines } = await import('../src/services/receivablesAccountingService.js')
+  const lines = customerOpeningBalanceLines(config, 450000, 'Opening receivable for John Traders')
+  assertBalanced(lines)
+  assert.deepEqual(lines.map((line) => [line.accountId, line.debit, line.credit]), [
+    ['ar', 450000, 0], ['opening-equity', 0, 450000],
+  ])
+})
+
 test('credit note separates receivable credit from the paid refund liability', () => {
   const lines = creditNoteRecognitionLines(config, { amount: 50, taxAmount: 5, refundAmount: 10 })
   assertBalanced(lines)
@@ -87,10 +97,11 @@ test('mapping validation accepts distinct tenant-owned leaf accounts with matchi
       receivableAccountId: 1, salesRevenueAccountId: 1, taxPayableAccountId: 1,
       salesReturnsAccountId: 1, costOfGoodsSoldAccountId: 1, inventoryAccountId: 1,
       customerAdvancesAccountId: 1,
+      openingBalanceEquityAccountId: 1,
     }).map((field) => [field, field])),
     isEnabled: true,
   }
-  const types = { receivableAccountId: 'asset', salesRevenueAccountId: 'revenue', taxPayableAccountId: 'liability', salesReturnsAccountId: 'revenue', costOfGoodsSoldAccountId: 'expense', inventoryAccountId: 'asset', customerAdvancesAccountId: 'liability' }
+  const types = { receivableAccountId: 'asset', salesRevenueAccountId: 'revenue', taxPayableAccountId: 'liability', salesReturnsAccountId: 'revenue', costOfGoodsSoldAccountId: 'expense', inventoryAccountId: 'asset', customerAdvancesAccountId: 'liability', openingBalanceEquityAccountId: 'equity' }
   const client = { account: { findMany: async () => Object.entries(types).map(([field, type]) => ({ id: field, type, name: field, description: null, _count: { children: 0 } })) } }
   const result = await validateReceivablesAccountingConfig(client, 'tenant', config, { requireEnabled: true })
   assert.equal(result.valid, true)

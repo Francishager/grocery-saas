@@ -32,10 +32,11 @@ interface ReconciliationIssue {
   receipts?: Array<{ id: string; amount: number; paymentMethod: string; reference?: string | null; transactionId?: string | null; notes?: string | null; createdAt: string }>
 }
 
-type AccountingRole = 'receivableAccountId' | 'salesRevenueAccountId' | 'taxPayableAccountId' | 'salesReturnsAccountId' | 'costOfGoodsSoldAccountId' | 'inventoryAccountId' | 'customerAdvancesAccountId'
+type AccountingRole = 'receivableAccountId' | 'salesRevenueAccountId' | 'taxPayableAccountId' | 'salesReturnsAccountId' | 'costOfGoodsSoldAccountId' | 'inventoryAccountId' | 'customerAdvancesAccountId' | 'openingBalanceEquityAccountId'
 type AccountingConfig = Partial<Record<AccountingRole, string | null>> & { isEnabled?: boolean }
 type PayablesRole = 'payableAccountId' | 'openingBalanceEquityAccountId' | 'purchaseExpenseAccountId' | 'inventoryAccountId' | 'purchaseReturnsAccountId'
 type PayablesConfig = Partial<Record<PayablesRole, string | null>> & { isEnabled?: boolean }
+type SetupStatus = { automatic: boolean; historicalActivityCount: number; historicalReviewRequired: boolean; receivablesEnabled: boolean; payablesEnabled: boolean }
 type ChartAccount = { id: string; code: string; name: string; type: string }
 const accountingRoles: Array<{ key: AccountingRole; title: string; type: string }> = [
   { key: 'receivableAccountId', title: 'Accounts receivable', type: 'asset' },
@@ -45,6 +46,7 @@ const accountingRoles: Array<{ key: AccountingRole; title: string; type: string 
   { key: 'costOfGoodsSoldAccountId', title: 'Cost of goods sold', type: 'expense' },
   { key: 'inventoryAccountId', title: 'Inventory', type: 'asset' },
   { key: 'customerAdvancesAccountId', title: 'Customer advances', type: 'liability' },
+  { key: 'openingBalanceEquityAccountId', title: 'Opening balance equity', type: 'equity' },
 ]
 const payablesRoles: Array<{ key: PayablesRole; title: string; type: string }> = [
   { key: 'payableAccountId', title: 'Accounts payable', type: 'liability' },
@@ -84,6 +86,7 @@ export default function ReceivableReconciliationPage() {
   const [accountingSaving, setAccountingSaving] = useState(false)
   const [payablesConfig, setPayablesConfig] = useState<PayablesConfig>({ isEnabled: false })
   const [payablesSaving, setPayablesSaving] = useState(false)
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
 
   const loadIssues = useCallback(async (targetPage = page) => {
     setLoading(true)
@@ -107,33 +110,32 @@ export default function ReceivableReconciliationPage() {
   const loadAccountingConfig = useCallback(async () => {
     setAccountingLoading(true)
     try {
+      if (canEditAccounting) {
+        const setupResponse = await apiFetch('/api/accounting/system-setup', { method: 'POST', body: JSON.stringify({}) })
+        const setupData = await setupResponse.json()
+        if (!setupResponse.ok) throw new Error(setupData?.error || 'Could not initialize automatic accounting')
+        setSetupStatus(setupData)
+        setPayablesConfig(setupData.payablesConfig || { isEnabled: false })
+      }
       const response = await apiFetch('/api/receivables/reconciliation/accounting-config')
       const data = await response.json()
       if (!response.ok) throw new Error(data?.error || 'Could not load accounting mappings')
       setAccountingConfig(data.config || { isEnabled: false })
       setChartAccounts(data.accounts || [])
+      if (!canEditAccounting && canViewPayables) {
+        const payablesResponse = await apiFetch('/api/payables/accounting-config')
+        const payablesData = await payablesResponse.json()
+        if (!payablesResponse.ok) throw new Error(payablesData?.error || 'Could not load supplier accounting status')
+        setPayablesConfig(payablesData.config || { isEnabled: false })
+      }
     } catch (error) {
       toast({ variant: 'destructive', title: 'Accounting mappings could not load', description: error instanceof Error ? error.message : 'Try again.' })
     } finally {
       setAccountingLoading(false)
     }
-  }, [toast])
+  }, [canEditAccounting, canViewPayables, toast])
 
   useEffect(() => { void loadAccountingConfig() }, [loadAccountingConfig])
-
-  const loadPayablesConfig = useCallback(async () => {
-    try {
-      const response = await apiFetch('/api/payables/accounting-config')
-      const data = await response.json()
-      if (!response.ok) throw new Error(data?.error || 'Could not load supplier accounting mappings')
-      setPayablesConfig(data.config || { isEnabled: false })
-      if (data.accounts) setChartAccounts(data.accounts)
-    } catch (error) {
-      toast({ variant: 'destructive', title: 'Supplier accounting mappings could not load', description: error instanceof Error ? error.message : 'Try again.' })
-    }
-  }, [toast])
-
-  useEffect(() => { if (canViewPayables) void loadPayablesConfig() }, [canViewPayables, loadPayablesConfig])
 
   const saveAccountingConfig = async () => {
     setAccountingSaving(true)
@@ -245,24 +247,39 @@ export default function ReceivableReconciliationPage() {
 
       <section className="space-y-4 border-b pb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="text-base font-semibold">Receivables general-ledger posting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Optional, tenant-scoped mappings. Existing transactions are not reposted automatically; use a reviewed migration plan for historical entries.</p></div>
-          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={Boolean(accountingConfig.isEnabled)} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setAccountingConfig((current) => ({ ...current, isEnabled: event.target.checked }))} /> Enable automatic posting</label>
+          <div><h2 className="text-base font-semibold">Automatic accounting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">The system sets up and validates standard accounts automatically for new businesses.</p></div>
+          <span className={`text-sm font-medium ${accountingConfig.isEnabled && payablesConfig.isEnabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}`}>
+            {accountingConfig.isEnabled && payablesConfig.isEnabled ? 'Active' : setupStatus?.historicalReviewRequired ? 'Historical review required' : 'Setup required'}
+          </span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {accountingRoles.map((role) => <label key={role.key} className="grid gap-1.5 text-sm"><span>{role.title} <span className="text-muted-foreground">({role.type})</span></span><select value={accountingConfig[role.key] || ''} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setAccountingConfig((current) => ({ ...current, [role.key]: event.target.value || null }))} className="h-10 min-w-0 rounded-md border bg-background px-3"><option value="">Select account</option>{chartAccounts.filter((account) => account.type.toLowerCase() === role.type).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>)}
-        </div>
-        {canEditAccounting ? <Button variant="outline" onClick={() => void saveAccountingConfig()} disabled={accountingSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{accountingSaving ? 'Saving...' : 'Save mappings'}</Button> : <p className="text-xs text-muted-foreground">You can view these mappings but do not have permission to change accounting configuration.</p>}
+        {setupStatus?.historicalReviewRequired && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">Existing transactions were found. Automatic posting stays off until those historical events have been reconciled and signed off; this prevents mixing unposted history with new ledger entries.</p>}
+        {canEditAccounting && <details className="border-t pt-3">
+          <summary className="cursor-pointer text-sm font-medium">Advanced account mapping</summary>
+          <div className="mt-4 space-y-4">
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={Boolean(accountingConfig.isEnabled)} disabled={accountingLoading || Boolean(setupStatus?.historicalReviewRequired && !accountingConfig.isEnabled)} onChange={(event) => setAccountingConfig((current) => ({ ...current, isEnabled: event.target.checked }))} /> Enable receivables posting</label>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {accountingRoles.map((role) => <label key={role.key} className="grid gap-1.5 text-sm"><span>{role.title} <span className="text-muted-foreground">({role.type})</span></span><select value={accountingConfig[role.key] || ''} disabled={accountingLoading} onChange={(event) => setAccountingConfig((current) => ({ ...current, [role.key]: event.target.value || null }))} className="h-10 min-w-0 rounded-md border bg-background px-3"><option value="">Select account</option>{chartAccounts.filter((account) => account.type.toLowerCase() === role.type).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>)}
+            </div>
+            <Button variant="outline" onClick={() => void saveAccountingConfig()} disabled={accountingSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{accountingSaving ? 'Saving...' : 'Save mappings'}</Button>
+          </div>
+        </details>}
       </section>
 
       {canViewPayables && <section className="space-y-4 border-b pb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="text-base font-semibold">Payables general-ledger posting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Optional tenant-scoped supplier mappings. Existing purchases are not posted retroactively.</p></div>
-          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={Boolean(payablesConfig.isEnabled)} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setPayablesConfig((current) => ({ ...current, isEnabled: event.target.checked }))} /> Enable supplier posting</label>
+          <div><h2 className="text-base font-semibold">Supplier accounting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Purchases, payments, and supplier balances are journaled automatically when setup is active.</p></div>
+          <span className={`text-sm font-medium ${payablesConfig.isEnabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}`}>{payablesConfig.isEnabled ? 'Active' : setupStatus?.historicalReviewRequired ? 'Historical review required' : 'Setup required'}</span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {payablesRoles.map((role) => <label key={role.key} className="grid gap-1.5 text-sm"><span>{role.title} <span className="text-muted-foreground">({role.type})</span></span><select value={payablesConfig[role.key] || ''} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setPayablesConfig((current) => ({ ...current, [role.key]: event.target.value || null }))} className="h-10 min-w-0 rounded-md border bg-background px-3"><option value="">Select account</option>{chartAccounts.filter((account) => account.type.toLowerCase() === role.type).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>)}
-        </div>
-        {canEditAccounting ? <Button variant="outline" onClick={() => void savePayablesConfig()} disabled={payablesSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{payablesSaving ? 'Saving...' : 'Save supplier mappings'}</Button> : <p className="text-xs text-muted-foreground">You can view these mappings but do not have permission to change accounting configuration.</p>}
+        {canEditAccounting && <details className="border-t pt-3">
+          <summary className="cursor-pointer text-sm font-medium">Advanced supplier mapping</summary>
+          <div className="mt-4 space-y-4">
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={Boolean(payablesConfig.isEnabled)} disabled={accountingLoading || Boolean(setupStatus?.historicalReviewRequired && !payablesConfig.isEnabled)} onChange={(event) => setPayablesConfig((current) => ({ ...current, isEnabled: event.target.checked }))} /> Enable supplier posting</label>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {payablesRoles.map((role) => <label key={role.key} className="grid gap-1.5 text-sm"><span>{role.title} <span className="text-muted-foreground">({role.type})</span></span><select value={payablesConfig[role.key] || ''} disabled={accountingLoading} onChange={(event) => setPayablesConfig((current) => ({ ...current, [role.key]: event.target.value || null }))} className="h-10 min-w-0 rounded-md border bg-background px-3"><option value="">Select account</option>{chartAccounts.filter((account) => account.type.toLowerCase() === role.type).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>)}
+            </div>
+            <Button variant="outline" onClick={() => void savePayablesConfig()} disabled={payablesSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{payablesSaving ? 'Saving...' : 'Save supplier mappings'}</Button>
+          </div>
+        </details>}
       </section>}
 
       <div className="overflow-x-auto border-y">

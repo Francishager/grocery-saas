@@ -8,6 +8,7 @@ import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { getPayablesAccountingConfig, getCashAccountLedgerId, postPayablesJournal, savePayablesAccountingConfig, supplierOpeningBalanceLines, supplierPaymentLines, supplierPurchaseLines } from '../src/services/payablesAccountingService.js'
+import { countAccountingHistory } from '../src/services/tenantAccountingSetupService.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -95,6 +96,12 @@ router.put('/accounting-config', authenticateToken, requirePermission('canEditAc
     const fields = ['payableAccountId', 'openingBalanceEquityAccountId', 'purchaseExpenseAccountId', 'inventoryAccountId', 'purchaseReturnsAccountId']
     const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
     values.isEnabled = req.body?.isEnabled === true
+    const previous = await getPayablesAccountingConfig(prisma, tenantId)
+    const hasHistory = await countAccountingHistory(prisma, tenantId) > 0
+    const mappingsChanged = fields.some((field) => (previous?.[field] || null) !== values[field])
+    if (hasHistory && ((values.isEnabled && !previous?.isEnabled) || mappingsChanged)) {
+      return res.status(409).json({ error: 'Accounting mappings cannot be enabled or changed while historical transactions exist until a reviewed general-ledger migration is complete.', code: 'HISTORICAL_GL_REVIEW_REQUIRED' })
+    }
     const config = await savePayablesAccountingConfig(prisma, tenantId, req.user.id, values)
     res.json({ config })
   } catch (error) {

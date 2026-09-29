@@ -5,6 +5,7 @@ import { authenticateToken, requirePermission, requireAnyPermission, getPaymentM
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
+import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSetupService.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -46,6 +47,26 @@ const STANDARD_HR_ACCOUNT_NAMES = new Set([
 ]);
 
 const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
+
+router.post("/system-setup", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const setup = await setupTenantAccountingSystem(prisma, { tenantId, userId: req.user.id });
+    res.json({
+      automatic: setup.automatic,
+      historicalActivityCount: setup.historicalActivityCount,
+      historicalReviewRequired: setup.historicalReviewRequired,
+      receivablesEnabled: Boolean(setup.receivables?.isEnabled),
+      payablesEnabled: Boolean(setup.payables?.isEnabled),
+      receivablesConfig: setup.receivables,
+      payablesConfig: setup.payables,
+    });
+  } catch (error) {
+    console.error("Automatic accounting setup failed:", error);
+    res.status(error.statusCode || 500).json({ error: error.message || "Automatic accounting setup failed." });
+  }
+});
 
 const linkedCashAccountId = (account) => {
   const match = String(account?.description || "").match(/cashAccount:([^\s]+)/);
@@ -360,9 +381,10 @@ router.put("/accounts/:id", authenticateToken, requirePermission("canEditChartOf
     const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "body"), { source: "body", allowOwnerAll: true });
     const existing = await prisma.account.findFirst({
       where: { id: req.params.id, tenantId },
-      select: { id: true },
+      select: { id: true, isSystemManaged: true },
     });
     if (!existing) return res.status(404).json({ error: "Account not found" });
+    if (existing.isSystemManaged) return res.status(409).json({ error: "This account is maintained by the system to keep automatic accounting entries consistent." });
 
     const account = await prisma.account.update({
       where: { id: existing.id },

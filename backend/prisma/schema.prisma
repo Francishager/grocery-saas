@@ -1934,6 +1934,7 @@ model Account {
   children     Account[]     @relation("AccountHierarchy")
   balance      Float         @default(0)
   isActive     Boolean       @default(true)
+  isSystemManaged Boolean    @default(false)
   description  String?
   branchId     String?
   branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
@@ -1945,6 +1946,7 @@ model Account {
   receivablesCOGSConfigs ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
   receivablesInventoryConfigs ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
   receivablesAdvanceConfigs ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
+  receivablesOpeningEquityConfigs ReceivablesAccountingConfig[] @relation("ReceivablesOpeningEquityAccount")
   payablesAPConfigs PayablesAccountingConfig[] @relation("PayablesAPAccount")
   payablesOpeningEquityConfigs PayablesAccountingConfig[] @relation("PayablesOpeningEquityAccount")
   payablesPurchaseExpenseConfigs PayablesAccountingConfig[] @relation("PayablesPurchaseExpenseAccount")
@@ -2433,6 +2435,8 @@ model ReceivablesAccountingConfig {
   inventoryAccount         Account? @relation("ReceivablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
   customerAdvancesAccountId String?
   customerAdvancesAccount  Account? @relation("ReceivablesAdvanceAccount", fields: [customerAdvancesAccountId], references: [id], onDelete: SetNull)
+  openingBalanceEquityAccountId String?
+  openingBalanceEquityAccount Account? @relation("ReceivablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
   isEnabled               Boolean  @default(false)
   configuredBy            String?
   configuredAt            DateTime?

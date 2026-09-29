@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from '../middleware/auth.js'
 import { filterPlanFeaturesByPlanList, invalidateFeatureCache, planFeatureIsAllowedByPlanList } from '../middleware/featureCheck.js'
+import { ensureTenantAccountingSetup } from '../src/services/tenantAccountingSetupService.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -435,7 +436,11 @@ router.post('/seed', authenticateToken, requirePlatformAdmin, async (req, res) =
       update: {},
       create: { name: 'Starter', slug: 'starter', price: 0, billingCycle: 'monthly', features: ['inventory', 'sales', 'reports'], maxUsers: 5, maxProducts: 100, isDefault: true },
     })
-    const tenant = await prisma.tenant.create({ data: { name: 'Dev Business', slug: 'dev-business', email: 'dev@example.com', status: 'active', planId: plan.id } })
+    const tenant = await prisma.$transaction(async (tx) => {
+      const created = await tx.tenant.create({ data: { name: 'Dev Business', slug: 'dev-business', email: 'dev@example.com', status: 'active', planId: plan.id } })
+      await ensureTenantAccountingSetup(tx, { tenantId: created.id, userId: req.user?.id, enableNewSetups: true })
+      return created
+    })
     const hashed = await bcrypt.hash('password123', 12)
     const user = await prisma.user.create({ data: { email: 'owner@dev.com', password: hashed, fname: 'Dev', lname: 'Owner', tenantId: tenant.id, role: 'owner' } })
     const products = await Promise.all([
