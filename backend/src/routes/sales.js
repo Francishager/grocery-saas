@@ -11,6 +11,7 @@ import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications
 import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
 import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
+import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -369,6 +370,8 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     const taxableAmount = Math.max(0, subtotal - totalDiscount);
     const tax = Math.round(taxableAmount * taxRate * 100) / 100;
     const total = Math.max(0, subtotal - totalDiscount + tax);
+    const itemTaxAmounts = allocateSaleTaxToItems(saleItems, tax);
+    saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index]; });
 
     const sale = await prisma.$transaction(async (tx) => {
       const created = await tx.sale.create({
@@ -485,6 +488,8 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     const taxableAmount = Math.max(0, subtotal - totalDiscount);
     const tax = Math.round(taxableAmount * taxRate * 100) / 100;
     const total = Math.max(0, subtotal - totalDiscount + tax);
+    const itemTaxAmounts = allocateSaleTaxToItems(saleItems, tax);
+    saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index]; });
 
     const sale = await prisma.$transaction(async (tx) => {
       const created = await tx.sale.create({

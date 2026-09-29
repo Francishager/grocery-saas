@@ -74,9 +74,10 @@ export function expenseDateWhere(range) {
 
 export function cashMovementDirection(type) {
   const value = String(type || '').toLowerCase().replace(/-/g, '_');
+  if (value.includes('refund_reversal') || value.includes('reversal_refund')) return 'in';
   if (value.includes('transfer_in') || value.includes('handover_in')) return 'transfer-in';
   if (value.includes('transfer') || value.includes('handover')) return 'transfer-out';
-  if (['expense', 'payment', 'withdrawal', 'purchase', 'refund', 'sale_return'].includes(value) || value.includes('out')) return 'out';
+  if (['expense', 'payment', 'withdrawal', 'purchase', 'refund', 'sale_return'].includes(value) || value.includes('refund') || value.includes('out')) return 'out';
   return 'in';
 }
 

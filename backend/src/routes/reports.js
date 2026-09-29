@@ -219,6 +219,52 @@ function saleItemProfit(item) {
   return saleItemProductRevenue(item) + saleItemServiceRevenue(item) - saleLineCogs(item);
 }
 
+function allocatedAmount(amount, portion, total) {
+  const value = Number(amount || 0);
+  const denominator = Number(total || 0);
+  if (!denominator || !portion) return 0;
+  return toMoney(value * Math.min(1, Math.max(0, Number(portion) / denominator)));
+}
+
+function cappedPaymentAllocations(byMethod = {}, totalPaid = 0, invoicePaid = 0) {
+  const entries = Object.entries(byMethod).filter(([, amount]) => Number(amount) > 0);
+  const cappedTotal = Math.min(Number(totalPaid || 0), Number(invoicePaid || 0));
+  if (!entries.length || cappedTotal <= 0) return {};
+  let allocated = 0;
+  return Object.fromEntries(entries.map(([method, amount], index) => {
+    const value = index === entries.length - 1
+      ? toMoney(cappedTotal - allocated)
+      : allocatedAmount(amount, cappedTotal, totalPaid);
+    allocated += value;
+    return [method, value];
+  }));
+}
+
+function returnedInventoryCost(returnItems = [], saleItems = []) {
+  const costsByProduct = new Map();
+  for (const item of saleItems) {
+    const factor = Number(item.conversionFactor || 1);
+    const baseQuantity = Number(item.quantity || 0) * (Number.isFinite(factor) && factor > 0 ? factor : 1);
+    if (baseQuantity <= 0) continue;
+    const current = costsByProduct.get(item.productId) || { cost: 0, quantity: 0 };
+    current.cost += saleLineCogs(item);
+    current.quantity += baseQuantity;
+    costsByProduct.set(item.productId, current);
+  }
+
+  return toMoney(returnItems.reduce((sum, item) => {
+    const source = costsByProduct.get(item.productId);
+    if (!source?.quantity) return sum;
+    return sum + (source.cost / source.quantity) * Number(item.quantity || 0);
+  }, 0));
+}
+
+function returnedTaxAmount(returnValue, sale) {
+  const taxableSales = Math.max(0, Number(sale?.subtotal || 0) - Number(sale?.discount || 0) - Number(sale?.cashDiscount || 0));
+  if (!taxableSales || !Number(sale?.tax || 0)) return 0;
+  return allocatedAmount(sale.tax, returnValue, taxableSales);
+}
+
 function saleStatus(sale) {
   return sale.status || sale.paymentStatus || "Completed";
 }
@@ -667,12 +713,59 @@ function isPaidAtSaleCustomerPayment(payment) {
   return Boolean(payment?.saleId && String(payment?.notes || "").trim().toLowerCase().startsWith("paid at sale"));
 }
 
-function dayRange(from, to) {
-  const start = from ? new Date(from) : new Date();
-  if (!from) start.setHours(0, 0, 0, 0);
-  const end = to ? toEndOfDay(to) : new Date(start);
-  if (!to) end.setHours(23, 59, 59, 999);
-  return { start, end };
+function localDateAt(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function zonedMidnight(dateValue, timeZone) {
+  const match = String(dateValue || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return new Date(dateValue);
+  const [, year, month, day] = match;
+  const target = Date.UTC(Number(year), Number(month) - 1, Number(day));
+  let candidate = target;
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(candidate)).map((part) => [part.type, part.value]));
+    const observed = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+    const adjustment = target - observed;
+    if (!adjustment) break;
+    candidate += adjustment;
+  }
+  return new Date(candidate);
+}
+
+function dayRange(from, to, timeZone = "Africa/Kampala") {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone }).format();
+  } catch {
+    timeZone = "Africa/Kampala";
+  }
+  const today = localDateAt(new Date(), timeZone);
+  const fromDate = from || today;
+  const toDate = to || fromDate;
+  const nextDate = new Date(`${toDate}T00:00:00.000Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const nextDateLabel = nextDate.toISOString().slice(0, 10);
+  return {
+    start: zonedMidnight(fromDate, timeZone),
+    end: new Date(zonedMidnight(nextDateLabel, timeZone).getTime() - 1),
+  };
 }
 
 function enrichBalanceRows(rows, { title, entityType, entityKey, balanceLabel = "Balance" }) {
@@ -781,10 +874,16 @@ router.get("/profit", authenticateToken, async (req, res) => {
 router.get("/daily-business", authenticateToken, async (req, res) => {
   try {
     const scope = await getScope(req);
-    const { start, end } = dayRange(req.query.from, req.query.to);
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: scope.tenantId },
+      select: { id: true, name: true, email: true, phone: true, address: true, logo: true, timezone: true },
+    });
+    const timeZone = tenant?.timezone || "Africa/Kampala";
+    const { start, end } = dayRange(req.query.from, req.query.to, timeZone);
     const userId = visibleSalesUserId(req, requestedSalesUserId(req));
     const customerId = req.query.customerId || null;
-    const requestedMethod = req.query.paymentMethod ? normalizedPaymentMethod(req.query.paymentMethod) : null;
+    const normalizedRequestedMethod = req.query.paymentMethod ? normalizedPaymentMethod(req.query.paymentMethod) : null;
+    const requestedMethod = normalizedRequestedMethod === "all" ? null : normalizedRequestedMethod;
     const dateWhere = { gte: start, lte: end };
     const allowedCashAccountId = userId === req.user.id ? req.user.cashAccountId : null;
     const cashAccountWhere = {
@@ -794,25 +893,20 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ...(userId ? (allowedCashAccountId ? { id: allowedCashAccountId } : { AssignedUsers: { some: { id: userId } } }) : {}),
     };
 
-    const [tenant, selectedCustomer] = await Promise.all([
-      prisma.tenant.findUnique({
-        where: { id: scope.tenantId },
-        select: { id: true, name: true, email: true, phone: true, address: true, logo: true },
-      }),
-      customerId
+    const selectedCustomer = customerId
         ? prisma.customer.findFirst({
             where: scopedWhere(scope, { id: customerId }),
             select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
           })
-        : null,
-    ]);
+        : null;
+    const resolvedSelectedCustomer = await selectedCustomer;
 
     const saleWhere = customerId
       ? scopedWhere(scope, {
           createdAt: dateWhere,
           status: "completed",
           ...(userId ? { userId } : {}),
-          ...(selectedCustomer?.name ? { customerName: selectedCustomer.name } : { id: "__no_matching_cash_sale__" }),
+          ...(resolvedSelectedCustomer?.name ? { customerName: resolvedSelectedCustomer.name } : { id: "__no_matching_cash_sale__" }),
         })
       : scopedWhere(scope, { createdAt: dateWhere, status: "completed", ...(userId ? { userId } : {}) });
     const saleRecordWhere = scopedWhere(scope, {
@@ -827,7 +921,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ...(userId ? { userId } : {}),
     });
 
-    const [sales, creditSales, payments, expenses, branches, cashAccounts, cashTransactions, laterMovements, customersForLookup] = await Promise.all([
+    const [sales, creditSales, payments, expenses, branches, cashAccounts, cashTransactions, laterMovements, customersForLookup, creditNotes, saleReturns] = await Promise.all([
       prisma.sale.findMany({
         where: saleWhere,
         include: {
@@ -895,7 +989,57 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         where: scopedWhere(scope, customerId ? { id: customerId } : {}),
         select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
       }),
+      prisma.creditNote.findMany({
+        where: scopedWhere(scope, {
+          createdAt: dateWhere,
+          status: { not: "cancelled" },
+          ...(customerId ? { customerId } : {}),
+          ...(userId ? { userId } : {}),
+        }),
+        include: {
+          customer: { select: { id: true, name: true } },
+          branch: { select: { id: true, name: true } },
+          sale: {
+            include: {
+              items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } } } },
+              User: { select: { id: true, fname: true, lname: true, email: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.saleReturn.findMany({
+        where: scopedWhere(scope, {
+          createdAt: dateWhere,
+          status: "completed",
+          refundMethod: { not: "credit_note_stock" },
+          ...(customerId ? { customerId } : {}),
+          ...(userId ? { userId } : {}),
+        }),
+        include: {
+          items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true } } } },
+          sale: {
+            include: {
+              items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } } } },
+              user: { select: { id: true, fname: true, lname: true, email: true } },
+            },
+          },
+          customer: { select: { id: true, name: true } },
+          user: { select: { id: true, fname: true, lname: true, email: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      }),
     ]);
+    const stockReturnNos = creditNotes
+      .filter((note) => ["sales_return", "cancellation"].includes(String(note.reason || "").toLowerCase()))
+      .map((note) => `RET-${note.noteNo}`);
+    const creditNoteStockReturns = stockReturnNos.length
+      ? await prisma.saleReturn.findMany({
+          where: { tenantId: scope.tenantId, returnNo: { in: stockReturnNos }, status: "stock_adjusted" },
+          include: { items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true } } } } },
+        })
+      : [];
+    const stockReturnsByNo = new Map(creditNoteStockReturns.map((row) => [row.returnNo, row]));
     const directExpenseReferences = new Set(
       expenses.flatMap((expense) => [expense.id, expense.reference].filter(Boolean))
     );
@@ -934,6 +1078,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     let netRevenue = 0;
     let taxCollected = 0;
     let cogs = 0;
+    let historicalCostFallbackLines = 0;
 
     const addStaff = (user, values = {}) => {
       const id = user?.id || "unknown";
@@ -1002,11 +1147,44 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       });
     };
 
+    const subtractReturnedProducts = (returnItems = [], saleItems = []) => {
+      returnItems.forEach((item) => {
+        const sourceItems = saleItems.filter((saleItem) => saleItem.productId === item.productId);
+        const sourceQuantity = sourceItems.reduce((sum, saleItem) => {
+          const factor = Number(saleItem.conversionFactor || 1);
+          return sum + Number(saleItem.quantity || 0) * (Number.isFinite(factor) && factor > 0 ? factor : 1);
+        }, 0);
+        const sourceSellingQuantity = sourceItems.reduce((sum, saleItem) => sum + Number(saleItem.quantity || 0), 0);
+        const baseToSellingFactor = sourceSellingQuantity > 0 ? sourceQuantity / sourceSellingQuantity : 1;
+        const product = item.product || sourceItems[0]?.product || {};
+        const row = productMap.get(item.productId) || {
+          id: item.productId,
+          name: product.name || "Returned product",
+          sku: product.sku || "",
+          quantitySold: 0,
+          quantityReturned: 0,
+          salesValue: 0,
+          cogs: 0,
+          grossProfit: 0,
+          currentStock: product.quantity ?? null,
+        };
+        const baseQuantity = Number(item.quantity || 0);
+        const returnedCost = returnedInventoryCost([item], sourceItems);
+        row.quantityReturned = Number(row.quantityReturned || 0) + baseQuantity;
+        row.quantitySold -= baseToSellingFactor > 0 ? baseQuantity / baseToSellingFactor : baseQuantity;
+        row.salesValue -= Number(item.total || 0);
+        row.cogs -= returnedCost;
+        row.grossProfit = row.salesValue - row.cogs;
+        productMap.set(item.productId, row);
+      });
+    };
+
     const findMatchingMovement = (...references) => references.filter(Boolean).map((reference) => cashMovementsByReference.get(reference)).find(Boolean) || null;
 
     for (const sale of sales) {
       const method = normalizedPaymentMethod(sale.paymentMethod);
       if (!paymentMethodMatches(method, requestedMethod)) continue;
+      historicalCostFallbackLines += (sale.items || []).filter((item) => item.cost === null || item.cost === undefined || item.cost === "").length;
       const grossAmount = Number(sale.total || 0);
       totalSales += grossAmount;
       netRevenue += saleNetRevenue(sale);
@@ -1033,6 +1211,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         branch: sale.branch?.name || "",
         amount: sale.total,
         revenue: saleNetRevenue(sale),
+        taxAmount: Number(sale.tax || 0),
         cogs: saleCogs(sale),
         cashAmount,
         creditAmount,
@@ -1040,7 +1219,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         credit: 0,
         paymentMethod: method,
         status: sale.status,
-        items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item), profit: saleItemProfit(item) })),
+        items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, taxAmount: item.taxAmount == null ? allocatedAmount(sale.tax, item.total, sale.items.reduce((sum, line) => sum + Number(line.total || 0), 0)) : Number(item.taxAmount), cost: saleLineCogs(item), profit: saleItemProfit(item) })),
       };
       customer.transactions.push({ ...row, type: "SALE" });
       transactionRows.push(row);
@@ -1051,23 +1230,37 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       const grossAmount = Number(sale.total || 0);
       const paidAtSale = paidAtSaleBySaleId.get(sale.id) || { total: 0, byMethod: { cash: 0, mobile_money: 0, bank: 0, card: 0 } };
       const paid = Math.min(grossAmount, Number(paidAtSale.total || 0));
+      const paidByMethod = cappedPaymentAllocations(paidAtSale.byMethod, paid, paidAtSale.total);
       const creditAmount = Math.max(0, grossAmount - paid);
       const method = normalizedPaymentMethod(sale.paymentMethod);
-      if (!paymentMethodMatches(method, requestedMethod)) continue;
-      totalSales += grossAmount;
-      netRevenue += saleNetRevenue(sale);
-      taxCollected += Number(sale.tax || 0);
-      salesBreakdown.credit += creditAmount;
-      Object.entries(paidAtSale.byMethod || {}).forEach(([paidMethod, amount]) => addPaymentBreakdown(salesBreakdown, paidMethod, amount));
-      cogs += saleCogsForItems(sale.items);
+      const selectedPortion = !requestedMethod
+        ? grossAmount
+        : requestedMethod === "credit"
+          ? creditAmount
+          : Number(paidByMethod[requestedMethod] || 0);
+      if (selectedPortion <= 0) continue;
+      historicalCostFallbackLines += (sale.items || []).filter((item) => item.cost === null || item.cost === undefined || item.cost === "").length;
+      const allocationRatio = grossAmount > 0 ? Math.min(1, selectedPortion / grossAmount) : 0;
+      const selectedByMethod = requestedMethod
+        ? { [requestedMethod]: selectedPortion }
+        : { ...paidByMethod, credit: creditAmount };
+      totalSales += selectedPortion;
+      netRevenue += allocatedAmount(saleNetRevenue(sale), selectedPortion, grossAmount);
+      taxCollected += allocatedAmount(sale.tax, selectedPortion, grossAmount);
+      Object.entries(selectedByMethod).forEach(([paidMethod, amount]) => addPaymentBreakdown(salesBreakdown, paidMethod, amount));
+      cogs += allocatedAmount(saleCogsForItems(sale.items), selectedPortion, grossAmount);
       addStaff(sale.User, {
-        sales: sale.total,
-        creditSales: creditAmount,
-        ...Object.entries(paidAtSale.byMethod || {}).reduce((values, [paidMethod, amount]) => ({ ...values, ...staffSalesValues(paidMethod, amount) }), {}),
+        sales: selectedPortion,
+        ...Object.entries(selectedByMethod).reduce((values, [paidMethod, amount]) => ({ ...values, ...staffSalesValues(paidMethod, amount) }), {}),
       });
       const customer = addCustomer(sale.customer);
-      customer.creditSales += creditAmount;
-      if (paid > 0 && method !== "credit") customer.cashSales += paid;
+      customer.creditSales += requestedMethod === "credit" ? selectedPortion : requestedMethod ? 0 : creditAmount;
+      customer.cashSales += requestedMethod && requestedMethod !== "credit"
+        ? selectedPortion
+        : requestedMethod ? 0 : paid;
+      const rowPaidByMethod = requestedMethod
+        ? { [requestedMethod]: selectedPortion }
+        : paidByMethod;
       const row = {
         id: sale.id,
         kind: "credit-sale",
@@ -1080,21 +1273,166 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         staff: userLabel(sale.User),
         staffId: sale.User?.id,
         branch: sale.branch?.name || "",
-        amount: sale.total,
-        revenue: saleNetRevenue(sale),
-        cogs: saleCogs(sale),
-        cashAmount: paid,
-        paidByMethod: paidAtSale.byMethod,
-        creditAmount,
-        debit: paid,
+        amount: selectedPortion,
+        invoiceTotal: grossAmount,
+        revenue: allocatedAmount(saleNetRevenue(sale), selectedPortion, grossAmount),
+        taxAmount: allocatedAmount(sale.tax, selectedPortion, grossAmount),
+        cogs: allocatedAmount(saleCogsForItems(sale.items), selectedPortion, grossAmount),
+        cashAmount: requestedMethod === "credit" ? 0 : requestedMethod ? selectedPortion : paid,
+        paidByMethod: rowPaidByMethod,
+        creditAmount: requestedMethod === "credit" ? selectedPortion : requestedMethod ? 0 : creditAmount,
+        debit: requestedMethod === "credit" ? 0 : selectedPortion,
         credit: 0,
-        paymentMethod: method,
+        paymentMethod: requestedMethod || method,
         status: sale.paymentStatus,
-        items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: item.total, cost: saleLineCogs(item), profit: saleItemProfit(item) })),
+        items: sale.items.map((item) => ({ productId: item.product?.id, product: item.product?.name, quantity: item.quantity, unitPrice: item.price, total: allocatedAmount(item.total, selectedPortion, grossAmount), taxAmount: allocatedAmount(item.taxAmount ?? allocatedAmount(sale.tax, item.total, sale.items.reduce((sum, line) => sum + Number(line.total || 0), 0)), selectedPortion, grossAmount), cost: allocatedAmount(saleLineCogs(item), selectedPortion, grossAmount), profit: allocatedAmount(saleItemProfit(item), selectedPortion, grossAmount) })),
       };
       customer.transactions.push({ ...row, type: "SALE" });
       transactionRows.push(row);
-      addProducts(sale.items);
+      if (requestedMethod) {
+        sale.items.forEach((item) => {
+          const product = item.product;
+          if (!product?.id) return;
+          const productRow = productMap.get(product.id) || { id: product.id, name: product.name, sku: product.sku, quantitySold: 0, salesValue: 0, cogs: 0, grossProfit: 0, currentStock: product.quantity };
+          productRow.quantitySold += Number(item.quantity || 0) * allocationRatio;
+          productRow.salesValue += allocatedAmount(item.total, selectedPortion, grossAmount);
+          productRow.cogs += allocatedAmount(saleLineCogs(item), selectedPortion, grossAmount);
+          productRow.grossProfit = productRow.salesValue - productRow.cogs;
+          productMap.set(product.id, productRow);
+        });
+      } else {
+        addProducts(sale.items);
+      }
+    }
+
+    let salesReturns = 0;
+    let creditNoteAdjustments = 0;
+    let posReturnAdjustments = 0;
+    let returnedTax = 0;
+    let returnedCogs = 0;
+    let taxSnapshotAdjustments = 0;
+    let estimatedTaxAdjustments = 0;
+    const effectiveCreditNotes = effectiveCreditNoteRows(creditNotes).filter((note) => note.effectiveAmount > 0);
+    for (const note of effectiveCreditNotes) {
+      if (!paymentMethodMatches("credit", requestedMethod)) continue;
+      const stockReturn = stockReturnsByNo.get(`RET-${note.noteNo}`);
+      const stockReturnValue = Number((stockReturn?.items || []).reduce((sum, item) => sum + Number(item.total || 0), 0));
+      const adjustmentValue = stockReturn && stockReturnValue > 0 ? toMoney(stockReturnValue) : Number(note.effectiveAmount || 0);
+      const noteTaxReturned = stockReturn?.taxAmount != null
+        ? Number(stockReturn.taxAmount)
+        : note.taxAmount != null
+          ? Number(note.taxAmount)
+          : returnedTaxAmount(adjustmentValue, note.sale);
+      if (stockReturn?.taxAmount != null || note.taxAmount != null) taxSnapshotAdjustments += 1;
+      else if (noteTaxReturned > 0) estimatedTaxAdjustments += 1;
+      const noteReturnedCogs = stockReturn
+        ? returnedInventoryCost(stockReturn.items, note.sale?.items || [])
+        : 0;
+      if (stockReturn) {
+        historicalCostFallbackLines += (note.sale?.items || []).filter((item) => item.cost === null || item.cost === undefined || item.cost === "").length;
+        subtractReturnedProducts(stockReturn.items, note.sale?.items || []);
+      }
+      salesReturns += adjustmentValue;
+      creditNoteAdjustments += adjustmentValue;
+      returnedTax += noteTaxReturned;
+      taxCollected -= noteTaxReturned;
+      netRevenue -= adjustmentValue;
+      returnedCogs += noteReturnedCogs;
+      cogs -= noteReturnedCogs;
+      transactionRows.push({
+        id: `credit-note-${note.id}`,
+        kind: "sales-adjustment",
+        date: note.createdAt,
+        reference: note.noteNo,
+        customer: note.customer?.name || "Unknown customer",
+        customerId: note.customerId,
+        staff: userLabel(note.sale?.User),
+        staffId: note.sale?.User?.id || null,
+        branch: note.branch?.name || "",
+        amount: adjustmentValue,
+        revenue: -adjustmentValue,
+        taxAmount: -noteTaxReturned,
+        taxAdjustment: -noteTaxReturned,
+        cogs: -noteReturnedCogs,
+        cashAmount: 0,
+        creditAmount: note.effectiveAmount,
+        debit: 0,
+        credit: note.effectiveAmount,
+        paymentMethod: "credit",
+        status: note.status,
+        reason: note.reason,
+        adjustmentType: "Credit note",
+        linkedSale: note.sale?.receiptNo || null,
+        refundAmount: Number(note.refundAmount || 0),
+        items: (stockReturn?.items || []).map((item) => ({
+          productId: item.productId,
+          product: item.product?.name || "Returned product",
+          quantity: item.quantity,
+          unitPrice: item.price,
+          total: item.total,
+          taxAmount: item.taxAmount ?? null,
+          cost: returnedInventoryCost([item], note.sale?.items || []),
+          profit: 0,
+        })),
+      });
+    }
+
+    for (const returned of saleReturns) {
+      const method = normalizedPaymentMethod(returned.refundMethod);
+      if (!paymentMethodMatches(method, requestedMethod)) continue;
+      const amount = Number(returned.total || 0);
+      const returnTax = returned.taxAmount != null
+        ? Number(returned.taxAmount)
+        : (returned.items || []).every((item) => item.taxAmount != null) && (returned.items || []).length
+          ? toMoney(returned.items.reduce((sum, item) => sum + Number(item.taxAmount || 0), 0))
+          : returnedTaxAmount(amount, returned.sale);
+      if (returned.taxAmount != null || ((returned.items || []).length && (returned.items || []).every((item) => item.taxAmount != null))) taxSnapshotAdjustments += 1;
+      else if (returnTax > 0) estimatedTaxAdjustments += 1;
+      const returnCogs = returnedInventoryCost(returned.items, returned.sale?.items || []);
+      if (returnCogs) historicalCostFallbackLines += (returned.sale?.items || []).filter((item) => item.cost === null || item.cost === undefined || item.cost === "").length;
+      subtractReturnedProducts(returned.items, returned.sale?.items || []);
+      salesReturns += amount;
+      posReturnAdjustments += amount;
+      returnedTax += returnTax;
+      taxCollected -= returnTax;
+      netRevenue -= amount;
+      returnedCogs += returnCogs;
+      cogs -= returnCogs;
+      transactionRows.push({
+        id: `sale-return-${returned.id}`,
+        kind: "sales-adjustment",
+        date: returned.createdAt,
+        reference: returned.returnNo,
+        customer: returned.customer?.name || returned.sale?.customerName || "Walk-in",
+        customerId: returned.customerId,
+        staff: userLabel(returned.user),
+        staffId: returned.userId,
+        branch: returned.branch?.name || "",
+        amount,
+        revenue: -amount,
+        taxAmount: -returnTax,
+        taxAdjustment: -returnTax,
+        cogs: -returnCogs,
+        cashAmount: 0,
+        creditAmount: amount,
+        debit: 0,
+        credit: amount,
+        paymentMethod: method,
+        status: returned.status,
+        reason: returned.reason,
+        adjustmentType: "POS sale return",
+        linkedSale: returned.sale?.receiptNo || null,
+        items: (returned.items || []).map((item) => ({
+          productId: item.productId,
+          product: item.product?.name || "Returned product",
+          quantity: item.quantity,
+          unitPrice: item.price,
+          total: item.total,
+          taxAmount: item.taxAmount ?? null,
+          cost: returnedInventoryCost([item], returned.sale?.items || []),
+          profit: 0,
+        })),
+      });
     }
 
     let debtCollections = 0;
@@ -1225,9 +1563,15 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const { cashReceived, cashAtHand, netCashMovement } = cashMovement;
     const cashLedger = cashTransactions.filter((movement) => movement.account?.type === "cash")
       .map((movement) => ({ ...financialCashMovementRow(movement), kind: "cash-movement" }));
-    const expensesTotal = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-    const revenue = netRevenue;
-    const grossProfit = revenue - cogs;
+    const expensesTotal = toMoney(filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0));
+    salesReturns = toMoney(salesReturns);
+    creditNoteAdjustments = toMoney(creditNoteAdjustments);
+    posReturnAdjustments = toMoney(posReturnAdjustments);
+    returnedTax = toMoney(returnedTax);
+    const revenue = toMoney(netRevenue);
+    cogs = toMoney(cogs);
+    const grossProfit = toMoney(revenue - cogs);
+    const netProfit = toMoney(grossProfit - expensesTotal);
     const staffTills = cashAccounts.map((account) => {
       const stats = accountMovementMap.get(account.id) || { cashIn: 0, cashOut: 0, transferIn: 0, transferOut: 0, debit: 0, credit: 0, lastBalance: null };
       const netMovement = stats.cashIn + stats.transferIn - stats.cashOut - stats.transferOut;
@@ -1254,7 +1598,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
 
     res.json({
       header: {
-        date: start.toISOString().slice(0, 10),
+        date: localDateAt(start, timeZone),
         businessName: tenant?.name || "Business",
         businessEmail: tenant?.email || "",
         businessPhone: tenant?.phone || "",
@@ -1264,33 +1608,53 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         generatedBy: userLabel(req.user),
       },
       filters: { from: start.toISOString(), to: end.toISOString(), branchId: scope.branchId || "all", userId, customerId, paymentMethod: req.query.paymentMethod || "all" },
-      note: "Credit sales include credit invoices only. Credit/debit notes are adjustments and are reported separately.",
+      note: "Sales returns and credit notes reduce net revenue. Cash refunds are reconciled from their actual cash-account movements; stock-only return records are not counted as a second refund.",
       reportNotes: [
-        "Credit sales include credit invoices only. Credit notes and debit notes are adjustments and are reported separately.",
+        "Sales returns and credit notes reduce net revenue. Returned inventory reduces cost of goods sold only when a linked stock return is recorded.",
+        "Cash refunds are reconciled from cash-account movements and are not counted a second time as sales expenses.",
       ],
       summary: {
-        totalSales,
-        grossSales: totalSales,
-        taxCollected,
+        totalSales: toMoney(totalSales),
+        grossSales: toMoney(totalSales),
+        salesReturns,
+        creditNoteAdjustments,
+        posReturnAdjustments,
+        returnedTax,
+        netSales: revenue,
+        taxCollected: toMoney(taxCollected),
         revenue,
-        cashSales,
-        creditSales: salesBreakdown.credit,
-        mobileMoneySales: salesBreakdown.mobile_money,
-        bankSales: salesBreakdown.bank,
-        cardSales: salesBreakdown.card,
-        debtCollections,
+        cashSales: toMoney(cashSales),
+        creditSales: toMoney(salesBreakdown.credit),
+        mobileMoneySales: toMoney(salesBreakdown.mobile_money),
+        bankSales: toMoney(salesBreakdown.bank),
+        cardSales: toMoney(salesBreakdown.card),
+        debtCollections: toMoney(debtCollections),
         cashReceived,
         cashAtHand,
         netCashMovement,
         expenses: expensesTotal,
         grossProfit,
-        netProfit: grossProfit - expensesTotal,
+        netProfit,
         customersServed: customerMap.size,
         transactionCount: transactionRows.length,
       },
       cashMovement,
       cashLedger,
-      profitability: { grossSales: totalSales, taxCollected, revenue, cogs, grossProfit, expenses: expensesTotal, netProfit: grossProfit - expensesTotal },
+      profitability: { grossSales: toMoney(totalSales), salesReturns, creditNoteAdjustments, posReturnAdjustments, returnedTax, netSales: revenue, taxCollected: toMoney(taxCollected), revenue, cogs, returnedCogs: toMoney(returnedCogs), grossProfit, expenses: expensesTotal, netProfit },
+      accountingReconciliation: {
+        salesReturns: { creditNotes: creditNoteAdjustments, posReturns: posReturnAdjustments, total: salesReturns },
+        tax: {
+          returnedTax,
+          snapshotAdjustments: taxSnapshotAdjustments,
+          estimatedAdjustments: estimatedTaxAdjustments,
+          status: estimatedTaxAdjustments ? "estimated_from_original_sale" : taxSnapshotAdjustments ? "recorded_at_transaction" : "no_return_tax_adjustment",
+          note: estimatedTaxAdjustments ? "Some legacy return records do not store original line-level tax; their tax reversal is proportionally estimated from the linked sale." : null,
+        },
+        costing: {
+          historicalCostFallbackLines,
+          status: historicalCostFallbackLines ? "estimated_for_legacy_lines" : "sale_cost_snapshots_available",
+        },
+      },
       customerActivity: [...customerMap.values()].sort((a, b) => (b.cashSales + b.creditSales + b.payments) - (a.cashSales + a.creditSales + a.payments)),
       staffActivity: [...staffMap.values()].sort((a, b) => b.sales - a.sales),
       productActivity: [...productMap.values()].sort((a, b) => b.salesValue - a.salesValue),

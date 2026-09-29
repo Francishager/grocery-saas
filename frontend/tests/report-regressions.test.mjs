@@ -128,6 +128,21 @@ test('Cash at Hand details include opening float but Net Cash Movement details d
   assert.equal(data.cashLedger.length, 2, 'opening rows must not mutate the API ledger');
 });
 
+test('Cash at Hand can be zero while the drilldown lists gross movements that net to zero', () => {
+  const data = { header: { date: '2026-09-29' },
+    cashMovement: { openingCash: 0, cashAtHand: 0, netCashMovement: 0 },
+    cashLedger: [
+      { id: 'cash-sale', amount: 500, debit: 500, credit: 0, type: 'Cash Inflow' },
+      { id: 'safe-deposit', amount: 500, debit: 0, credit: 500, type: 'Cash Outflow', description: 'Transferred to safe' },
+    ],
+  };
+  assert.equal(amount(render(data), 'Cash at Hand'), 0);
+  const rows = drilldown(data, 'Cash at Hand');
+  assert.equal(rows.length, 3, 'opening float and both movements remain visible');
+  assert.equal(rows.reduce((sum, row) => sum + row.debit - row.credit, 0), 0);
+  assert.equal(rows.reduce((sum, row) => sum + row.amount, 0), 1000, 'the list shows gross movement amounts, not the closing net');
+});
+
 test('partially paid credit invoices split cash and credit card details without counting the full invoice twice', () => {
   const data = { summary: { cashSales: 200, creditSales: 800 }, transactions: [
     { id: 'invoice', kind: 'credit-sale', paymentMethod: 'credit', amount: 1000,
@@ -137,6 +152,22 @@ test('partially paid credit invoices split cash and credit card details without 
   assert.equal(total(drilldown(data, 'Credit Sales')), 800);
   assert.equal(amount(render(data), 'Cash Sales'), 200);
   assert.equal(amount(render(data), 'Credit Sales'), 800);
+});
+
+test('sales returns and credit notes reduce net revenue and reverse returned inventory cost in profit drilldowns', () => {
+  const data = { summary: { salesReturns: 300 }, profitability: {
+    revenue: 700, salesReturns: 300, cogs: 250, returnedCogs: 350, grossProfit: 450, expenses: 50, netProfit: 400,
+  }, transactions: [
+    { id: 'sale', kind: 'sale', paymentMethod: 'cash', amount: 1000, revenue: 1000, cogs: 600 },
+    { id: 'return', kind: 'sales-adjustment', adjustmentType: 'POS sale return', amount: 300, revenue: -300, cogs: -350 },
+    { id: 'expense', kind: 'expense', paymentMethod: 'cash', amount: 50 },
+  ] };
+  const tree = render(data);
+  assert.equal(amount(tree, 'Sales Returns / Credit Notes'), 300);
+  assert.equal(amount(tree, 'Gross Profit'), 450);
+  assert.equal(amount(tree, 'Net Profit'), 400);
+  assert.equal(total(drilldown(data, 'Sales Returns / Credit Notes')), 300);
+  assert.equal(total(drilldown(data, 'Gross Profit')), 450);
 });
 
 test('gross/net profit drilldowns use revenue minus saved COGS and signed expense reversals', () => {

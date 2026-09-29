@@ -20,6 +20,10 @@ export interface DailyBusinessData {
   cashMovement: Record<string, number>
   cashLedger?: any[]
   profitability: Record<string, number>
+  accountingReconciliation?: {
+    costing?: { historicalCostFallbackLines?: number; status?: string }
+    tax?: { returnedTax?: number; estimatedAdjustments?: number; snapshotAdjustments?: number; status?: string; note?: string | null }
+  }
   customerActivity: any[]
   staffActivity: any[]
   productActivity: any[]
@@ -29,7 +33,7 @@ export interface DailyBusinessData {
   generatedAt: string
 }
 
-type Drilldown = { title: string; rows: any[] } | null
+type Drilldown = { title: string; rows: any[]; closingBalance?: number } | null
 type SummaryCard = { label: string; value: number; kinds: string[]; methods?: string[]; icon: typeof BarChart3 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -188,6 +192,16 @@ function groupMoneyRows<T extends { key: string; label: string }>(
 
 function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldown; onClose: () => void; onTransaction: (row: any) => void }) {
   if (!drilldown) return null
+  const showCashReconciliation = drilldown.title === 'Cash at Hand'
+  const openingCash = drilldown.rows
+    .filter((row) => row.kind === 'opening-balance')
+    .reduce((sum, row) => sum + numberValue(row.debit) - numberValue(row.credit), 0)
+  const cashPeriodRows = drilldown.rows.filter((row) => row.kind !== 'opening-balance')
+  const periodCashIn = cashPeriodRows.reduce((sum, row) => sum + numberValue(row.debit), 0)
+  const periodCashOut = cashPeriodRows.reduce((sum, row) => sum + numberValue(row.credit), 0)
+  const detailClosingCash = openingCash + periodCashIn - periodCashOut
+  const reportedClosingCash = numberValue(drilldown.closingBalance ?? detailClosingCash)
+  const cashReconciliationDifference = Math.round((reportedClosingCash - detailClosingCash) * 100) / 100
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-0 print:hidden sm:items-center sm:p-4" role="dialog" aria-modal="true">
       <div className="max-h-[90vh] w-full overflow-hidden rounded-t-xl bg-background shadow-xl sm:max-w-6xl sm:rounded-xl">
@@ -196,6 +210,31 @@ function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldo
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close details"><X className="h-5 w-5" /></Button>
         </div>
         <div className="max-h-[75vh] overflow-auto p-4 sm:p-6">
+          {showCashReconciliation && (
+            <div className="mb-4 space-y-3 rounded-lg border bg-muted/20 p-4">
+              <p className="text-sm leading-5 text-muted-foreground">
+                Cash at Hand is the cash remaining in tills. Cash moved into safe, bank, or mobile-money accounts is separate; the transaction list shows individual movements, while the card shows their closing net.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ['Opening till cash', openingCash],
+                  ['Cash in during period', periodCashIn],
+                  ['Cash out during period', periodCashOut],
+                  ['Closing cash at hand', reportedClosingCash],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="min-w-0">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="mt-1 whitespace-nowrap font-semibold tabular-nums">{money(value)}</p>
+                  </div>
+                ))}
+              </div>
+              {Math.abs(cashReconciliationDifference) >= 0.01 && (
+                <p role="status" className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                  Detail movements differ from the report card by {money(cashReconciliationDifference)}. Review the selected date, branch, and staff filters.
+                </p>
+              )}
+            </div>
+          )}
           {drilldown.rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No transactions match this figure.</p>
           ) : (
@@ -244,21 +283,25 @@ function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldo
 
 function TransactionModal({ row, onClose }: { row: any; onClose: () => void }) {
   if (!row) return null
-  const fields = [
+  const fields: [string, any][] = [
     ['Reference', row.reference || row.id],
     ['Date / Time', row.date ? new Date(row.date).toLocaleString() : '-'],
-    ['Type', row.kind === 'credit-sale' ? 'Credit Sale' : row.kind === 'collection' ? 'Customer Payment' : row.kind === 'expense' ? 'Expense' : row.kind === 'transfer' ? 'Cash Transfer' : 'Sale'],
+    ['Type', row.kind === 'credit-sale' ? 'Credit Sale' : row.kind === 'sales-adjustment' ? row.adjustmentType || 'Sales Return / Credit Note' : row.kind === 'collection' ? 'Customer Payment' : row.kind === 'expense' ? 'Expense' : row.kind === 'transfer' ? 'Cash Transfer' : 'Sale'],
     ['Customer', row.customer || 'Walk-in'],
     ['Customer Balance', money(row.customerBalance)],
     ['Staff', row.staff || '-'],
     ['Branch', row.branch || '-'],
     ['Payment Method', text(row.paymentMethod)],
     ['Amount', money(row.amount)],
+    ...(row.taxAmount !== undefined ? [['Tax / Tax Reversal', money(row.taxAmount)]] : []),
     ['Debit', money(row.debit)],
     ['Credit', money(row.credit)],
     ['Cash Portion', money(row.cashAmount)],
     ['Credit Portion', money(row.creditAmount)],
     ['Status', row.status || 'Completed'],
+    ...(row.linkedSale ? [['Original Sale', row.linkedSale]] : []),
+    ...(row.reason ? [['Reason', row.reason.replace(/_/g, ' ')]] : []),
+    ...(row.refundAmount !== undefined ? [['Cash Actually Refunded', money(row.refundAmount)]] : []),
   ]
   return (
     <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 p-0 print:hidden sm:items-center sm:p-4" role="dialog" aria-modal="true">
@@ -281,7 +324,7 @@ function TransactionModal({ row, onClose }: { row: any; onClose: () => void }) {
             <div className="overflow-x-auto rounded-md border">
               <table className="min-w-[700px] w-full text-sm">
                 <thead className="bg-muted/50">
-                  <tr><th className="px-3 py-2 text-left">Product</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Unit Price</th><th className="px-3 py-2 text-right">Total</th><th className="px-3 py-2 text-right">COGS</th><th className="px-3 py-2 text-right">Gross Profit</th></tr>
+                  <tr><th className="px-3 py-2 text-left">Product</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Unit Price</th><th className="px-3 py-2 text-right">Total</th><th className="px-3 py-2 text-right">Tax</th><th className="px-3 py-2 text-right">COGS</th><th className="px-3 py-2 text-right">Gross Profit</th></tr>
                 </thead>
                 <tbody>
                   {row.items.map((item: any, index: number) => (
@@ -290,6 +333,7 @@ function TransactionModal({ row, onClose }: { row: any; onClose: () => void }) {
                       <td className="px-3 py-2 text-right">{item.quantity}</td>
                       <td className="px-3 py-2 text-right">{money(item.unitPrice)}</td>
                       <td className="px-3 py-2 text-right">{money(item.total)}</td>
+                      <td className="px-3 py-2 text-right">{item.taxAmount == null ? '-' : money(item.taxAmount)}</td>
                       <td className="px-3 py-2 text-right">{money(item.cost)}</td>
                       <td className="px-3 py-2 text-right">{money(item.profit)}</td>
                     </tr>
@@ -366,7 +410,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     }
     return [...rows.values()]
   }
-  const openKind = (title: string, kinds: string[], methods?: string[]) => {
+  const openKind = (title: string, kinds: string[], methods?: string[], closingBalance?: number) => {
     if ((title === 'Cash at Hand' || title === 'Net Cash Movement') && Array.isArray(data.cashLedger)) {
       const opening = numberValue(cash.openingCash)
       const rows = title === 'Cash at Hand' ? [{
@@ -374,13 +418,13 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         description: 'Opening Physical Cash', account: 'Cash tills', paymentMethod: 'cash',
         amount: opening, debit: Math.max(0, opening), credit: Math.max(0, -opening),
       }, ...data.cashLedger] : data.cashLedger
-      setDrilldown({ title, rows })
+      setDrilldown({ title, rows, closingBalance: title === 'Cash at Hand' ? closingBalance : undefined })
       return
     }
     let rows = rowsForKinds(kinds, methods)
     if (title === 'Credit Sales') rows = rows.filter((row) => numberValue(row.creditAmount) > 0)
       .map((row) => ({ ...row, amount: numberValue(row.creditAmount), debit: 0, credit: numberValue(row.creditAmount) }))
-    if (title === 'Gross Profit' || title === 'Net Profit') rows = rows.map((row) => {
+    if (title.startsWith('Gross Profit') || title.startsWith('Net Profit')) rows = rows.map((row) => {
       const amount = row.kind === 'expense' ? -numberValue(row.amount)
         : numberValue(row.revenue ?? row.amount) - numberValue(row.cogs)
       return { ...row, amount, debit: Math.max(0, amount), credit: Math.max(0, -amount) }
@@ -448,15 +492,23 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       cashExpenseTotal -
       numberValue(cash.otherCashOut) -
       cashTransfersOutTotal
-    const cogsTotal = sum(saleRows, (row) => Array.isArray(row.items)
+    const returnRows = transactions.filter((row) => row.kind === 'sales-adjustment')
+    const accountingSaleRows = [...saleRows, ...returnRows]
+    const cogsTotal = sum(accountingSaleRows, (row) => row.cogs !== undefined
+      ? numberValue(row.cogs)
+      : Array.isArray(row.items)
       ? row.items.reduce((total: number, item: any) => total + numberValue(item.cost ?? item.cogs), 0)
       : numberValue(row.cogs ?? row.cost)
     )
-    const revenueTotal = metricValue(profitability.revenue ?? summary.revenue, transactionTotal - numberValue(summary.taxCollected))
+    const derivedRevenue = sum(saleRows, (row) => numberValue(row.revenue ?? row.amount)) + sum(returnRows, (row) => numberValue(row.revenue))
+    const revenueFallback = saleRows.length || returnRows.length ? derivedRevenue : transactionTotal - numberValue(summary.taxCollected)
+    const revenueTotal = metricValue(profitability.revenue ?? summary.revenue, revenueFallback)
     const grossProfitTotal = fromSummary(profitability.grossProfit ?? summary.grossProfit, revenueTotal - cogsTotal)
 
     return {
       totalSales: fromSummary(summary.totalSales ?? summary.grossSales, transactionTotal, saleRows.length > 0),
+      salesReturns: metricValue(profitability.salesReturns ?? summary.salesReturns),
+      taxCollected: fromSummary(profitability.taxCollected ?? summary.taxCollected, sum(saleRows, (row) => row.taxAmount) + sum(returnRows, (row) => row.taxAmount), Boolean(saleRows.length || returnRows.length)),
       revenue: revenueTotal,
       cogs: metricValue(profitability.cogs ?? summary.cogs, cogsTotal),
       cashSales: fromSummary(summary.cashSales, methodTotal('cash'), saleRows.length > 0),
@@ -466,10 +518,10 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       cardSales: fromSummary(summary.cardSales, methodTotal('card'), saleRows.length > 0),
       debtCollections: fromSummary(summary.debtCollections, collectionTotal, transactions.some((row) => row.kind === 'collection')),
       expenses: fromSummary(summary.expenses, expenseTotal, expenseRows.length > 0),
-      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand, Boolean(data.cashLedger?.length || transactions.length || expenseRows.length)),
+      cashAtHand: fromSummary(cash.cashAtHand ?? summary.cashAtHand, derivedCashAtHand, Boolean(data.cashLedger?.length || methodTotal('cash') > 0 || cashCollectionTotal > 0 || cashExpenseTotal > 0 || cashTransfersInTotal > 0 || cashTransfersOutTotal > 0 || otherPhysicalCashIn > 0 || otherPhysicalCashOut > 0)),
       netCashMovement: fromSummary(cash.netCashMovement ?? summary.netCashMovement, derivedNetCashMovement, Boolean(data.cashLedger?.length || transactions.length || expenseRows.length)),
       grossProfit: grossProfitTotal,
-      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal, Boolean(saleRows.length || expenseRows.length)),
+      netProfit: fromSummary(profitability.netProfit ?? summary.netProfit, grossProfitTotal - expenseTotal, Boolean(saleRows.length || returnRows.length || expenseRows.length)),
     }
   }, [cash, cashMovementRows, expenseRows, profitability, summary, transactions])
 
@@ -481,6 +533,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Bank / Card Sales', value: cardTotals.bankSales + cardTotals.cardSales, kinds: ['sale', 'credit-sale'], methods: ['bank', 'card'], icon: ArrowUpFromLine },
     { label: 'Debt Collections', value: cardTotals.debtCollections, kinds: ['collection'], icon: ReceiptText },
     { label: 'Expenses', value: cardTotals.expenses, kinds: ['expense'], icon: ArrowDownToLine },
+    { label: 'Sales Tax Collected', value: cardTotals.taxCollected, kinds: ['sale', 'credit-sale', 'sales-adjustment'], icon: ReceiptText },
   ]
 
   const cashRows = [
@@ -500,14 +553,15 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     ['Cash Retained / Float', cash.cashRetained],
   ]
   const balancingTotals = [
-    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Closing cash till balance for the selected branch, staff and period', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
+    { label: 'Cash at Hand', value: cardTotals.cashAtHand, note: 'Cash remaining in tills after outflows; safe, bank and mobile money are separate', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Cash Sales', value: cardTotals.cashSales, note: 'Sales paid by cash', kinds: ['sale', 'credit-sale'], methods: ['cash'] },
     { label: 'Credit Sales', value: cardTotals.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
+    { label: 'Sales Returns / Credit Notes', value: cardTotals.salesReturns, note: 'Issued customer sales adjustments; actual refunds appear in cash movements', kinds: ['sales-adjustment'] },
     { label: 'Debt Collections', value: cardTotals.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
     { label: 'Expenses', value: cardTotals.expenses, note: 'Expenses recognized in the selected period', kinds: ['expense'] },
     { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash till receipts minus payments, refunds and transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
-    { label: 'Gross Profit', value: cardTotals.grossProfit, note: 'Sales minus COGS', kinds: ['sale', 'credit-sale'] },
-    { label: 'Net Profit', value: cardTotals.netProfit, note: 'Gross profit minus expenses', kinds: ['sale', 'credit-sale', 'expense'] },
+    { label: 'Gross Profit', value: cardTotals.grossProfit, note: 'Net revenue after returns less net COGS after returned inventory', kinds: ['sale', 'credit-sale', 'sales-adjustment'] },
+    { label: 'Net Profit', value: cardTotals.netProfit, note: 'Gross profit minus recognized expenses', kinds: ['sale', 'credit-sale', 'sales-adjustment', 'expense'] },
   ]
   const cashFormulaRows = [
     { label: 'Opening Physical Cash', inflow: cash.openingCash, outflow: 0 },
@@ -536,6 +590,17 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         </div>
       </div>
 
+      {numberValue(data.accountingReconciliation?.costing?.historicalCostFallbackLines) > 0 && (
+        <div role="status" className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
+          Gross profit includes current-product-cost estimates for {numberValue(data.accountingReconciliation?.costing?.historicalCostFallbackLines)} legacy sale line(s) without a saved sale-time cost. Treat the affected margin as estimated.
+        </div>
+      )}
+      {data.accountingReconciliation?.tax?.status === 'estimated_from_original_sale' && (
+        <div role="status" className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
+          Returned tax of {money(data.accountingReconciliation.tax.returnedTax)} includes estimates for {numberValue(data.accountingReconciliation.tax.estimatedAdjustments)} legacy return(s) without saved line-tax snapshots. Confirm this amount against the tax credit notes before filing.
+        </div>
+      )}
+
       <section>
         <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -546,7 +611,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {balancingTotals.map((item) => (
-            <button key={item.label} className="min-w-0 text-left print:pointer-events-none" onClick={() => openKind(item.label, item.kinds, item.methods)}>
+            <button key={item.label} className="min-w-0 text-left print:pointer-events-none" onClick={() => openKind(item.label, item.kinds, item.methods, item.value)}>
               <Card className={item.label === 'Cash at Hand' ? 'h-full border-primary/60 bg-primary/5' : 'h-full transition hover:border-primary hover:shadow-sm'}>
                 <CardContent className="p-4">
                   <p className="text-xs font-semibold uppercase text-muted-foreground">{item.label}</p>
@@ -585,11 +650,14 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><BriefcaseBusiness className="h-4 w-4" />Profitability</CardTitle></CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
             {[
-              ['Revenue', cardTotals.revenue],
+              ['Sales Revenue Before Returns', cardTotals.revenue + cardTotals.salesReturns],
+              ['Sales Returns / Credit Notes', -cardTotals.salesReturns],
+              ['Sales Tax Collected (liability, excluded from income)', cardTotals.taxCollected],
+              ['Net Revenue', cardTotals.revenue],
               ['COGS', cardTotals.cogs],
               ['Gross Profit', cardTotals.grossProfit],
               ['Net Profit', cardTotals.netProfit],
-            ].map(([label, value]) => <button key={label} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openKind(`${label} Support`, ['sale', 'credit-sale'])}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 min-h-[1.5rem] whitespace-nowrap overflow-visible font-semibold tabular-nums" aria-label={`${label}: ${money(value)}`}>{money(value)}</p></button>)}
+            ].map(([label, value]) => <button key={label} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openKind(`${label} Support`, ['sale', 'credit-sale', 'sales-adjustment'])}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 min-h-[1.5rem] whitespace-nowrap overflow-visible font-semibold tabular-nums" aria-label={`${label}: ${money(value)}`}>{money(value)}</p></button>)}
           </CardContent>
         </Card>
       </section>

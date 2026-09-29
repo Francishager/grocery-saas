@@ -1158,6 +1158,7 @@ model SaleItem {
   unitName         String? // Selling unit name (e.g. "Half KG", "Pack")
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
+  taxAmount        Float?   // Sale-time tax allocated to this line; null for legacy rows
   serviceJobCards ServiceJobCard[]
   createdAt        DateTime @default(now())
 
@@ -1320,6 +1321,7 @@ model SaleRecordItem {
   unitName         String? // Selling unit name
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
+  taxAmount        Float?   // Sale-time tax allocated to this line; null for legacy rows
   createdAt        DateTime   @default(now())
 
   @@map("sale_record_items")
@@ -1815,6 +1817,7 @@ model SaleReturn {
   customerId   String?
   customer     Customer?        @relation(fields: [customerId], references: [id])
   total        Float            @default(0)
+  taxAmount    Float?           // Tax reversed by this return; null for legacy rows
   reason       String?
   refundMethod String           @default("cash") // cash, credit, mobile_money
   status       String           @default("completed") // completed, pending
@@ -1837,6 +1840,7 @@ model SaleReturnItem {
   quantity  Int
   price     Float
   total     Float
+  taxAmount Float?   // Original sale-line tax allocated to the returned quantity
   reason    String?
   createdAt DateTime   @default(now())
 
@@ -3780,6 +3784,7 @@ model CreditNote {
   saleId     String? // Linked sale record (required for new notes)
   sale       SaleRecord? @relation(fields: [saleId], references: [id], onDelete: SetNull)
   amount     Float
+  taxAmount Float?  // Tax component of this credit note when known
   refundAmount       Float   @default(0)
   refundWithdrawalId String?
   refundCashAccountId String?

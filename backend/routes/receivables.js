@@ -9,6 +9,7 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
 import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
 import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
+import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import {
   attachCustomerReceivableBalances,
@@ -1066,6 +1067,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     const computedSubtotal = saleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
     const computedDiscount = saleItems.reduce((sum, item) => sum + item.discount, 0) + toMoney(discount)
     const computedTax = toMoney(tax)
+    const itemTaxAmounts = allocateSaleTaxToItems(saleItems, computedTax)
+    saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index] })
     const computedTotal = Math.max(0, computedSubtotal + computedTax - computedDiscount)
     const paid = Math.min(toMoney(amountPaid), computedTotal)
     const balance = Math.max(0, computedTotal - paid)
@@ -1136,6 +1139,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           conversionFactor: item.conversionFactor,
           productRevenue: item.productRevenue,
           serviceRevenue: item.serviceRevenue,
+          taxAmount: item.taxAmount,
           total: item.total
         }))
       })

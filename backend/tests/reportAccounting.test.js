@@ -91,6 +91,17 @@ test('cancelled-sale cash receipts and their refunds remain in cash reconciliati
   assert.equal(result.netCashMovement, 0);
 });
 
+test('credit note refunds reduce till cash and refund reversals restore it', () => {
+  const result = summarizeCashMovements([
+    movement('till', 'sale', 500000, 'sale'),
+    movement('till', 'credit_note_refund', 120000, 'CN-1'),
+    movement('till', 'credit_note_refund_reversal', 20000, 'CN-2-REV'),
+  ], 100000);
+  assert.equal(result.cashAtHand, 500000);
+  assert.equal(result.cashPaidOut, 120000);
+  assert.equal(result.otherCashIn, 20000);
+});
+
 test('historical cash balances exclude later activity and preserve opening float', () => {
   const balances = accountCashBalances(
     [{ id: 'till', balance: 850000 }, { id: 'quiet', balance: 90000 }],

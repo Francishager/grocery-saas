@@ -4,6 +4,7 @@ import { authenticateToken, requirePermission, requireCashAccount, canUsePayment
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
+import { returnItemTaxAmount } from "../src/utils/saleTaxAllocation.js";
 
 const router = Router();
 const CREDIT_NOTE_STOCK_RETURN_METHOD = "credit_note_stock";
@@ -293,6 +294,7 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
           quantity: baseQty,
           price: baseQty > 0 ? toMoney(lineTotal / baseQty) : toMoney(saleItem.price),
           total: lineTotal,
+          taxAmount: returnItemTaxAmount(saleItem, qty),
           reason: requested.reason || reason || null,
         });
       }
@@ -334,6 +336,9 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
           userId: req.user.id,
           customerId: null,
           total,
+          taxAmount: returnItems.every((item) => item.taxAmount != null)
+            ? toMoney(returnItems.reduce((sum, item) => sum + item.taxAmount, 0))
+            : null,
           reason,
           refundMethod: requestedRefundMethod,
           status: "completed",

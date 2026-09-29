@@ -4,6 +4,7 @@ import { authenticateToken, requirePermission, requireTenant } from '../middlewa
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../src/utils/customerBalance.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
+import { returnItemTaxAmount } from '../src/utils/saleTaxAllocation.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -357,6 +358,7 @@ async function resolveCreditReturnItems(client, scope, { customerId, saleId, ite
       quantity: requestedBaseQty,
       price: requestedBaseQty > 0 ? toMoney(lineTotal / requestedBaseQty) : 0,
       total: lineTotal,
+      taxAmount: returnItemTaxAmount(item, requestedQty),
       reason: 'Credit note stock reversal',
     })
   }
@@ -399,6 +401,9 @@ async function createCreditNoteStockReturn(client, scope, note, items) {
       userId: note.userId,
       customerId: note.customerId,
       total: 0,
+      taxAmount: returnItems.every((item) => item.taxAmount != null)
+        ? toMoney(returnItems.reduce((sum, item) => sum + item.taxAmount, 0))
+        : null,
       reason: `Stock returned by credit note ${note.noteNo}`,
       refundMethod: CREDIT_NOTE_STOCK_RETURN_METHOD,
       status: CREDIT_NOTE_STOCK_RETURN_STATUS,
@@ -799,8 +804,12 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
     const creditCapacity = await remainingSaleCreditCapacity(prisma, scope, saleId)
     if (!creditCapacity) return res.status(404).json({ error: 'Original customer sale was not found' })
 
+    let noteTaxAmount = null
     if (CREDIT_STOCK_REASONS.has(normalizedReason)) {
-      const { netReturnAmount } = await resolveCreditReturnItems(prisma, scope, { customerId, saleId, items })
+      const { netReturnAmount, returnItems } = await resolveCreditReturnItems(prisma, scope, { customerId, saleId, items })
+      if (returnItems.every((item) => item.taxAmount != null)) {
+        noteTaxAmount = toMoney(returnItems.reduce((sum, item) => sum + item.taxAmount, 0))
+      }
       noteAmount = normalizedReason === 'cancellation' ? creditCapacity.remaining : netReturnAmount
     }
 
@@ -820,6 +829,7 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
           customerId,
           saleId: saleId || null,
           amount: noteAmount,
+          taxAmount: noteTaxAmount,
           reason: normalizedReason,
           notes: notes || null,
           userId: req.user.id,
