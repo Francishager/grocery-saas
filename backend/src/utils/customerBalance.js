@@ -57,6 +57,39 @@ const groupSumMap = (groups, field) => new Map(
   groups.map((group) => [group.customerId, toMoney(group._sum?.[field])])
 );
 
+function summarizeSaleAndCustomerPayments(sales = [], payments = []) {
+  const saleCustomerById = new Map(sales.map((sale) => [sale.id, sale.customerId]));
+  const linkedPaymentsBySale = new Map();
+  const unlinkedPaymentsByCustomer = new Map();
+
+  for (const payment of payments) {
+    const amount = toMoney(payment.amount ?? payment._sum?.amount);
+    if (payment.saleId && saleCustomerById.get(payment.saleId) === payment.customerId) {
+      linkedPaymentsBySale.set(payment.saleId, roundMoney(toMoney(linkedPaymentsBySale.get(payment.saleId)) + amount));
+    } else {
+      unlinkedPaymentsByCustomer.set(payment.customerId,
+        roundMoney(toMoney(unlinkedPaymentsByCustomer.get(payment.customerId)) + amount));
+    }
+  }
+
+  const salesByCustomer = new Map();
+  const salePaymentsByCustomer = new Map();
+  for (const sale of sales) {
+    const customerId = sale.customerId;
+    const net = receivableSaleNetTotal(sale);
+    const recordedPaid = Math.max(0, toMoney(sale.amountPaid));
+    const linkedPaid = Math.max(0, toMoney(linkedPaymentsBySale.get(sale.id)));
+    // amountPaid is cumulative; sale-linked payment rows can contain those same receipts.
+    const paidOnce = Math.max(recordedPaid, linkedPaid);
+
+    salesByCustomer.set(customerId, roundMoney(toMoney(salesByCustomer.get(customerId)) + net));
+    salePaymentsByCustomer.set(customerId,
+      roundMoney(toMoney(salePaymentsByCustomer.get(customerId)) + paidOnce));
+  }
+
+  return { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer };
+}
+
 async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = []) {
   const ids = [...new Set(customerIds.filter(Boolean))];
   if (!scope?.tenantId || !ids.length) return new Map();
@@ -93,10 +126,10 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   const [sales, payments, withdrawals, creditNotes, creditReturns] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      select: { customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
+      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
     }),
     client.customerPayment.groupBy({
-      by: ["customerId"],
+      by: ["customerId", "saleId"],
       where: tenantCustomerWhere,
       _sum: { amount: true },
     }),
@@ -114,29 +147,28 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
     }),
   ]);
 
-  const salesMap = new Map();
-  for (const sale of sales) {
-    salesMap.set(sale.customerId, roundMoney(toMoney(salesMap.get(sale.customerId)) + receivableSaleNetTotal(sale)));
-  }
-  const paymentsMap = groupSumMap(payments, "amount");
+  const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer } =
+    summarizeSaleAndCustomerPayments(sales, payments);
   const withdrawalsMap = groupSumMap(withdrawals, "amount");
   const creditNotesMap = creditNotes;
   const creditReturnsMap = groupSumMap(creditReturns, "total");
 
   return new Map(customerList.map((customer) => {
     const openingBalance = Math.max(0, toMoney(customer.openingBalance));
-    const receivableSales = salesMap.get(customer.id) || 0;
-    const customerPayments = paymentsMap.get(customer.id) || 0;
+    const receivableSales = salesByCustomer.get(customer.id) || 0;
+    const salePayments = salePaymentsByCustomer.get(customer.id) || 0;
+    const customerPayments = unlinkedPaymentsByCustomer.get(customer.id) || 0;
     const customerWithdrawals = withdrawalsMap.get(customer.id) || 0;
     const creditNoteTotal = creditNotesMap.get(customer.id) || 0;
     const creditReturnTotal = creditReturnsMap.get(customer.id) || 0;
-    const balance = roundMoney(openingBalance + receivableSales + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal);
+    const balance = roundMoney(openingBalance + receivableSales - salePayments + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal);
     return [customer.id, {
       customerId: customer.id,
       balance,
       components: {
         openingBalance,
         receivableSales,
+        salePayments,
         customerPayments,
         customerWithdrawals,
         creditNotes: creditNoteTotal,
@@ -167,9 +199,10 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const [sales, payments, withdrawals, creditNotes, creditReturns] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      select: { total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
+      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true },
     }),
-    client.customerPayment.aggregate({
+    client.customerPayment.groupBy({
+      by: ["customerId", "saleId"],
       where: tenantCustomerWhere,
       _sum: { amount: true },
     }),
@@ -185,19 +218,23 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
     }),
   ]);
 
+  const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer } =
+    summarizeSaleAndCustomerPayments(sales, payments);
   const openingBalance = Math.max(0, toMoney(customer.openingBalance));
-  const receivableSales = sales.reduce((sum, sale) => roundMoney(sum + receivableSaleNetTotal(sale)), 0);
-  const customerPayments = toMoney(payments._sum.amount);
+  const receivableSales = salesByCustomer.get(customerId) || 0;
+  const salePayments = salePaymentsByCustomer.get(customerId) || 0;
+  const customerPayments = unlinkedPaymentsByCustomer.get(customerId) || 0;
   const customerWithdrawals = toMoney(withdrawals._sum.amount);
   const creditNoteTotal = toMoney(creditNotes.get(customerId));
   const creditReturnTotal = toMoney(creditReturns._sum.total);
 
   return {
     customerId,
-    balance: roundMoney(openingBalance + receivableSales + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal),
+    balance: roundMoney(openingBalance + receivableSales - salePayments + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal),
     components: {
       openingBalance,
       receivableSales,
+      salePayments,
       customerPayments,
       customerWithdrawals,
       creditNotes: creditNoteTotal,

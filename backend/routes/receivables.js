@@ -11,6 +11,7 @@ import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
 import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
+import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -772,38 +773,44 @@ router.post('/customers', authenticateToken, requirePermission('canCreateReceiva
 
     await checkUsageLimit(scope.tenantId, 'customers')
 
-    // Check if customer already exists
-    if (phone?.trim()) {
-      const existingCustomer = await prisma.customer.findFirst({
-        where: {
+    let customerRaw
+    try {
+      customerRaw = await prisma.$transaction(async (tx) => {
+        const identityConflict = await findCustomerIdentityConflict(tx, {
           tenantId: scope.tenantId,
-          branchId: scope.branchId,
-          phone
+          identity: { name, email, phone },
+        })
+        if (identityConflict) {
+          const error = new Error(customerIdentityConflictMessage(identityConflict.field))
+          error.code = 'CUSTOMER_IDENTITY_CONFLICT'
+          error.conflictField = identityConflict.field
+          throw error
         }
+
+        return tx.customer.create({
+          data: {
+            name: name.trim(),
+            email: email?.trim() || null,
+            phone: phone?.trim() || null,
+            address,
+            creditLimit: creditLimitCheck.amount,
+            balance: openingBalance,
+            openingBalance,
+            openingBalanceDate,
+            openingBalanceNote,
+            notes,
+            trustScore: 0,
+            tenantId: scope.tenantId,
+            branchId: scope.branchId
+          }
+        })
       })
-
-      if (existingCustomer) {
-        return res.status(400).json({ error: 'Customer with this phone number already exists' })
+    } catch (error) {
+      if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
+        return res.status(409).json({ error: error.message, code: error.code, duplicateField: error.conflictField })
       }
+      throw error
     }
-
-    const customerRaw = await prisma.customer.create({
-      data: {
-        name: name.trim(),
-        email,
-        phone,
-        address,
-        creditLimit: creditLimitCheck.amount,
-        balance: openingBalance,
-        openingBalance,
-        openingBalanceDate,
-        openingBalanceNote,
-        notes,
-        trustScore: 0,
-        tenantId: scope.tenantId,
-        branchId: scope.branchId
-      }
-    })
 
     const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
     res.status(201).json(customer)
@@ -905,6 +912,23 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
     }
 
     const customerRaw = await prisma.$transaction(async (tx) => {
+      const identityConflict = await findCustomerIdentityConflict(tx, {
+        tenantId: scope.tenantId,
+        identity: {
+          name: data.name ?? existingCustomer.name,
+          email: data.email ?? existingCustomer.email,
+          phone: data.phone ?? existingCustomer.phone,
+        },
+        previousIdentity: existingCustomer,
+        excludeCustomerId: id,
+      })
+      if (identityConflict) {
+        const error = new Error(customerIdentityConflictMessage(identityConflict.field))
+        error.code = 'CUSTOMER_IDENTITY_CONFLICT'
+        error.conflictField = identityConflict.field
+        throw error
+      }
+
       const updatedCustomer = await tx.customer.update({
         where: { id },
         data
@@ -920,6 +944,9 @@ router.put('/customers/:id', authenticateToken, requirePermission('canEditReceiv
     const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
     res.json(customer)
   } catch (error) {
+    if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
+      return res.status(409).json({ error: error.message, code: error.code, duplicateField: error.conflictField })
+    }
     console.error('Update customer error:', error)
     handleBranchError(res, error, 'Failed to update customer')
   }

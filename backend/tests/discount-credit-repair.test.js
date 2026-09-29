@@ -20,12 +20,12 @@ function fixture() {
     Object.assign(row, data);
     return { count: 1 };
   };
-  const zero = { aggregate: async () => ({ _sum: { amount: 0, total: 0 } }) };
+  const zero = { aggregate: async () => ({ _sum: { amount: 0, total: 0 } }), groupBy: async () => [] };
   const client = {
     customer: { findFirst: async () => customer, updateMany: update([customer]) },
     saleRecord: { findMany: async () => [sale], updateMany: update([sale]) },
     creditNote: { findMany: async () => notes.filter((note) => note.status !== 'cancelled'), updateMany: update(notes) },
-    customerPayment: zero, customerWithdrawal: zero, saleReturn: zero,
+    customerPayment: { ...zero, findMany: async () => [] }, customerWithdrawal: zero, saleReturn: zero,
     auditLog: { create: async ({ data }) => { audits.push(data); } },
   };
   const plan = async () => {

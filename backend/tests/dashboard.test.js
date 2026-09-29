@@ -31,7 +31,7 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   t.mock.method(prisma.creditNote, 'findMany', async () => [{ ...note, sale: returned }]);
   t.mock.method(prisma.customer, 'findMany', async () => [{ id: 'customer', openingBalance: 20, balance: 99999 }]);
   t.mock.method(prisma.customer, 'count', async () => 1);
-  t.mock.method(prisma.customerPayment, 'groupBy', async () => [{ customerId: 'customer', _sum: { amount: 50 } }]);
+  t.mock.method(prisma.customerPayment, 'groupBy', async () => [{ customerId: 'customer', saleId: null, _sum: { amount: 50 } }]);
   t.mock.method(prisma.customerWithdrawal, 'groupBy', async () => []);
   t.mock.method(prisma.saleReturn, 'groupBy', async () => []);
   t.mock.method(prisma.saleReturn, 'findMany', async () => []);
