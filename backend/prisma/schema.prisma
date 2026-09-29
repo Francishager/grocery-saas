@@ -176,6 +176,8 @@ model Tenant {
   employeeSalaryConfigs           EmployeeSalaryConfig[]
   hrAccountingConfig              HRAccountingConfig?
   receivablesAccountingConfig     ReceivablesAccountingConfig?
+  payablesAccountingConfig        PayablesAccountingConfig?
+  receivablesGlMigrationBatches   ReceivablesGlMigrationBatch[]
   hrAuditLogs                     HRAuditLog[]
 
   // =====================
@@ -499,6 +501,7 @@ model User {
   calculatorHistory               CalculatorHistory[]
   createdReceiptAllocations       CustomerPaymentAllocation[]              @relation("ReceiptAllocationCreator")
   receivableReconciliationReviews CustomerReceivableReconciliationReview[] @relation("ReceivableReconciliationReviewer")
+  receivablesGlMigrationApprovals ReceivablesGlMigrationBatch[]               @relation("ReceivablesGlMigrationApprover")
 
   advisorCollections   AdvisorCollection[]
   advisorConversations AdvisorConversation[]
@@ -1942,6 +1945,11 @@ model Account {
   receivablesCOGSConfigs ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
   receivablesInventoryConfigs ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
   receivablesAdvanceConfigs ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
+  payablesAPConfigs PayablesAccountingConfig[] @relation("PayablesAPAccount")
+  payablesOpeningEquityConfigs PayablesAccountingConfig[] @relation("PayablesOpeningEquityAccount")
+  payablesPurchaseExpenseConfigs PayablesAccountingConfig[] @relation("PayablesPurchaseExpenseAccount")
+  payablesInventoryConfigs PayablesAccountingConfig[] @relation("PayablesInventoryAccount")
+  payablesReturnsConfigs PayablesAccountingConfig[] @relation("PayablesReturnsAccount")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -2433,6 +2441,49 @@ model ReceivablesAccountingConfig {
   updatedAt               DateTime @updatedAt
 
   @@map("receivables_accounting_configs")
+}
+
+model PayablesAccountingConfig {
+  id                         String   @id @default(cuid())
+  tenantId                   String   @unique
+  tenant                     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payableAccountId           String?
+  payableAccount             Account? @relation("PayablesAPAccount", fields: [payableAccountId], references: [id], onDelete: SetNull)
+  openingBalanceEquityAccountId String?
+  openingBalanceEquityAccount Account? @relation("PayablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
+  purchaseExpenseAccountId   String?
+  purchaseExpenseAccount     Account? @relation("PayablesPurchaseExpenseAccount", fields: [purchaseExpenseAccountId], references: [id], onDelete: SetNull)
+  inventoryAccountId         String?
+  inventoryAccount           Account? @relation("PayablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
+  purchaseReturnsAccountId   String?
+  purchaseReturnsAccount     Account? @relation("PayablesReturnsAccount", fields: [purchaseReturnsAccountId], references: [id], onDelete: SetNull)
+  isEnabled                  Boolean  @default(false)
+  configuredBy               String?
+  configuredAt               DateTime?
+  updatedBy                  String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@map("payables_accounting_configs")
+}
+
+model ReceivablesGlMigrationBatch {
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fingerprint       String
+  approvedByUserId  String
+  approvedBy        User     @relation("ReceivablesGlMigrationApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  approvedAt        DateTime
+  appliedAt         DateTime @default(now())
+  actionCount       Int
+  blockedCount      Int
+  plan              Json
+  createdAt         DateTime @default(now())
+
+  @@unique([tenantId, fingerprint])
+  @@index([tenantId, appliedAt])
+  @@map("receivables_gl_migration_batches")
 }
 
 // =====================================================

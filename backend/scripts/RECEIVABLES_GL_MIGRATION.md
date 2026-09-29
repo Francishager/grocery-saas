@@ -8,7 +8,7 @@ Historical journals require a reviewed plan. Run from `backend/` using an enviro
 node scripts/receivables-gl-migration.mjs --tenant <tenant-id> --plan-out .\receivables-plan.json --signoff-template .\receivables-signoff.json
 ```
 
-Review both files. The plan lists postable missing journals, already-posted records, and blocked/ambiguous records. Legacy payments without explicit allocations, unmatched cash transactions, and credit notes without exact tax data are not guessed. The sign-off template is intentionally unapproved. An authorized reviewer must set `approved` to `true`, fill `approvedBy` and `approvedAt`, and retain the exact fingerprint and `acknowledgedBlockedCount` after reviewing the plan.
+Review both files. The plan lists postable missing journals, already-posted records, and blocked/ambiguous records. It scans existing tenant journals for matching source ids, references, entry numbers, or descriptions and blocks possible legacy/manual duplicates for review. Legacy payments without explicit allocations, unmatched cash transactions, and credit notes without exact tax data are not guessed. **Apply is refused while any record is blocked**; the reviewer must resolve those cases and generate a new plan. The sign-off template is intentionally unapproved. A tenant owner or active user with accounting-edit permission must set `approved` to `true`, enter their `approvedByUserId` and `approvedAt`, and retain the exact fingerprint and `acknowledgedBlockedCount` after review. The approver, fingerprint, plan and application timestamp are also recorded in the database in the same transaction as the migration journals.
 
 Only after independent approval, use the *same database*, same tenant, and same plan state:
 

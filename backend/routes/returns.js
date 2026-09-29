@@ -294,7 +294,9 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
         total += lineTotal;
         if (arConfig?.isEnabled) {
           if (saleItem.cost == null || !Number.isFinite(Number(saleItem.cost))) throw httpError(409, "Saved sale-time cost is missing for a returned item; inventory accounting cannot post this return safely.");
-          returnedCogs += Number(saleItem.cost) * qty;
+          const originalBaseQuantity = Number(saleItem.quantity || 0) * Number(saleItem.conversionFactor || 1);
+          if (!Number.isFinite(originalBaseQuantity) || originalBaseQuantity <= 0) throw httpError(409, "Original sale quantity cannot be used to verify returned stock cost.");
+          returnedCogs += Number(saleItem.cost) * Number(saleItem.quantity || 0) * baseQty / originalBaseQuantity;
         }
         returnItems.push({
           productId: saleItem.productId,

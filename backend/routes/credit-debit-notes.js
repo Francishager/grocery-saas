@@ -1,4 +1,5 @@
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
@@ -6,6 +7,7 @@ import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../s
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { returnItemTaxAmount } from '../src/utils/saleTaxAllocation.js'
 import { creditNoteRecognitionLines, customerRefundLines, getReceivablesAccountingConfig, postReceivablesJournal, reverseReceivablesJournal } from '../src/services/receivablesAccountingService.js'
+import { getPayablesAccountingConfig, getSupplierDebitNoteStockCost, postPayablesJournal, reverseCurrentPayablesJournal, supplierDebitNoteLines } from '../src/services/payablesAccountingService.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -1134,6 +1136,18 @@ router.post('/debit-notes', authenticateToken, requirePermission('canCreatePayab
         data: { balance: { decrement: noteAmount } },
       })
 
+      const payableConfig = await getPayablesAccountingConfig(tx, tenantId)
+      if (payableConfig?.isEnabled) {
+        const returnedCost = await getSupplierDebitNoteStockCost(tx, tenantId, createdNote.id, createdNote.purchaseId)
+        await postPayablesJournal(tx, {
+          tenantId, branchId: createdNote.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_DEBIT_NOTE', sourceId: createdNote.id,
+          date: createdNote.createdAt, reference: createdNote.noteNo,
+          description: `Supplier debit note ${createdNote.noteNo}`,
+          lines: supplierDebitNoteLines(payableConfig, noteAmount, returnedCost, createdNote.noteNo),
+        })
+      }
+
       return createdNote
     })
 
@@ -1164,6 +1178,7 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
     if (notes !== undefined) updates.notes = notes
 
     const note = await prisma.$transaction(async (tx) => {
+      await reverseCurrentPayablesJournal(tx, { tenantId: scope.tenantId, sourceType: 'SUPPLIER_DEBIT_NOTE', sourceIdPrefix: existing.id, userId: req.user.id, reason: 'Debit note amended' })
       const existingAffectsStock = DEBIT_STOCK_REASONS.has(normalizeReason(existing.reason))
       const nextAffectsStock = DEBIT_STOCK_REASONS.has(normalizedReason)
       if (existingAffectsStock !== nextAffectsStock) {
@@ -1190,6 +1205,17 @@ router.put('/debit-notes/:id', authenticateToken, requirePermission('canCreatePa
         },
       })
       await updateLinkedPurchaseBalanceFromDebitNotes(tx, scope, existing.purchaseId)
+      const payableConfig = await getPayablesAccountingConfig(tx, scope.tenantId)
+      if (payableConfig?.isEnabled) {
+        const returnedCost = await getSupplierDebitNoteStockCost(tx, scope.tenantId, updatedNote.id, updatedNote.purchaseId)
+        await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: updatedNote.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_DEBIT_NOTE', sourceId: `${updatedNote.id}-v-${randomUUID()}`,
+          date: updatedNote.updatedAt, reference: updatedNote.noteNo,
+          description: `Amended supplier debit note ${updatedNote.noteNo}`,
+          lines: supplierDebitNoteLines(payableConfig, updatedNote.amount, returnedCost, updatedNote.noteNo),
+        })
+      }
       return updatedNote
     })
     res.json(note)
@@ -1207,6 +1233,7 @@ router.patch('/debit-notes/:id/cancel', authenticateToken, requirePermission('ca
     if (existing.status === 'cancelled') return res.status(400).json({ error: 'Debit note is already cancelled' })
 
     const note = await prisma.$transaction(async (tx) => {
+      await reverseCurrentPayablesJournal(tx, { tenantId: scope.tenantId, sourceType: 'SUPPLIER_DEBIT_NOTE', sourceIdPrefix: existing.id, userId: req.user.id, reason: 'Debit note cancelled' })
       await reverseDebitNoteStockReturn(tx, scope, existing, req)
 
       // Reverse the supplier balance adjustment

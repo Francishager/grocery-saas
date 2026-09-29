@@ -2,11 +2,12 @@ import express from 'express'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
+import { getPayablesAccountingConfig, getCashAccountLedgerId, postPayablesJournal, savePayablesAccountingConfig, supplierOpeningBalanceLines, supplierPaymentLines, supplierPurchaseLines } from '../src/services/payablesAccountingService.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -70,6 +71,37 @@ const paymentMethodAccountLabel = (paymentMethod) => {
 }
 
 const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
+
+router.get('/accounting-config', authenticateToken, requireAnyPermission(['canViewPayable', 'canViewAccounting', 'canEditAccounting']), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const [config, accounts] = await Promise.all([
+      getPayablesAccountingConfig(prisma, tenantId),
+      prisma.account.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, code: true, name: true, type: true, subType: true, description: true, _count: { select: { children: true } } },
+        orderBy: { code: 'asc' },
+      }),
+    ])
+    res.json({ config, accounts: accounts.filter((account) => !account._count.children && !String(account.description || '').includes('cashAccount:')) })
+  } catch (error) {
+    handleBranchError(res, error, 'Failed to load payables accounting mappings')
+  }
+})
+
+router.put('/accounting-config', authenticateToken, requirePermission('canEditAccounting'), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const fields = ['payableAccountId', 'openingBalanceEquityAccountId', 'purchaseExpenseAccountId', 'inventoryAccountId', 'purchaseReturnsAccountId']
+    const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
+    values.isEnabled = req.body?.isEnabled === true
+    const config = await savePayablesAccountingConfig(prisma, tenantId, req.user.id, values)
+    res.json({ config })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to save payables accounting mappings')
+  }
+})
 
 const canManageOpeningBalance = (req) => (
   openingBalanceRoles.has(req.user?.role) ||
@@ -222,20 +254,24 @@ router.post('/suppliers', authenticateToken, requirePermission('canCreatePayable
       }
     }
 
-    const supplier = await prisma.supplier.create({
-      data: {
-        name: name.trim(),
-        email,
-        phone,
-        address,
-        balance: openingBalance,
-        openingBalance,
-        openingBalanceDate,
-        openingBalanceNote,
-        notes,
-        tenantId: scope.tenantId,
-        branchId: scope.branchId
+    const supplier = await prisma.$transaction(async (tx) => {
+      const created = await tx.supplier.create({
+        data: {
+          name: name.trim(), email, phone, address, balance: openingBalance, openingBalance,
+          openingBalanceDate, openingBalanceNote, notes, tenantId: scope.tenantId, branchId: scope.branchId,
+        }
+      })
+      if (openingBalance > 0) {
+        const config = await getPayablesAccountingConfig(tx, scope.tenantId)
+        if (config?.isEnabled) await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_OPENING_BALANCE', sourceId: created.id,
+          date: openingBalanceDate || new Date(), reference: created.name,
+          description: `Opening balance for supplier ${created.name}`,
+          lines: supplierOpeningBalanceLines(config, openingBalance),
+        })
       }
+      return created
     })
 
     res.status(201).json(supplier)
@@ -326,9 +362,23 @@ router.put('/suppliers/:id', authenticateToken, requirePermission('canEditPayabl
       data.branchId = targetScope.branchId
     }
 
-    const supplier = await prisma.supplier.update({
-      where: { id },
-      data
+    const supplier = await prisma.$transaction(async (tx) => {
+      const updated = await tx.supplier.update({ where: { id }, data })
+      if (openingBalanceDelta !== 0) {
+        const config = await getPayablesAccountingConfig(tx, scope.tenantId)
+        const positive = openingBalanceDelta > 0
+        const amount = Math.abs(openingBalanceDelta)
+        if (config?.isEnabled) await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: updated.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_OPENING_BALANCE_ADJUSTMENT', sourceId: `${updated.id}-${Date.now()}`,
+          date: new Date(), reference: updated.name, description: `Supplier opening balance adjustment for ${updated.name}`,
+          lines: positive ? supplierOpeningBalanceLines(config, amount) : [
+            { accountId: config.payableAccountId, debit: amount, credit: 0, description: 'Reduce supplier opening payable' },
+            { accountId: config.openingBalanceEquityAccountId, debit: 0, credit: amount, description: 'Reverse opening balance migration equity' },
+          ],
+        })
+      }
+      return updated
     })
 
     res.json(supplier)
@@ -462,6 +512,7 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
     const purchaseRefNo = refNo || `PUR-${Date.now()}`
 
     const purchase = await prisma.$transaction(async (tx) => {
+      let paymentLedgerId = null
       if (balance > 0) {
         await tx.supplier.update({
           where: { id: supplierId },
@@ -570,6 +621,19 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
         })
 
         await syncLinkedTransactionAccountBalance(tx, scope.tenantId, paymentAccount.id)
+        paymentLedgerId = await getCashAccountLedgerId(tx, scope.tenantId, paymentAccount.id)
+      }
+
+      const payableConfig = await getPayablesAccountingConfig(tx, scope.tenantId)
+      if (payableConfig?.isEnabled) {
+        if (paid > 0 && !paymentLedgerId) throw Object.assign(new Error('The selected payment account is not linked to a chart-of-accounts transaction ledger.'), { statusCode: 409 })
+        await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_PURCHASE', sourceId: createdPurchase.id,
+          date: createdPurchase.createdAt, reference: createdPurchase.refNo,
+          description: `Supplier purchase ${createdPurchase.refNo || ''}`.trim(),
+          lines: supplierPurchaseLines(payableConfig, createdPurchase, purchaseItems.map((item) => ({ ...item, product: productsById.get(item.productId) })), paymentLedgerId),
+        })
       }
 
       return createdPurchase
@@ -718,6 +782,18 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
       })
 
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, cashAccountUsed.id)
+      const payableConfig = await getPayablesAccountingConfig(tx, scope.tenantId)
+      if (payableConfig?.isEnabled) {
+        const ledgerAccountId = await getCashAccountLedgerId(tx, scope.tenantId, cashAccountUsed.id)
+        if (!ledgerAccountId) throw Object.assign(new Error('The selected payment account is not linked to a chart-of-accounts transaction ledger.'), { statusCode: 409 })
+        await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_PAYMENT', sourceId: createdPayment.id,
+          date: createdPayment.createdAt, reference: reference || createdPayment.id,
+          description: `Supplier payment: ${supplier.name}`,
+          lines: supplierPaymentLines(payableConfig, paidAmount, ledgerAccountId, reference),
+        })
+      }
 
       const newBalance = Math.max(0, supplier.balance - paidAmount)
       await tx.supplier.update({

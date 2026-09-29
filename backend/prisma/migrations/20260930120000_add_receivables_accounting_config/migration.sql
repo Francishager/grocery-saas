@@ -35,3 +35,26 @@ CREATE TABLE IF NOT EXISTS "receivables_accounting_configs" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "receivables_accounting_configs_tenantId_key"
   ON "receivables_accounting_configs"("tenantId");
+
+CREATE TABLE IF NOT EXISTS "receivables_gl_migration_batches" (
+  "id" TEXT NOT NULL,
+  "tenantId" TEXT NOT NULL,
+  "fingerprint" TEXT NOT NULL,
+  "approvedByUserId" TEXT NOT NULL,
+  "approvedAt" TIMESTAMP(3) NOT NULL,
+  "appliedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "actionCount" INTEGER NOT NULL,
+  "blockedCount" INTEGER NOT NULL,
+  "plan" JSONB NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "receivables_gl_migration_batches_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "receivables_gl_migration_batches_tenantId_fkey"
+    FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "receivables_gl_migration_batches_approvedByUserId_fkey"
+    FOREIGN KEY ("approvedByUserId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "receivables_gl_migration_batches_tenantId_fingerprint_key"
+  ON "receivables_gl_migration_batches"("tenantId", "fingerprint");
+CREATE INDEX IF NOT EXISTS "receivables_gl_migration_batches_tenantId_appliedAt_idx"
+  ON "receivables_gl_migration_batches"("tenantId", "appliedAt");

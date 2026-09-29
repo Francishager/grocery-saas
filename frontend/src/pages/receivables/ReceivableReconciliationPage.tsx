@@ -34,6 +34,8 @@ interface ReconciliationIssue {
 
 type AccountingRole = 'receivableAccountId' | 'salesRevenueAccountId' | 'taxPayableAccountId' | 'salesReturnsAccountId' | 'costOfGoodsSoldAccountId' | 'inventoryAccountId' | 'customerAdvancesAccountId'
 type AccountingConfig = Partial<Record<AccountingRole, string | null>> & { isEnabled?: boolean }
+type PayablesRole = 'payableAccountId' | 'openingBalanceEquityAccountId' | 'purchaseExpenseAccountId' | 'inventoryAccountId' | 'purchaseReturnsAccountId'
+type PayablesConfig = Partial<Record<PayablesRole, string | null>> & { isEnabled?: boolean }
 type ChartAccount = { id: string; code: string; name: string; type: string }
 const accountingRoles: Array<{ key: AccountingRole; title: string; type: string }> = [
   { key: 'receivableAccountId', title: 'Accounts receivable', type: 'asset' },
@@ -43,6 +45,13 @@ const accountingRoles: Array<{ key: AccountingRole; title: string; type: string 
   { key: 'costOfGoodsSoldAccountId', title: 'Cost of goods sold', type: 'expense' },
   { key: 'inventoryAccountId', title: 'Inventory', type: 'asset' },
   { key: 'customerAdvancesAccountId', title: 'Customer advances', type: 'liability' },
+]
+const payablesRoles: Array<{ key: PayablesRole; title: string; type: string }> = [
+  { key: 'payableAccountId', title: 'Accounts payable', type: 'liability' },
+  { key: 'openingBalanceEquityAccountId', title: 'Opening balance offset', type: 'equity' },
+  { key: 'purchaseExpenseAccountId', title: 'Service purchase expense', type: 'expense' },
+  { key: 'inventoryAccountId', title: 'Inventory', type: 'asset' },
+  { key: 'purchaseReturnsAccountId', title: 'Purchase returns / allowances', type: 'expense' },
 ]
 
 const decisionLabels: Record<Decision, string> = {
@@ -58,6 +67,7 @@ export default function ReceivableReconciliationPage() {
   const canReview = hasPermission('canReviewReceivableReconciliation')
   const canApply = hasPermission('canApplyReceivableReconciliation')
   const canEditAccounting = hasPermission('canEditAccounting')
+  const canViewPayables = hasPermission('canViewPayable') || hasPermission('canViewAccounting') || canEditAccounting
   const [issues, setIssues] = useState<ReconciliationIssue[]>([])
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
@@ -72,6 +82,8 @@ export default function ReceivableReconciliationPage() {
   const [chartAccounts, setChartAccounts] = useState<ChartAccount[]>([])
   const [accountingLoading, setAccountingLoading] = useState(false)
   const [accountingSaving, setAccountingSaving] = useState(false)
+  const [payablesConfig, setPayablesConfig] = useState<PayablesConfig>({ isEnabled: false })
+  const [payablesSaving, setPayablesSaving] = useState(false)
 
   const loadIssues = useCallback(async (targetPage = page) => {
     setLoading(true)
@@ -109,6 +121,20 @@ export default function ReceivableReconciliationPage() {
 
   useEffect(() => { void loadAccountingConfig() }, [loadAccountingConfig])
 
+  const loadPayablesConfig = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/payables/accounting-config')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not load supplier accounting mappings')
+      setPayablesConfig(data.config || { isEnabled: false })
+      if (data.accounts) setChartAccounts(data.accounts)
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Supplier accounting mappings could not load', description: error instanceof Error ? error.message : 'Try again.' })
+    }
+  }, [toast])
+
+  useEffect(() => { if (canViewPayables) void loadPayablesConfig() }, [canViewPayables, loadPayablesConfig])
+
   const saveAccountingConfig = async () => {
     setAccountingSaving(true)
     try {
@@ -121,6 +147,21 @@ export default function ReceivableReconciliationPage() {
       toast({ variant: 'destructive', title: 'Accounting mappings were not saved', description: error instanceof Error ? error.message : 'Try again.' })
     } finally {
       setAccountingSaving(false)
+    }
+  }
+
+  const savePayablesConfig = async () => {
+    setPayablesSaving(true)
+    try {
+      const response = await apiFetch('/api/payables/accounting-config', { method: 'PUT', body: JSON.stringify(payablesConfig) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not save supplier accounting mappings')
+      setPayablesConfig(data.config)
+      toast({ title: data.config?.isEnabled ? 'Payables posting enabled' : 'Supplier mappings saved', description: 'New supplier opening balances, purchases, and payments will post source-linked journals.' })
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Supplier mappings were not saved', description: error instanceof Error ? error.message : 'Try again.' })
+    } finally {
+      setPayablesSaving(false)
     }
   }
 
@@ -212,6 +253,17 @@ export default function ReceivableReconciliationPage() {
         </div>
         {canEditAccounting ? <Button variant="outline" onClick={() => void saveAccountingConfig()} disabled={accountingSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{accountingSaving ? 'Saving...' : 'Save mappings'}</Button> : <p className="text-xs text-muted-foreground">You can view these mappings but do not have permission to change accounting configuration.</p>}
       </section>
+
+      {canViewPayables && <section className="space-y-4 border-b pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-base font-semibold">Payables general-ledger posting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Optional tenant-scoped supplier mappings. Existing purchases are not posted retroactively.</p></div>
+          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={Boolean(payablesConfig.isEnabled)} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setPayablesConfig((current) => ({ ...current, isEnabled: event.target.checked }))} /> Enable supplier posting</label>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {payablesRoles.map((role) => <label key={role.key} className="grid gap-1.5 text-sm"><span>{role.title} <span className="text-muted-foreground">({role.type})</span></span><select value={payablesConfig[role.key] || ''} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setPayablesConfig((current) => ({ ...current, [role.key]: event.target.value || null }))} className="h-10 min-w-0 rounded-md border bg-background px-3"><option value="">Select account</option>{chartAccounts.filter((account) => account.type.toLowerCase() === role.type).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>)}
+        </div>
+        {canEditAccounting ? <Button variant="outline" onClick={() => void savePayablesConfig()} disabled={payablesSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{payablesSaving ? 'Saving...' : 'Save supplier mappings'}</Button> : <p className="text-xs text-muted-foreground">You can view these mappings but do not have permission to change accounting configuration.</p>}
+      </section>}
 
       <div className="overflow-x-auto border-y">
         <table className="w-full min-w-[980px] border-collapse text-left text-sm">

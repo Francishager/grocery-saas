@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { PrismaClient } from '@prisma/client'
+import { findPotentialLegacyJournalMatches, journalSummary } from '../src/services/receivablesGlMigrationSafety.js'
 import {
   cashSaleRecognitionLines,
   creditNoteRecognitionLines,
@@ -34,23 +35,53 @@ if (!tenantId || tenantId.startsWith('--')) {
     const plan = await buildPlan(prisma, tenantId)
     if (planOut) await writeFile(planOut, `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx' })
     if (templateOut) {
-      await writeFile(templateOut, `${JSON.stringify({ approved: false, tenantId, fingerprint: plan.fingerprint, acknowledgedBlockedCount: plan.blocked.length, approvedBy: '', approvedAt: '' }, null, 2)}\n`, { flag: 'wx' })
+      await writeFile(templateOut, `${JSON.stringify({ approved: false, tenantId, fingerprint: plan.fingerprint, acknowledgedBlockedCount: plan.blocked.length, approvedByUserId: '', approvedAt: '' }, null, 2)}\n`, { flag: 'wx' })
     }
     if (!apply) {
       console.log(JSON.stringify({ tenantId, fingerprint: plan.fingerprint, ready: plan.actions.length, blocked: plan.blocked.length, alreadyPosted: plan.alreadyPosted, actions: plan.actions, blockedItems: plan.blocked }, null, 2))
     } else {
       const approval = JSON.parse(await readFile(signoffPath, 'utf8'))
-      if (approval.approved !== true || approval.tenantId !== tenantId || approval.fingerprint !== plan.fingerprint || Number(approval.acknowledgedBlockedCount) !== plan.blocked.length || !String(approval.approvedBy || '').trim() || !Number.isFinite(Date.parse(approval.approvedAt))) {
+      const approvedAt = new Date(approval.approvedAt)
+      if (approval.approved !== true || approval.tenantId !== tenantId || approval.fingerprint !== plan.fingerprint || Number(approval.acknowledgedBlockedCount) !== plan.blocked.length || !String(approval.approvedByUserId || '').trim() || !Number.isFinite(approvedAt.getTime()) || approvedAt > new Date()) {
         throw new Error('Sign-off is missing, incomplete, or does not match the current tenant plan fingerprint. No writes were made.')
       }
+      if (plan.blocked.length) throw new Error(`Apply refused: ${plan.blocked.length} records have unresolved or potentially duplicate postings. Resolve them and generate a new plan; no writes were made.`)
+      if (!plan.actions.length) throw new Error('Apply refused: the plan has no missing source journals to create.')
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { ownerId: true } })
+      const approver = await prisma.user.findFirst({
+        where: {
+          id: approval.approvedByUserId,
+          isActive: true,
+          OR: [
+            ...(tenant?.ownerId ? [{ id: tenant.ownerId }] : []),
+            { tenantId, role: 'owner' },
+            { tenantId, permissions: { some: { canEditAccounting: true } } },
+          ],
+        },
+        select: { id: true },
+      })
+      if (!approver) throw new Error('Approver must be an active user in this tenant who is the owner or has accounting-edit permission. No writes were made.')
       await prisma.$transaction(async (tx) => {
         const current = await buildPlan(tx, tenantId)
         if (current.fingerprint !== approval.fingerprint) throw new Error('Source records changed after sign-off. No migration entries were written; prepare and review a new plan.')
+        if (current.blocked.length) throw new Error('The refreshed plan contains blocked records. No migration entries were written.')
         for (const action of current.actions) {
           await postReceivablesJournal(tx, action)
         }
+        await tx.receivablesGlMigrationBatch.create({
+          data: {
+            tenantId,
+            fingerprint: current.fingerprint,
+            approvedByUserId: approver.id,
+            approvedAt,
+            appliedAt: new Date(),
+            actionCount: current.actions.length,
+            blockedCount: current.blocked.length,
+            plan: JSON.parse(JSON.stringify(current)),
+          },
+        })
       }, { isolationLevel: 'Serializable', timeout: 120000 })
-      console.log(JSON.stringify({ tenantId, applied: plan.actions.length, fingerprint: plan.fingerprint, approvedBy: approval.approvedBy, approvedAt: approval.approvedAt }, null, 2))
+      console.log(JSON.stringify({ tenantId, applied: plan.actions.length, fingerprint: plan.fingerprint, approvedByUserId: approver.id, approvedAt: approvedAt.toISOString() }, null, 2))
     }
   } catch (error) {
     console.error(error?.message || error)
@@ -74,16 +105,37 @@ async function buildPlan(db, scopedTenantId) {
       const match = String(account.description || '').match(/cashAccount:([^\s]+)/)
       return [match?.[1], account]
     }).filter(([cashId]) => cashId))
-    const journals = await db.journalEntry.findMany({ where: { tenantId: scopedTenantId, sourceType: { in: ['POS_SALE', 'POS_SALE_RETURN', 'RECEIVABLE_SALE', 'CUSTOMER_RECEIPT', 'RECEIVABLE_CREDIT_NOTE', 'CUSTOMER_WITHDRAWAL'] } }, select: { sourceType: true, sourceId: true } })
-    const journalKeys = new Set(journals.map((entry) => `${entry.sourceType}:${entry.sourceId}`))
+    const journals = await db.journalEntry.findMany({ where: { tenantId: scopedTenantId }, select: { id: true, entryNo: true, sourceType: true, sourceId: true, status: true, reference: true, description: true, date: true } })
+    const journalByKey = new Map(journals.filter((entry) => entry.sourceType && entry.sourceId).map((entry) => [`${entry.sourceType}:${entry.sourceId}`, entry]))
     const cashRows = await db.cashTransaction.findMany({ where: { tenantId: scopedTenantId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
     const addAction = (action) => {
-      if (journalKeys.has(`${action.sourceType}:${action.sourceId}`)) alreadyPosted += 1
-      else actions.push(action)
+      const exact = journalByKey.get(`${action.sourceType}:${action.sourceId}`)
+      if (exact?.status === 'posted') {
+        const duplicates = findPotentialLegacyJournalMatches(action, journals)
+        if (duplicates.length) blocked.push({ sourceType: action.sourceType, sourceId: action.sourceId, reason: 'The source is posted, but other legacy/manual journals share its reference and may duplicate it.', matchingJournals: duplicates.map(journalSummary) })
+        else alreadyPosted += 1
+        return
+      }
+      if (exact) {
+        blocked.push({ sourceType: action.sourceType, sourceId: action.sourceId, reason: `A matching source journal exists with status ${exact.status}; review its reversal/draft history.`, matchingJournals: [journalSummary(exact)] })
+        return
+      }
+      const collisions = findPotentialLegacyJournalMatches(action, journals)
+      if (collisions.length) {
+        blocked.push({ sourceType: action.sourceType, sourceId: action.sourceId, reason: 'A legacy/manual journal may already represent this event. Resolve it before migrating to avoid duplicate postings.', matchingJournals: collisions.map(journalSummary) })
+        return
+      }
+      actions.push(action)
     }
     const skipIfPosted = (sourceType, sourceId) => {
-      if (!journalKeys.has(`${sourceType}:${sourceId}`)) return false
-      alreadyPosted += 1
+      const existing = journalByKey.get(`${sourceType}:${sourceId}`)
+      if (!existing) return false
+      if (existing.status === 'posted') {
+        const duplicates = findPotentialLegacyJournalMatches({ sourceType, sourceId, reference: existing.reference }, journals)
+        if (duplicates.length) blocked.push({ sourceType, sourceId, reason: 'The source is posted, but other legacy/manual journals share its reference and may duplicate it.', matchingJournals: duplicates.map(journalSummary) })
+        else alreadyPosted += 1
+      }
+      else blocked.push({ sourceType, sourceId, reason: `A matching source journal exists with status ${existing.status}; review its reversal/draft history.`, matchingJournals: [journalSummary(existing)] })
       return true
     }
     const accountForCash = (cashAccountId, sourceType, sourceId) => {
@@ -133,6 +185,7 @@ async function buildPlan(db, scopedTenantId) {
     for (const payment of payments) {
       if (skipIfPosted('CUSTOMER_RECEIPT', payment.id)) continue
       if (payment.allocationMode !== 'explicit') { blocked.push({ sourceType: 'CUSTOMER_RECEIPT', sourceId: payment.id, reason: 'Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred.' }); continue }
+      if (!payment.allocations.length || payment.allocations.some((allocation) => allocation.targetType !== 'sale' || !allocation.saleId)) { blocked.push({ sourceType: 'CUSTOMER_RECEIPT', sourceId: payment.id, reason: 'Customer-account allocations do not retain the exact receivable-versus-advance split needed for historical GL posting.' }); continue }
       const allocated = money(payment.allocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0))
       if (allocated - money(payment.amount) > 0.01) { blocked.push({ sourceType: 'CUSTOMER_RECEIPT', sourceId: payment.id, reason: 'Explicit allocations exceed the receipt amount.' }); continue }
       const refs = new Set([payment.reference, payment.id].filter(Boolean))
@@ -170,11 +223,31 @@ async function buildPlan(db, scopedTenantId) {
           if (returnedCogs != null) addAction({ tenantId: scopedTenantId, branchId: note.branchId, userId: note.userId, sourceType: 'RECEIVABLE_CREDIT_NOTE', sourceId: note.id, date: note.createdAt, reference: note.noteNo, description: `Customer credit note ${note.noteNo}`, lines: creditNoteRecognitionLines(config, { amount: note.amount, taxAmount: note.taxAmount || 0, refundAmount: note.refundAmount || 0, returnedCogs, reference: note.noteNo }) })
         }
       }
-      if (money(note.refundAmount) > 0 && note.refundWithdrawalId && !journalKeys.has(`CUSTOMER_WITHDRAWAL:${note.refundWithdrawalId}`)) {
+      if (money(note.refundAmount) > 0 && !note.refundWithdrawalId) {
+        blocked.push({ sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: note.id, reason: 'The credit note records a refund amount but has no linked withdrawal record.' })
+      } else if (money(note.refundAmount) > 0 && note.refundWithdrawalId && !skipIfPosted('CUSTOMER_WITHDRAWAL', note.refundWithdrawalId)) {
         const withdrawal = await db.customerWithdrawal.findFirst({ where: { id: note.refundWithdrawalId, tenantId: scopedTenantId } })
-        const linked = withdrawal && accountForCash(withdrawal.cashAccountId, 'CUSTOMER_WITHDRAWAL', withdrawal.id)
-        if (linked) addAction({ tenantId: scopedTenantId, branchId: withdrawal.branchId, userId: withdrawal.userId, sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id, date: withdrawal.createdAt, reference: withdrawal.reference, description: `Customer credit refund ${withdrawal.reference || note.noteNo}`, lines: customerRefundLines(config, { transactionAccountId: linked.id, amount: withdrawal.amount, reference: withdrawal.reference }) })
+        if (!withdrawal) blocked.push({ sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: note.refundWithdrawalId, reason: 'The credit note refund points to a missing withdrawal record.' })
+        else {
+          const refundRows = cashRows.filter((row) => row.type === 'credit_note_refund' && row.reference === withdrawal.reference && money(row.amount) === money(withdrawal.amount) && row.accountId === withdrawal.cashAccountId)
+          if (refundRows.length !== 1) blocked.push({ sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id, reason: 'The linked refund cash transaction is missing or ambiguous.' })
+          else {
+            const linked = accountForCash(withdrawal.cashAccountId, 'CUSTOMER_WITHDRAWAL', withdrawal.id)
+            if (linked) addAction({ tenantId: scopedTenantId, branchId: withdrawal.branchId, userId: withdrawal.userId, sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id, date: withdrawal.createdAt, reference: withdrawal.reference, description: `Customer credit refund ${withdrawal.reference || note.noteNo}`, lines: customerRefundLines(config, { transactionAccountId: linked.id, amount: withdrawal.amount, reference: withdrawal.reference }) })
+          }
+        }
       }
+    }
+
+    const openingBalanceCustomers = await db.customer.findMany({ where: { tenantId: scopedTenantId, openingBalance: { not: 0 } }, select: { id: true, name: true, openingBalance: true } })
+    for (const customer of openingBalanceCustomers) {
+      blocked.push({ sourceType: 'CUSTOMER_OPENING_BALANCE', sourceId: customer.id, reason: `Customer ${customer.name} has an opening balance. The opening-balance offset account and signed opening entry are not configured by this migration.` })
+    }
+    const withdrawals = await db.customerWithdrawal.findMany({ where: { tenantId: scopedTenantId }, select: { id: true, reference: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+    const noteWithdrawalIds = new Set(creditNotes.map((note) => note.refundWithdrawalId).filter(Boolean))
+    for (const withdrawal of withdrawals) {
+      if (noteWithdrawalIds.has(withdrawal.id) || skipIfPosted('CUSTOMER_WITHDRAWAL', withdrawal.id)) continue
+      blocked.push({ sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id, reason: 'Standalone customer withdrawal depends on the historical source of customer credit; that advance provenance is not unambiguous for automatic migration.' })
     }
   }
 
