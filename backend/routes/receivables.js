@@ -12,6 +12,7 @@ import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
+import { getReceivablesAccountingConfig, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines, saveReceivablesAccountingConfig } from '../src/services/receivablesAccountingService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -1175,6 +1176,21 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         }))
       })
 
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
+      if (arConfig?.isEnabled) {
+        await postReceivablesJournal(tx, {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId: req.user.id,
+          sourceType: 'RECEIVABLE_SALE',
+          sourceId: createdSale.id,
+          date: createdSale.createdAt,
+          reference: createdSale.receiptNo,
+          description: `Credit sale ${createdSale.receiptNo}`,
+          lines: saleRecognitionLines(arConfig, createdSale, saleItems),
+        })
+      }
+
       for (const item of saleItems) {
         const product = productsById.get(item.productId)
         if (product && product.itemType === 'service') continue
@@ -1238,6 +1254,21 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         })
 
         await syncLinkedTransactionAccountBalance(tx, scope.tenantId, receiptAccount.id)
+        if (arConfig?.isEnabled) {
+          const transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${receiptAccount.id}` } } })
+          if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${receiptAccount.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId,
+            branchId: scope.branchId,
+            userId: req.user.id,
+            sourceType: 'CUSTOMER_RECEIPT',
+            sourceId: payment.id,
+            date: payment.createdAt,
+            reference: receiptNo,
+            description: `Customer receipt ${receiptNo}`,
+            lines: receiptCollectionLines(arConfig, { transactionAccountId: transactionAccount.id, amount: paid, receivableApplied: paid, reference: receiptNo }),
+          })
+        }
       }
 
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
@@ -1275,6 +1306,37 @@ const reconciliationDecisions = new Set([
   'requires_adjustment',
   'investigate_duplicate',
 ])
+
+router.get('/reconciliation/accounting-config', authenticateToken, requirePermission('canViewReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const [config, accounts] = await Promise.all([
+      getReceivablesAccountingConfig(prisma, tenantId),
+      prisma.account.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, code: true, name: true, type: true, subType: true, description: true, parentId: true, _count: { select: { children: true } } },
+        orderBy: { code: 'asc' },
+      }),
+    ])
+    res.json({ config, accounts: accounts.filter((account) => !account._count.children && !String(account.description || '').includes('cashAccount:')) })
+  } catch (error) {
+    handleBranchError(res, error, 'Failed to load receivables accounting mappings')
+  }
+})
+
+router.put('/reconciliation/accounting-config', authenticateToken, requirePermission('canEditAccounting'), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const fields = ['receivableAccountId', 'salesRevenueAccountId', 'taxPayableAccountId', 'salesReturnsAccountId', 'costOfGoodsSoldAccountId', 'inventoryAccountId', 'customerAdvancesAccountId']
+    const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
+    values.isEnabled = req.body?.isEnabled === true
+    const config = await saveReceivablesAccountingConfig(prisma, tenantId, req.user.id, values)
+    res.json({ config })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to save receivables accounting mappings')
+  }
+})
 
 router.get('/reconciliation/payment-allocations', authenticateToken, requirePermission('canViewReceivableReconciliation'), requireTenant, async (req, res) => {
   try {
@@ -1634,6 +1696,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       let legacyPaidBaseline = 0
       let allocatedBefore = 0
       let allocateToSale = 0
+      const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
       if (saleId) {
         await tx.$queryRaw`SELECT "id" FROM "sale_records" WHERE "id" = ${saleId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
         transactionSale = await tx.saleRecord.findFirst({
@@ -1735,6 +1798,26 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
       })
 
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, accountToUse.id)
+
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
+      if (arConfig?.isEnabled) {
+        const receivableApplied = saleId
+          ? allocateToSale
+          : Math.min(paidAmount, Math.max(0, toMoney(customerBalanceBefore?.balance)))
+        const transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` } } })
+        if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${accountToUse.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
+        await postReceivablesJournal(tx, {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId: req.user.id,
+          sourceType: 'CUSTOMER_RECEIPT',
+          sourceId: createdPayment.id,
+          date: createdPayment.createdAt,
+          reference: paymentReference || createdPayment.id,
+          description: `Customer receipt ${paymentReference || createdPayment.id}`,
+          lines: receiptCollectionLines(arConfig, { transactionAccountId: transactionAccount.id, amount: paidAmount, receivableApplied, reference: paymentReference }),
+        })
+      }
 
       if (transactionSale) {
         const newAmountPaid = legacyPaidBaseline + allocatedBefore + allocateToSale

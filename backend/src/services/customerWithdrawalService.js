@@ -1,6 +1,7 @@
 import { scopedWhere } from '../utils/branchAccess.js'
 import { calculateCustomerReceivableBalance, reconcileCustomerReceivableBalance } from '../utils/customerBalance.js'
 import { syncLinkedTransactionAccountBalance } from '../utils/accountingSync.js'
+import { getReceivablesAccountingConfig, postReceivablesJournal, customerRefundLines } from './receivablesAccountingService.js'
 
 const fail = (message, code, statusCode = 400, details = {}) => Object.assign(new Error(message), { statusCode, code, ...details })
 
@@ -63,6 +64,18 @@ export async function recordCustomerWithdrawal(client, {
         description: `Customer withdrawal: ${customer.name || customer.email}`, userId,
       } })
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, account.id)
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
+      if (arConfig?.isEnabled) {
+        const linkedAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${account.id}` } } })
+        if (!linkedAccount) throw fail(`No linked chart account exists for ${account.name}. Link this transaction account in Accounting first.`, 'RECEIVABLE_ACCOUNT_LINK_REQUIRED', 409)
+        await postReceivablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId,
+          sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id,
+          date: withdrawal.createdAt, reference: withdrawalReference,
+          description: `Customer credit refund ${withdrawalReference}`,
+          lines: customerRefundLines(arConfig, { transactionAccountId: linkedAccount.id, amount: withdrawalAmount, reference: withdrawalReference }),
+        })
+      }
       const reconciled = await reconcileCustomerReceivableBalance(tx, scope, customerId)
       if (!reconciled || reconciled.balance > 0) throw fail('Customer funds changed. Refresh the balance and try again.', 'CUSTOMER_FUNDS_CHANGED', 409)
       return {

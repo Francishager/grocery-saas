@@ -4,6 +4,7 @@ import { authenticateToken, requirePermission, requireCashAccount, canUsePayment
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
+import { getReceivablesAccountingConfig, postReceivablesJournal, posReturnRecognitionLines } from '../src/services/receivablesAccountingService.js';
 import { returnItemTaxAmount } from "../src/utils/saleTaxAllocation.js";
 
 const router = Router();
@@ -266,6 +267,8 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
       }
 
       let total = 0;
+      let returnedCogs = 0;
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId);
       const returnItems = [];
       const requestedByProduct = new Map();
       for (const requested of items) {
@@ -289,6 +292,10 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
         const lineUnitTotal = Number(saleItem.quantity || 0) > 0 ? toMoney(saleItem.total) / Number(saleItem.quantity) : toMoney(saleItem.price);
         const lineTotal = toMoney(lineUnitTotal * qty);
         total += lineTotal;
+        if (arConfig?.isEnabled) {
+          if (saleItem.cost == null || !Number.isFinite(Number(saleItem.cost))) throw httpError(409, "Saved sale-time cost is missing for a returned item; inventory accounting cannot post this return safely.");
+          returnedCogs += Number(saleItem.cost) * qty;
+        }
         returnItems.push({
           productId: saleItem.productId,
           quantity: baseQty,
@@ -368,6 +375,18 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
         },
       });
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, refundAccount.id);
+
+      if (arConfig?.isEnabled) {
+        if (createdReturn.taxAmount == null && Number(sale.tax || 0) > 0) throw httpError(409, 'Exact tax for this return is not available from the original sale lines. No refund or stock change was committed.');
+        const linkedAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${refundAccount.id}` }, isActive: true } });
+        if (!linkedAccount) throw httpError(409, `No linked chart account exists for ${refundAccount.name}. Link this transaction account in Accounting first.`);
+        await postReceivablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: sale.branchId || scope.branchId || null, userId: req.user.id,
+          sourceType: 'POS_SALE_RETURN', sourceId: createdReturn.id, date: createdReturn.createdAt,
+          reference: returnNo, description: `POS sales return ${returnNo}`,
+          lines: posReturnRecognitionLines(arConfig, { transactionAccountId: linkedAccount.id, amount: total, taxAmount: createdReturn.taxAmount || 0, returnedCogs, reference: returnNo }),
+        });
+      }
 
       return createdReturn;
     });

@@ -5,6 +5,7 @@ import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils
 import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../src/utils/customerBalance.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { returnItemTaxAmount } from '../src/utils/saleTaxAllocation.js'
+import { creditNoteRecognitionLines, customerRefundLines, getReceivablesAccountingConfig, postReceivablesJournal, reverseReceivablesJournal } from '../src/services/receivablesAccountingService.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -223,6 +224,17 @@ async function ensureCreditNotePaidRefund(client, scope, noteId, userId) {
     userId,
   } })
   await syncLinkedTransactionAccountBalance(client, note.tenantId, account.id)
+  const arConfig = await getReceivablesAccountingConfig(client, note.tenantId)
+  if (arConfig?.isEnabled) {
+    const linkedAccount = await client.account.findFirst({ where: { tenantId: note.tenantId, description: { contains: `cashAccount:${account.id}` }, isActive: true } })
+    if (!linkedAccount) throw httpError(409, `No linked chart account exists for ${account.name}. Link this transaction account in Accounting first.`)
+    await postReceivablesJournal(client, {
+      tenantId: note.tenantId, branchId: note.branchId || scope.branchId || null, userId,
+      sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id, date: withdrawal.createdAt,
+      reference, description: `Customer credit refund ${reference}`,
+      lines: customerRefundLines(arConfig, { transactionAccountId: linkedAccount.id, amount: targetRefund, reference }),
+    })
+  }
   return client.creditNote.update({
     where: { id: note.id },
     data: { refundAmount: targetRefund, refundWithdrawalId: withdrawal.id, refundCashAccountId: account.id },
@@ -253,6 +265,7 @@ async function reverseCreditNotePaidRefund(client, scope, note, userId) {
   } })
   await client.customerWithdrawal.delete({ where: { id: withdrawal.id } })
   await syncLinkedTransactionAccountBalance(client, scope.tenantId, withdrawal.cashAccountId)
+  await reverseReceivablesJournal(client, { tenantId: scope.tenantId, sourceType: 'CUSTOMER_WITHDRAWAL', sourceId: withdrawal.id, userId, reason: `Credit note ${note.noteNo} cancelled` })
   return client.creditNote.update({ where: { id: note.id }, data: { refundAmount: 0, refundWithdrawalId: null, refundCashAccountId: null } })
 }
 
@@ -271,6 +284,34 @@ function itemBaseQuantity(item, quantity = item?.quantity) {
     throw httpError(400, 'Returned quantity must convert to a whole stock quantity')
   }
   return baseQty
+}
+
+async function getCreditNoteReturnedCogs(client, scope, note) {
+  if (!CREDIT_STOCK_REASONS.has(String(note.reason || '').toLowerCase())) return 0
+  const stockReturn = await client.saleReturn.findFirst({
+    where: { tenantId: scope.tenantId, returnNo: creditNoteReturnNo(note.noteNo), refundMethod: CREDIT_NOTE_STOCK_RETURN_METHOD, status: CREDIT_NOTE_STOCK_RETURN_STATUS },
+    include: { items: true },
+  })
+  if (!stockReturn?.items?.length) return 0
+  const sale = await client.saleRecord.findFirst({ where: scopedWhere(scope, { id: note.saleId }), include: { items: { include: { product: { select: { itemType: true } } } } } })
+  if (!sale) throw httpError(409, 'Original sale items are unavailable; returned inventory cost cannot be verified.')
+  let returnedCogs = 0
+  for (const returned of stockReturn.items) {
+    const sourceLines = (sale.items || []).filter((line) => line.productId === returned.productId && String(line.product?.itemType || '').toLowerCase() !== 'service')
+    if (!sourceLines.length || sourceLines.some((line) => line.cost == null || !Number.isFinite(Number(line.cost)))) {
+      throw httpError(409, 'Saved sale-time cost is missing for a returned product; correct the source cost evidence before enabling automatic accounting for this return.')
+    }
+    const unitCostsPerBase = sourceLines.map((line) => {
+      const baseQuantity = itemBaseQuantity(line)
+      if (baseQuantity <= 0) throw httpError(409, 'Original sale quantity cannot be used to verify returned stock cost.')
+      return toMoney(Number(line.cost) * Number(line.quantity || 0) / baseQuantity)
+    })
+    if (unitCostsPerBase.some((cost) => Math.abs(cost - unitCostsPerBase[0]) > 0.01)) {
+      throw httpError(409, 'The same product was sold at different saved costs and the return is not linked to a specific sale line. Resolve its cost allocation before posting this return.')
+    }
+    returnedCogs += unitCostsPerBase[0] * Number(returned.quantity || 0)
+  }
+  return toMoney(returnedCogs)
 }
 
 function requestedQuantityMap(items = []) {
@@ -797,7 +838,7 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
 
     const originalSale = await prisma.saleRecord.findFirst({
       where: scopedWhere(scope, { id: saleId, customerId, status: { not: 'cancelled' } }),
-      select: { id: true },
+      select: { id: true, tax: true },
     })
     if (!originalSale) return res.status(404).json({ error: 'Original customer sale was not found' })
 
@@ -843,6 +884,20 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
       })
       await createCreditNoteStockReturn(tx, scope, createdNote, items)
       await updateLinkedSaleBalanceFromCreditNotes(tx, scope, createdNote.saleId)
+      const arConfig = await getReceivablesAccountingConfig(tx, tenantId)
+      if (arConfig?.isEnabled) {
+        if (noteTaxAmount == null && Number(originalSale.tax || 0) > 0) {
+          throw httpError(409, 'Exact tax for this credit note is not captured. Record the return with line-level tax evidence before enabling automatic accounting for this transaction.')
+        }
+        const { targetRefund } = await creditNoteRefundTarget(tx, scope, createdNote.id)
+        const returnedCogs = await getCreditNoteReturnedCogs(tx, scope, createdNote)
+        await postReceivablesJournal(tx, {
+          tenantId, branchId: createdNote.branchId, userId: req.user.id,
+          sourceType: 'RECEIVABLE_CREDIT_NOTE', sourceId: createdNote.id, date: createdNote.createdAt,
+          reference: createdNote.noteNo, description: `Customer credit note ${createdNote.noteNo}`,
+          lines: creditNoteRecognitionLines(arConfig, { amount: createdNote.amount, taxAmount: noteTaxAmount || 0, refundAmount: targetRefund, returnedCogs, reference: createdNote.noteNo }),
+        })
+      }
       await ensureCreditNotePaidRefund(tx, scope, createdNote.id, req.user.id)
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
       return createdNote
@@ -862,6 +917,11 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
     const existing = await prisma.creditNote.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
     if (!existing) return res.status(404).json({ error: 'Credit note not found' })
     if (existing.status === 'cancelled') return res.status(400).json({ error: 'Cannot edit a cancelled credit note' })
+
+    const accountingConfig = await getReceivablesAccountingConfig(prisma, tenantId)
+    if (accountingConfig?.isEnabled && (req.body.amount !== undefined || req.body.reason !== undefined)) {
+      return res.status(409).json({ error: 'This credit note is accounted for. Cancel it with the reversal workflow and issue a corrected note so the audit trail stays intact.' })
+    }
 
     const { amount, reason, notes } = req.body
     const updates = {}
@@ -918,6 +978,7 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
     const note = await prisma.$transaction(async (tx) => {
       await reverseCreditNoteStockReturn(tx, existing.tenantId, existing.noteNo)
       await reverseCreditNotePaidRefund(tx, scope, existing, req.user.id)
+      await reverseReceivablesJournal(tx, { tenantId: scope.tenantId, sourceType: 'RECEIVABLE_CREDIT_NOTE', sourceId: existing.id, userId: req.user.id, reason: `Credit note ${existing.noteNo} cancelled` })
       const cancelledNote = await tx.creditNote.update({
         where: { id: req.params.id },
         data: { status: 'cancelled' },

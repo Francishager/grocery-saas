@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
@@ -32,6 +32,19 @@ interface ReconciliationIssue {
   receipts?: Array<{ id: string; amount: number; paymentMethod: string; reference?: string | null; transactionId?: string | null; notes?: string | null; createdAt: string }>
 }
 
+type AccountingRole = 'receivableAccountId' | 'salesRevenueAccountId' | 'taxPayableAccountId' | 'salesReturnsAccountId' | 'costOfGoodsSoldAccountId' | 'inventoryAccountId' | 'customerAdvancesAccountId'
+type AccountingConfig = Partial<Record<AccountingRole, string | null>> & { isEnabled?: boolean }
+type ChartAccount = { id: string; code: string; name: string; type: string }
+const accountingRoles: Array<{ key: AccountingRole; title: string; type: string }> = [
+  { key: 'receivableAccountId', title: 'Accounts receivable', type: 'asset' },
+  { key: 'salesRevenueAccountId', title: 'Sales revenue', type: 'revenue' },
+  { key: 'taxPayableAccountId', title: 'Output tax payable', type: 'liability' },
+  { key: 'salesReturnsAccountId', title: 'Sales returns and allowances', type: 'revenue' },
+  { key: 'costOfGoodsSoldAccountId', title: 'Cost of goods sold', type: 'expense' },
+  { key: 'inventoryAccountId', title: 'Inventory', type: 'asset' },
+  { key: 'customerAdvancesAccountId', title: 'Customer advances', type: 'liability' },
+]
+
 const decisionLabels: Record<Decision, string> = {
   sale_amount_confirmed: 'Sale paid amount verified',
   receipt_rows_confirmed: 'Receipt rows verified',
@@ -44,6 +57,7 @@ export default function ReceivableReconciliationPage() {
   const { toast } = useToast()
   const canReview = hasPermission('canReviewReceivableReconciliation')
   const canApply = hasPermission('canApplyReceivableReconciliation')
+  const canEditAccounting = hasPermission('canEditAccounting')
   const [issues, setIssues] = useState<ReconciliationIssue[]>([])
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
@@ -54,6 +68,10 @@ export default function ReceivableReconciliationPage() {
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [confirmReceipts, setConfirmReceipts] = useState(false)
+  const [accountingConfig, setAccountingConfig] = useState<AccountingConfig>({ isEnabled: false })
+  const [chartAccounts, setChartAccounts] = useState<ChartAccount[]>([])
+  const [accountingLoading, setAccountingLoading] = useState(false)
+  const [accountingSaving, setAccountingSaving] = useState(false)
 
   const loadIssues = useCallback(async (targetPage = page) => {
     setLoading(true)
@@ -73,6 +91,38 @@ export default function ReceivableReconciliationPage() {
   }, [page, toast])
 
   useEffect(() => { void loadIssues(1) }, [])
+
+  const loadAccountingConfig = useCallback(async () => {
+    setAccountingLoading(true)
+    try {
+      const response = await apiFetch('/api/receivables/reconciliation/accounting-config')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not load accounting mappings')
+      setAccountingConfig(data.config || { isEnabled: false })
+      setChartAccounts(data.accounts || [])
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Accounting mappings could not load', description: error instanceof Error ? error.message : 'Try again.' })
+    } finally {
+      setAccountingLoading(false)
+    }
+  }, [toast])
+
+  useEffect(() => { void loadAccountingConfig() }, [loadAccountingConfig])
+
+  const saveAccountingConfig = async () => {
+    setAccountingSaving(true)
+    try {
+      const response = await apiFetch('/api/receivables/reconciliation/accounting-config', { method: 'PUT', body: JSON.stringify(accountingConfig) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not save accounting mappings')
+      setAccountingConfig(data.config)
+      toast({ title: data.config?.isEnabled ? 'Receivables posting enabled' : 'Accounting mappings saved', description: 'New mapped sales, receipts, refunds, and credit notes will post source-linked journals.' })
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Accounting mappings were not saved', description: error instanceof Error ? error.message : 'Try again.' })
+    } finally {
+      setAccountingSaving(false)
+    }
+  }
 
   const submitReview = async (issue: ReconciliationIssue) => {
     if (!note.trim()) {
@@ -151,6 +201,17 @@ export default function ReceivableReconciliationPage() {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Only verified linked receipts can be allocated here. Missing receipts, duplicates, lower receipt totals, and cash/ledger differences remain unresolved for accountant review.
         </p>
       </div>
+
+      <section className="space-y-4 border-b pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-base font-semibold">Receivables general-ledger posting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Optional, tenant-scoped mappings. Existing transactions are not reposted automatically; use a reviewed migration plan for historical entries.</p></div>
+          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={Boolean(accountingConfig.isEnabled)} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setAccountingConfig((current) => ({ ...current, isEnabled: event.target.checked }))} /> Enable automatic posting</label>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {accountingRoles.map((role) => <label key={role.key} className="grid gap-1.5 text-sm"><span>{role.title} <span className="text-muted-foreground">({role.type})</span></span><select value={accountingConfig[role.key] || ''} disabled={!canEditAccounting || accountingLoading} onChange={(event) => setAccountingConfig((current) => ({ ...current, [role.key]: event.target.value || null }))} className="h-10 min-w-0 rounded-md border bg-background px-3"><option value="">Select account</option>{chartAccounts.filter((account) => account.type.toLowerCase() === role.type).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>)}
+        </div>
+        {canEditAccounting ? <Button variant="outline" onClick={() => void saveAccountingConfig()} disabled={accountingSaving || accountingLoading}><Save className="mr-2 h-4 w-4" />{accountingSaving ? 'Saving...' : 'Save mappings'}</Button> : <p className="text-xs text-muted-foreground">You can view these mappings but do not have permission to change accounting configuration.</p>}
+      </section>
 
       <div className="overflow-x-auto border-y">
         <table className="w-full min-w-[980px] border-collapse text-left text-sm">

@@ -175,6 +175,7 @@ model Tenant {
   payrollPayments                 PayrollPayment[]
   employeeSalaryConfigs           EmployeeSalaryConfig[]
   hrAccountingConfig              HRAccountingConfig?
+  receivablesAccountingConfig     ReceivablesAccountingConfig?
   hrAuditLogs                     HRAuditLog[]
 
   // =====================
@@ -1934,6 +1935,13 @@ model Account {
   branchId     String?
   branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   journalLines JournalLine[]
+  receivablesARConfigs ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
+  receivablesRevenueConfigs ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
+  receivablesTaxConfigs ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
+  receivablesReturnsConfigs ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
+  receivablesCOGSConfigs ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
+  receivablesInventoryConfigs ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
+  receivablesAdvanceConfigs ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -2397,6 +2405,34 @@ model HRAccountingConfig {
   updatedAt    DateTime  @updatedAt
 
   @@map("hr_accounting_configs")
+}
+
+model ReceivablesAccountingConfig {
+  id                      String   @id @default(cuid())
+  tenantId                String   @unique
+  tenant                  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivableAccountId      String?
+  receivableAccount        Account? @relation("ReceivablesARAccount", fields: [receivableAccountId], references: [id], onDelete: SetNull)
+  salesRevenueAccountId    String?
+  salesRevenueAccount      Account? @relation("ReceivablesRevenueAccount", fields: [salesRevenueAccountId], references: [id], onDelete: SetNull)
+  taxPayableAccountId      String?
+  taxPayableAccount        Account? @relation("ReceivablesTaxAccount", fields: [taxPayableAccountId], references: [id], onDelete: SetNull)
+  salesReturnsAccountId    String?
+  salesReturnsAccount      Account? @relation("ReceivablesReturnsAccount", fields: [salesReturnsAccountId], references: [id], onDelete: SetNull)
+  costOfGoodsSoldAccountId String?
+  costOfGoodsSoldAccount   Account? @relation("ReceivablesCOGSAccount", fields: [costOfGoodsSoldAccountId], references: [id], onDelete: SetNull)
+  inventoryAccountId       String?
+  inventoryAccount         Account? @relation("ReceivablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
+  customerAdvancesAccountId String?
+  customerAdvancesAccount  Account? @relation("ReceivablesAdvanceAccount", fields: [customerAdvancesAccountId], references: [id], onDelete: SetNull)
+  isEnabled               Boolean  @default(false)
+  configuredBy            String?
+  configuredAt            DateTime?
+  updatedBy               String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("receivables_accounting_configs")
 }
 
 // =====================================================

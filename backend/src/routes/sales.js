@@ -12,6 +12,7 @@ import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js"
 import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
 import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
+import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivablesJournal } from '../services/receivablesAccountingService.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -431,6 +432,17 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
         });
 
         await syncLinkedTransactionAccountBalance(tx, scope.tenantId, req.userCashAccountId);
+        const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId);
+        if (arConfig?.isEnabled) {
+          const linkedAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${req.userCashAccountId}` }, isActive: true } });
+          if (!linkedAccount) throw Object.assign(new Error('Receivables accounting is enabled, but this till has no linked chart-of-accounts record.'), { statusCode: 409 });
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: scope.branchId, userId,
+            sourceType: 'POS_SALE', sourceId: created.id, date: created.createdAt,
+            reference: created.receiptNo, description: `Point-of-sale ${created.receiptNo}`,
+            lines: cashSaleRecognitionLines(arConfig, created, saleItems, linkedAccount.id),
+          });
+        }
       }
 
       return created;
@@ -550,6 +562,17 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
         });
 
         await syncLinkedTransactionAccountBalance(tx, scope.tenantId, req.userCashAccountId);
+        const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId);
+        if (arConfig?.isEnabled) {
+          const linkedAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${req.userCashAccountId}` }, isActive: true } });
+          if (!linkedAccount) throw Object.assign(new Error('Receivables accounting is enabled, but this till has no linked chart-of-accounts record.'), { statusCode: 409 });
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: scope.branchId, userId,
+            sourceType: 'POS_SALE', sourceId: created.id, date: created.createdAt,
+            reference: created.receiptNo, description: `Point-of-sale ${created.receiptNo}`,
+            lines: cashSaleRecognitionLines(arConfig, created, saleItems, linkedAccount.id),
+          });
+        }
       }
 
       return created;
