@@ -46,6 +46,7 @@ const PERMISSION_TO_FEATURES = {
   canDeleteReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
   canViewReceivableReconciliation: ['receivables'],
   canReviewReceivableReconciliation: ['receivables'],
+  canApplyReceivableReconciliation: ['receivables'],
   canCreateSupplier: ['suppliers'],
   canViewSupplier: ['suppliers'],
   canEditSupplier: ['suppliers'],
@@ -205,7 +206,7 @@ export const ALL_PERMISSION_KEYS = [
   // Customers / Receivables
   "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
   "canCreateReceivable", "canViewReceivable", "canEditReceivable", "canDeleteReceivable",
-  "canViewReceivableReconciliation", "canReviewReceivableReconciliation",
+  "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
   "canCreateSupplier", "canViewSupplier", "canEditSupplier", "canDeleteSupplier",
   // Staff
@@ -688,6 +689,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canReviewReceivableReconciliation: {
     name: 'Review receivable reconciliation',
     description: 'Record an auditable review decision and note for a customer receipt mismatch. This does not post or change balances.',
+  },
+  canApplyReceivableReconciliation: {
+    name: 'Apply receivable reconciliation',
+    description: 'Convert verified legacy customer receipts into explicit invoice allocations while preserving customer and cash balances.',
   },
   canViewPayablesReport: {
     name: 'View payables reports',

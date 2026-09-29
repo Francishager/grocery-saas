@@ -78,6 +78,7 @@ test('new transaction permissions are grouped separately from accounting permiss
 
 test('receivable reconciliation access and review are independently permissioned', () => {
   assert.equal(PERMISSION_METADATA.canViewReceivableReconciliation.category, 'customers');
+  assert.equal(PERMISSION_METADATA.canApplyReceivableReconciliation.category, 'customers');
   assert.equal(PERMISSION_METADATA.canReviewReceivableReconciliation.category, 'customers');
   assert.notEqual(
     PERMISSION_METADATA.canViewReceivableReconciliation.id,

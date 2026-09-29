@@ -12,17 +12,30 @@ const issue = {
   recordedSaleAmountPaid: 40, linkedPaymentTotal: 25,
 };
 let calls;
+const testSale = { id: issue.saleId, tenantId: 'tenant-a', customerId: issue.customerId, status: 'completed', amountPaid: 40, total: 100, balance: 60, legacyPaidAmountAtCutover: null, legacySaleAmountPaidAtCutover: null, legacyLinkedPaymentsAtCutover: null };
+const testPayments = [{ id: 'payment-a', amount: 25 }];
 const db = {
   $queryRawUnsafe: async (query) => query.includes('COUNT(*)') ? [{ count: 1 }] : [issue],
+  $transaction: async (callback) => callback(db),
+  $queryRaw: async () => [],
   customerReceivableReconciliationReview: {
     findMany: async () => [],
     create: async ({ data }) => { calls.review = data; return { ...data, id: 'review-a', reviewer: { id: data.reviewerId, fname: 'Reviewer' } }; },
   },
   saleRecord: {
-    findFirst: async () => ({ id: issue.saleId, tenantId: 'tenant-a', customerId: issue.customerId, status: 'completed', amountPaid: 40 }),
-    update: async () => { calls.saleUpdate++; },
+    findFirst: async () => ({ ...testSale }),
+    update: async ({ data }) => { calls.saleUpdate++; calls.saleData = data; return { ...testSale, ...data }; },
   },
-  customerPayment: { aggregate: async () => ({ _sum: { amount: 25 } }) },
+  customerPayment: {
+    aggregate: async () => ({ _sum: { amount: testPayments.reduce((sum, item) => sum + item.amount, 0) } }),
+    findMany: async () => testPayments.map((payment) => ({ ...payment })),
+    update: async ({ where, data }) => { calls.paymentUpdates.push({ where, data }); },
+  },
+  customerPaymentAllocation: {
+    findMany: async () => [],
+    aggregate: async () => ({ _sum: { amount: 0 } }),
+    create: async ({ data }) => { calls.allocations.push(data); },
+  },
 };
 globalThis.receivableReconciliationFixture = { db };
 
@@ -39,7 +52,7 @@ const fixtures = {
   'customerWithdrawalService.js': dataUrl('export const recordCustomerWithdrawal = () => {};'),
   'customerIdentity.js': dataUrl('export const customerIdentityConflictMessage = () => "Conflict"; export const findCustomerIdentityConflict = () => null;'),
   'customerBalance.js': dataUrl(`export const attachCustomerReceivableBalances = async (_, __, customers) => customers;
-    export const outstandingCustomerSummary = () => {}, calculateCustomerReceivableBalance = () => {}, reconcileCustomerReceivableBalance = () => {}, effectiveCreditNoteRows = () => [];`),
+    export const outstandingCustomerSummary = () => {}, calculateCustomerReceivableBalance = () => ({ balance: globalThis.receivableReconciliationFixture.balance }), reconcileCustomerReceivableBalance = async () => {}, effectiveCreditNoteRows = () => [];`),
   'saleTaxAllocation.js': dataUrl('export const allocateSaleTaxToItems = () => [];'),
 };
 const routeUrl = new URL('../routes/receivables.js', import.meta.url);
@@ -51,8 +64,14 @@ const source = (await readFile(routeUrl, 'utf8')).replace(/(from\s+)(["'])([^"']
 const router = (await import(dataUrl(source))).default;
 const getRoute = router.stack.find((layer) => layer.route?.path === '/reconciliation/payment-allocations' && layer.route.methods.get).route;
 const reviewRoute = router.stack.find((layer) => layer.route?.path === '/reconciliation/payment-allocations/:saleId/reviews' && layer.route.methods.post).route;
+const correctionRoute = router.stack.find((layer) => layer.route?.path === '/reconciliation/payment-allocations/:saleId/reconcile-to-receipts' && layer.route.methods.post).route;
 
-beforeEach(() => { calls = { saleUpdate: 0, review: null }; });
+beforeEach(() => {
+  calls = { saleUpdate: 0, review: null, paymentUpdates: [], allocations: [], balance: 60 };
+  globalThis.receivableReconciliationFixture.balance = 60;
+  Object.assign(testSale, { amountPaid: 40, legacyPaidAmountAtCutover: null, legacySaleAmountPaidAtCutover: null, legacyLinkedPaymentsAtCutover: null });
+  testPayments.splice(0, testPayments.length, { id: 'payment-a', amount: 25 });
+});
 
 async function request(route, { query = {}, body = {}, permissions = [], params = {} } = {}) {
   const req = {
@@ -101,4 +120,43 @@ test('authorized reviews are fingerprint-checked and append an audit note withou
   assert.equal(calls.review.reviewerId, 'reviewer-a');
   assert.equal(calls.review.provisionalPaidAmount, 40);
   assert.equal(calls.saleUpdate, 0);
+});
+
+test('receipt correction is permission checked and requires explicit evidence confirmation', async () => {
+  const common = { params: { saleId: issue.saleId }, permissions: ['canApplyReceivableReconciliation'] };
+  const forbidden = await request(correctionRoute, { ...common, permissions: [] });
+  assert.equal(forbidden.status, 403);
+  const reviewOnly = await request(correctionRoute, { ...common, permissions: ['canReviewReceivableReconciliation'] });
+  assert.equal(reviewOnly.status, 403);
+  const unconfirmed = await request(correctionRoute, { ...common, body: { note: 'Bank evidence reviewed', sourceFingerprint: 'sale-a:40.00:25.00' } });
+  assert.equal(unconfirmed.status, 400);
+  assert.equal(calls.saleUpdate, 0);
+});
+
+test('receipt correction converts verified legacy rows to allocations without changing customer balance', async () => {
+  Object.assign(testSale, { amountPaid: 25 });
+  testPayments.splice(0, testPayments.length, { id: 'payment-a', amount: 40 });
+  const response = await request(correctionRoute, {
+    params: { saleId: issue.saleId },
+    permissions: ['canApplyReceivableReconciliation'],
+    body: { confirmReceipts: true, note: 'Matched to till close and bank evidence.', sourceFingerprint: 'sale-a:25.00:40.00' },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.customerBalanceChanged, false);
+  assert.equal(response.body.cashOrGeneralLedgerChanged, false);
+  assert.equal(calls.allocations.length, 1);
+  assert.equal(calls.allocations[0].amount, '40.00');
+  assert.deepEqual(calls.saleData, { legacyPaidAmountAtCutover: 0, amountPaid: 40, balance: 45, paymentStatus: 'partial' });
+  assert.equal(calls.review.decision, 'receipts_confirmed_and_sale_projection_reconciled');
+});
+
+test('receipt correction refuses a lower receipt total instead of adjusting receivables silently', async () => {
+  const response = await request(correctionRoute, {
+    params: { saleId: issue.saleId },
+    permissions: ['canApplyReceivableReconciliation'],
+    body: { confirmReceipts: true, note: 'Checked bank evidence.', sourceFingerprint: 'sale-a:40.00:25.00' },
+  });
+  assert.equal(response.status, 409);
+  assert.equal(calls.saleUpdate, 0);
+  assert.equal(calls.allocations.length, 0);
 });

@@ -656,6 +656,7 @@ model UserPermission {
   canDeleteReceivable               Boolean  @default(false)
   canViewReceivableReconciliation   Boolean  @default(false)
   canReviewReceivableReconciliation Boolean  @default(false)
+  canApplyReceivableReconciliation  Boolean  @default(false)
   // Suppliers
   canCreateSupplier                 Boolean  @default(false)
   canViewSupplier                   Boolean  @default(false)

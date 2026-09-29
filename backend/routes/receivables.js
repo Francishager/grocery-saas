@@ -1319,11 +1319,138 @@ router.get('/reconciliation/payment-allocations', authenticateToken, requirePerm
         review: latestReviewByFingerprint.get(`${issue.saleId}:${fingerprint}`) || null,
       }
     })
+    const receiptRows = saleIds.length ? await prisma.customerPayment.findMany({
+      where: { tenantId: scope.tenantId, saleId: { in: saleIds }, allocationMode: 'legacy' },
+      select: { id: true, saleId: true, amount: true, paymentMethod: true, reference: true, transactionId: true, notes: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    }) : []
+    const receiptsBySale = new Map()
+    for (const receipt of receiptRows) {
+      const list = receiptsBySale.get(receipt.saleId) || []
+      list.push({ ...receipt, amount: toMoney(receipt.amount) })
+      receiptsBySale.set(receipt.saleId, list)
+    }
+    for (const row of rows) {
+      const review = row.review
+      row.resolved = review?.decision === 'receipts_confirmed_and_sale_projection_reconciled'
+      row.receipts = receiptsBySale.get(row.saleId) || []
+    }
     const total = Number(countRows[0]?.count || 0)
-    res.json({ rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
+    res.json({ rows, pagination: { page, limit, total, open: rows.filter((row) => !row.resolved).length, pages: Math.ceil(total / limit) } })
   } catch (error) {
     console.error('Get receivable reconciliation issues error:', error)
     handleBranchError(res, error, 'Failed to load receivable reconciliation issues')
+  }
+})
+
+router.post('/reconciliation/payment-allocations/:saleId/reconcile-to-receipts', authenticateToken, requirePermission('canApplyReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: true })
+    const { note, sourceFingerprint, confirmReceipts } = req.body || {}
+    const reviewNote = String(note || '').trim()
+    if (confirmReceipts !== true) return res.status(400).json({ error: 'Confirm that you verified every linked receipt against the actual cash, bank, or mobile-money evidence.' })
+    if (!reviewNote) return res.status(400).json({ error: 'Record the evidence checked before reconciling this sale.' })
+    if (reviewNote.length > 1000) return res.status(400).json({ error: 'Evidence note must be 1,000 characters or fewer' })
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "sale_records" WHERE "id" = ${req.params.saleId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const sale = await tx.saleRecord.findFirst({
+        where: scopedWhere(scope, { id: req.params.saleId, status: 'completed', customerId: { not: null } }),
+      })
+      if (!sale) throw Object.assign(new Error('Receivable sale not found'), { statusCode: 404 })
+
+      const legacyPayments = await tx.customerPayment.findMany({
+        where: { tenantId: scope.tenantId, customerId: sale.customerId, saleId: sale.id, allocationMode: 'legacy' },
+        select: { id: true, amount: true },
+        orderBy: { createdAt: 'asc' },
+      })
+      const recorded = sale.legacySaleAmountPaidAtCutover == null
+        ? toMoney(sale.amountPaid)
+        : toMoney(sale.legacySaleAmountPaidAtCutover)
+      const linked = sale.legacyLinkedPaymentsAtCutover == null
+        ? toMoney(legacyPayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
+        : toMoney(sale.legacyLinkedPaymentsAtCutover)
+      const fingerprint = receivablePaymentFingerprint(sale.id, recorded, linked)
+      if (sourceFingerprint !== fingerprint) throw Object.assign(new Error('Source values changed. Reload the reconciliation list and verify the current receipts.'), { statusCode: 409 })
+      if (Math.abs(recorded - linked) <= 0.01) throw Object.assign(new Error('This sale no longer has a payment mismatch.'), { statusCode: 409 })
+      if (linked < recorded) throw Object.assign(new Error('Linked receipts are below the sale-paid figure. This may require recording a missing receipt or correcting the sale with a balanced accounting entry; this workflow will not reduce paid amounts automatically.'), { statusCode: 409 })
+      if (!legacyPayments.length) throw Object.assign(new Error('No legacy receipt rows are available to allocate. This discrepancy needs a source-document correction.'), { statusCode: 409 })
+      const legacyTotal = toMoney(legacyPayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
+      if (Math.abs(legacyTotal - linked) > 0.01) throw Object.assign(new Error('The linked receipt rows no longer match the captured reconciliation evidence. Reload and investigate.'), { statusCode: 409 })
+
+      const paymentIds = legacyPayments.map((payment) => payment.id)
+      const existingAllocations = await tx.customerPaymentAllocation.findMany({ where: { tenantId: scope.tenantId, paymentId: { in: paymentIds } } })
+      if (existingAllocations.length) throw Object.assign(new Error('One or more legacy receipts already have allocations. This requires a separate allocation review.'), { statusCode: 409 })
+      const existingExplicit = await tx.customerPaymentAllocation.aggregate({
+        where: { tenantId: scope.tenantId, saleId: sale.id, targetType: 'sale' },
+        _sum: { amount: true },
+      })
+      const paidAfter = toMoney(linked + toMoney(existingExplicit._sum.amount))
+      if (paidAfter > toMoney(sale.total) + 0.01) throw Object.assign(new Error('Verified receipts exceed the sale total. Allocate the excess to the customer account through an approved workflow.'), { statusCode: 409 })
+
+      const before = await calculateCustomerReceivableBalance(tx, scope, sale.customerId)
+      const originalRecorded = recorded
+      const originalLinked = linked
+      const previousBaseline = sale.legacyPaidAmountAtCutover == null
+        ? Math.max(toMoney(sale.amountPaid), linked)
+        : toMoney(sale.legacyPaidAmountAtCutover)
+      if (Math.abs(previousBaseline - linked) > 0.01) throw Object.assign(new Error('The existing customer balance uses a different legacy baseline. This requires an accountant-reviewed adjustment.'), { statusCode: 409 })
+
+      for (const payment of legacyPayments) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId: sale.customerId,
+            paymentId: payment.id,
+            saleId: sale.id,
+            targetType: 'sale',
+            amount: toMoney(payment.amount).toFixed(2),
+            createdById: req.user.id,
+          },
+        })
+        await tx.customerPayment.update({ where: { id: payment.id }, data: { allocationMode: 'explicit' } })
+      }
+
+      const projectionDelta = toMoney(paidAfter - toMoney(sale.amountPaid))
+      const remaining = Math.min(toMoney(sale.total), Math.max(0, toMoney(sale.balance) - projectionDelta))
+      await tx.saleRecord.update({
+        where: { id: sale.id },
+        data: {
+          legacyPaidAmountAtCutover: 0,
+          amountPaid: paidAfter,
+          balance: remaining,
+          paymentStatus: remaining <= 0.01 ? 'paid' : paidAfter > 0 ? 'partial' : 'unpaid',
+        },
+      })
+
+      const review = await tx.customerReceivableReconciliationReview.create({
+        data: {
+          tenantId: scope.tenantId,
+          customerId: sale.customerId,
+          saleId: sale.id,
+          recordedSaleAmountPaid: originalRecorded,
+          linkedPaymentTotal: originalLinked,
+          provisionalPaidAmount: Math.max(originalRecorded, originalLinked),
+          sourceFingerprint: fingerprint,
+          decision: 'receipts_confirmed_and_sale_projection_reconciled',
+          note: reviewNote,
+          reviewerId: req.user.id,
+        },
+      })
+      await reconcileCustomerReceivableBalance(tx, scope, sale.customerId)
+      const after = await calculateCustomerReceivableBalance(tx, scope, sale.customerId)
+      if (Math.abs(toMoney(before?.balance) - toMoney(after?.balance)) > 0.01) {
+        throw Object.assign(new Error('The correction would change the customer balance. No changes were saved; use an accountant-reviewed adjustment workflow.'), { statusCode: 409 })
+      }
+      return { review, customerBalance: toMoney(after?.balance), reconciledPaidAmount: paidAfter }
+    })
+
+    res.status(200).json({ ...result, financialRecordsChanged: true, customerBalanceChanged: false, cashOrGeneralLedgerChanged: false })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    if (error.code === 'P2002') return res.status(409).json({ error: 'A receipt allocation already exists. Reload the reconciliation list and verify the current state.' })
+    console.error('Reconcile receivable sale to receipts error:', error)
+    handleBranchError(res, error, 'Failed to reconcile sale to verified receipt records')
   }
 })
 

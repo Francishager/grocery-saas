@@ -28,6 +28,8 @@ interface ReconciliationIssue {
     reviewedAt: string
     reviewer?: { fname?: string; lname?: string }
   }
+  resolved?: boolean
+  receipts?: Array<{ id: string; amount: number; paymentMethod: string; reference?: string | null; transactionId?: string | null; notes?: string | null; createdAt: string }>
 }
 
 const decisionLabels: Record<Decision, string> = {
@@ -41,6 +43,7 @@ export default function ReceivableReconciliationPage() {
   const { hasPermission } = useJWTAuth()
   const { toast } = useToast()
   const canReview = hasPermission('canReviewReceivableReconciliation')
+  const canApply = hasPermission('canApplyReceivableReconciliation')
   const [issues, setIssues] = useState<ReconciliationIssue[]>([])
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
@@ -50,6 +53,7 @@ export default function ReceivableReconciliationPage() {
   const [decision, setDecision] = useState<Decision>('requires_adjustment')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmReceipts, setConfirmReceipts] = useState(false)
 
   const loadIssues = useCallback(async (targetPage = page) => {
     setLoading(true)
@@ -85,11 +89,42 @@ export default function ReceivableReconciliationPage() {
       if (!response.ok) throw new Error(data?.error || 'Could not save review')
       toast({ title: 'Review recorded', description: 'No sale, receipt, or balance was changed.' })
       setActiveIssue(null)
+      setConfirmReceipts(false)
       setDecision('requires_adjustment')
       setNote('')
       await loadIssues(page)
     } catch (error) {
       toast({ variant: 'destructive', title: 'Review was not saved', description: error instanceof Error ? error.message : 'Try again.' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reconcileToReceipts = async (issue: ReconciliationIssue) => {
+    if (!confirmReceipts || !note.trim()) {
+      toast({ variant: 'destructive', title: 'Confirm the source evidence', description: 'Verify every receipt against actual collection records and add a note.' })
+      return
+    }
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/api/receivables/reconciliation/payment-allocations/${encodeURIComponent(issue.saleId)}/reconcile-to-receipts`, {
+        method: 'POST',
+        body: JSON.stringify({
+          branchId: issue.branchId || undefined,
+          sourceFingerprint: issue.sourceFingerprint,
+          confirmReceipts,
+          note: note.trim(),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not reconcile this sale')
+      toast({ title: 'Receipt allocations reconciled', description: 'The verified receipts were allocated to the sale. Customer balance and cash/general-ledger balances did not change.' })
+      setActiveIssue(null)
+      setConfirmReceipts(false)
+      setNote('')
+      await loadIssues(page)
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Reconciliation was not applied', description: error instanceof Error ? error.message : 'Reload and verify the source records.' })
     } finally {
       setSaving(false)
     }
@@ -110,10 +145,10 @@ export default function ReceivableReconciliationPage() {
       </header>
 
       <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-y py-4">
-        <div><div className="text-xs uppercase text-muted-foreground">Open differences</div><div className="mt-1 text-xl font-semibold">{total}</div></div>
+        <div><div className="text-xs uppercase text-muted-foreground">Mismatch records</div><div className="mt-1 text-xl font-semibold">{total}</div></div>
         <div><div className="text-xs uppercase text-muted-foreground">This page absolute difference</div><div className="mt-1 text-xl font-semibold">{formatCurrency(absoluteDifference)}</div></div>
         <p className="flex min-w-[260px] flex-1 items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Reviews record a decision only; they never post adjustments or change customer balances.
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Only verified linked receipts can be allocated here. Missing receipts, duplicates, lower receipt totals, and cash/ledger differences remain unresolved for accountant review.
         </p>
       </div>
 
@@ -124,8 +159,8 @@ export default function ReceivableReconciliationPage() {
               <th className="px-3 py-3">Invoice / Customer</th>
               <th className="px-3 py-3">Date</th>
               <th className="px-3 py-3 text-right">Invoice total</th>
-              <th className="px-3 py-3 text-right">Sale paid</th>
-              <th className="px-3 py-3 text-right">Linked receipts</th>
+              <th className="px-3 py-3 text-right">Captured paid (legacy)</th>
+              <th className="px-3 py-3 text-right">Legacy receipt rows</th>
               <th className="px-3 py-3 text-right">Difference</th>
               <th className="px-3 py-3">Review</th>
               <th className="px-3 py-3"></th>
@@ -144,24 +179,39 @@ export default function ReceivableReconciliationPage() {
                 <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(issue.linkedPaymentTotal)}</td>
                 <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums">{formatCurrency(issue.difference)}</td>
                 <td className="px-3 py-3">
-                  {issue.review ? <div className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /><div><div>{decisionLabels[issue.review.decision]}</div><div className="max-w-[260px] text-xs text-muted-foreground">{issue.review.note}</div></div></div> : <span className="text-amber-700 dark:text-amber-300">Needs review</span>}
+                  {issue.resolved ? <div className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /><div><div>Reconciled to verified receipts</div><div className="max-w-[260px] text-xs text-muted-foreground">{issue.review?.note}</div></div></div> : issue.review ? <div className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" /><div><div>{decisionLabels[issue.review.decision]}</div><div className="max-w-[260px] text-xs text-muted-foreground">{issue.review.note}</div></div></div> : <span className="text-amber-700 dark:text-amber-300">Needs review</span>}
                 </td>
                 <td className="px-3 py-3 text-right">
-                  {canReview && <Button size="sm" variant="outline" onClick={() => { setActiveIssue(activeIssue === issue.saleId ? null : issue.saleId); setNote('') }}>{issue.review ? 'Review again' : 'Review'}</Button>}
+                  {(canReview || canApply) && <Button size="sm" variant="outline" onClick={() => { setActiveIssue(activeIssue === issue.saleId ? null : issue.saleId); setNote(''); setConfirmReceipts(false) }}>{issue.resolved ? 'View audit' : 'Review / correct'}</Button>}
                 </td>
               </tr>
-              {activeIssue === issue.saleId && canReview && (
+              {activeIssue === issue.saleId && (canReview || canApply) && (
                 <tr><td colSpan={8} className="border-t bg-muted/20 px-4 py-4">
-                    <div className="grid gap-3 md:grid-cols-[minmax(220px,0.7fr)_minmax(280px,1.3fr)_auto] md:items-end">
+                    <div className="space-y-4">
+                      <section className="overflow-x-auto rounded-md border bg-background">
+                        <div className="border-b px-3 py-2 text-sm font-medium">Linked legacy receipts</div>
+                        <table className="w-full min-w-[720px] text-left text-xs">
+                          <thead className="text-muted-foreground"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Method</th><th className="px-3 py-2">Transaction ID</th><th className="px-3 py-2 text-right">Amount</th></tr></thead>
+                          <tbody className="divide-y">{(issue.receipts || []).map((receipt) => <tr key={receipt.id}><td className="px-3 py-2 whitespace-nowrap">{formatDisplayDate(receipt.createdAt)}</td><td className="px-3 py-2"><div>{receipt.reference || '—'}</div><div className="break-all text-[10px] text-muted-foreground">{receipt.id}</div></td><td className="px-3 py-2">{receipt.paymentMethod}</td><td className="px-3 py-2">{receipt.transactionId || '—'}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(receipt.amount)}</td></tr>)}{!issue.receipts?.length && <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">No legacy receipt details found.</td></tr>}</tbody>
+                        </table>
+                      </section>
+                      {(canReview || canApply) && <label className="grid gap-1.5 text-sm">Evidence / reviewer note
+                        <Textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} rows={2} placeholder="Identify the till close, bank statement, mobile-money reference, or other evidence checked." />
+                      </label>}
+                      <div><Button variant="ghost" onClick={() => setActiveIssue(null)}>Close</Button></div>
+                      {canReview && <div className="flex flex-wrap items-end gap-3">
                       <label className="grid gap-1.5 text-sm">Decision
                         <select value={decision} onChange={(event) => setDecision(event.target.value as Decision)} className="h-10 rounded-md border bg-background px-3">
                           {Object.entries(decisionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </select>
                       </label>
-                      <label className="grid gap-1.5 text-sm">Evidence / reviewer note
-                        <Textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} rows={2} placeholder="State what source evidence was checked and what follow-up is required." />
-                      </label>
-                      <div className="flex gap-2"><Button onClick={() => void submitReview(issue)} disabled={saving}>{saving ? 'Saving...' : 'Record review'}</Button><Button variant="ghost" onClick={() => setActiveIssue(null)}>Cancel</Button></div>
+                      <Button onClick={() => void submitReview(issue)} disabled={saving}>{saving ? 'Saving...' : 'Record review'}</Button>
+                      </div>}
+                    {!issue.resolved && canApply && issue.difference > 0.01 && (issue.receipts?.length || 0) > 0 && <div className="space-y-3 border-t pt-3">
+                      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmReceipts} onChange={(event) => setConfirmReceipts(event.target.checked)} className="mt-1" /><span>I matched every listed receipt to actual collection evidence and confirm these receipts are genuine, not duplicates.</span></label>
+                      <Button onClick={() => void reconcileToReceipts(issue)} disabled={saving || !confirmReceipts || !note.trim()}>{saving ? 'Reconciling...' : 'Allocate verified receipts to this sale'}</Button>
+                      <p className="text-xs text-muted-foreground">This converts legacy receipt rows into explicit allocations and aligns the invoice payment projection. The operation is rejected if it would change the customer balance. It does not change cash or general-ledger balances.</p>
+                    </div>}
                     </div>
                 </td></tr>
               )}

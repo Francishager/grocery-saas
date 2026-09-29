@@ -119,6 +119,7 @@ export const permissions: Permission[] = [
   { id: 'canDeleteReceivable', name: 'Delete Receivables', description: 'Delete receivable records', category: 'customers', accessesBusinessData: true },
   { id: 'canViewReceivableReconciliation', name: 'View Receivable Reconciliation', description: 'View customer receipt mismatches and review history', category: 'customers', accessesBusinessData: true },
   { id: 'canReviewReceivableReconciliation', name: 'Review Receivable Reconciliation', description: 'Record an auditable review decision without changing financial records', category: 'customers', accessesBusinessData: true },
+  { id: 'canApplyReceivableReconciliation', name: 'Apply Receivable Reconciliation', description: 'Apply verified receipt allocations without changing customer or cash balances', category: 'customers', accessesBusinessData: true },
   
   // Suppliers
   { id: 'canViewSupplier', name: 'View Suppliers', description: 'View suppliers list', category: 'suppliers', accessesBusinessData: true },
