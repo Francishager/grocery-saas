@@ -28,6 +28,9 @@ const toMoney = (value, fallback = 0) => {
   return Number.isFinite(num) ? Math.round(num * 100) / 100 : fallback
 }
 
+const receivablePaymentFingerprint = (saleId, salePaid, linkedPayments) =>
+  `${saleId}:${toMoney(salePaid).toFixed(2)}:${toMoney(linkedPayments).toFixed(2)}`
+
 async function applyLinkedServiceRevenueSplit(client, scope, saleItems, productsById) {
   const productIds = saleItems
     .filter((item) => productsById.get(item.productId)?.itemType !== 'service')
@@ -1129,8 +1132,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     }
 
     const sale = await prisma.$transaction(async (tx) => {
-      const createdSale = await tx.saleRecord.create({
-        data: {
+        const createdSale = await tx.saleRecord.create({
+          data: {
           receiptNo,
           tenantId: scope.tenantId,
           branchId: scope.branchId,
@@ -1140,7 +1143,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           tax: computedTax,
           discount: computedDiscount,
           total: computedTotal,
-          amountPaid: paid,
+            amountPaid: paid,
+            legacyPaidAmountAtCutover: 0,
           balance,
           paymentMethod: resolvedPaymentMethod,
           paymentStatus: finalPaymentStatus,
@@ -1192,12 +1196,25 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
             customerId,
             saleId: createdSale.id,
             amount: paid,
+            allocationMode: 'explicit',
             paymentMethod: resolvedPaymentMethod,
             mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
             phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
             transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
             reference: receiptNo,
             notes: notes ? `Paid at sale: ${notes}` : 'Paid at sale'
+          }
+        })
+
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: payment.id,
+            saleId: createdSale.id,
+            targetType: 'sale',
+            amount: paid,
+            createdById: req.user.id,
           }
         })
 
@@ -1252,6 +1269,114 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
 // === CUSTOMER PAYMENTS ===
 
 // Get customer payments
+const reconciliationDecisions = new Set([
+  'sale_amount_confirmed',
+  'receipt_rows_confirmed',
+  'requires_adjustment',
+  'investigate_duplicate',
+])
+
+router.get('/reconciliation/payment-allocations', authenticateToken, requirePermission('canViewReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1)
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 25))
+    const skip = (page - 1) * limit
+    const branchId = scope.branchId || null
+    const baseWhere = `sr."tenantId" = $1 AND ($2::text IS NULL OR sr."branchId" = $2) AND sr."status" = 'completed' AND (sr."legacyPaidAmountAtCutover" IS NULL OR (sr."legacySaleAmountPaidAtCutover" IS NOT NULL AND sr."legacyLinkedPaymentsAtCutover" IS NOT NULL))`
+    const issues = await prisma.$queryRawUnsafe(
+      `SELECT sr."id" AS "saleId", sr."customerId", sr."branchId", c."name" AS "customerName", sr."receiptNo", sr."createdAt", sr."total", sr."balance", COALESCE(sr."legacySaleAmountPaidAtCutover", sr."amountPaid") AS "recordedSaleAmountPaid", COALESCE(sr."legacyLinkedPaymentsAtCutover", SUM(cp."amount") FILTER (WHERE cp."allocationMode" = 'legacy'), 0) AS "linkedPaymentTotal" FROM "sale_records" sr JOIN "customers" c ON c."id" = sr."customerId" LEFT JOIN "customer_payments" cp ON cp."saleId" = sr."id" AND cp."tenantId" = sr."tenantId" WHERE ${baseWhere} GROUP BY sr."id", c."name" HAVING ABS(COALESCE(sr."legacySaleAmountPaidAtCutover", sr."amountPaid") - COALESCE(sr."legacyLinkedPaymentsAtCutover", SUM(cp."amount") FILTER (WHERE cp."allocationMode" = 'legacy'), 0)) > 0.01 ORDER BY sr."createdAt" DESC LIMIT $3 OFFSET $4`,
+      scope.tenantId, branchId, limit, skip,
+    )
+    const countRows = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS "count" FROM (SELECT sr."id" FROM "sale_records" sr LEFT JOIN "customer_payments" cp ON cp."saleId" = sr."id" AND cp."tenantId" = sr."tenantId" WHERE ${baseWhere} GROUP BY sr."id" HAVING ABS(COALESCE(sr."legacySaleAmountPaidAtCutover", sr."amountPaid") - COALESCE(sr."legacyLinkedPaymentsAtCutover", SUM(cp."amount") FILTER (WHERE cp."allocationMode" = 'legacy'), 0)) > 0.01) mismatches`,
+      scope.tenantId, branchId,
+    )
+    const saleIds = issues.map((issue) => issue.saleId)
+    const reviews = saleIds.length ? await prisma.customerReceivableReconciliationReview.findMany({
+      where: { tenantId: scope.tenantId, saleId: { in: saleIds } },
+      include: { reviewer: { select: { id: true, fname: true, lname: true } } },
+      orderBy: { reviewedAt: 'desc' },
+    }) : []
+    const latestReviewByFingerprint = new Map()
+    for (const review of reviews) {
+      const key = `${review.saleId}:${review.sourceFingerprint}`
+      if (!latestReviewByFingerprint.has(key)) latestReviewByFingerprint.set(key, review)
+    }
+    const rows = issues.map((issue) => {
+      const recorded = toMoney(issue.recordedSaleAmountPaid)
+      const linked = toMoney(issue.linkedPaymentTotal)
+      const fingerprint = receivablePaymentFingerprint(issue.saleId, recorded, linked)
+      return {
+        ...issue,
+        total: toMoney(issue.total),
+        balance: toMoney(issue.balance),
+        recordedSaleAmountPaid: recorded,
+        linkedPaymentTotal: linked,
+        difference: toMoney(linked - recorded),
+        provisionalPaidAmount: Math.max(recorded, linked),
+        sourceFingerprint: fingerprint,
+        review: latestReviewByFingerprint.get(`${issue.saleId}:${fingerprint}`) || null,
+      }
+    })
+    const total = Number(countRows[0]?.count || 0)
+    res.json({ rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
+  } catch (error) {
+    console.error('Get receivable reconciliation issues error:', error)
+    handleBranchError(res, error, 'Failed to load receivable reconciliation issues')
+  }
+})
+
+router.post('/reconciliation/payment-allocations/:saleId/reviews', authenticateToken, requirePermission('canReviewReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: true })
+    const { decision, note, sourceFingerprint } = req.body || {}
+    const reviewNote = String(note || '').trim()
+    if (!reconciliationDecisions.has(decision)) return res.status(400).json({ error: 'Choose a valid reconciliation decision' })
+    if (!reviewNote) return res.status(400).json({ error: 'A review note is required' })
+    if (reviewNote.length > 1000) return res.status(400).json({ error: 'Review note must be 1,000 characters or fewer' })
+
+    const sale = await prisma.saleRecord.findFirst({
+      where: scopedWhere(scope, { id: req.params.saleId, status: 'completed', customerId: { not: null } }),
+    })
+    if (!sale) return res.status(404).json({ error: 'Legacy receivable sale not found' })
+
+    const linkedPayments = await prisma.customerPayment.aggregate({
+      where: { tenantId: scope.tenantId, customerId: sale.customerId, saleId: sale.id, allocationMode: 'legacy' },
+      _sum: { amount: true },
+    })
+    const recorded = sale.legacySaleAmountPaidAtCutover == null
+      ? toMoney(sale.amountPaid)
+      : toMoney(sale.legacySaleAmountPaidAtCutover)
+    const linked = sale.legacyLinkedPaymentsAtCutover == null
+      ? toMoney(linkedPayments._sum.amount)
+      : toMoney(sale.legacyLinkedPaymentsAtCutover)
+    const fingerprint = receivablePaymentFingerprint(sale.id, recorded, linked)
+    if (Math.abs(recorded - linked) <= 0.01) return res.status(409).json({ error: 'This sale no longer has a payment mismatch' })
+    if (sourceFingerprint !== fingerprint) return res.status(409).json({ error: 'The source values changed. Reload the reconciliation list and review the current evidence.' })
+
+    const review = await prisma.customerReceivableReconciliationReview.create({
+      data: {
+        tenantId: scope.tenantId,
+        customerId: sale.customerId,
+        saleId: sale.id,
+        recordedSaleAmountPaid: recorded,
+        linkedPaymentTotal: linked,
+        provisionalPaidAmount: Math.max(recorded, linked),
+        sourceFingerprint: fingerprint,
+        decision,
+        note: reviewNote,
+        reviewerId: req.user.id,
+      },
+      include: { reviewer: { select: { id: true, fname: true, lname: true } } },
+    })
+    res.status(201).json({ review, financialRecordsChanged: false })
+  } catch (error) {
+    console.error('Review receivable reconciliation issue error:', error)
+    handleBranchError(res, error, 'Failed to record reconciliation review')
+  }
+})
+
 router.get('/payments', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
@@ -1339,8 +1464,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
         where: scopedWhere(scope, { id: saleId, customerId })
       })
       if (!sale) return res.status(404).json({ error: 'Sale not found for this customer' })
-      // Allow payment amounts larger than the sale balance. We'll allocate to the sale first,
-      // then apply any remainder to the customer's balance (resulting in a negative balance i.e. credit).
+      if (sale.status !== 'completed') return res.status(400).json({ error: 'Payments can only be allocated to completed sales' })
     }
 
     const duplicateMarkers = [
@@ -1379,6 +1503,48 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
     let payment
     try {
       payment = await prisma.$transaction(async (tx) => {
+      let transactionSale = null
+      let legacyPaidBaseline = 0
+      let allocatedBefore = 0
+      let allocateToSale = 0
+      if (saleId) {
+        await tx.$queryRaw`SELECT "id" FROM "sale_records" WHERE "id" = ${saleId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+        transactionSale = await tx.saleRecord.findFirst({
+          where: { id: saleId, tenantId: scope.tenantId, customerId, status: 'completed' },
+        })
+        if (!transactionSale) throw Object.assign(new Error('Sale is no longer available for payment'), { statusCode: 409 })
+
+        const [allocations, legacyPayments] = await Promise.all([
+          tx.customerPaymentAllocation.aggregate({
+            where: { tenantId: scope.tenantId, saleId, targetType: 'sale' },
+            _sum: { amount: true },
+          }),
+          tx.customerPayment.aggregate({
+            where: { tenantId: scope.tenantId, customerId, saleId, allocationMode: 'legacy' },
+            _sum: { amount: true },
+          }),
+        ])
+        allocatedBefore = toMoney(allocations._sum.amount)
+        const legacySalePaid = toMoney(transactionSale.amountPaid)
+        const legacyReceiptTotal = toMoney(legacyPayments._sum.amount)
+        legacyPaidBaseline = transactionSale.legacyPaidAmountAtCutover == null
+          ? Math.max(legacySalePaid, legacyReceiptTotal)
+          : toMoney(transactionSale.legacyPaidAmountAtCutover)
+
+        if (transactionSale.legacyPaidAmountAtCutover == null) {
+          await tx.saleRecord.update({
+            where: { id: saleId },
+            data: {
+              legacyPaidAmountAtCutover: legacyPaidBaseline,
+              legacySaleAmountPaidAtCutover: legacySalePaid,
+              legacyLinkedPaymentsAtCutover: legacyReceiptTotal,
+            },
+          })
+        }
+        const amountStillDue = Math.max(0, transactionSale.total - legacyPaidBaseline - allocatedBefore)
+        allocateToSale = Math.min(paidAmount, Math.min(Math.max(0, transactionSale.balance), amountStillDue))
+      }
+
       const createdPayment = await tx.customerPayment.create({
         data: {
           tenantId: scope.tenantId,
@@ -1386,6 +1552,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           customerId,
           saleId,
           amount: paidAmount,
+          allocationMode: 'explicit',
           paymentMethod: resolvedPaymentMethod,
           mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
           phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
@@ -1395,6 +1562,31 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
           notes
         }
       })
+
+      if (saleId && allocateToSale > 0) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: createdPayment.id,
+            saleId,
+            targetType: 'sale',
+            amount: allocateToSale,
+            createdById: req.user.id,
+          }
+        })
+      } else if (!saleId) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: createdPayment.id,
+            targetType: 'customer_account',
+            amount: paidAmount,
+            createdById: req.user.id,
+          }
+        })
+      }
 
       const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'payments')
       const updatedAccount = await tx.cashAccount.update({
@@ -1417,12 +1609,10 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
 
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, accountToUse.id)
 
-      let remaining = paidAmount
-
-      if (sale) {
-        const allocateToSale = Math.min(remaining, sale.balance)
-        const newAmountPaid = Math.min(sale.total, (sale.amountPaid || 0) + allocateToSale)
-        const newSaleBalance = Math.max(0, sale.balance - allocateToSale)
+      if (transactionSale) {
+        const newAmountPaid = legacyPaidBaseline + allocatedBefore + allocateToSale
+        const legacyPaidIncrease = Math.max(0, legacyPaidBaseline - toMoney(transactionSale.amountPaid))
+        const newSaleBalance = Math.max(0, transactionSale.balance - legacyPaidIncrease - allocateToSale)
 
         await tx.saleRecord.update({
           where: { id: saleId },
@@ -1432,8 +1622,6 @@ router.post('/payments', authenticateToken, requirePermission('canCreateReceivab
             paymentStatus: newSaleBalance <= 0 ? 'paid' : 'partial'
           }
         })
-
-        remaining = Math.round((remaining - allocateToSale) * 100) / 100
       }
 
       await reconcileCustomerReceivableBalance(tx, scope, customerId)

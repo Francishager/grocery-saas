@@ -32,6 +32,7 @@ import RolesPermissionsPage from '@/pages/RolesPermissionsPage'
 import TaxManagementPage from '@/pages/TaxManagementPage'
 import ReceiptSettingsPage from '@/pages/ReceiptSettingsPage'
 import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
+import ReceivableReconciliationPage from '@/pages/receivables/ReceivableReconciliationPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import RentalsPage from '@/pages/RentalsPage'
 import ReturnsPage from '@/pages/ReturnsPage'
@@ -175,6 +176,7 @@ function App() {
           <Route path="inventory/:tab" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />
           <Route path="purchases" element={<Navigate to="/tenant/payables" replace />} />
           <Route path="receivables" element={<Navigate to="/tenant/receivables/customers" replace />} />
+          <Route path="receivables/reconciliation" element={<FeatureGuard feature="receivables" permission="canViewReceivableReconciliation"><ReceivableReconciliationPage /></FeatureGuard>} />
           <Route path="receivables/:tab" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />

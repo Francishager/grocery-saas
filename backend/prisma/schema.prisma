@@ -11,10 +11,10 @@ datasource db {
 }
 
 model Branch {
-  id       String  @id @default(cuid())
-  name     String
-  address  String?
-  isActive Boolean @default(true)
+  id                            String  @id @default(cuid())
+  name                          String
+  address                       String?
+  isActive                      Boolean @default(true)
   attendanceUseBusinessLocation Boolean @default(true)
   attendanceLatitude            Float?
   attendanceLongitude           Float?
@@ -100,19 +100,19 @@ model UserBranch {
 
 // Tenant/Business - each business is a tenant in the SaaS
 model Tenant {
-  trashEntries TrashEntry[]
-  id           String       @id @default(cuid())
-  name         String
-  slug         String       @unique
-  email        String       @unique
-  phone        String?
-  address      String?
-  attendanceLatitude  Float?
-  attendanceLongitude Float?
-  attendanceRadiusMeters Int @default(200)
-  logo         String?
-  status       TenantStatus @default(active)
-  businessType String? // retail, pharmacy, hardware, supermarket, wholesale, restaurant, bar, restaurant_bar, cafe, coffee_shop, fast_food, hotel_restaurant, bakery, service, salon_spa, repair_shop, manufacturing, other
+  trashEntries           TrashEntry[]
+  id                     String       @id @default(cuid())
+  name                   String
+  slug                   String       @unique
+  email                  String       @unique
+  phone                  String?
+  address                String?
+  attendanceLatitude     Float?
+  attendanceLongitude    Float?
+  attendanceRadiusMeters Int          @default(200)
+  logo                   String?
+  status                 TenantStatus @default(active)
+  businessType           String? // retail, pharmacy, hardware, supermarket, wholesale, restaurant, bar, restaurant_bar, cafe, coffee_shop, fast_food, hotel_restaurant, bakery, service, salon_spa, repair_shop, manufacturing, other
 
   // =====================
   // PLAN RELATION
@@ -151,29 +151,31 @@ model Tenant {
   // =====================
   // BUSINESS DATA
   // =====================
-  customers               Customer[]
-  customerWithdrawals     CustomerWithdrawal[]
-  suppliers               Supplier[]
-  features                TenantFeature[]
-  cashAccounts            CashAccount[]
-  expenses                Expense[]
-  cashTransactions        CashTransaction[]
-  rentals                 Rental[]
-  saleReturns             SaleReturn[]
-  accounts                Account[]
-  journalEntries          JournalEntry[]
-  employees               Employee[]
-  attendance              Attendance[]
-  leaveRequests           LeaveRequest[]
-  salaryAdvances          SalaryAdvance[]
-  salaryAdvanceRecoveries SalaryAdvanceRecovery[]
-  payrolls                Payroll[]
-  payrollAdjustments      PayrollAdjustment[]
-  payrollDeductions       PayrollDeduction[]
-  payrollPayments         PayrollPayment[]
-  employeeSalaryConfigs   EmployeeSalaryConfig[]
-  hrAccountingConfig      HRAccountingConfig?
-  hrAuditLogs             HRAuditLog[]
+  customers                       Customer[]
+  customerWithdrawals             CustomerWithdrawal[]
+  customerPaymentAllocations      CustomerPaymentAllocation[]
+  receivableReconciliationReviews CustomerReceivableReconciliationReview[]
+  suppliers                       Supplier[]
+  features                        TenantFeature[]
+  cashAccounts                    CashAccount[]
+  expenses                        Expense[]
+  cashTransactions                CashTransaction[]
+  rentals                         Rental[]
+  saleReturns                     SaleReturn[]
+  accounts                        Account[]
+  journalEntries                  JournalEntry[]
+  employees                       Employee[]
+  attendance                      Attendance[]
+  leaveRequests                   LeaveRequest[]
+  salaryAdvances                  SalaryAdvance[]
+  salaryAdvanceRecoveries         SalaryAdvanceRecovery[]
+  payrolls                        Payroll[]
+  payrollAdjustments              PayrollAdjustment[]
+  payrollDeductions               PayrollDeduction[]
+  payrollPayments                 PayrollPayment[]
+  employeeSalaryConfigs           EmployeeSalaryConfig[]
+  hrAccountingConfig              HRAccountingConfig?
+  hrAuditLogs                     HRAuditLog[]
 
   // =====================
   // PHASE 1: HR CORE RELATIONS
@@ -278,17 +280,17 @@ model Tenant {
   customPrice             Float? // Per-tenant override on the base plan fee
   customCurrency          String? // Per-tenant override currency, e.g. UGX / USD
   customBillingCycle      String? // monthly, yearly
-  monthlyServiceFee       Float?    @default(0)
-  annualServiceFee        Float?    @default(0)
-  staticIpFee             Float?    @default(0)
+  monthlyServiceFee       Float?                @default(0)
+  annualServiceFee        Float?                @default(0)
+  staticIpFee             Float?                @default(0)
   billingPaymentMethod    String? // cash, mobile_money, card, bank_transfer, relwork, kamatera
   billingPaymentReference String?
   billingNotes            String?
   subscriptionPayments    SubscriptionPayment[]
-  gracePeriodDays         Int?      @default(0)
-  reminderDaysBeforeDue   Int?      @default(10)
+  gracePeriodDays         Int?                  @default(0)
+  reminderDaysBeforeDue   Int?                  @default(10)
   paymentReminderSentAt   DateTime?
-  paymentReminderStatus   String?   @default("not_started") // not_started, due_soon, grace_period, paid
+  paymentReminderStatus   String?               @default("not_started") // not_started, due_soon, grace_period, paid
 
   // =====================
   // MODULE DEFAULTS (based on businessType, overridable by feature control)
@@ -310,7 +312,7 @@ model Tenant {
   creditNotes       CreditNote[]
   debitNotes        DebitNote[]
 
-  advisorCollections AdvisorCollection[]
+  advisorCollections   AdvisorCollection[]
   advisorConversations AdvisorConversation[]
 
   @@map("tenants")
@@ -388,32 +390,32 @@ model Plan {
 }
 
 model SubscriptionPayment {
-  id              String   @id @default(cuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  amount          Decimal  @db.Decimal(18, 2)
-  currency        String
-  paymentMethod   String
-  reference       String?
-  notes           String?
-  paidAt          DateTime?
-  recordedById    String?
-  recordedByEmail String?
-  status          String   @default("completed")
-  provider        String?
+  id                   String    @id @default(cuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  amount               Decimal   @db.Decimal(18, 2)
+  currency             String
+  paymentMethod        String
+  reference            String?
+  notes                String?
+  paidAt               DateTime?
+  recordedById         String?
+  recordedByEmail      String?
+  status               String    @default("completed")
+  provider             String?
   gatewayPaymentMethod String?
-  merchantReference String? @unique
-  gatewayTrackingId String? @unique
-  checkoutUrl     String?
-  checkoutReturnPath String?
-  payerName       String?
-  payerPhone      String?
-  payerEmail      String?
-  cancelledAt     DateTime?
-  cancelledById   String?
-  cancelledByEmail String?
-  cancellationReason String?
-  createdAt       DateTime @default(now())
+  merchantReference    String?   @unique
+  gatewayTrackingId    String?   @unique
+  checkoutUrl          String?
+  checkoutReturnPath   String?
+  payerName            String?
+  payerPhone           String?
+  payerEmail           String?
+  cancelledAt          DateTime?
+  cancelledById        String?
+  cancelledByEmail     String?
+  cancellationReason   String?
+  createdAt            DateTime  @default(now())
 
   @@index([tenantId, paidAt])
   @@map("subscription_payments")
@@ -428,7 +430,7 @@ model User {
   lname              String?
   phone              String?
   avatar             String?
-  preferredLanguage   String             @default("en")
+  preferredLanguage  String             @default("en")
   role               UserRole           @default(attendant)
   discountPermission DiscountPermission @default(none)
 
@@ -490,94 +492,100 @@ model User {
   // =========================
   // BRANCH ASSIGNMENTS
   // =========================
-  branches          UserBranch[]
-  permissions       UserPermission[]
-  stickyNotes       StickyNote[]
-  calculatorHistory CalculatorHistory[]
+  branches                        UserBranch[]
+  permissions                     UserPermission[]
+  stickyNotes                     StickyNote[]
+  calculatorHistory               CalculatorHistory[]
+  createdReceiptAllocations       CustomerPaymentAllocation[]              @relation("ReceiptAllocationCreator")
+  receivableReconciliationReviews CustomerReceivableReconciliationReview[] @relation("ReceivableReconciliationReviewer")
 
-  advisorCollections AdvisorCollection[]
+  advisorCollections   AdvisorCollection[]
   advisorConversations AdvisorConversation[]
 
   @@map("users")
 }
 
 model AdvisorCollection {
-  id String @id @default(cuid())
-  tenantId String
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userId String
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name String
-  kind String @default("project")
-  instructions String @default("")
-  parentId String?
-  parent AdvisorCollection? @relation("AdvisorFolders", fields: [parentId], references: [id], onDelete: SetNull)
-  children AdvisorCollection[] @relation("AdvisorFolders")
+  id            String                @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  kind          String                @default("project")
+  instructions  String                @default("")
+  parentId      String?
+  parent        AdvisorCollection?    @relation("AdvisorFolders", fields: [parentId], references: [id], onDelete: SetNull)
+  children      AdvisorCollection[]   @relation("AdvisorFolders")
   conversations AdvisorConversation[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
   @@index([tenantId, userId])
   @@map("advisor_collections")
 }
 
 model AdvisorConversation {
-  id String @id @default(cuid())
-  tenantId String
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userId String
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  collectionId String?
-  collection AdvisorCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  title String @default("New chat")
-  scopeKey String
-  memory String @default("")
-  memoryThrough Int @default(0)
-  nextSequence Int @default(1)
-  busyUntil DateTime?
+  id              String             @id @default(cuid())
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collectionId    String?
+  collection      AdvisorCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  title           String             @default("New chat")
+  scopeKey        String
+  memory          String             @default("")
+  memoryThrough   Int                @default(0)
+  nextSequence    Int                @default(1)
+  busyUntil       DateTime?
   activeRequestId String?
-  turns AdvisorTurn[]
-  artifacts AdvisorArtifact[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  turns           AdvisorTurn[]
+  artifacts       AdvisorArtifact[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
   @@index([tenantId, userId, updatedAt])
   @@map("advisor_conversations")
 }
 
 model AdvisorTurn {
-  id String @id @default(cuid())
-  conversationId String
-  conversation AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  requestId String
-  sequence Int
-  input String
-  output String?
-  status String @default("pending")
-  context Json?
-  truncated Boolean @default(false)
-  feedback Int?
+  id                String              @id @default(cuid())
+  conversationId    String
+  conversation      AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requestId         String
+  sequence          Int
+  input             String
+  output            String?
+  status            String              @default("pending")
+  context           Json?
+  truncated         Boolean             @default(false)
+  feedback          Int?
   feedbackUpdatedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt         DateTime            @default(now())
+
   @@unique([conversationId, requestId])
   @@unique([conversationId, sequence])
   @@map("advisor_turns")
 }
 
 model AdvisorArtifact {
-  id String @id @default(cuid())
+  id             String              @id @default(cuid())
   conversationId String
-  conversation AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  requestId String
-  inputHash String
-  kind String
-  title String
-  status String @default("pending")
-  leaseToken String?
-  busyUntil DateTime?
-  data Json?
-  image Bytes?
-  imageMime String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  conversation   AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requestId      String
+  inputHash      String
+  kind           String
+  title          String
+  status         String              @default("pending")
+  leaseToken     String?
+  busyUntil      DateTime?
+  data           Json?
+  image          Bytes?
+  imageMime      String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
   @@unique([conversationId, requestId])
   @@index([conversationId, createdAt])
   @@map("advisor_artifacts")
@@ -601,256 +609,258 @@ enum DiscountPermission {
 
 // Granular user permissions
 model UserPermission {
-  id                           String   @id @default(cuid())
-  userId                       String
-  user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  platformPermissions          Json?
+  id                                String   @id @default(cuid())
+  userId                            String
+  user                              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platformPermissions               Json?
   // Dashboard
-  canViewDashboard             Boolean  @default(false)
-  canUseBusinessAI             Boolean  @default(false)
+  canViewDashboard                  Boolean  @default(false)
+  canUseBusinessAI                  Boolean  @default(false)
   // Sales
-  canCreateSale                Boolean  @default(false)
-  canViewSale                  Boolean  @default(false)
-  canEditSale                  Boolean  @default(false)
-  canDeleteSale                Boolean  @default(false)
-  canRefundSale                Boolean  @default(false)
+  canCreateSale                     Boolean  @default(false)
+  canViewSale                       Boolean  @default(false)
+  canEditSale                       Boolean  @default(false)
+  canDeleteSale                     Boolean  @default(false)
+  canRefundSale                     Boolean  @default(false)
   // Inventory
-  canCreateProduct             Boolean  @default(false)
-  canViewProduct               Boolean  @default(false)
-  canViewPriceHistory          Boolean  @default(false)
-  canEditProduct               Boolean  @default(false)
-  canDeleteProduct             Boolean  @default(false)
-  canAdjustStock               Boolean  @default(false)
-  canTransferStock             Boolean  @default(false)
+  canCreateProduct                  Boolean  @default(false)
+  canViewProduct                    Boolean  @default(false)
+  canViewPriceHistory               Boolean  @default(false)
+  canEditProduct                    Boolean  @default(false)
+  canDeleteProduct                  Boolean  @default(false)
+  canAdjustStock                    Boolean  @default(false)
+  canTransferStock                  Boolean  @default(false)
   // Purchases / Payables
-  canCreatePurchase            Boolean  @default(false)
-  canViewPurchase              Boolean  @default(false)
-  canEditPurchase              Boolean  @default(false)
-  canDeletePurchase            Boolean  @default(false)
-  canCreatePayable             Boolean  @default(false)
-  canViewPayable               Boolean  @default(false)
-  canEditPayable               Boolean  @default(false)
-  canDeletePayable             Boolean  @default(false)
+  canCreatePurchase                 Boolean  @default(false)
+  canViewPurchase                   Boolean  @default(false)
+  canEditPurchase                   Boolean  @default(false)
+  canDeletePurchase                 Boolean  @default(false)
+  canCreatePayable                  Boolean  @default(false)
+  canViewPayable                    Boolean  @default(false)
+  canEditPayable                    Boolean  @default(false)
+  canDeletePayable                  Boolean  @default(false)
   // Expenses
-  canCreateExpense             Boolean  @default(false)
-  canViewExpense               Boolean  @default(false)
-  canEditExpense               Boolean  @default(false)
-  canDeleteExpense             Boolean  @default(false)
-  canViewStaffTillSheet        Boolean  @default(false)
+  canCreateExpense                  Boolean  @default(false)
+  canViewExpense                    Boolean  @default(false)
+  canEditExpense                    Boolean  @default(false)
+  canDeleteExpense                  Boolean  @default(false)
+  canViewStaffTillSheet             Boolean  @default(false)
   // Customers / Receivables
-  canCreateCustomer            Boolean  @default(false)
-  canViewCustomer              Boolean  @default(false)
-  canEditCustomer              Boolean  @default(false)
-  canDeleteCustomer            Boolean  @default(false)
-  canCreateReceivable          Boolean  @default(false)
-  canViewReceivable            Boolean  @default(false)
-  canEditReceivable            Boolean  @default(false)
-  canDeleteReceivable          Boolean  @default(false)
+  canCreateCustomer                 Boolean  @default(false)
+  canViewCustomer                   Boolean  @default(false)
+  canEditCustomer                   Boolean  @default(false)
+  canDeleteCustomer                 Boolean  @default(false)
+  canCreateReceivable               Boolean  @default(false)
+  canViewReceivable                 Boolean  @default(false)
+  canEditReceivable                 Boolean  @default(false)
+  canDeleteReceivable               Boolean  @default(false)
+  canViewReceivableReconciliation   Boolean  @default(false)
+  canReviewReceivableReconciliation Boolean  @default(false)
   // Suppliers
-  canCreateSupplier            Boolean  @default(false)
-  canViewSupplier              Boolean  @default(false)
-  canEditSupplier              Boolean  @default(false)
-  canDeleteSupplier            Boolean  @default(false)
+  canCreateSupplier                 Boolean  @default(false)
+  canViewSupplier                   Boolean  @default(false)
+  canEditSupplier                   Boolean  @default(false)
+  canDeleteSupplier                 Boolean  @default(false)
   // Staff
-  canCreateStaff               Boolean  @default(false)
-  canViewStaff                 Boolean  @default(false)
-  canEditStaff                 Boolean  @default(false)
-  canDeleteStaff               Boolean  @default(false)
+  canCreateStaff                    Boolean  @default(false)
+  canViewStaff                      Boolean  @default(false)
+  canEditStaff                      Boolean  @default(false)
+  canDeleteStaff                    Boolean  @default(false)
   // HR Management
-  canViewHR                    Boolean  @default(false)
-  canViewHREmployeesForAttendance Boolean  @default(false)
-  canCreateHREmployee          Boolean  @default(false)
-  canEditHREmployee            Boolean  @default(false)
-  canDeleteHREmployee          Boolean  @default(false)
-  canManageHRStructure         Boolean  @default(false)
-  canViewHRContracts           Boolean  @default(false)
-  canManageHRContracts         Boolean  @default(false)
-  canViewHRDocuments           Boolean  @default(false)
-  canManageHRDocuments         Boolean  @default(false)
-  canViewHRSalaries            Boolean  @default(false)
-  canManageHRSalaries          Boolean  @default(false)
-  canViewHRAttendance          Boolean  @default(false)
-  canRecordHRAttendance        Boolean  @default(false)
-  canRecordOwnHRAttendance     Boolean  @default(false)
-  canManageHRAttendance        Boolean  @default(false)
-  canEditHRAttendance          Boolean  @default(false)
-  canDeleteHRAttendance        Boolean  @default(false)
-  canImportHRAttendance        Boolean  @default(false)
-  canConfigureHRAttendance     Boolean  @default(false)
-  canApproveHRAttendance       Boolean  @default(false)
-  canViewHRShifts              Boolean  @default(false)
-  canManageHRShifts            Boolean  @default(false)
-  canAssignHRShifts            Boolean  @default(false)
-  canApproveHRShifts           Boolean  @default(false)
-  canViewHRLeave               Boolean  @default(false)
-  canRequestHRLeave            Boolean  @default(false)
-  canManageHRLeaveTypes        Boolean  @default(false)
-  canApproveHRLeave            Boolean  @default(false)
-  canViewHRPayroll             Boolean  @default(false)
-  canCreateHRPayroll           Boolean  @default(false)
-  canApproveHRPayroll          Boolean  @default(false)
-  canPostHRPayroll             Boolean  @default(false)
-  canPayHRPayroll              Boolean  @default(false)
-  canManageHRPayrollSettings   Boolean  @default(false)
-  canManageHRPayroll           Boolean  @default(false)
+  canViewHR                         Boolean  @default(false)
+  canViewHREmployeesForAttendance   Boolean  @default(false)
+  canCreateHREmployee               Boolean  @default(false)
+  canEditHREmployee                 Boolean  @default(false)
+  canDeleteHREmployee               Boolean  @default(false)
+  canManageHRStructure              Boolean  @default(false)
+  canViewHRContracts                Boolean  @default(false)
+  canManageHRContracts              Boolean  @default(false)
+  canViewHRDocuments                Boolean  @default(false)
+  canManageHRDocuments              Boolean  @default(false)
+  canViewHRSalaries                 Boolean  @default(false)
+  canManageHRSalaries               Boolean  @default(false)
+  canViewHRAttendance               Boolean  @default(false)
+  canRecordHRAttendance             Boolean  @default(false)
+  canRecordOwnHRAttendance          Boolean  @default(false)
+  canManageHRAttendance             Boolean  @default(false)
+  canEditHRAttendance               Boolean  @default(false)
+  canDeleteHRAttendance             Boolean  @default(false)
+  canImportHRAttendance             Boolean  @default(false)
+  canConfigureHRAttendance          Boolean  @default(false)
+  canApproveHRAttendance            Boolean  @default(false)
+  canViewHRShifts                   Boolean  @default(false)
+  canManageHRShifts                 Boolean  @default(false)
+  canAssignHRShifts                 Boolean  @default(false)
+  canApproveHRShifts                Boolean  @default(false)
+  canViewHRLeave                    Boolean  @default(false)
+  canRequestHRLeave                 Boolean  @default(false)
+  canManageHRLeaveTypes             Boolean  @default(false)
+  canApproveHRLeave                 Boolean  @default(false)
+  canViewHRPayroll                  Boolean  @default(false)
+  canCreateHRPayroll                Boolean  @default(false)
+  canApproveHRPayroll               Boolean  @default(false)
+  canPostHRPayroll                  Boolean  @default(false)
+  canPayHRPayroll                   Boolean  @default(false)
+  canManageHRPayrollSettings        Boolean  @default(false)
+  canManageHRPayroll                Boolean  @default(false)
   // Branches
-  canCreateBranch              Boolean  @default(false)
-  canViewBranch                Boolean  @default(false)
-  canEditBranch                Boolean  @default(false)
-  canDeleteBranch              Boolean  @default(false)
+  canCreateBranch                   Boolean  @default(false)
+  canViewBranch                     Boolean  @default(false)
+  canEditBranch                     Boolean  @default(false)
+  canDeleteBranch                   Boolean  @default(false)
   // Reports (granular)
-  canViewSalesReport           Boolean  @default(false)
-  canViewInventoryReport       Boolean  @default(false)
-  canViewFinancialReport       Boolean  @default(false)
-  canViewCustomerReport        Boolean  @default(false)
-  canViewSupplierReport        Boolean  @default(false)
-  canViewReceivablesReport     Boolean  @default(false)
-  canViewPayablesReport        Boolean  @default(false)
-  canViewPerformanceReport     Boolean  @default(false)
-  canViewAuditReport           Boolean  @default(false)
-  canExportReport              Boolean  @default(false)
+  canViewSalesReport                Boolean  @default(false)
+  canViewInventoryReport            Boolean  @default(false)
+  canViewFinancialReport            Boolean  @default(false)
+  canViewCustomerReport             Boolean  @default(false)
+  canViewSupplierReport             Boolean  @default(false)
+  canViewReceivablesReport          Boolean  @default(false)
+  canViewPayablesReport             Boolean  @default(false)
+  canViewPerformanceReport          Boolean  @default(false)
+  canViewAuditReport                Boolean  @default(false)
+  canExportReport                   Boolean  @default(false)
   // Settings
-  canViewSettings              Boolean  @default(false)
-  canEditSettings              Boolean  @default(false)
+  canViewSettings                   Boolean  @default(false)
+  canEditSettings                   Boolean  @default(false)
   // Receipts
-  canViewReceipt               Boolean  @default(false)
-  canCreateReceipt             Boolean  @default(false)
+  canViewReceipt                    Boolean  @default(false)
+  canCreateReceipt                  Boolean  @default(false)
   // Discounts
-  canGiveDiscount              Boolean  @default(false)
+  canGiveDiscount                   Boolean  @default(false)
   // Tax
-  canViewTax                   Boolean  @default(false)
-  canManageTax                 Boolean  @default(false)
+  canViewTax                        Boolean  @default(false)
+  canManageTax                      Boolean  @default(false)
   // Services
-  canViewService               Boolean  @default(false)
-  canCreateService             Boolean  @default(false)
-  canEditService               Boolean  @default(false)
-  canDeleteService             Boolean  @default(false)
-  canManageServiceCategory     Boolean  @default(false)
-  canViewServiceReport         Boolean  @default(false)
+  canViewService                    Boolean  @default(false)
+  canCreateService                  Boolean  @default(false)
+  canEditService                    Boolean  @default(false)
+  canDeleteService                  Boolean  @default(false)
+  canManageServiceCategory          Boolean  @default(false)
+  canViewServiceReport              Boolean  @default(false)
   // Rentals / Hire
-  canViewRental                Boolean  @default(false)
-  canCreateRental              Boolean  @default(false)
-  canEditRental                Boolean  @default(false)
-  canDeleteRental              Boolean  @default(false)
-  canProcessRentalReturn       Boolean  @default(false)
-  canViewRentalReport          Boolean  @default(false)
+  canViewRental                     Boolean  @default(false)
+  canCreateRental                   Boolean  @default(false)
+  canEditRental                     Boolean  @default(false)
+  canDeleteRental                   Boolean  @default(false)
+  canProcessRentalReturn            Boolean  @default(false)
+  canViewRentalReport               Boolean  @default(false)
   // Restaurant & Bar
-  canViewRestaurant            Boolean  @default(false)
-  canCreateRestaurant          Boolean  @default(false)
-  canEditRestaurant            Boolean  @default(false)
-  canDeleteRestaurant          Boolean  @default(false)
-  canViewRestaurantReport      Boolean  @default(false)
+  canViewRestaurant                 Boolean  @default(false)
+  canCreateRestaurant               Boolean  @default(false)
+  canEditRestaurant                 Boolean  @default(false)
+  canDeleteRestaurant               Boolean  @default(false)
+  canViewRestaurantReport           Boolean  @default(false)
   // Fuel Station
-  canViewFuelStation           Boolean  @default(false)
-  canCreateFuelStation         Boolean  @default(false)
-  canEditFuelStation           Boolean  @default(false)
-  canDeleteFuelStation         Boolean  @default(false)
-  canViewFuelStationReport     Boolean  @default(false)
+  canViewFuelStation                Boolean  @default(false)
+  canCreateFuelStation              Boolean  @default(false)
+  canEditFuelStation                Boolean  @default(false)
+  canDeleteFuelStation              Boolean  @default(false)
+  canViewFuelStationReport          Boolean  @default(false)
   // Manufacturing
-  canViewManufacturing         Boolean  @default(false)
-  canCreateManufacturing       Boolean  @default(false)
-  canEditManufacturing         Boolean  @default(false)
-  canDeleteManufacturing       Boolean  @default(false)
-  canViewManufacturingReport   Boolean  @default(false)
+  canViewManufacturing              Boolean  @default(false)
+  canCreateManufacturing            Boolean  @default(false)
+  canEditManufacturing              Boolean  @default(false)
+  canDeleteManufacturing            Boolean  @default(false)
+  canViewManufacturingReport        Boolean  @default(false)
   // Agriculture
-  canViewAgriculture           Boolean  @default(false)
-  canCreateAgriculture         Boolean  @default(false)
-  canEditAgriculture           Boolean  @default(false)
-  canDeleteAgriculture         Boolean  @default(false)
-  canViewAgricultureReport     Boolean  @default(false)
+  canViewAgriculture                Boolean  @default(false)
+  canCreateAgriculture              Boolean  @default(false)
+  canEditAgriculture                Boolean  @default(false)
+  canDeleteAgriculture              Boolean  @default(false)
+  canViewAgricultureReport          Boolean  @default(false)
   // Service Business (appointments, work orders, contracts)
-  canViewServiceBusiness       Boolean  @default(false)
-  canCreateServiceBusiness     Boolean  @default(false)
-  canEditServiceBusiness       Boolean  @default(false)
-  canDeleteServiceBusiness     Boolean  @default(false)
-  canViewServiceBusinessReport Boolean  @default(false)
-  servicePermissionsMigrated Boolean @default(true)
-  canViewServiceAppointment Boolean @default(false)
-  canCreateServiceAppointment Boolean @default(false)
-  canEditServiceAppointment Boolean @default(false)
-  canDeleteServiceAppointment Boolean @default(false)
-  canUpdateServiceAppointmentStatus Boolean @default(false)
-  canAssignServiceAppointment Boolean @default(false)
-  canViewServiceAppointmentReport Boolean @default(false)
-  canViewServiceWorkOrder Boolean @default(false)
-  canCreateServiceWorkOrder Boolean @default(false)
-  canEditServiceWorkOrder Boolean @default(false)
-  canDeleteServiceWorkOrder Boolean @default(false)
-  canUpdateServiceWorkOrderStatus Boolean @default(false)
-  canAssignServiceWorkOrder Boolean @default(false)
-  canViewServiceWorkOrderReport Boolean @default(false)
-  canViewServiceContract Boolean @default(false)
-  canCreateServiceContract Boolean @default(false)
-  canEditServiceContract Boolean @default(false)
-  canDeleteServiceContract Boolean @default(false)
-  canUpdateServiceContractStatus Boolean @default(false)
-  canViewServiceContractReport Boolean @default(false)
-  canViewServiceTechnician Boolean @default(false)
-  canCreateServiceTechnician Boolean @default(false)
-  canEditServiceTechnician Boolean @default(false)
-  canDeleteServiceTechnician Boolean @default(false)
-  canViewServiceTechnicianReport Boolean @default(false)
-  canViewServiceJobCard Boolean @default(false)
-  canCreateServiceJobCard Boolean @default(false)
-  canEditServiceJobCard Boolean @default(false)
-  canDeleteServiceJobCard Boolean @default(false)
-  canUpdateServiceJobCardStatus Boolean @default(false)
-  canAssignServiceJobCard Boolean @default(false)
-  canCheckServiceJobCardQuality Boolean @default(false)
-  canViewServiceJobCardReport Boolean @default(false)
-  canViewServiceFeedback Boolean @default(false)
-  canCreateServiceFeedback Boolean @default(false)
-  canRespondServiceFeedback Boolean @default(false)
-  canModerateServiceFeedback Boolean @default(false)
-  canDeleteServiceFeedback Boolean @default(false)
-  canGenerateServiceFeedbackQR Boolean @default(false)
-  canViewServiceFeedbackReport Boolean @default(false)
-  canViewServiceCarWash Boolean @default(false)
-  canCreateServiceCarWash Boolean @default(false)
-  canEditServiceCarWash Boolean @default(false)
-  canDeleteServiceCarWash Boolean @default(false)
-  canViewServiceGarage Boolean @default(false)
-  canCreateServiceGarage Boolean @default(false)
-  canEditServiceGarage Boolean @default(false)
-  canDeleteServiceGarage Boolean @default(false)
-  canUpdateServiceGarageStatus Boolean @default(false)
+  canViewServiceBusiness            Boolean  @default(false)
+  canCreateServiceBusiness          Boolean  @default(false)
+  canEditServiceBusiness            Boolean  @default(false)
+  canDeleteServiceBusiness          Boolean  @default(false)
+  canViewServiceBusinessReport      Boolean  @default(false)
+  servicePermissionsMigrated        Boolean  @default(true)
+  canViewServiceAppointment         Boolean  @default(false)
+  canCreateServiceAppointment       Boolean  @default(false)
+  canEditServiceAppointment         Boolean  @default(false)
+  canDeleteServiceAppointment       Boolean  @default(false)
+  canUpdateServiceAppointmentStatus Boolean  @default(false)
+  canAssignServiceAppointment       Boolean  @default(false)
+  canViewServiceAppointmentReport   Boolean  @default(false)
+  canViewServiceWorkOrder           Boolean  @default(false)
+  canCreateServiceWorkOrder         Boolean  @default(false)
+  canEditServiceWorkOrder           Boolean  @default(false)
+  canDeleteServiceWorkOrder         Boolean  @default(false)
+  canUpdateServiceWorkOrderStatus   Boolean  @default(false)
+  canAssignServiceWorkOrder         Boolean  @default(false)
+  canViewServiceWorkOrderReport     Boolean  @default(false)
+  canViewServiceContract            Boolean  @default(false)
+  canCreateServiceContract          Boolean  @default(false)
+  canEditServiceContract            Boolean  @default(false)
+  canDeleteServiceContract          Boolean  @default(false)
+  canUpdateServiceContractStatus    Boolean  @default(false)
+  canViewServiceContractReport      Boolean  @default(false)
+  canViewServiceTechnician          Boolean  @default(false)
+  canCreateServiceTechnician        Boolean  @default(false)
+  canEditServiceTechnician          Boolean  @default(false)
+  canDeleteServiceTechnician        Boolean  @default(false)
+  canViewServiceTechnicianReport    Boolean  @default(false)
+  canViewServiceJobCard             Boolean  @default(false)
+  canCreateServiceJobCard           Boolean  @default(false)
+  canEditServiceJobCard             Boolean  @default(false)
+  canDeleteServiceJobCard           Boolean  @default(false)
+  canUpdateServiceJobCardStatus     Boolean  @default(false)
+  canAssignServiceJobCard           Boolean  @default(false)
+  canCheckServiceJobCardQuality     Boolean  @default(false)
+  canViewServiceJobCardReport       Boolean  @default(false)
+  canViewServiceFeedback            Boolean  @default(false)
+  canCreateServiceFeedback          Boolean  @default(false)
+  canRespondServiceFeedback         Boolean  @default(false)
+  canModerateServiceFeedback        Boolean  @default(false)
+  canDeleteServiceFeedback          Boolean  @default(false)
+  canGenerateServiceFeedbackQR      Boolean  @default(false)
+  canViewServiceFeedbackReport      Boolean  @default(false)
+  canViewServiceCarWash             Boolean  @default(false)
+  canCreateServiceCarWash           Boolean  @default(false)
+  canEditServiceCarWash             Boolean  @default(false)
+  canDeleteServiceCarWash           Boolean  @default(false)
+  canViewServiceGarage              Boolean  @default(false)
+  canCreateServiceGarage            Boolean  @default(false)
+  canEditServiceGarage              Boolean  @default(false)
+  canDeleteServiceGarage            Boolean  @default(false)
+  canUpdateServiceGarageStatus      Boolean  @default(false)
   // Communication
-  canViewCommunication         Boolean  @default(false)
-  canCreateCommunication       Boolean  @default(false)
-  canEditCommunication         Boolean  @default(false)
-  canDeleteCommunication       Boolean  @default(false)
+  canViewCommunication              Boolean  @default(false)
+  canCreateCommunication            Boolean  @default(false)
+  canEditCommunication              Boolean  @default(false)
+  canDeleteCommunication            Boolean  @default(false)
   // Accounting
-  canViewAccounting            Boolean  @default(false)
-  canCreateAccounting          Boolean  @default(false)
-  canEditAccounting            Boolean  @default(false)
-  canDeleteAccounting          Boolean  @default(false)
-  canReverseAccountingEntry    Boolean  @default(false)
-  canViewChartOfAccounts       Boolean  @default(false)
-  canCreateChartOfAccounts     Boolean  @default(false)
-  canEditChartOfAccounts       Boolean  @default(false)
+  canViewAccounting                 Boolean  @default(false)
+  canCreateAccounting               Boolean  @default(false)
+  canEditAccounting                 Boolean  @default(false)
+  canDeleteAccounting               Boolean  @default(false)
+  canReverseAccountingEntry         Boolean  @default(false)
+  canViewChartOfAccounts            Boolean  @default(false)
+  canCreateChartOfAccounts          Boolean  @default(false)
+  canEditChartOfAccounts            Boolean  @default(false)
   // Transaction Accounts & Cash Movements
-  canViewTransactionAccount    Boolean  @default(false)
-  canUseAnyTransactionAccount  Boolean  @default(false)
-  canUseOtherCashAccount       Boolean  @default(false)
-  canUseOwnCashAccount         Boolean  @default(false)
-  canUseOtherStaffCashAccount  Boolean  @default(false)
-  canUseSafeAccount            Boolean  @default(false)
-  canUseBankAccount            Boolean  @default(false)
-  canUseMobileMoneyAccount     Boolean  @default(false)
-  canUseCardAccount            Boolean  @default(false)
-  canCreateTransactionAccount  Boolean  @default(false)
-  canEditTransactionAccount    Boolean  @default(false)
-  canDeleteTransactionAccount  Boolean  @default(false)
-  canCreateWithdrawal          Boolean  @default(false)
+  canViewTransactionAccount         Boolean  @default(false)
+  canUseAnyTransactionAccount       Boolean  @default(false)
+  canUseOtherCashAccount            Boolean  @default(false)
+  canUseOwnCashAccount              Boolean  @default(false)
+  canUseOtherStaffCashAccount       Boolean  @default(false)
+  canUseSafeAccount                 Boolean  @default(false)
+  canUseBankAccount                 Boolean  @default(false)
+  canUseMobileMoneyAccount          Boolean  @default(false)
+  canUseCardAccount                 Boolean  @default(false)
+  canCreateTransactionAccount       Boolean  @default(false)
+  canEditTransactionAccount         Boolean  @default(false)
+  canDeleteTransactionAccount       Boolean  @default(false)
+  canCreateWithdrawal               Boolean  @default(false)
   // Payment Methods (for spending — expenses, payables)
-  canUseCash                   Boolean  @default(false)
-  canUseMobileMoney            Boolean  @default(false)
-  canUseBank                   Boolean  @default(false)
-  canUseCard                   Boolean  @default(false)
+  canUseCash                        Boolean  @default(false)
+  canUseMobileMoney                 Boolean  @default(false)
+  canUseBank                        Boolean  @default(false)
+  canUseCard                        Boolean  @default(false)
   // Data Import
-  canImportInventory           Boolean  @default(false)
-  createdAt                    DateTime @default(now())
-  updatedAt                    DateTime @updatedAt
+  canImportInventory                Boolean  @default(false)
+  createdAt                         DateTime @default(now())
+  updatedAt                         DateTime @updatedAt
 
   @@unique([userId])
   @@map("user_permissions")
@@ -934,27 +944,27 @@ model Product {
   purchaseItems PurchaseItem[]
 
   // New relations
-  saleRecordItems       SaleRecordItem[]
-  supplierPurchaseItems SupplierPurchaseItem[]
-  units                 ProductUnit[]
-  rentalItems           RentalItem[]
-  saleReturnItems       SaleReturnItem[]
-  stockTransferItems    StockTransferItem[]
-  recipeIngredients     RecipeIngredient[]
-  comboMealItems        ComboMealItem[]
-  orderItems            RestaurantOrderItem[]
-  recipes               Recipe[]
-  productionOrders      ProductionOrder[]
-  productionWaste       ProductionWaste[]
-  productionBatches     ProductionBatch[]
-  harvests              Harvest[]
-  appointmentProducts   Appointment[]
-  workOrderProducts     WorkOrder[]
-  serviceJobCardProducts ServiceJobCard[]
-  includedServices ProductServiceLink[] @relation("ProductIncludedServices")
-  includedInProducts ProductServiceLink[] @relation("ServiceIncludedProducts")
+  saleRecordItems         SaleRecordItem[]
+  supplierPurchaseItems   SupplierPurchaseItem[]
+  units                   ProductUnit[]
+  rentalItems             RentalItem[]
+  saleReturnItems         SaleReturnItem[]
+  stockTransferItems      StockTransferItem[]
+  recipeIngredients       RecipeIngredient[]
+  comboMealItems          ComboMealItem[]
+  orderItems              RestaurantOrderItem[]
+  recipes                 Recipe[]
+  productionOrders        ProductionOrder[]
+  productionWaste         ProductionWaste[]
+  productionBatches       ProductionBatch[]
+  harvests                Harvest[]
+  appointmentProducts     Appointment[]
+  workOrderProducts       WorkOrder[]
+  serviceJobCardProducts  ServiceJobCard[]
+  includedServices        ProductServiceLink[]   @relation("ProductIncludedServices")
+  includedInProducts      ProductServiceLink[]   @relation("ServiceIncludedProducts")
   serviceFeedbackProducts ServiceFeedback[]
-  priceHistory          ProductPriceHistory[]
+  priceHistory            ProductPriceHistory[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
@@ -1002,22 +1012,22 @@ model ProductUnit {
 
 // Audit Log — tracks all data mutations
 model TrashEntry {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  model       String
-  recordId    String
-  label       String
-  permission  String
-  branchId    String?
-  deletedById String
-  deletedBy   String
-  deletedAt   DateTime @default(now())
-  expiresAt   DateTime
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  model         String
+  recordId      String
+  label         String
+  permission    String
+  branchId      String?
+  deletedById   String
+  deletedBy     String
+  deletedAt     DateTime  @default(now())
+  expiresAt     DateTime
   restoreFields Json
   deletedFields Json
-  status      String   @default("active")
-  resolvedAt  DateTime?
+  status        String    @default("active")
+  resolvedAt    DateTime?
 
   @@unique([tenantId, model, recordId])
   @@index([tenantId, status, expiresAt])
@@ -1102,32 +1112,32 @@ model Category {
 
 // Sales/Orders
 model Sale {
-  id             String       @id @default(cuid())
-  receiptNo      String
-  tenantId       String
-  branchId       String?
-  branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  userId         String
-  user           User         @relation(fields: [userId], references: [id])
-  total          Float
-  subtotal       Float
-  tax            Float        @default(0)
-  discount       Float        @default(0)
-  cashDiscount   Float        @default(0) // Invoice-level cash discount
-  paymentMethod  String
-  mobileProvider String?
-  phoneNumber    String?
-  transactionId  String?
-  customerName   String?
-  amountPaid     Float? // Amount customer paid (for cash change calculation)
-  changeGiven    Float? // Change given back to customer
-  status         SaleStatus   @default(completed)
-  notes          String?
-  items          SaleItem[]
-  saleReturns    SaleReturn[]
+  id              String           @id @default(cuid())
+  receiptNo       String
+  tenantId        String
+  branchId        String?
+  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  userId          String
+  user            User             @relation(fields: [userId], references: [id])
+  total           Float
+  subtotal        Float
+  tax             Float            @default(0)
+  discount        Float            @default(0)
+  cashDiscount    Float            @default(0) // Invoice-level cash discount
+  paymentMethod   String
+  mobileProvider  String?
+  phoneNumber     String?
+  transactionId   String?
+  customerName    String?
+  amountPaid      Float? // Amount customer paid (for cash change calculation)
+  changeGiven     Float? // Change given back to customer
+  status          SaleStatus       @default(completed)
+  notes           String?
+  items           SaleItem[]
+  saleReturns     SaleReturn[]
   serviceJobCards ServiceJobCard[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@unique([tenantId, receiptNo])
   @@index([tenantId, branchId])
@@ -1143,24 +1153,24 @@ enum SaleStatus {
 
 // Sale Items
 model SaleItem {
-  id               String   @id @default(cuid())
+  id               String           @id @default(cuid())
   saleId           String
-  sale             Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale             Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productId        String
-  product          Product  @relation(fields: [productId], references: [id])
+  product          Product          @relation(fields: [productId], references: [id])
   quantity         Int
   price            Float
   cost             Float?
-  discount         Float    @default(0)
-  cashDiscount     Float    @default(0) // Cash discount amount on this line item
-  productRevenue   Float    @default(0)
-  serviceRevenue   Float    @default(0)
+  discount         Float            @default(0)
+  cashDiscount     Float            @default(0) // Cash discount amount on this line item
+  productRevenue   Float            @default(0)
+  serviceRevenue   Float            @default(0)
   unitName         String? // Selling unit name (e.g. "Half KG", "Pack")
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
-  taxAmount        Float?   // Sale-time tax allocated to this line; null for legacy rows
-  serviceJobCards ServiceJobCard[]
-  createdAt        DateTime @default(now())
+  taxAmount        Float? // Sale-time tax allocated to this line; null for legacy rows
+  serviceJobCards  ServiceJobCard[]
+  createdAt        DateTime         @default(now())
 
   @@map("sale_items")
 }
@@ -1227,21 +1237,23 @@ model Customer {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
-  sales            SaleRecord[]
-  payments         CustomerPayment[]
-  withdrawals      CustomerWithdrawal[]
-  invoices         Invoice[]
-  rentals          Rental[]
-  saleReturns      SaleReturn[]
-  reservations     Reservation[]
-  deliveries       Delivery[]
-  restaurantOrders RestaurantOrder[]
-  appointments     Appointment[]
-  workOrders       WorkOrder[]
-  serviceContracts ServiceContract[]
-  serviceFeedback  ServiceFeedback[]
-  fuelCards        FuelCard[]
-  Tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  sales                           SaleRecord[]
+  payments                        CustomerPayment[]
+  paymentAllocations              CustomerPaymentAllocation[]
+  receivableReconciliationReviews CustomerReceivableReconciliationReview[]
+  withdrawals                     CustomerWithdrawal[]
+  invoices                        Invoice[]
+  rentals                         Rental[]
+  saleReturns                     SaleReturn[]
+  reservations                    Reservation[]
+  deliveries                      Delivery[]
+  restaurantOrders                RestaurantOrder[]
+  appointments                    Appointment[]
+  workOrders                      WorkOrder[]
+  serviceContracts                ServiceContract[]
+  serviceFeedback                 ServiceFeedback[]
+  fuelCards                       FuelCard[]
+  Tenant                          Tenant                                   @relation(fields: [tenantId], references: [id])
 
   creditNotes CreditNote[]
 
@@ -1258,32 +1270,37 @@ enum CustomerStatus {
 
 // Sales Records (includes credit sales)
 model SaleRecord {
-  id            String            @id @default(cuid())
-  receiptNo     String
-  tenantId      String
-  branchId      String?
-  branch        Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customerId    String?
-  customer      Customer?         @relation(fields: [customerId], references: [id])
-  userId        String
-  total         Float
-  subtotal      Float
-  tax           Float             @default(0)
-  discount      Float             @default(0)
-  cashDiscount  Float             @default(0) // Invoice-level cash discount
-  amountPaid    Float             @default(0)
-  balance       Float             @default(0) // Remaining balance for credit sales
-  paymentMethod String
-  paymentStatus PaymentStatus     @default(paid)
-  status        SaleRecordStatus  @default(completed)
-  dueDate       DateTime?
-  notes         String?
-  items         SaleRecordItem[]
-  payments      CustomerPayment[]
-  creditNotes   CreditNote[]
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  User          User              @relation(fields: [userId], references: [id])
+  id                              String                                   @id @default(cuid())
+  receiptNo                       String
+  tenantId                        String
+  branchId                        String?
+  branch                          Branch?                                  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId                      String?
+  customer                        Customer?                                @relation(fields: [customerId], references: [id])
+  userId                          String
+  total                           Float
+  subtotal                        Float
+  tax                             Float                                    @default(0)
+  discount                        Float                                    @default(0)
+  cashDiscount                    Float                                    @default(0) // Invoice-level cash discount
+  amountPaid                      Float                                    @default(0)
+  legacyPaidAmountAtCutover       Float?
+  legacySaleAmountPaidAtCutover   Float?
+  legacyLinkedPaymentsAtCutover   Float?
+  balance                         Float                                    @default(0) // Remaining balance for credit sales
+  paymentMethod                   String
+  paymentStatus                   PaymentStatus                            @default(paid)
+  status                          SaleRecordStatus                         @default(completed)
+  dueDate                         DateTime?
+  notes                           String?
+  items                           SaleRecordItem[]
+  payments                        CustomerPayment[]
+  paymentAllocations              CustomerPaymentAllocation[]
+  receivableReconciliationReviews CustomerReceivableReconciliationReview[]
+  creditNotes                     CreditNote[]
+  createdAt                       DateTime                                 @default(now())
+  updatedAt                       DateTime                                 @updatedAt
+  User                            User                                     @relation(fields: [userId], references: [id])
 
   @@unique([tenantId, receiptNo])
   @@index([tenantId, branchId])
@@ -1321,7 +1338,7 @@ model SaleRecordItem {
   unitName         String? // Selling unit name
   conversionFactor Float? // Conversion factor used at time of sale
   total            Float
-  taxAmount        Float?   // Sale-time tax allocated to this line; null for legacy rows
+  taxAmount        Float? // Sale-time tax allocated to this line; null for legacy rows
   createdAt        DateTime   @default(now())
 
   @@map("sale_record_items")
@@ -1329,26 +1346,73 @@ model SaleRecordItem {
 
 // Customer Payments
 model CustomerPayment {
-  id             String      @id @default(cuid())
+  id             String                      @id @default(cuid())
   tenantId       String
   branchId       String?
-  branch         Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch         Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId     String
-  customer       Customer    @relation(fields: [customerId], references: [id])
+  customer       Customer                    @relation(fields: [customerId], references: [id])
   saleId         String?
-  sale           SaleRecord? @relation(fields: [saleId], references: [id])
+  sale           SaleRecord?                 @relation(fields: [saleId], references: [id])
   amount         Float
   paymentMethod  String // cash, mobile_money, bank_transfer
   mobileProvider String?
   phoneNumber    String?
   transactionId  String?
   reference      String? // Transaction reference
-  idempotencyKey String?     @unique
+  idempotencyKey String?                     @unique
+  allocationMode String                      @default("legacy")
   notes          String?
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime                    @default(now())
+  allocations    CustomerPaymentAllocation[]
 
   @@index([tenantId, branchId])
   @@map("customer_payments")
+}
+
+model CustomerPaymentAllocation {
+  id          String          @id @default(cuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentId   String
+  payment     CustomerPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  targetType  String          @default("sale")
+  saleId      String?
+  sale        SaleRecord?     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  amount      Decimal         @db.Decimal(18, 2)
+  createdById String
+  createdBy   User            @relation("ReceiptAllocationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime        @default(now())
+
+  @@unique([paymentId, saleId])
+  @@index([tenantId, saleId, createdAt])
+  @@index([tenantId, customerId, createdAt])
+  @@map("customer_payment_allocations")
+}
+
+model CustomerReceivableReconciliationReview {
+  id                     String     @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId             String
+  customer               Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  saleId                 String
+  sale                   SaleRecord @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  recordedSaleAmountPaid Decimal    @db.Decimal(18, 2)
+  linkedPaymentTotal     Decimal    @db.Decimal(18, 2)
+  provisionalPaidAmount  Decimal    @db.Decimal(18, 2)
+  sourceFingerprint      String
+  decision               String
+  note                   String
+  reviewerId             String
+  reviewer               User       @relation("ReceivableReconciliationReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  reviewedAt             DateTime   @default(now())
+
+  @@index([tenantId, saleId, reviewedAt])
+  @@index([tenantId, sourceFingerprint])
+  @@map("customer_receivable_reconciliation_reviews")
 }
 
 // Customer Withdrawals
@@ -1613,30 +1677,30 @@ model Expense {
 // =====================================================
 
 model CashAccount {
-  id              String            @id @default(cuid())
+  id              String               @id @default(cuid())
   tenantId        String
   branchId        String?
-  branch          Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch          Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
   name            String // "Cash Box", "MTN Mobile Money", "Stanbic Bank"
   type            String // cash, mobile_money, bank, card
   accountNumber   String? // Phone number for mobile money, account number for bank
   bankName        String? // Bank name (bank type only)
   accountHolder   String? // Name of the account holder
   branchName      String? // Bank branch (bank type only)
-  balance         Float             @default(0)
-  currency        String            @default("UGX")
-  isActive        Boolean           @default(true)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  Tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  balance         Float                @default(0)
+  currency        String               @default("UGX")
+  isActive        Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  Tenant          Tenant               @relation(fields: [tenantId], references: [id])
   CashTransaction CashTransaction[]
   Expense         Expense[]
   withdrawals     CustomerWithdrawal[]
-  AssignedUsers   User[]            @relation("UserCashAccount")
+  AssignedUsers   User[]               @relation("UserCashAccount")
 
   @@unique([tenantId, name])
-  @@map("cash_accounts")
   @@index([tenantId, branchId])
+  @@map("cash_accounts")
 }
 
 model CashTransaction {
@@ -1817,7 +1881,7 @@ model SaleReturn {
   customerId   String?
   customer     Customer?        @relation(fields: [customerId], references: [id])
   total        Float            @default(0)
-  taxAmount    Float?           // Tax reversed by this return; null for legacy rows
+  taxAmount    Float? // Tax reversed by this return; null for legacy rows
   reason       String?
   refundMethod String           @default("cash") // cash, credit, mobile_money
   status       String           @default("completed") // completed, pending
@@ -1840,7 +1904,7 @@ model SaleReturnItem {
   quantity  Int
   price     Float
   total     Float
-  taxAmount Float?   // Original sale-line tax allocated to the returned quantity
+  taxAmount Float? // Original sale-line tax allocated to the returned quantity
   reason    String?
   createdAt DateTime   @default(now())
 
@@ -1948,26 +2012,26 @@ model Employee {
   // =====================
   // PERSONAL INFORMATION
   // =====================
-  firstName     String
-  middleName    String? // Phase 1: New
-  lastName      String
+  firstName      String
+  middleName     String? // Phase 1: New
+  lastName       String
   employeeNumber String?
-  userId         String?  @unique
+  userId         String?   @unique
   profilePhoto   String?
-  email         String?
-  phone         String?
-  gender        String? // male, female, other (Phase 1: New)
-  dateOfBirth   DateTime? // (Phase 1: New)
-  nationality   String? // (Phase 1: New)
-  maritalStatus String? // single, married, divorced, widowed (Phase 1: New)
-  bloodType     String? // A, B, O, AB (Phase 1: New)
+  email          String?
+  phone          String?
+  gender         String? // male, female, other (Phase 1: New)
+  dateOfBirth    DateTime? // (Phase 1: New)
+  nationality    String? // (Phase 1: New)
+  maritalStatus  String? // single, married, divorced, widowed (Phase 1: New)
+  bloodType      String? // A, B, O, AB (Phase 1: New)
 
   // =====================
   // IDENTIFICATION DOCUMENTS
   // =====================
-  nationalId            String? // Passport, ID number (Phase 1: New)
-  nationalIdType        String? // passport, national_id, drivers_license (Phase 1: New)
-  taxId                 String? // Tax identification number (Phase 1: New)
+  nationalId           String? // Passport, ID number (Phase 1: New)
+  nationalIdType       String? // passport, national_id, drivers_license (Phase 1: New)
+  taxId                String? // Tax identification number (Phase 1: New)
   socialSecurityNumber String?
 
   // =====================
@@ -1984,9 +2048,9 @@ model Employee {
   emergencyContactName         String?
   emergencyContactPhone        String?
   emergencyContactRelationship String?
-  nextOfKinName                 String?
-  nextOfKinPhone                String?
-  nextOfKinRelationship         String?
+  nextOfKinName                String?
+  nextOfKinPhone               String?
+  nextOfKinRelationship        String?
 
   // =====================
   // BANK ACCOUNT (Phase 1: New)
@@ -2019,27 +2083,27 @@ model Employee {
   // =====================
   // EMPLOYMENT DETAILS
   // =====================
-  position             String? // e.g. "Cashier", "Manager" (legacy field, use positionId)
-  department_text      String? // (legacy field, use departmentId)
-  jobTitle             String?
-  basicSalary          Float     @default(0) // Base monthly salary
-  payFrequency         String    @default("monthly") // weekly, biweekly, monthly
-  employmentType       String    @default("permanent") // permanent, contract, temporary, casual, part-time, intern, consultant
-  workLocation         String?
-  costCentre           String?
-  probationStartDate   DateTime?
-  probationEndDate     DateTime?
-  contractStartDate    DateTime?
-  contractEndDate      DateTime?
-  hireDate             DateTime  @default(now())
-  terminationDate      DateTime?
-  status               String    @default("active") // active, terminated, on_leave, suspended, on_probation
-  salaryAdvanceBalance Float     @default(0) // Total outstanding salary advances
-  salaryPayableBalance Float     @default(0) // Total outstanding salary payable
-  openingSalaryAdvanceBalance Float @default(0) // Advance/loan owed back to the business before onboarding
-  openingSalaryPayableBalance Float @default(0) // Salary already owed before onboarding
-  openingHrBalanceDate DateTime?
-  openingHrBalanceNote String?
+  position                    String? // e.g. "Cashier", "Manager" (legacy field, use positionId)
+  department_text             String? // (legacy field, use departmentId)
+  jobTitle                    String?
+  basicSalary                 Float     @default(0) // Base monthly salary
+  payFrequency                String    @default("monthly") // weekly, biweekly, monthly
+  employmentType              String    @default("permanent") // permanent, contract, temporary, casual, part-time, intern, consultant
+  workLocation                String?
+  costCentre                  String?
+  probationStartDate          DateTime?
+  probationEndDate            DateTime?
+  contractStartDate           DateTime?
+  contractEndDate             DateTime?
+  hireDate                    DateTime  @default(now())
+  terminationDate             DateTime?
+  status                      String    @default("active") // active, terminated, on_leave, suspended, on_probation
+  salaryAdvanceBalance        Float     @default(0) // Total outstanding salary advances
+  salaryPayableBalance        Float     @default(0) // Total outstanding salary payable
+  openingSalaryAdvanceBalance Float     @default(0) // Advance/loan owed back to the business before onboarding
+  openingSalaryPayableBalance Float     @default(0) // Salary already owed before onboarding
+  openingHrBalanceDate        DateTime?
+  openingHrBalanceNote        String?
 
   // =====================
   // TIMESTAMPS
@@ -2387,20 +2451,20 @@ model Attendance {
 }
 
 model LeaveRequest {
-  id                   String   @id @default(cuid())
-  tenantId             String
-  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId           String
-  employee             Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveTypeId          String
-  leaveTypeName        String // Denormalized
-  startDate            DateTime
-  endDate              DateTime
-  totalDays            Float // Calculated
-  reason               String
-  contactDuringLeave   String?
+  id                    String   @id @default(cuid())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId           String
+  leaveTypeName         String // Denormalized
+  startDate             DateTime
+  endDate               DateTime
+  totalDays             Float // Calculated
+  reason                String
+  contactDuringLeave    String?
   replacementEmployeeId String?
-  attachments          String[] // File URLs
+  attachments           String[] // File URLs
 
   // Level 1 Approval
   approverLevel1Id     String?
@@ -2414,9 +2478,9 @@ model LeaveRequest {
   approverLevel2Date   DateTime?
   approverLevel2Notes  String?
 
-  status               String   @default("draft") // draft, pending_l1, pending_l2, approved, rejected, on_leave, completed, cancelled
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  status    String   @default("draft") // draft, pending_l1, pending_l2, approved, rejected, on_leave, completed, cancelled
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([tenantId, employeeId])
   @@index([startDate, endDate])
@@ -3319,42 +3383,42 @@ model Appointment {
 }
 
 model WorkOrder {
-  serviceKind String @default("work_order")
-  id              String    @id @default(cuid())
-  tenantId        String
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId        String?
-  branch          Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  orderNo         String
-  customerId      String?
-  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerName    String
-  customerPhone   String?
-  customerEmail   String?
-  productId       String? // service item
-  product         Product?  @relation(fields: [productId], references: [id])
-  technicianId    String?
-  technician      User?     @relation("WorkOrderTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
-  createdByUserId String?
-  createdByTechnicianId String?
-  sharedWithUserIds String[] @default([])
-  sharedWithTechnicianIds String[] @default([])
-  title           String
-  description     String?
-  status          String    @default("open") // open, in_progress, on_hold, completed, cancelled
-  priority        String    @default("normal") // low, normal, high, urgent
-  serviceCategory String? // e.g., "repair", "installation", "maintenance", "consultation"
-  estimatedCost   Float     @default(0)
-  actualCost      Float     @default(0)
-  laborCost       Float     @default(0)
-  partsCost       Float     @default(0)
-  startDate       DateTime?
-  endDate         DateTime?
-  diagnostics     String? // technician diagnosis notes
-  warrantyInfo    String? // warranty details for the work done
-  notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  serviceKind             String    @default("work_order")
+  id                      String    @id @default(cuid())
+  tenantId                String
+  tenant                  Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId                String?
+  branch                  Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orderNo                 String
+  customerId              String?
+  customer                Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName            String
+  customerPhone           String?
+  customerEmail           String?
+  productId               String? // service item
+  product                 Product?  @relation(fields: [productId], references: [id])
+  technicianId            String?
+  technician              User?     @relation("WorkOrderTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  createdByUserId         String?
+  createdByTechnicianId   String?
+  sharedWithUserIds       String[]  @default([])
+  sharedWithTechnicianIds String[]  @default([])
+  title                   String
+  description             String?
+  status                  String    @default("open") // open, in_progress, on_hold, completed, cancelled
+  priority                String    @default("normal") // low, normal, high, urgent
+  serviceCategory         String? // e.g., "repair", "installation", "maintenance", "consultation"
+  estimatedCost           Float     @default(0)
+  actualCost              Float     @default(0)
+  laborCost               Float     @default(0)
+  partsCost               Float     @default(0)
+  startDate               DateTime?
+  endDate                 DateTime?
+  diagnostics             String? // technician diagnosis notes
+  warrantyInfo            String? // warranty details for the work done
+  notes                   String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   jobCards ServiceJobCard[]
   feedback ServiceFeedback[]
@@ -3476,59 +3540,59 @@ model ServiceTechnician {
 // =====================================================
 
 model ServiceJobCard {
-  id                 String             @id @default(cuid())
-  tenantId           String
-  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId           String?
-  branch             Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  cardNo             String
-  saleId             String?
-  sale               Sale? @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  saleItemId         String?
-  saleItem           SaleItem? @relation(fields: [saleItemId], references: [id], onDelete: SetNull)
-  saleReceiptNo      String?
-  soldProductName    String?
-  serviceSource      String @default("manual")
-  serviceQuantity    Int @default(1)
-  servicePrice       Float @default(0)
-  serviceRevenue     Float @default(0)
-  appointmentId      String?
-  appointment        Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
-  workOrderId        String?
-  workOrder          WorkOrder?         @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
-  productId          String?
-  product            Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
-  technicianId       String?
-  technician         ServiceTechnician? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
-  createdByUserId    String?
-  createdByTechnicianId String?
-  sharedWithUserIds String[] @default([])
-  sharedWithTechnicianIds String[] @default([])
-  customerName       String
-  customerPhone      String?
-  serviceTitle       String
-  serviceDescription String?
-  status             String             @default("pending") // pending, in_progress, on_hold, completed, cancelled
-  priority           String             @default("normal") // low, normal, high, urgent
+  id                      String             @id @default(cuid())
+  tenantId                String
+  tenant                  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId                String?
+  branch                  Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  cardNo                  String
+  saleId                  String?
+  sale                    Sale?              @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  saleItemId              String?
+  saleItem                SaleItem?          @relation(fields: [saleItemId], references: [id], onDelete: SetNull)
+  saleReceiptNo           String?
+  soldProductName         String?
+  serviceSource           String             @default("manual")
+  serviceQuantity         Int                @default(1)
+  servicePrice            Float              @default(0)
+  serviceRevenue          Float              @default(0)
+  appointmentId           String?
+  appointment             Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  workOrderId             String?
+  workOrder               WorkOrder?         @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  productId               String?
+  product                 Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  technicianId            String?
+  technician              ServiceTechnician? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
+  createdByUserId         String?
+  createdByTechnicianId   String?
+  sharedWithUserIds       String[]           @default([])
+  sharedWithTechnicianIds String[]           @default([])
+  customerName            String
+  customerPhone           String?
+  serviceTitle            String
+  serviceDescription      String?
+  status                  String             @default("pending") // pending, in_progress, on_hold, completed, cancelled
+  priority                String             @default("normal") // low, normal, high, urgent
   // Time tracking
-  scheduledStart     DateTime?
-  scheduledEnd       DateTime?
-  actualStart        DateTime?
-  actualEnd          DateTime?
-  laborHours         Float              @default(0)
+  scheduledStart          DateTime?
+  scheduledEnd            DateTime?
+  actualStart             DateTime?
+  actualEnd               DateTime?
+  laborHours              Float              @default(0)
   // Cost tracking
-  laborCost          Float              @default(0)
-  partsCost          Float              @default(0)
-  totalCost          Float              @default(0)
+  laborCost               Float              @default(0)
+  partsCost               Float              @default(0)
+  totalCost               Float              @default(0)
   // Parts used (JSON array: [{ name, quantity, unitCost, totalCost }])
-  partsUsed          Json?
+  partsUsed               Json?
   // Quality & completion
-  qualityCheckPassed Boolean            @default(false)
-  qualityNotes       String?
-  completionNotes    String?
-  customerSignature  String? // base64 or URL
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  qualityCheckPassed      Boolean            @default(false)
+  qualityNotes            String?
+  completionNotes         String?
+  customerSignature       String? // base64 or URL
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
 
   @@unique([tenantId, cardNo])
   @@unique([saleItemId, productId])
@@ -3541,13 +3605,13 @@ model ServiceJobCard {
 }
 
 model ProductServiceLink {
-  id String @id @default(cuid())
-  tenantId String
-  productId String
-  product Product @relation("ProductIncludedServices", fields: [productId], references: [id], onDelete: Cascade)
+  id               String   @id @default(cuid())
+  tenantId         String
+  productId        String
+  product          Product  @relation("ProductIncludedServices", fields: [productId], references: [id], onDelete: Cascade)
   serviceProductId String
-  serviceProduct Product @relation("ServiceIncludedProducts", fields: [serviceProductId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  serviceProduct   Product  @relation("ServiceIncludedProducts", fields: [serviceProductId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
 
   @@unique([productId, serviceProductId])
   @@index([tenantId, serviceProductId])
@@ -3555,26 +3619,27 @@ model ProductServiceLink {
 }
 
 model ServiceShareRequest {
-  id                    String   @id @default(cuid())
-  tenantId              String
-  recordType            String
-  recordId              String
-  requesterUserId       String?
-  requesterTechnicianId String?
-  targetUserId          String?
-  targetTechnicianId    String?
-  status                String   @default("pending")
-  reason                String?
-  approvedByUserId      String?
+  id                     String    @id @default(cuid())
+  tenantId               String
+  recordType             String
+  recordId               String
+  requesterUserId        String?
+  requesterTechnicianId  String?
+  targetUserId           String?
+  targetTechnicianId     String?
+  status                 String    @default("pending")
+  reason                 String?
+  approvedByUserId       String?
   approvedByTechnicianId String?
-  approvedAt            DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  approvedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([tenantId, recordType, recordId])
   @@index([tenantId, status])
   @@map("service_share_requests")
 }
+
 // =====================================================
 // SERVICE FEEDBACK (customer ratings & reviews)
 // =====================================================
@@ -3621,24 +3686,23 @@ model ServiceFeedback {
 // ASSET & RESOURCE ENGINE (generic assets)
 // =====================================================
 
-
 // =====================================================
 // SERVICE FEEDBACK LINKS (public customer QR links)
 // =====================================================
 
 model ServiceFeedbackLink {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   tenantId      String
   productId     String
   appointmentId String?
   workOrderId   String?
   contractId    String?
   branchId      String?
-  tokenHash     String   @unique
-  isActive      Boolean  @default(true)
+  tokenHash     String    @unique
+  isActive      Boolean   @default(true)
   expiresAt     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([tenantId, productId])
   @@index([tenantId, createdAt])
@@ -3773,27 +3837,27 @@ model CalculatorHistory {
 
 // Credit Notes — issued to customers to reduce receivables (returns, allowances, overcharges)
 model CreditNote {
-  id         String   @id @default(cuid())
-  noteNo     String
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId   String?
-  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-  saleId     String? // Linked sale record (required for new notes)
-  sale       SaleRecord? @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  amount     Float
-  taxAmount Float?  // Tax component of this credit note when known
-  refundAmount       Float   @default(0)
-  refundWithdrawalId String?
+  id                  String      @id @default(cuid())
+  noteNo              String
+  tenantId            String
+  tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId            String?
+  branch              Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId          String
+  customer            Customer    @relation(fields: [customerId], references: [id])
+  saleId              String? // Linked sale record (required for new notes)
+  sale                SaleRecord? @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  amount              Float
+  taxAmount           Float? // Tax component of this credit note when known
+  refundAmount        Float       @default(0)
+  refundWithdrawalId  String?
   refundCashAccountId String?
-  reason     String // sales_return, price_adjustment, overcharge, cancellation, other
-  status     String   @default("issued") // issued, applied, cancelled
-  notes      String?
-  userId     String // Who issued it
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  reason              String // sales_return, price_adjustment, overcharge, cancellation, other
+  status              String      @default("issued") // issued, applied, cancelled
+  notes               String?
+  userId              String // Who issued it
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   @@unique([tenantId, noteNo])
   @@index([tenantId, branchId])
@@ -3803,23 +3867,23 @@ model CreditNote {
 
 // Debit Notes — issued to suppliers to reduce payables (returns, short delivery, quality issues, price adjustments)
 model DebitNote {
-  id         String   @id @default(cuid())
+  id         String            @id @default(cuid())
   noteNo     String
   tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branchId   String?
-  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch     Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   supplierId String
-  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  supplier   Supplier          @relation(fields: [supplierId], references: [id])
   purchaseId String? // Linked purchase (required for new notes)
   purchase   SupplierPurchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
   amount     Float
   reason     String // purchase_return, short_delivery, quality_issue, price_adjustment, other
-  status     String   @default("issued") // issued, applied, cancelled
+  status     String            @default("issued") // issued, applied, cancelled
   notes      String?
   userId     String // Who issued it
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
 
   @@unique([tenantId, noteNo])
   @@index([tenantId, branchId])
@@ -4078,21 +4142,21 @@ model HRModuleFeature {
 // =====================================================
 
 model LeaveType {
-  id                  String   @id @default(cuid())
-  tenantId            String
-  name                String // "Annual Leave", "Sick Leave"
-  code                String // "AL", "SL"
-  description         String?
-  daysAllowedPerYear  Int
-  carryoverAllowed    Boolean  @default(false)
-  maxCarryover        Int? // Max carryover days
-  requiresMedical     Boolean  @default(false)
-  requiresApproval    Boolean  @default(true)
-  approvalLevels      Int      @default(1) // 1 or 2 level
-  color               String? // For calendar
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  tenantId           String
+  name               String // "Annual Leave", "Sick Leave"
+  code               String // "AL", "SL"
+  description        String?
+  daysAllowedPerYear Int
+  carryoverAllowed   Boolean  @default(false)
+  maxCarryover       Int? // Max carryover days
+  requiresMedical    Boolean  @default(false)
+  requiresApproval   Boolean  @default(true)
+  approvalLevels     Int      @default(1) // 1 or 2 level
+  color              String? // For calendar
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -4100,19 +4164,19 @@ model LeaveType {
 }
 
 model LeaveBalance {
-  id                   String   @id @default(cuid())
-  tenantId             String
-  employeeId           String
-  leaveTypeId          String
-  leaveTypeName        String // Denormalized
-  year                 Int // 2024, 2025
-  allocatedDays        Float
-  usedDays             Float    @default(0)
-  approvedPendingDays  Float    @default(0)
-  pendingApprovalDays  Float    @default(0)
-  carryoverDays        Float    @default(0)
-  remainingDays        Float // Calculated
-  lastUpdatedAt        DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  tenantId            String
+  employeeId          String
+  leaveTypeId         String
+  leaveTypeName       String // Denormalized
+  year                Int // 2024, 2025
+  allocatedDays       Float
+  usedDays            Float    @default(0)
+  approvedPendingDays Float    @default(0)
+  pendingApprovalDays Float    @default(0)
+  carryoverDays       Float    @default(0)
+  remainingDays       Float // Calculated
+  lastUpdatedAt       DateTime @updatedAt
 
   @@unique([employeeId, leaveTypeId, year])
   @@index([tenantId, employeeId])
@@ -4121,19 +4185,19 @@ model LeaveBalance {
 }
 
 model LeaveHistory {
-  id                 String   @id @default(cuid())
-  tenantId           String
-  employeeId         String
-  leaveTypeId        String
-  leaveTypeName      String
-  leaveRequestId     String? // Link to request
-  startDate          DateTime
-  endDate            DateTime
-  totalDays          Float
-  reason             String?
-  manualEntry        Boolean  @default(false)
-  createdBy          String // UserId
-  createdAt          DateTime @default(now())
+  id             String   @id @default(cuid())
+  tenantId       String
+  employeeId     String
+  leaveTypeId    String
+  leaveTypeName  String
+  leaveRequestId String? // Link to request
+  startDate      DateTime
+  endDate        DateTime
+  totalDays      Float
+  reason         String?
+  manualEntry    Boolean  @default(false)
+  createdBy      String // UserId
+  createdAt      DateTime @default(now())
 
   @@index([tenantId, employeeId])
   @@index([startDate, endDate])
@@ -4167,25 +4231,25 @@ model AttendanceConfiguration {
 }
 
 model AttendanceRecord {
-  id            String   @id @default(cuid())
-  tenantId      String
-  employeeId    String
-  branchId      String?
-  attendanceDate DateTime
-  checkInTime   DateTime?
-  checkOutTime  DateTime?
-  duration      Float? // hours worked
-  lateMinutes   Int?
+  id              String    @id @default(cuid())
+  tenantId        String
+  employeeId      String
+  branchId        String?
+  attendanceDate  DateTime
+  checkInTime     DateTime?
+  checkOutTime    DateTime?
+  duration        Float? // hours worked
+  lateMinutes     Int?
   overtimeMinutes Int?
-  method        String   @default("MANUAL") // MANUAL, QR_CODE, BIOMETRIC
-  location      String? // GPS location
-  notes         String?
-  status        String   @default("present") // present, absent, on_leave, half_day, leave
-  approvedBy    String? // UserId
-  approvedAt    DateTime?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  method          String    @default("MANUAL") // MANUAL, QR_CODE, BIOMETRIC
+  location        String? // GPS location
+  notes           String?
+  status          String    @default("present") // present, absent, on_leave, half_day, leave
+  approvedBy      String? // UserId
+  approvedAt      DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([tenantId, employeeId, attendanceDate])
   @@index([tenantId, employeeId])
@@ -4194,20 +4258,20 @@ model AttendanceRecord {
 }
 
 model AttendanceSummary {
-  id              String   @id @default(cuid())
-  tenantId        String
-  employeeId      String
-  periodStart     DateTime // Month start
-  periodEnd       DateTime // Month end
-  presentDays     Int      @default(0)
-  absentDays      Int      @default(0)
-  leaveDays       Int      @default(0)
-  overtimeHours   Float    @default(0)
+  id                  String   @id @default(cuid())
+  tenantId            String
+  employeeId          String
+  periodStart         DateTime // Month start
+  periodEnd           DateTime // Month end
+  presentDays         Int      @default(0)
+  absentDays          Int      @default(0)
+  leaveDays           Int      @default(0)
+  overtimeHours       Float    @default(0)
   averageCheckInTime  String? // HH:MM
   averageCheckOutTime String? // HH:MM
-  workingDaysInPeriod Int @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  workingDaysInPeriod Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@unique([tenantId, employeeId, periodStart])
   @@index([tenantId, employeeId])
@@ -4215,15 +4279,15 @@ model AttendanceSummary {
 }
 
 model AttendanceAudit {
-  id        String   @id @default(cuid())
-  tenantId  String
-  recordId  String
-  changedBy String // UserId
+  id         String   @id @default(cuid())
+  tenantId   String
+  recordId   String
+  changedBy  String // UserId
   changeType String // created, edited, approved, deleted
-  oldValues Json?
-  newValues Json?
-  reason    String?
-  timestamp DateTime @default(now())
+  oldValues  Json?
+  newValues  Json?
+  reason     String?
+  timestamp  DateTime @default(now())
 
   @@index([tenantId, recordId])
   @@index([timestamp])
@@ -4235,20 +4299,20 @@ model AttendanceAudit {
 // =====================================================
 
 model ShiftTemplate {
-  id              String   @id @default(cuid())
-  tenantId        String
-  branchId        String?
-  name            String // "Morning Shift", "Night Shift"
-  code            String // "MS", "NS"
-  description     String?
-  startTime       String // "09:00"
-  endTime         String // "17:00"
-  breakDuration   Int      @default(60) // minutes
-  workingHours    Float
-  isDefault       Boolean  @default(false)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String   @id @default(cuid())
+  tenantId      String
+  branchId      String?
+  name          String // "Morning Shift", "Night Shift"
+  code          String // "MS", "NS"
+  description   String?
+  startTime     String // "09:00"
+  endTime       String // "17:00"
+  breakDuration Int      @default(60) // minutes
+  workingHours  Float
+  isDefault     Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([tenantId, branchId, code])
   @@index([tenantId])
@@ -4256,21 +4320,21 @@ model ShiftTemplate {
 }
 
 model ShiftAssignment {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   tenantId            String
   employeeId          String
   shiftTemplateId     String
   shiftTemplateName   String // Denormalized
   assignmentStartDate DateTime // When assignment begins
   assignmentEndDate   DateTime? // When assignment ends (NULL = ongoing)
-  rotationType        String   @default("FIXED") // FIXED, ROTATING, TEMPORARY
+  rotationType        String    @default("FIXED") // FIXED, ROTATING, TEMPORARY
   reason              String?
   approvedBy          String?
   approvedAt          DateTime?
-  status              String   @default("pending") // pending, active, ended, on_hold
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  status              String    @default("pending") // pending, active, ended, on_hold
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@unique([tenantId, employeeId, assignmentStartDate])
   @@index([tenantId, employeeId])
@@ -4279,22 +4343,22 @@ model ShiftAssignment {
 }
 
 model ShiftSwap {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   tenantId          String
   requesterId       String // Who wants to swap
   targetEmployeeId  String // Who they want to swap with
   originalShiftDate DateTime // Employee 1's original shift
   swapDate          DateTime // Employee 2's shift date (what Employee 1 wants)
   reason            String?
-  requestedAt       DateTime @default(now())
+  requestedAt       DateTime  @default(now())
   approverIds       String[] // Manager/HR who can approve
   approvedAt        DateTime?
   approvedBy        String?
-  status            String   @default("pending") // pending, approved, rejected, executed, cancelled
+  status            String    @default("pending") // pending, approved, rejected, executed, cancelled
   executedAt        DateTime?
   notes             String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([tenantId, requesterId])
   @@index([status])
@@ -4304,4 +4368,3 @@ model ShiftSwap {
 // =====================================================
 // PHASE 2: LEAVE MANAGEMENT (LeaveType, LeaveBalance, LeaveHistory added)
 // =====================================================
-

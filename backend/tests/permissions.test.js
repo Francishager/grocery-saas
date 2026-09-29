@@ -75,3 +75,13 @@ test('new transaction permissions are grouped separately from accounting permiss
   assert.equal(PERMISSION_METADATA.canCreateTransactionAccount.category, 'transactions');
   assert.equal(PERMISSION_METADATA.canCreateWithdrawal.category, 'transactions');
 });
+
+test('receivable reconciliation access and review are independently permissioned', () => {
+  assert.equal(PERMISSION_METADATA.canViewReceivableReconciliation.category, 'customers');
+  assert.equal(PERMISSION_METADATA.canReviewReceivableReconciliation.category, 'customers');
+  assert.notEqual(
+    PERMISSION_METADATA.canViewReceivableReconciliation.id,
+    PERMISSION_METADATA.canReviewReceivableReconciliation.id,
+  );
+  assert.match(PERMISSION_METADATA.canReviewReceivableReconciliation.description, /does not post or change balances/i);
+});

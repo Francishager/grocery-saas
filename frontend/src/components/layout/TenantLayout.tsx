@@ -40,6 +40,7 @@ const receivablesSubItems = [
   { to: '/tenant/receivables/customers', label: 'Customers', icon: CreditCard, permission: 'canViewReceivable', feature: 'receivables' },
   { to: '/tenant/receivables/sales', label: 'Credit Sales', icon: Receipt, permission: 'canViewReceivable', feature: 'receivables' },
   { to: '/tenant/receivables/payments', label: 'Payments', icon: DollarSign, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/reconciliation', label: 'Payment Reconciliation', icon: ClipboardCheck, permission: 'canViewReceivableReconciliation', feature: 'receivables' },
   { to: '/tenant/receivables/fuel-cards', label: 'Fuel Cards', icon: CardIcon, permission: 'canViewReceivable', feature: 'fuel_station.fuel_cards' },
   { to: '/tenant/receivables/credit-accounts', label: 'Credit Accounts', icon: BadgeDollarSign, permission: 'canViewReceivable', feature: 'fuel_station.credit_accounts' },
 ]
