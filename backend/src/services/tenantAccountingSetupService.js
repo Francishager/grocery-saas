@@ -87,17 +87,17 @@ async function ensureWithClient(client, { tenantId, userId, enableNewSetups }) {
     if (rolesToProvision.has(role.key) && !accountsByRole.has(role.key)) accountsByRole.set(role.key, await provisionAccount(client, tenantId, role))
   }
 
-  if (!receivablesExisting || receivablesRoles.some((role) => !receivablesExisting[role.key])) {
+  if (!receivablesExisting || receivablesRoles.some((role) => !receivablesExisting[role.key]) || (enableNewSetups && !receivablesExisting.isEnabled)) {
     const values = Object.fromEntries(receivablesRoles.map((role) => [role.key, receivablesExisting?.[role.key] || accountsByRole.get(role.key).id]))
-    values.isEnabled = receivablesExisting ? Boolean(receivablesExisting.isEnabled) : Boolean(enableNewSetups)
+    values.isEnabled = receivablesExisting ? Boolean(receivablesExisting.isEnabled || enableNewSetups) : Boolean(enableNewSetups)
     const validation = await validateReceivablesAccountingConfig(client, tenantId, values)
     if (!validation.valid) throw Object.assign(new Error(validation.errors?.join('. ') || 'Automatic receivables account setup did not validate.'), { statusCode: 409 })
     await saveReceivablesAccountingConfig(client, tenantId, userId, values)
   }
 
-  if (!payablesExisting || payablesRoles.some((role) => !payablesExisting[role.key])) {
+  if (!payablesExisting || payablesRoles.some((role) => !payablesExisting[role.key]) || (enableNewSetups && !payablesExisting.isEnabled)) {
     const values = Object.fromEntries(payablesRoles.map((role) => [role.key, payablesExisting?.[role.key] || accountsByRole.get(role.key).id]))
-    values.isEnabled = payablesExisting ? Boolean(payablesExisting.isEnabled) : Boolean(enableNewSetups)
+    values.isEnabled = payablesExisting ? Boolean(payablesExisting.isEnabled || enableNewSetups) : Boolean(enableNewSetups)
     const validation = await validatePayablesAccountingConfig(client, tenantId, values)
     if (!validation.valid) throw Object.assign(new Error(validation.errors?.join('. ') || 'Automatic payables account setup did not validate.'), { statusCode: 409 })
     await savePayablesAccountingConfig(client, tenantId, userId, values)
@@ -118,13 +118,9 @@ export async function ensureTenantAccountingSetup(client, options) {
 }
 
 export async function setupTenantAccountingSystem(client, { tenantId, userId }) {
-  const accountingConfigAlreadyExists = await Promise.all([
-    getReceivablesAccountingConfig(client, tenantId),
-    getPayablesAccountingConfig(client, tenantId),
-  ])
   const historicalActivityCount = await countAccountingHistory(client, tenantId)
-  const isTrulyNew = historicalActivityCount === 0 && accountingConfigAlreadyExists.every((config) => !config)
-  const setup = await ensureTenantAccountingSetup(client, { tenantId, userId, enableNewSetups: isTrulyNew })
+  const mayEnableWithoutHistory = historicalActivityCount === 0
+  const setup = await ensureTenantAccountingSetup(client, { tenantId, userId, enableNewSetups: mayEnableWithoutHistory })
   return {
     ...setup,
     historicalActivityCount,

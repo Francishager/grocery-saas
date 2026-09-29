@@ -13,8 +13,7 @@ import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
-import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines, saveReceivablesAccountingConfig } from '../src/services/receivablesAccountingService.js'
-import { countAccountingHistory } from '../src/services/tenantAccountingSetupService.js'
+import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -1363,13 +1362,9 @@ router.put('/reconciliation/accounting-config', authenticateToken, requirePermis
     const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
     values.isEnabled = req.body?.isEnabled === true
     const previous = await getReceivablesAccountingConfig(prisma, tenantId)
-    const hasHistory = await countAccountingHistory(prisma, tenantId) > 0
-    const mappingsChanged = fields.some((field) => (previous?.[field] || null) !== values[field])
-    if (hasHistory && ((values.isEnabled && !previous?.isEnabled) || mappingsChanged)) {
-      return res.status(409).json({ error: 'Accounting mappings cannot be enabled or changed while historical transactions exist until a reviewed general-ledger migration is complete.', code: 'HISTORICAL_GL_REVIEW_REQUIRED' })
-    }
-    const config = await saveReceivablesAccountingConfig(prisma, tenantId, req.user.id, values)
-    res.json({ config })
+    const changed = !previous || fields.some((field) => (previous[field] || null) !== values[field]) || Boolean(previous.isEnabled) !== values.isEnabled
+    if (changed) return res.status(409).json({ error: 'Accounting mappings and posting status are system-managed and cannot be changed manually.', code: 'SYSTEM_MANAGED_ACCOUNTING_CONFIG' })
+    res.json({ config: previous })
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
     handleBranchError(res, error, 'Failed to save receivables accounting mappings')

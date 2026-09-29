@@ -66,12 +66,22 @@ test('existing tenant with transaction history gets mappings but stays disabled 
 })
 
 test('existing incomplete configuration gets only missing mappings and stays disabled', async () => {
-  const db = createDatabase()
+  const db = createDatabase({ history: 1 })
   const initial = await ensureTenantAccountingSetup(db, { tenantId: 'legacy-tenant', userId: 'owner', enableNewSetups: false })
   db._configs.receivables.openingBalanceEquityAccountId = null
   const accountCount = db._accounts.length
-  const repaired = await ensureTenantAccountingSetup(db, { tenantId: 'legacy-tenant', userId: 'owner', enableNewSetups: true })
+  const repaired = await ensureTenantAccountingSetup(db, { tenantId: 'legacy-tenant', userId: 'owner', enableNewSetups: false })
   assert.equal(repaired.receivables.isEnabled, false)
   assert.equal(repaired.receivables.openingBalanceEquityAccountId, initial.payables.openingBalanceEquityAccountId)
   assert.equal(db._accounts.length, accountCount)
+})
+
+test('validated mappings auto-enable posting when no accounting history exists', async () => {
+  const db = createDatabase()
+  await ensureTenantAccountingSetup(db, { tenantId: 'empty-tenant', userId: 'owner', enableNewSetups: false })
+  assert.equal(db._configs.receivables.isEnabled, false)
+  const setup = await setupTenantAccountingSystem(db, { tenantId: 'empty-tenant', userId: 'owner' })
+  assert.equal(setup.historicalActivityCount, 0)
+  assert.equal(setup.receivables.isEnabled, true)
+  assert.equal(setup.payables.isEnabled, true)
 })
