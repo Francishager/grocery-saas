@@ -21,6 +21,10 @@ test('customer identity normalization ignores case, spacing, and phone punctuati
 test('duplicate check locks the tenant and returns the conflicting identity field', async () => {
   const calls = [];
   const client = {
+    async $executeRawUnsafe(query, ...values) {
+      calls.push({ query, values });
+      return 0;
+    },
     async $queryRawUnsafe(query, ...values) {
       calls.push({ query, values });
       return query.includes('SELECT CASE') ? [{ field: 'phone' }] : [];
@@ -34,6 +38,7 @@ test('duplicate check locks the tenant and returns the conflicting identity fiel
 
   assert.deepEqual(conflict, { field: 'phone' });
   assert.match(calls[0].query, /pg_advisory_xact_lock/);
+  assert.match(calls[0].query, /^SELECT pg_advisory_xact_lock/);
   assert.equal(calls[0].values[0], 'tenant-a');
   assert.equal(calls[1].values[0], 'tenant-a');
   assert.equal(calls[1].values[2], null);

@@ -23,7 +23,7 @@ export async function findCustomerIdentityConflict(client, {
     return null;
   }
 
-  await client.$queryRawUnsafe(
+  await client.$executeRawUnsafe(
     'SELECT pg_advisory_xact_lock(hashtextextended($1, 20260929))',
     tenantId,
   );
