@@ -201,7 +201,7 @@ const sortLedgerRows = (rows) => rows.sort((a, b) => {
 // === CUSTOMERS ===
 
 // Get all customers for tenant
-router.get('/customers', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+router.get('/customers', authenticateToken, requirePermission('canViewCustomer'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { page = 1, limit = 50, search, status } = req.query
@@ -253,7 +253,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewReceivable
 })
 
 // Get one customer's active credit position with outstanding goods/items
-router.get('/customers/:id/credit-info', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+router.get('/customers/:id/credit-info', authenticateToken, requirePermission('canViewCustomer'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -389,7 +389,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
 })
 
 // Get one customer's transaction history without requiring the statement report screen
-router.get('/customers/:id/history', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+router.get('/customers/:id/history', authenticateToken, requirePermission('canViewCustomer'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -747,11 +747,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 // Create new customer
 router.post('/customers', authenticateToken, requirePermission('canCreateCustomer'), requireTenant, async (req, res) => {
   try {
+    console.log('POST /customers - Request body:', req.body)
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
       requireBranch: true,
       allowOwnerAll: false
     })
+    console.log('POST /customers - Scope resolved:', scope)
     const { name, email, phone, address, creditLimit = 0, notes, openingBalanceNote } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })
@@ -828,7 +830,10 @@ router.post('/customers', authenticateToken, requirePermission('canCreateCustome
       throw error
     }
 
-    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw])
+    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw]).catch((err) => {
+      console.error('Error attaching repayment trust scores:', err)
+      return [customerRaw]
+    })
     res.status(201).json(customer)
   } catch (error) {
     if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
