@@ -745,7 +745,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 })
 
 // Create new customer
-router.post('/customers', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
+router.post('/customers', authenticateToken, requirePermission('canCreateCustomer'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
