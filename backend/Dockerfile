@@ -62,8 +62,7 @@ USER app
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
   CMD sh -c 'wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1'
 
-# Start the application — sync schema in background, start server immediately
-# app.js already retries DB connection in the background, so the healthcheck passes
-# even if the database is temporarily unavailable
-CMD ["sh", "-c", "(npx prisma db push --accept-data-loss 2>&1 || true) & ./start.sh"]
+# Sync the Prisma schema before accepting requests. Starting the API in parallel
+# can make existing tenants hit database errors while schema updates are pending.
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && ./start.sh"]
 

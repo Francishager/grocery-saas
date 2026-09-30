@@ -12,11 +12,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const startupScriptPath = path.resolve(__dirname, '../start.sh');
 const startupScript = fs.readFileSync(startupScriptPath, 'utf8');
+const dockerfile = fs.readFileSync(path.resolve(__dirname, '../Dockerfile'), 'utf8');
 
 test('startup script launches the app without blocking on prisma bootstrap', () => {
   assert.match(startupScript, /exec node --trace-warnings src\/app\.js/);
   assert.doesNotMatch(startupScript, /prisma db push/);
   assert.doesNotMatch(startupScript, /prisma db seed/);
+});
+
+test('container completes the Prisma schema sync before starting the API', () => {
+  assert.match(dockerfile, /npx prisma db push --accept-data-loss && \.\/start\.sh/);
+  assert.doesNotMatch(dockerfile, /\(npx prisma db push[\s\S]*?\)\s*&\s*\.\/start\.sh/);
 });
 
 test('backend loads every router and serves the Railway healthcheck without a database', { timeout: 45000 }, async () => {
