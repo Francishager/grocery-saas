@@ -52,7 +52,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
   const { isFeatureEnabled } = useFeatureAccess()
   const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
-  const canManageCustomers = hasPermission('canCreateSale') || hasPermission('canViewSale')
+  const canManageCustomers = hasPermission('canCreateCustomer') || hasPermission('canViewCustomer') || hasPermission('canCreateSale') || hasPermission('canViewSale')
   const canManageOpeningBalances = Boolean(
     user && (openingBalanceRoles.includes(user.role) || user.permissions?.includes('*'))
   )
@@ -160,7 +160,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       const payload = {
         ...formData,
         creditLimit: Number(formData.creditLimit || 0),
-        branchId: canManageCustomers ? formData.branchId : undefined,
+        branchId: formData.branchId || undefined,
         openingBalance: canManageOpeningBalances ? Number(formData.openingBalance || 0) : undefined,
         openingBalanceDate: canManageOpeningBalances ? formData.openingBalanceDate || null : undefined,
         openingBalanceNote: canManageOpeningBalances ? formData.openingBalanceNote || '' : undefined,

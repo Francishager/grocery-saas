@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireTenant, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
@@ -745,13 +745,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 })
 
 // Create new customer
-router.post('/customers', authenticateToken, requirePermission('canCreateCustomer'), requireTenant, async (req, res) => {
+router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCustomer', 'canCreateReceivable']), requireTenant, async (req, res) => {
   try {
     console.log('POST /customers - Request body:', req.body)
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
-      requireBranch: true,
-      allowOwnerAll: false
+      requireBranch: false,
+      allowOwnerAll: true
     })
     console.log('POST /customers - Scope resolved:', scope)
     const { name, email, phone, address, creditLimit = 0, notes, openingBalanceNote } = req.body
@@ -808,7 +808,7 @@ router.post('/customers', authenticateToken, requirePermission('canCreateCustome
             notes,
             trustScore: 0,
             tenantId: scope.tenantId,
-            branchId: scope.branchId
+            branchId: scope.branchId || req.body.branchId || null
           }
         })
         if (openingBalance > 0) {
