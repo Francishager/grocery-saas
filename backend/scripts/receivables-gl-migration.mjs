@@ -16,7 +16,11 @@ import {
 } from '../src/services/receivablesAccountingService.js'
 
 const args = process.argv.slice(2)
-const valueAfter = (name) => args[args.indexOf(name) + 1]
+const valueAfter = (name) => {
+  const index = args.indexOf(name)
+  const value = index >= 0 ? args[index + 1] : null
+  return value && !value.startsWith('--') ? value : null
+}
 const tenantId = valueAfter('--tenant')
 const apply = args.includes('--apply')
 const signoffPath = valueAfter('--signoff')

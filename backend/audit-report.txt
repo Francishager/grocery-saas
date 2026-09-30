@@ -1,0 +1,617 @@
+﻿ΓöîΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÉ
+Γöé (index) Γöé tenantId                    Γöé tenant                                   Γöé customerMismatches Γöé saleMismatches Γöé supplierMismatches Γöé purchaseMismatches Γöé linkedCashMismatches Γöé unbalancedJournals Γöé refundArtifacts Γöé
+Γö£ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöñ
+Γöé 0       Γöé 'cmqlhj7lx0009ec4tij7s3f97' Γöé 'MK Shoppers'                            Γöé 1                  Γöé 0              Γöé 2                  Γöé 0                  Γöé 0                    Γöé 0                  Γöé 0               Γöé
+Γöé 1       Γöé 'cms8rr22503iycxem8r0h3zuj' Γöé 'REZO FAMILY RICE STORE'                 Γöé 0                  Γöé 14             Γöé 0                  Γöé 0                  Γöé 0                    Γöé 0                  Γöé 1               Γöé
+Γöé 2       Γöé 'cmrovmual00bd11r6cn90r120' Γöé 'WELLNESS CENTER (C4 CRETE MASTERS LTD)' Γöé 3                  Γöé 0              Γöé 0                  Γöé 0                  Γöé 0                    Γöé 0                  Γöé 0               Γöé
+ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ
+{
+  apply: false,
+  tenantCount: 24,
+  summary: [
+    {
+      tenantId: 'cmttvb1zz02816peswb6cf02j',
+      tenant: 'ABBA SHAK ENTERPRISES LIMITED',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmuaz4vxi0cpoipik504m2rda',
+      tenant: 'A-T PHONE SERVICE CENTER',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmre7yl6302oqip6p674lweas',
+      tenant: 'Baze Mart Shopping Center',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmtv64f2e0dhp6pes5p1l59ny',
+      tenant: 'BUMUGENYI FAMILY HARDWARE',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmu8bam4b05h0d29y3ub3ftu6',
+      tenant: 'CLIMAX MATRESS DEALERS',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmtmqw2rh0lr9wwvoyt65p2g3',
+      tenant: 'DTPRODUCE',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmsk50ou103hiufy992j0v65a',
+      tenant: 'EBENEZER HARDWARE',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqy6o3ju000250vrtgwt7th5',
+      tenant: 'JB Shoppers',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqfdhyt30004zzwg2bbnesq3',
+      tenant: 'Kyengo Mart',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmsg6wvjf02vp8v2j9n1s84w6',
+      tenant: 'MARCUS TRADERS',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmta07uzx0098110z8ovrhtmb',
+      tenant: 'MASE HARDWARE & ELECTRONICS',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmrhqou0l0090methso52lugo',
+      tenant: 'Mega Win Supermart',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqydcru2004o32dtyxcn1q2i',
+      tenant: 'Megga Super Market',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqp3u5dh009s8r9kb0s0046l',
+      tenant: 'M-F MAYANJA HARDWARE',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqlhj7lx0009ec4tij7s3f97',
+      tenant: 'MK Shoppers',
+      customerMismatches: 1,
+      saleMismatches: 0,
+      supplierMismatches: 2,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmskcygfb052uufy905krzenf',
+      tenant: 'NALONGO TRADERS',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmu9juglr02ayipik80iyheoa',
+      tenant: 'NKUNDA TRADERS',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqxqyml0001b1i1lwnv3miaf',
+      tenant: 'Olivia Enterprises',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cms8rr22503iycxem8r0h3zuj',
+      tenant: 'REZO FAMILY RICE STORE',
+      customerMismatches: 0,
+      saleMismatches: 14,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 1
+    },
+    {
+      tenantId: 'cmtaa548300u3110z9vcsy5jd',
+      tenant: 'S & A CURTAINS & FURNITURE',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqtp4kxw0002ux1g4iwse3ru',
+      tenant: 'Storage House Ltd',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmr8xkwvq05ru6fafobxow2hs',
+      tenant: 'Twekobe Hardware',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmqlh7jkg0003ec4tepoubibs',
+      tenant: 'Urban Tech Investments',
+      customerMismatches: 0,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    },
+    {
+      tenantId: 'cmrovmual00bd11r6cn90r120',
+      tenant: 'WELLNESS CENTER (C4 CRETE MASTERS LTD)',
+      customerMismatches: 3,
+      saleMismatches: 0,
+      supplierMismatches: 0,
+      purchaseMismatches: 0,
+      linkedCashMismatches: 0,
+      unbalancedJournals: 0,
+      refundArtifacts: 0
+    }
+  ],
+  details: [
+    {
+      tenantId: 'cmqlhj7lx0009ec4tij7s3f97',
+      tenant: 'MK Shoppers',
+      customers: [
+        {
+          id: 'cmqm0dgou00019h6a4lrxk0ne',
+          name: 'Francis',
+          stored: 45000,
+          calculated: -45000,
+          difference: 90000,
+          components: {
+            openingBalance: 0,
+            receivableSales: 0,
+            salePayments: 0,
+            paymentReconciliationIssues: [],
+            customerPayments: 45000,
+            customerAccountAllocations: 0,
+            unappliedCustomerReceipts: 0,
+            customerWithdrawals: 0,
+            creditNotes: 0,
+            creditReturns: 0
+          }
+        }
+      ],
+      sales: [],
+      suppliers: [
+        {
+          id: 'cmqm0g7bd00049h6afzp4kx78',
+          name: 'Ibra',
+          stored: 3850000,
+          calculated: 0,
+          difference: 3850000,
+          components: {
+            openingBalance: 0,
+            purchases: 0,
+            payments: 0,
+            debitNotes: 0
+          }
+        },
+        {
+          id: 'cmqob748o0019122wrb3eplgj',
+          name: 'Tinah Asimwe',
+          stored: 105000,
+          calculated: 300000,
+          difference: -195000,
+          components: {
+            openingBalance: 0,
+            purchases: 410000,
+            payments: 110000,
+            debitNotes: 0
+          }
+        }
+      ],
+      purchases: [],
+      linkedCashAccounts: [],
+      journals: [],
+      refundArtifacts: []
+    },
+    {
+      tenantId: 'cms8rr22503iycxem8r0h3zuj',
+      tenant: 'REZO FAMILY RICE STORE',
+      customers: [],
+      sales: [
+        {
+          id: 'cmtjpiugt01gsd9b6583bt8m2',
+          receiptNo: 'SALE-1788330024869',
+          stored: 510000,
+          expected: 0,
+          difference: 510000,
+          netTotal: 510000,
+          amountPaid: 0,
+          creditNotes: 510000
+        },
+        {
+          id: 'cmtk5d8c605bwx7y8p10y9gbz',
+          receiptNo: 'SALE-1788356636774',
+          stored: 100000,
+          expected: 0,
+          difference: 100000,
+          netTotal: 5100000,
+          amountPaid: 5000000,
+          creditNotes: 5100000
+        },
+        {
+          id: 'cmtle89v908m2wwvo3skthi46',
+          receiptNo: 'SALE-1788431988195',
+          stored: 31000000,
+          expected: 0,
+          difference: 31000000,
+          netTotal: 31000000,
+          amountPaid: 0,
+          creditNotes: 31000000
+        },
+        {
+          id: 'cmtleay3g08mjwwvoely6dqt6',
+          receiptNo: 'SALE-1788432112907',
+          stored: 310000,
+          expected: 0,
+          difference: 310000,
+          netTotal: 310000,
+          amountPaid: 0,
+          creditNotes: 310000
+        },
+        {
+          id: 'cmto3g2ry0q0uwwvo2t9ovok6',
+          receiptNo: 'SALE-1788595275002',
+          stored: 3500000,
+          expected: 0,
+          difference: 3500000,
+          netTotal: 3500000,
+          amountPaid: 0,
+          creditNotes: 3500000
+        },
+        {
+          id: 'cmto3p5pu0q9wwwvobgnlxcrg',
+          receiptNo: 'SALE-1788595698721',
+          stored: 7000000,
+          expected: 0,
+          difference: 7000000,
+          netTotal: 7000000,
+          amountPaid: 0,
+          creditNotes: 7000000
+        },
+        {
+          id: 'cmto3x1210qiiwwvoajd0hv6q',
+          receiptNo: 'SALE-1788596065928',
+          stored: 12250000,
+          expected: 0,
+          difference: 12250000,
+          netTotal: 12250000,
+          amountPaid: 0,
+          creditNotes: 12250000
+        },
+        {
+          id: 'cmto3ydkh0qiowwvoaa79ww8s',
+          receiptNo: 'SALE-1788596128803',
+          stored: 21000000,
+          expected: 0,
+          difference: 21000000,
+          netTotal: 21000000,
+          amountPaid: 0,
+          creditNotes: 21000000
+        },
+        {
+          id: 'cmto42lqe0qj6wwvobp68xw56',
+          receiptNo: 'SALE-1788596326008',
+          stored: 3500000,
+          expected: 0,
+          difference: 3500000,
+          netTotal: 3500000,
+          amountPaid: 0,
+          creditNotes: 3500000
+        },
+        {
+          id: 'cmtqtg9470vy7wwvojq5e5i0n',
+          receiptNo: 'SALE-1788759885589',
+          stored: 6800000,
+          expected: 0,
+          difference: 6800000,
+          netTotal: 6800000,
+          amountPaid: 0,
+          creditNotes: 6800000
+        },
+        {
+          id: 'cmtquurdd0wepwwvo5vvuua7q',
+          receiptNo: 'SALE-1788762242048',
+          stored: 3400000,
+          expected: 0,
+          difference: 3400000,
+          netTotal: 3400000,
+          amountPaid: 0,
+          creditNotes: 3400000
+        },
+        {
+          id: 'cmts7b5iz11fkwwvog5wisu0x',
+          receiptNo: 'SALE-1788843628456',
+          stored: 450000,
+          expected: 0,
+          difference: 450000,
+          netTotal: 1150000,
+          amountPaid: 700000,
+          creditNotes: 1150000
+        },
+        {
+          id: 'cmts807nz11q5wwvovguvzoj6',
+          receiptNo: 'SALE-1788844797630',
+          stored: 5050000,
+          expected: 0,
+          difference: 5050000,
+          netTotal: 5050000,
+          amountPaid: 0,
+          creditNotes: 5050000
+        },
+        {
+          id: 'cmts8cspj11vtwwvoexbrzzn5',
+          receiptNo: 'SALE-1788845384734',
+          stored: 23200000,
+          expected: 0,
+          difference: 23200000,
+          netTotal: 23200000,
+          amountPaid: 0,
+          creditNotes: 23200000
+        }
+      ],
+      suppliers: [],
+      purchases: [],
+      linkedCashAccounts: [],
+      journals: [],
+      refundArtifacts: [
+        {
+          noteNo: 'CN-2026-00051',
+          customer: 'Jeff maseruka',
+          amount: 2320000,
+          refundAmount: 1500000,
+          reason: 'cancellation',
+          salePaid: 1500000,
+          saleStatus: 'completed'
+        }
+      ]
+    },
+    {
+      tenantId: 'cmrovmual00bd11r6cn90r120',
+      tenant: 'WELLNESS CENTER (C4 CRETE MASTERS LTD)',
+      customers: [
+        {
+          id: 'cmrz2fu1a00hvjyx2ofx2ka3v',
+          name: 'MIRIAM',
+          stored: 0,
+          calculated: -510000,
+          difference: 510000,
+          components: {
+            openingBalance: 0,
+            receivableSales: 510000,
+            salePayments: 510000,
+            paymentReconciliationIssues: [
+              {
+                saleId: 'cmrz2ueui00hzjyx2kd9uv8ea',
+                recordedSaleAmountPaid: 510000,
+                linkedPaymentTotal: 0,
+                difference: -510000,
+                provisionalAmountUsed: 510000,
+                status: 'missing_payment_rows',
+                requiresReview: true
+              }
+            ],
+            customerPayments: 510000,
+            customerAccountAllocations: 0,
+            unappliedCustomerReceipts: 0,
+            customerWithdrawals: 0,
+            creditNotes: 0,
+            creditReturns: 0
+          }
+        },
+        {
+          id: 'cmseoz2ml0358xjt51oh05mv8',
+          name: 'OGURAM RAYMOND',
+          stored: 920000,
+          calculated: 0,
+          difference: 920000,
+          components: {
+            openingBalance: 0,
+            receivableSales: 1460000,
+            salePayments: 1460000,
+            paymentReconciliationIssues: [
+              {
+                saleId: 'cmsep51bn035cxjt5cpvnbpg3',
+                recordedSaleAmountPaid: 520000,
+                linkedPaymentTotal: 0,
+                difference: -520000,
+                provisionalAmountUsed: 520000,
+                status: 'missing_payment_rows',
+                requiresReview: true
+              },
+              {
+                saleId: 'cmswv6gnt00zb1280l92zf8fu',
+                recordedSaleAmountPaid: 400000,
+                linkedPaymentTotal: 0,
+                difference: -400000,
+                provisionalAmountUsed: 400000,
+                status: 'missing_payment_rows',
+                requiresReview: true
+              }
+            ],
+            customerPayments: 0,
+            customerAccountAllocations: 0,
+            unappliedCustomerReceipts: 0,
+            customerWithdrawals: 0,
+            creditNotes: 0,
+            creditReturns: 0
+          }
+        },
+        {
+          id: 'cmswvnqyp00zq128054fyozsy',
+          name: 'NAMUYANJA IMELDA',
+          stored: 600000,
+          calculated: 0,
+          difference: 600000,
+          components: {
+            openingBalance: 0,
+            receivableSales: 600000,
+            salePayments: 600000,
+            paymentReconciliationIssues: [
+              {
+                saleId: 'cmswvpksm00zu1280ihjvp0yf',
+                recordedSaleAmountPaid: 550000,
+                linkedPaymentTotal: 0,
+                difference: -550000,
+                provisionalAmountUsed: 550000,
+                status: 'missing_payment_rows',
+                requiresReview: true
+              },
+              {
+                saleId: 'cmswvtiv101011280pzbprzbm',
+                recordedSaleAmountPaid: 50000,
+                linkedPaymentTotal: 0,
+                difference: -50000,
+                provisionalAmountUsed: 50000,
+                status: 'missing_payment_rows',
+                requiresReview: true
+              }
+            ],
+            customerPayments: 0,
+            customerAccountAllocations: 0,
+            unappliedCustomerReceipts: 0,
+            customerWithdrawals: 0,
+            creditNotes: 0,
+            creditReturns: 0
+          }
+        }
+      ],
+      sales: [],
+      suppliers: [],
+      purchases: [],
+      linkedCashAccounts: [],
+      journals: [],
+      refundArtifacts: []
+    }
+  ]
+}
+Dry run only. Re-run with --apply to reconcile customer/supplier/sale/purchase balances and linked cash accounts. Journal imbalance and refund artifacts are reported only for manual review.

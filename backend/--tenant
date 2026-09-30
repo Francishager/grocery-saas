@@ -1,0 +1,2862 @@
+{
+  "tenantId": "cmttvb1zz02816peswb6cf02j",
+  "actions": [
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE_RETURN",
+      "sourceId": "cmuk8gyyp00fmkac4ryyuwt73",
+      "date": "2026-09-27T19:50:32.450Z",
+      "reference": "RET-1790538632389",
+      "description": "POS sales return RET-1790538632389",
+      "lines": [
+        {
+          "accountId": "cmumutn60000ex7w07oy5wwln",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Sales return RET-1790538632389"
+        },
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Refund paid from transaction account"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 4000,
+          "credit": 0,
+          "description": "Inventory restored from POS return"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 0,
+          "credit": 4000,
+          "description": "Reverse cost of goods sold for returned stock"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu13ec3103wpqz66l2du237r",
+      "date": "2026-09-14T10:20:54.061Z",
+      "reference": "RCP-1789381254060",
+      "description": "Point-of-sale RCP-1789381254060",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 4000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 4000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 2000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 2000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu14cc9o04hdqz66c8uvlz1j",
+      "date": "2026-09-14T10:47:20.604Z",
+      "reference": "RCP-1789382840603",
+      "description": "Point-of-sale RCP-1789382840603",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 18000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 18000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu16w5em059jqz66edp3448g",
+      "date": "2026-09-14T11:58:44.062Z",
+      "reference": "RCP-1789387124061",
+      "description": "Point-of-sale RCP-1789387124061",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 20000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 20000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu1gswd301s8qj87bzf8l1id",
+      "date": "2026-09-14T16:36:08.535Z",
+      "reference": "RCP-1789403768534",
+      "description": "Point-of-sale RCP-1789403768534",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 2000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 2000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu1gu6ci01wqqj872akpncw8",
+      "date": "2026-09-14T16:37:08.131Z",
+      "reference": "RCP-1789403828130",
+      "description": "Point-of-sale RCP-1789403828130",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 2000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 2000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu1gvh2p021aqj87dje195n1",
+      "date": "2026-09-14T16:38:08.689Z",
+      "reference": "RCP-1789403888688",
+      "description": "Point-of-sale RCP-1789403888688",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu1jyzvs03dlqj8787zk7yun",
+      "date": "2026-09-14T18:04:51.881Z",
+      "reference": "RCP-1789409091880",
+      "description": "Point-of-sale RCP-1789409091880",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2cnieg04brqj87qsd11dn4",
+      "date": "2026-09-15T07:27:44.873Z",
+      "reference": "RCP-1789457264872",
+      "description": "Point-of-sale RCP-1789457264872",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2gajuw052mqj87wxfejx9x",
+      "date": "2026-09-15T09:09:38.697Z",
+      "reference": "RCP-1789463378696",
+      "description": "Point-of-sale RCP-1789463378696",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 35000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 35000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 26000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 26000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2oscg706dlqj87uujtnw8t",
+      "date": "2026-09-15T13:07:25.832Z",
+      "reference": "RCP-1789477645831",
+      "description": "Point-of-sale RCP-1789477645831",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2sgo6s079rqj87pgy4ch01",
+      "date": "2026-09-15T14:50:19.636Z",
+      "reference": "RCP-1789483819635",
+      "description": "Point-of-sale RCP-1789483819635",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 11000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 11000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2wb3bh08dtqj87o0w5759o",
+      "date": "2026-09-15T16:37:57.773Z",
+      "reference": "RCP-1789490277771",
+      "description": "Point-of-sale RCP-1789490277771",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 30000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 30000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2wxaid08idqj873h8z6vw1",
+      "date": "2026-09-15T16:55:13.525Z",
+      "reference": "RCP-1789491313524",
+      "description": "Point-of-sale RCP-1789491313524",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2xqplh08vaqj87odi9f3iz",
+      "date": "2026-09-15T17:18:06.101Z",
+      "reference": "RCP-1789492686101",
+      "description": "Point-of-sale RCP-1789492686101",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu2xy9vm0941qj87d0vmg7vy",
+      "date": "2026-09-15T17:23:58.979Z",
+      "reference": "RCP-1789493038978",
+      "description": "Point-of-sale RCP-1789493038978",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu3wlstd0agtqj87xsf0uhdn",
+      "date": "2026-09-16T09:34:03.553Z",
+      "reference": "RCP-1789551243552",
+      "description": "Point-of-sale RCP-1789551243552",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu3wysf00albqj87321zv00s",
+      "date": "2026-09-16T09:44:09.564Z",
+      "reference": "RCP-1789551849563",
+      "description": "Point-of-sale RCP-1789551849563",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu42sqbi0bpmqj8733s7wsg9",
+      "date": "2026-09-16T12:27:24.607Z",
+      "reference": "RCP-1789561644606",
+      "description": "Point-of-sale RCP-1789561644606",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu4a1g1e0c0rqj87qalks9lz",
+      "date": "2026-09-16T15:50:08.498Z",
+      "reference": "RCP-1789573808497",
+      "description": "Point-of-sale RCP-1789573808497",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 18000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 18000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu5hih5f0houqj87xtj58kb9",
+      "date": "2026-09-17T12:07:06.580Z",
+      "reference": "RCP-1789646826579",
+      "description": "Point-of-sale RCP-1789646826579",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 8000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 8000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu5q9vn90id1qj87sgo0nuyx",
+      "date": "2026-09-17T16:12:22.006Z",
+      "reference": "RCP-1789661542004",
+      "description": "Point-of-sale RCP-1789661542004",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu5quntk0ihlqj879nchj99n",
+      "date": "2026-09-17T16:28:31.641Z",
+      "reference": "RCP-1789662511640",
+      "description": "Point-of-sale RCP-1789662511640",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 22000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 22000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu5r52te0imfqj87ugyp8wpv",
+      "date": "2026-09-17T16:36:37.635Z",
+      "reference": "RCP-1789662997634",
+      "description": "Point-of-sale RCP-1789662997634",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu77zbbs02g9d29ysr1u33eb",
+      "date": "2026-09-18T17:15:48.376Z",
+      "reference": "RCP-1789751748375",
+      "description": "Point-of-sale RCP-1789751748375",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 20000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 20000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 12000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 12000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu7852np02krd29yerxsagf6",
+      "date": "2026-09-18T17:20:17.077Z",
+      "reference": "RCP-1789752017076",
+      "description": "Point-of-sale RCP-1789752017076",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 8000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 8000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu8011j302u0d29y7n0956c2",
+      "date": "2026-09-19T06:20:58.240Z",
+      "reference": "RCP-1789798858239",
+      "description": "Point-of-sale RCP-1789798858239",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu82shy10379d29yrw0itc6l",
+      "date": "2026-09-19T07:38:18.457Z",
+      "reference": "RCP-1789803498456",
+      "description": "Point-of-sale RCP-1789803498456",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 8000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 8000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu85aw4n03ofd29y8rf401ul",
+      "date": "2026-09-19T08:48:35.880Z",
+      "reference": "RCP-1789807715879",
+      "description": "Point-of-sale RCP-1789807715879",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 13000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 13000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu88yqe404dud29yiqbnsjcm",
+      "date": "2026-09-19T10:31:07.036Z",
+      "reference": "RCP-1789813867035",
+      "description": "Point-of-sale RCP-1789813867035",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu8au1au057id29yuk8sy36v",
+      "date": "2026-09-19T11:23:27.127Z",
+      "reference": "RCP-1789817007126",
+      "description": "Point-of-sale RCP-1789817007126",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu8np5z709z0d29yycmeve30",
+      "date": "2026-09-19T17:23:34.916Z",
+      "reference": "RCP-1789838614915",
+      "description": "Point-of-sale RCP-1789838614915",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu8p8exx0bm9d29yt1fe52ea",
+      "date": "2026-09-19T18:06:32.614Z",
+      "reference": "RCP-1789841192612",
+      "description": "Point-of-sale RCP-1789841192612",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 30000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 30000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 25000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 25000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu8pbgsr0bzid29yxfrytra7",
+      "date": "2026-09-19T18:08:54.988Z",
+      "reference": "RCP-1789841334987",
+      "description": "Point-of-sale RCP-1789841334987",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 50000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 50000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 35000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 35000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu8phtyl0ccud29ynx8nbezx",
+      "date": "2026-09-19T18:13:51.982Z",
+      "reference": "RCP-1789841631981",
+      "description": "Point-of-sale RCP-1789841631981",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 40000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 40000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 31000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 31000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmu9j4l9n02anipikkxxrhzl4",
+      "date": "2026-09-20T08:03:22.667Z",
+      "reference": "RCP-1789891402666",
+      "description": "Point-of-sale RCP-1789891402666",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmua2qu5e07e1ipik9zoa4sh6",
+      "date": "2026-09-20T17:12:33.314Z",
+      "reference": "RCP-1789924353313",
+      "description": "Point-of-sale RCP-1789924353313",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 52000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 52000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 36000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 36000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmua8477e07r4ipikyoth8ptf",
+      "date": "2026-09-20T19:42:54.843Z",
+      "reference": "RCP-1789933374842",
+      "description": "Point-of-sale RCP-1789933374842",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 40000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 40000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 33000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 33000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmua87dys0849ipikf3pr0u1q",
+      "date": "2026-09-20T19:45:23.572Z",
+      "reference": "RCP-1789933523571",
+      "description": "Point-of-sale RCP-1789933523571",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 30000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 30000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 20000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 20000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmua8bb2408heipikkggnq068",
+      "date": "2026-09-20T19:48:26.428Z",
+      "reference": "RCP-1789933706427",
+      "description": "Point-of-sale RCP-1789933706427",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 425000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 425000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 415000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 415000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuch1w4e007ck2ik19cn7557",
+      "date": "2026-09-22T09:28:36.063Z",
+      "reference": "RCP-1790069316061",
+      "description": "Point-of-sale RCP-1790069316061",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuch2x94007nk2ikoue0bvmo",
+      "date": "2026-09-22T09:29:24.184Z",
+      "reference": "RCP-1790069364183",
+      "description": "Point-of-sale RCP-1790069364183",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 2000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 2000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuci8hn7008fk2ikz1a38pki",
+      "date": "2026-09-22T10:01:43.507Z",
+      "reference": "RCP-1790071303505",
+      "description": "Point-of-sale RCP-1790071303505",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmucof2iw007kfd9ta0wbxma9",
+      "date": "2026-09-22T12:54:48.200Z",
+      "reference": "RCP-1790081688199",
+      "description": "Point-of-sale RCP-1790081688199",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmucv9yr80017zapu7qdaiw7l",
+      "date": "2026-09-22T16:06:47.348Z",
+      "reference": "RCP-1790093207347",
+      "description": "Point-of-sale RCP-1790093207347",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmudsuid6000n42czj7sjz1yq",
+      "date": "2026-09-23T07:46:33.211Z",
+      "reference": "RCP-1790149593210",
+      "description": "Point-of-sale RCP-1790149593210",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 60000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 60000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 50000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 50000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmudsvq7y000y42cznmtv3ewi",
+      "date": "2026-09-23T07:47:30.046Z",
+      "reference": "RCP-1790149650044",
+      "description": "Point-of-sale RCP-1790149650044",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 20000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 20000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmudswo9y001842cza7d8ljg3",
+      "date": "2026-09-23T07:48:14.182Z",
+      "reference": "RCP-1790149694181",
+      "description": "Point-of-sale RCP-1790149694181",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmudtyp77002842cz7zr43o5j",
+      "date": "2026-09-23T08:17:48.307Z",
+      "reference": "RCP-1790151468306",
+      "description": "Point-of-sale RCP-1790151468306",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmudu4ku0002o42czfc86zwcs",
+      "date": "2026-09-23T08:22:22.584Z",
+      "reference": "RCP-1790151742583",
+      "description": "Point-of-sale RCP-1790151742583",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 35000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 35000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 18000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 18000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmue1guxv000v2voj0by8yysf",
+      "date": "2026-09-23T11:47:52.867Z",
+      "reference": "RCP-1790164072866",
+      "description": "Point-of-sale RCP-1790164072866",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 8000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 8000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuf8ku8800e5e3p6fafmb2jo",
+      "date": "2026-09-24T07:54:42.056Z",
+      "reference": "RCP-1790236482054",
+      "description": "Point-of-sale RCP-1790236482054",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmufa3ddm00eye3p68x58968x",
+      "date": "2026-09-24T08:37:06.298Z",
+      "reference": "RCP-1790239026297",
+      "description": "Point-of-sale RCP-1790239026297",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 25000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 25000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 20000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 20000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuflfs58002w2vmt2tbvnbwu",
+      "date": "2026-09-24T13:54:41.085Z",
+      "reference": "RCP-1790258081083",
+      "description": "Point-of-sale RCP-1790258081083",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 25000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 25000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 16000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 16000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmufv3n59006my56093bw7ofm",
+      "date": "2026-09-24T18:25:10.893Z",
+      "reference": "RCP-1790274310891",
+      "description": "Point-of-sale RCP-1790274310891",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 25000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 25000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 21000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 21000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuh4uas700zsy5603g1dtlts",
+      "date": "2026-09-25T15:45:37.303Z",
+      "reference": "RCP-1790351137302",
+      "description": "Point-of-sale RCP-1790351137302",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 5000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 5000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuimxs1k002mcaxfck94le55",
+      "date": "2026-09-26T16:59:58.905Z",
+      "reference": "RCP-1790441998904",
+      "description": "Point-of-sale RCP-1790441998904",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 0,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 0,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuin1pul002zcaxf5noweplm",
+      "date": "2026-09-26T17:03:02.685Z",
+      "reference": "RCP-1790442182684",
+      "description": "Point-of-sale RCP-1790442182684",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 8000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 8000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuin2rzm003acaxf57ojee7w",
+      "date": "2026-09-26T17:03:52.114Z",
+      "reference": "RCP-1790442232113",
+      "description": "Point-of-sale RCP-1790442232113",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmujwtiy200cnkac4adrtbzpw",
+      "date": "2026-09-27T14:24:22.826Z",
+      "reference": "RCP-1790519062825",
+      "description": "Point-of-sale RCP-1790519062825",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 4000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 4000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmujwuy4500d5kac4wm36s986",
+      "date": "2026-09-27T14:25:29.141Z",
+      "reference": "RCP-1790519129140",
+      "description": "Point-of-sale RCP-1790519129140",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmujwv3ji00dgkac4aw90vql3",
+      "date": "2026-09-27T14:25:36.174Z",
+      "reference": "RCP-1790519136173",
+      "description": "Point-of-sale RCP-1790519136173",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmujx01md00dykac4nmisccad",
+      "date": "2026-09-27T14:29:26.965Z",
+      "reference": "RCP-1790519366964",
+      "description": "Point-of-sale RCP-1790519366964",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuk2kvyu00efkac46n9vtwn1",
+      "date": "2026-09-27T17:05:37.495Z",
+      "reference": "RCP-1790528737491",
+      "description": "Point-of-sale RCP-1790528737491",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 8000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 8000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmuk2rccr00ewkac48za5a1j5",
+      "date": "2026-09-27T17:10:38.667Z",
+      "reference": "RCP-1790529038666",
+      "description": "Point-of-sale RCP-1790529038666",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmukygm3g00x6kac4ipyb18cs",
+      "date": "2026-09-28T07:58:05.788Z",
+      "reference": "RCP-1790582285787",
+      "description": "Point-of-sale RCP-1790582285787",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 30000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 30000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 24500,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 24500,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmukyrwav00xjkac495d7iegv",
+      "date": "2026-09-28T08:06:52.232Z",
+      "reference": "RCP-1790582812231",
+      "description": "Point-of-sale RCP-1790582812231",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 40000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 40000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 31000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 31000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmul96poj000m4m4fm5nl220b",
+      "date": "2026-09-28T12:58:19.651Z",
+      "reference": "RCP-1790600299650",
+      "description": "Point-of-sale RCP-1790600299650",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmul9tjqj000z4m4f2wupjgxk",
+      "date": "2026-09-28T13:16:05.035Z",
+      "reference": "RCP-1790601365034",
+      "description": "Point-of-sale RCP-1790601365034",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 9000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 9000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmulawv4x000hzjgc0pajteiy",
+      "date": "2026-09-28T13:46:39.394Z",
+      "reference": "RCP-1790603199393",
+      "description": "Point-of-sale RCP-1790603199393",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 10000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 10000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 3000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 3000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmumdvxnj0004h3y91qytyeyn",
+      "date": "2026-09-29T07:57:41.024Z",
+      "reference": "RCP-1790668661023",
+      "description": "Point-of-sale RCP-1790668661023",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 35000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 35000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 24500,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 24500,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmumytvxi003kx7w0fu9vsisz",
+      "date": "2026-09-29T17:43:57.414Z",
+      "reference": "RCP-1790703837413",
+      "description": "Point-of-sale RCP-1790703837413",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 7000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 7000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 4000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 4000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "POS_SALE",
+      "sourceId": "cmumyur5k003vx7w080gkoesq",
+      "date": "2026-09-29T17:44:37.881Z",
+      "reference": "RCP-1790703877880",
+      "description": "Point-of-sale RCP-1790703877880",
+      "lines": [
+        {
+          "accountId": "cmttyw0ut02jc6pes44podsuo",
+          "debit": 6000,
+          "credit": 0,
+          "description": "Cash / transaction account received"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 6000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 1000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 1000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmttvb20302836peswrcxxcu1",
+      "sourceType": "RECEIVABLE_CREDIT_NOTE",
+      "sourceId": "cmu6r19ia0n29qj87jlstuqtj",
+      "date": "2026-09-18T09:21:25.858Z",
+      "reference": "CN-2026-00001",
+      "description": "Customer credit note CN-2026-00001",
+      "lines": [
+        {
+          "accountId": "cmumutn60000ex7w07oy5wwln",
+          "debit": 25000,
+          "credit": 0,
+          "description": "Sales return / allowance CN-2026-00001"
+        },
+        {
+          "accountId": "cmumutn550004x7w0z6vyqxux",
+          "debit": 0,
+          "credit": 25000,
+          "description": "Credit note applied to customer receivable"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Inventory restored from customer return"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Reverse cost of goods sold for returned stock"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "RECEIVABLE_SALE",
+      "sourceId": "cmtzznj1b00l5qaxzky8mgmrc",
+      "date": "2026-09-13T15:48:18.336Z",
+      "reference": "SALE-1789314498299",
+      "description": "Credit sale SALE-1789314498299",
+      "lines": [
+        {
+          "accountId": "cmumutn550004x7w0z6vyqxux",
+          "debit": 25000,
+          "credit": 0,
+          "description": "Customer invoice receivable"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 25000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 15000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 15000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "RECEIVABLE_SALE",
+      "sourceId": "cmu2gz8br057hqj87j7mzf5xu",
+      "date": "2026-09-15T09:28:50.151Z",
+      "reference": "SALE-1789464530081",
+      "description": "Credit sale SALE-1789464530081",
+      "lines": [
+        {
+          "accountId": "cmumutn550004x7w0z6vyqxux",
+          "debit": 55000,
+          "credit": 0,
+          "description": "Customer invoice receivable"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 55000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 50000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 50000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "RECEIVABLE_SALE",
+      "sourceId": "cmu6s4sgr0ootqj87sg24vlsc",
+      "date": "2026-09-18T09:52:10.012Z",
+      "reference": "SALE-1789725129991",
+      "description": "Credit sale SALE-1789725129991",
+      "lines": [
+        {
+          "accountId": "cmumutn550004x7w0z6vyqxux",
+          "debit": 20000,
+          "credit": 0,
+          "description": "Customer invoice receivable"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 20000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 16000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 16000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    },
+    {
+      "tenantId": "cmttvb1zz02816peswb6cf02j",
+      "branchId": "cmttw6tc102cm6pesbq90pv3x",
+      "userId": "cmtty514n02ig6pesge2cro1v",
+      "sourceType": "RECEIVABLE_SALE",
+      "sourceId": "cmuiov1vv003wcaxf5l7qmbsx",
+      "date": "2026-09-26T17:53:50.924Z",
+      "reference": "SALE-1790445230907",
+      "description": "Credit sale SALE-1790445230907",
+      "lines": [
+        {
+          "accountId": "cmumutn550004x7w0z6vyqxux",
+          "debit": 70000,
+          "credit": 0,
+          "description": "Customer invoice receivable"
+        },
+        {
+          "accountId": "cmumutn5v000cx7w0h7d6wixb",
+          "debit": 0,
+          "credit": 70000,
+          "description": "Net sales revenue"
+        },
+        {
+          "accountId": "cmumutn65000gx7w0cc48spg2",
+          "debit": 60000,
+          "credit": 0,
+          "description": "Cost of goods sold"
+        },
+        {
+          "accountId": "cmumutn5a0006x7w080eyfgv9",
+          "debit": 0,
+          "credit": 60000,
+          "description": "Inventory relieved on sale"
+        }
+      ]
+    }
+  ],
+  "blocked": [
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmtzzoh6900lbqaxz1chhtt5r",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmu2gz8cm057kqj878h0si1hr",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmu5rrgjg0iv4qj87ec584fy5",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmu5rsn9g0ivbqj87e0nkpc3j",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmu6l8swl0ly0qj87ihegz07u",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmu6s4sht0oowqj87cbkll5r8",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmu6s7ulm0op3qj87luw674xl",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmuioy9ty0042caxf4p3zk8m6",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    },
+    {
+      "sourceType": "CUSTOMER_RECEIPT",
+      "sourceId": "cmuk5tydf00f7kac4jw93qwe6",
+      "reason": "Receipt has no explicit, signed-off allocation; legacy receipt allocation is intentionally not inferred."
+    }
+  ],
+  "alreadyPosted": 0,
+  "fingerprint": "ab80887eefb83fd4b9d3f43f731212cd2d17c4f1a5d1079e84eaebd563409661"
+}

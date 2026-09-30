@@ -35,6 +35,8 @@ interface ReconciliationIssue {
 type AccountingConfig = { isEnabled?: boolean }
 type PayablesConfig = { isEnabled?: boolean }
 type SetupStatus = { automatic: boolean; historicalActivityCount: number; historicalReviewRequired: boolean; receivablesEnabled: boolean; payablesEnabled: boolean }
+type CutoverException = { key: string; type: string; label: string; storedBalance: number; ledgerBalance: number; difference: number; reviewStatus: string }
+type CutoverPreview = { sourceFingerprint: string; snapshots: Array<{ accountId: string; code: string; accountName: string; targetBalance: number; postedJournalBalance: number; difference: number }>; exceptions: CutoverException[]; customerBalanceTotal: number; supplierBalanceTotal: number; openingEquityOffset: number }
 
 const decisionLabels: Record<Decision, string> = {
   sale_amount_confirmed: 'Sale paid amount verified',
@@ -49,6 +51,7 @@ export default function ReceivableReconciliationPage() {
   const canReview = hasPermission('canReviewReceivableReconciliation')
   const canApply = hasPermission('canApplyReceivableReconciliation')
   const canEditAccounting = hasPermission('canEditAccounting')
+  const canViewAccounting = hasPermission('canViewAccounting')
   const canViewPayables = hasPermission('canViewPayable') || hasPermission('canViewAccounting') || canEditAccounting
   const [issues, setIssues] = useState<ReconciliationIssue[]>([])
   const [page, setPage] = useState(1)
@@ -64,6 +67,12 @@ export default function ReceivableReconciliationPage() {
   const [accountingLoading, setAccountingLoading] = useState(false)
   const [payablesConfig, setPayablesConfig] = useState<PayablesConfig>({ isEnabled: false })
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
+  const [cutoverPreview, setCutoverPreview] = useState<CutoverPreview | null>(null)
+  const [cutoverExceptions, setCutoverExceptions] = useState<CutoverException[]>([])
+  const [cutoverAt, setCutoverAt] = useState<string | null>(null)
+  const [cutoverFilter, setCutoverFilter] = useState('all')
+  const [cutoverConfirmed, setCutoverConfirmed] = useState(false)
+  const [cutoverLoading, setCutoverLoading] = useState(false)
 
   const loadIssues = useCallback(async (targetPage = page) => {
     setLoading(true)
@@ -94,6 +103,17 @@ export default function ReceivableReconciliationPage() {
         setSetupStatus(setupData)
         setPayablesConfig(setupData.payablesConfig || { isEnabled: false })
       }
+      if (canEditAccounting || canViewAccounting) {
+        const cutoverResponse = await apiFetch('/api/accounting/cutover/status')
+        const cutoverData = await cutoverResponse.json()
+        if (!cutoverResponse.ok) throw new Error(cutoverData?.error || 'Could not load cutover status')
+        const cutover = cutoverData.cutover
+        if (cutover) {
+          setCutoverExceptions(cutover.exceptions || [])
+          setCutoverAt(cutover.cutoverAt || null)
+          setSetupStatus((current) => current ? { ...current, receivablesEnabled: true, payablesEnabled: true, historicalReviewRequired: false } : current)
+        }
+      }
       const response = await apiFetch('/api/receivables/reconciliation/accounting-config')
       const data = await response.json()
       if (!response.ok) throw new Error(data?.error || 'Could not load accounting mappings')
@@ -109,9 +129,55 @@ export default function ReceivableReconciliationPage() {
     } finally {
       setAccountingLoading(false)
     }
-  }, [canEditAccounting, canViewPayables, toast])
+  }, [canEditAccounting, canViewAccounting, canViewPayables, toast])
 
   useEffect(() => { void loadAccountingConfig() }, [loadAccountingConfig])
+
+  const previewCutover = async () => {
+    setCutoverLoading(true)
+    try {
+      const response = await apiFetch('/api/accounting/cutover/preview')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not prepare cutover preview')
+      if (data.alreadyApplied) {
+        setCutoverPreview(null)
+        setCutoverExceptions(data.cutover?.exceptions || [])
+        setCutoverAt(data.cutover?.cutoverAt || null)
+        setSetupStatus((current) => current ? { ...current, receivablesEnabled: true, payablesEnabled: true, historicalReviewRequired: false } : current)
+      } else {
+        setCutoverPreview(data.preview)
+        setCutoverExceptions(data.preview?.exceptions || [])
+        setCutoverConfirmed(false)
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Cutover preview failed', description: error instanceof Error ? error.message : 'Try again.' })
+    } finally {
+      setCutoverLoading(false)
+    }
+  }
+
+  const applyCutover = async () => {
+    if (!cutoverPreview || !cutoverConfirmed) return
+    setCutoverLoading(true)
+    try {
+      const response = await apiFetch('/api/accounting/cutover', {
+        method: 'POST',
+        body: JSON.stringify({ sourceFingerprint: cutoverPreview.sourceFingerprint }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not start accounting cutover')
+      setCutoverExceptions(data.cutover?.exceptions || [])
+      setCutoverAt(data.cutover?.cutoverAt || null)
+      setCutoverPreview(null)
+      setCutoverConfirmed(false)
+      toast({ title: 'Accounting is active', description: `${data.cutover?.exceptionCount || 0} legacy balance differences are saved for review. Historical sales were not replayed.` })
+      await loadAccountingConfig()
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Cutover was not applied', description: error instanceof Error ? error.message : 'Refresh the preview and retry.' })
+    } finally {
+      setCutoverLoading(false)
+    }
+  }
 
   const submitReview = async (issue: ReconciliationIssue) => {
     if (!note.trim()) {
@@ -193,15 +259,16 @@ export default function ReceivableReconciliationPage() {
 
       <section className="space-y-4 border-b pb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="text-base font-semibold">Automatic accounting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">The system sets up and validates standard accounts automatically for new businesses.</p></div>
+          <div><h2 className="text-base font-semibold">Automatic accounting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Existing businesses can start posting from a dated opening snapshot while legacy differences remain visible for review.</p></div>
           <span className={`text-sm font-medium ${accountingConfig.isEnabled && payablesConfig.isEnabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}`}>
             {accountingConfig.isEnabled && payablesConfig.isEnabled ? 'Active' : setupStatus?.historicalReviewRequired ? 'Historical review required' : 'Setup required'}
           </span>
         </div>
-        {setupStatus?.historicalReviewRequired && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">Existing transactions were found. Automatic posting stays off until those historical events have been reconciled and signed off; this prevents mixing unposted history with new ledger entries.</p>}
+        {cutoverAt && <p className="text-sm text-muted-foreground">Posting cutover: {formatDisplayDate(cutoverAt)}. Earlier records remain in the legacy history and were not replayed.</p>}
+        {setupStatus?.historicalReviewRequired && <div className="space-y-3 text-sm text-amber-900 dark:text-amber-200"><p role="status">Legacy activity was found. Historical transactions will not be replayed. Review the snapshot differences, then start posting from the cutover date; unresolved differences stay in the exception list.</p>{canEditAccounting && <Button variant="outline" onClick={() => void previewCutover()} disabled={cutoverLoading}>{cutoverLoading ? 'Preparing…' : 'Preview opening snapshot'}</Button>}</div>}
         <label className="flex items-center gap-2 border-t pt-3 text-sm font-medium text-muted-foreground">
           <input type="checkbox" checked={Boolean(accountingConfig.isEnabled)} disabled readOnly />
-          {accountingConfig.isEnabled ? 'Receivables posting enabled automatically' : 'Receivables posting is awaiting historical review'}
+          {accountingConfig.isEnabled ? 'Receivables posting is active' : 'Receivables posting is awaiting cutover'}
         </label>
       </section>
 
@@ -212,8 +279,25 @@ export default function ReceivableReconciliationPage() {
         </div>
         <label className="flex items-center gap-2 border-t pt-3 text-sm font-medium text-muted-foreground">
           <input type="checkbox" checked={Boolean(payablesConfig.isEnabled)} disabled readOnly />
-          {payablesConfig.isEnabled ? 'Supplier posting enabled automatically' : 'Supplier posting is awaiting historical review'}
+          {payablesConfig.isEnabled ? 'Supplier posting is active' : 'Supplier posting is awaiting cutover'}
         </label>
+      </section>}
+
+      {cutoverPreview && <section className="space-y-4 border-b pb-5" aria-label="Accounting cutover preview">
+        <div><h2 className="text-base font-semibold">Opening snapshot preview</h2><p className="mt-1 text-sm text-muted-foreground">The system will not recreate old invoices or payments. It will post only the net opening balances needed to carry today's balances into the ledger, then enable future automatic posting.</p></div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="border p-3"><div className="text-xs text-muted-foreground">Customer balances</div><div className="mt-1 font-semibold">{formatCurrency(cutoverPreview.customerBalanceTotal)}</div></div>
+          <div className="border p-3"><div className="text-xs text-muted-foreground">Supplier balances</div><div className="mt-1 font-semibold">{formatCurrency(cutoverPreview.supplierBalanceTotal)}</div></div>
+          <div className="border p-3"><div className="text-xs text-muted-foreground">Opening equity offset</div><div className="mt-1 font-semibold">{formatCurrency(Math.abs(cutoverPreview.openingEquityOffset))} {cutoverPreview.openingEquityOffset >= 0 ? 'credit' : 'debit'}</div></div>
+        </div>
+        <p className="text-sm text-muted-foreground">{cutoverPreview.exceptions.length} review flags will be retained. Account differences are included in the opening snapshot; customer/supplier control differences remain flagged for investigation.</p>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={cutoverConfirmed} onChange={(event) => setCutoverConfirmed(event.target.checked)} /><span>I reviewed this preview. Start accounting from now without replaying legacy transactions; keep listed differences visible for follow-up.</span></label>
+        <div className="flex flex-wrap gap-2"><Button onClick={() => void applyCutover()} disabled={!cutoverConfirmed || cutoverLoading}>{cutoverLoading ? 'Starting…' : 'Start accounting from now'}</Button><Button variant="outline" onClick={() => { setCutoverPreview(null); setCutoverConfirmed(false) }} disabled={cutoverLoading}>Cancel</Button></div>
+      </section>}
+
+      {cutoverExceptions.length > 0 && <section className="space-y-3 border-b pb-5" aria-label="Legacy accounting exceptions">
+        <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-base font-semibold">Legacy differences</h2><p className="mt-1 text-sm text-muted-foreground">These are preserved review items, not automatic corrections. New transactions can continue posting.</p></div><label className="text-sm">Filter <select className="ml-2 h-9 border bg-background px-2" value={cutoverFilter} onChange={(event) => setCutoverFilter(event.target.value)}><option value="all">All types</option><option value="account_balance">Account balances</option><option value="subledger_control">Customer/supplier control</option></select></label></div>
+        <div className="overflow-x-auto border"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Difference</th><th className="px-3 py-2 text-right">Stored balance</th><th className="px-3 py-2 text-right">Journal balance before cutover</th><th className="px-3 py-2 text-right">Variance</th><th className="px-3 py-2">Status</th></tr></thead><tbody className="divide-y">{cutoverExceptions.filter((row) => cutoverFilter === 'all' || row.type === cutoverFilter).map((row) => <tr key={row.key}><td className="px-3 py-2">{row.label}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.storedBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.ledgerBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.difference)}</td><td className="px-3 py-2">{row.reviewStatus === 'included_in_snapshot' ? 'Included in opening snapshot' : 'Open review'}</td></tr>)}</tbody></table></div>
       </section>}
 
       <div className="overflow-x-auto border-y">

@@ -6,6 +6,7 @@ import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSetupService.js";
+import { applyTenantAccountingCutover, previewTenantAccountingCutover } from "../src/services/tenantAccountingCutoverService.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -65,6 +66,45 @@ router.post("/system-setup", authenticateToken, requirePermission("canEditAccoun
   } catch (error) {
     console.error("Automatic accounting setup failed:", error);
     res.status(error.statusCode || 500).json({ error: error.message || "Automatic accounting setup failed." });
+  }
+});
+
+router.get("/cutover/preview", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const existing = await prisma.tenantAccountingCutover.findUnique({ where: { tenantId } });
+    if (existing) return res.json({ alreadyApplied: true, cutover: existing });
+    await setupTenantAccountingSystem(prisma, { tenantId, userId: req.user.id });
+    const preview = await previewTenantAccountingCutover(prisma, tenantId);
+    res.json({ alreadyApplied: false, preview });
+  } catch (error) {
+    console.error("Accounting cutover preview failed:", error);
+    res.status(error.statusCode || 500).json({ error: error.message || "Could not prepare accounting cutover preview." });
+  }
+});
+
+router.get("/cutover/status", authenticateToken, requireAnyPermission(["canViewAccounting", "canEditAccounting"]), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const cutover = await prisma.tenantAccountingCutover.findUnique({ where: { tenantId } });
+    res.json({ cutover });
+  } catch (error) {
+    console.error("Accounting cutover status failed:", error);
+    res.status(500).json({ error: "Could not load accounting cutover status." });
+  }
+});
+
+router.post("/cutover", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const result = await applyTenantAccountingCutover(prisma, { tenantId, userId: req.user.id, confirmedFingerprint: req.body?.sourceFingerprint });
+    res.json(result);
+  } catch (error) {
+    console.error("Accounting cutover failed:", error);
+    res.status(error.statusCode || 500).json({ error: error.message || "Accounting cutover failed without applying changes." });
   }
 });
 

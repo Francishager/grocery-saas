@@ -178,6 +178,7 @@ model Tenant {
   receivablesAccountingConfig     ReceivablesAccountingConfig?
   payablesAccountingConfig        PayablesAccountingConfig?
   receivablesGlMigrationBatches   ReceivablesGlMigrationBatch[]
+  accountingCutover              TenantAccountingCutover?
   hrAuditLogs                     HRAuditLog[]
 
   // =====================
@@ -502,6 +503,7 @@ model User {
   createdReceiptAllocations       CustomerPaymentAllocation[]              @relation("ReceiptAllocationCreator")
   receivableReconciliationReviews CustomerReceivableReconciliationReview[] @relation("ReceivableReconciliationReviewer")
   receivablesGlMigrationApprovals ReceivablesGlMigrationBatch[]               @relation("ReceivablesGlMigrationApprover")
+  accountingCutovers              TenantAccountingCutover[]                  @relation("TenantAccountingCutoverPerformer")
 
   advisorCollections   AdvisorCollection[]
   advisorConversations AdvisorConversation[]
@@ -2488,6 +2490,25 @@ model ReceivablesGlMigrationBatch {
   @@unique([tenantId, fingerprint])
   @@index([tenantId, appliedAt])
   @@map("receivables_gl_migration_batches")
+}
+
+model TenantAccountingCutover {
+  id               String   @id @default(cuid())
+  tenantId         String   @unique
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cutoverAt        DateTime @default(now())
+  performedById    String
+  performedBy      User     @relation("TenantAccountingCutoverPerformer", fields: [performedById], references: [id], onDelete: Restrict)
+  sourceFingerprint String
+  openingJournalId String?
+  snapshot         Json
+  exceptions       Json
+  exceptionCount   Int      @default(0)
+  status           String   @default("active_with_exceptions")
+  createdAt        DateTime @default(now())
+
+  @@index([status, cutoverAt])
+  @@map("tenant_accounting_cutovers")
 }
 
 // =====================================================

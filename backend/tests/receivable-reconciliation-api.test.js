@@ -40,6 +40,7 @@ const db = {
 globalThis.receivableReconciliationFixture = { db };
 
 const fixtures = {
+  'node:crypto': dataUrl('export const randomUUID = () => "test-uuid";'),
   '@prisma/client': dataUrl('export class PrismaClient { constructor() { return globalThis.receivableReconciliationFixture.db; } }'),
   'auth.js': dataUrl(`export const authenticateToken = (req, res, next) => next();
     export const requirePermission = key => (req, res, next) => req.user?.permissions?.includes(key) ? next() : res.status(403).json({ error: 'Forbidden' });
