@@ -24,6 +24,7 @@ import IncludedServicesPicker from '@/components/IncludedServicesPicker'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { generateInternalEan13Barcode, printProductBarcode } from '@/lib/barcodeLabel'
 import CreatableProductAttribute from '@/components/CreatableProductAttribute'
+import { ToastAction } from '@/components/ui/toast'
 
 interface SellingUnit {
   id?: string
@@ -602,8 +603,17 @@ export default function InventoryPage() {
           toast({ variant: 'destructive', title: `You do not have permission to create ${isServicesPage ? 'services' : 'products'}` })
           return
         }
+        let printableProduct: Pick<InventoryItem, 'product_name' | 'barcode' | 'size' | 'brand' | 'design'> | null = null
         if (online) {
           const result = await inventoryApi.create({ ...formData, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
+          const savedProduct = (result as any)?.product || result
+          printableProduct = {
+            product_name: savedProduct?.name || formData.product_name,
+            barcode: savedProduct?.barcode || formData.barcode || undefined,
+            size: savedProduct?.size || formData.size,
+            brand: savedProduct?.brand || formData.brand,
+            design: savedProduct?.design || formData.design,
+          }
           if (formData.itemType === 'product') {
             const newId = result?.id || (result as any)?.product?.id
             if (newId) await saveSellingUnits(String(newId))
@@ -635,8 +645,23 @@ export default function InventoryPage() {
             updatedAt: new Date().toISOString(),
           })
           await queueMutation('products', 'create', newId, queuedProductData(offlineBarcode, Number(formData.quantity || 0)))
+          printableProduct = {
+            product_name: formData.product_name,
+            barcode: offlineBarcode || undefined,
+            size: formData.size,
+            brand: formData.brand,
+            design: formData.design,
+          }
         }
-        toast({ title: 'Item created successfully' })
+        toast({
+          title: 'Item created successfully',
+          description: printableProduct?.barcode ? `Barcode: ${printableProduct.barcode}` : undefined,
+          action: formData.itemType === 'product' && printableProduct?.barcode ? (
+            <ToastAction altText="Print barcode label" onClick={() => handlePrintBarcode(printableProduct!)}>
+              Print barcode
+            </ToastAction>
+          ) : undefined,
+        })
       }
       closeForm()
       loadInventory()
@@ -816,7 +841,7 @@ export default function InventoryPage() {
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
-  const handlePrintBarcode = (item: InventoryItem) => {
+  const handlePrintBarcode = (item: Pick<InventoryItem, 'product_name' | 'barcode' | 'size' | 'brand' | 'design'>) => {
     try {
       const opened = printProductBarcode({
         name: item.product_name,
