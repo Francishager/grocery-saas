@@ -1,7 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal, Printer } from 'lucide-react'
 import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,8 @@ import { db } from '@/db/index'
 import ServiceList from '@/components/ServiceList'
 import IncludedServicesPicker from '@/components/IncludedServicesPicker'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { generateInternalEan13Barcode, printProductBarcode } from '@/lib/barcodeLabel'
+import CreatableProductAttribute from '@/components/CreatableProductAttribute'
 
 interface SellingUnit {
   id?: string
@@ -29,6 +31,12 @@ interface SellingUnit {
   conversionFactor: number
   sellingPrice: number
   isDefault: boolean
+}
+
+interface ProductAttributeOptions {
+  sizes: string[]
+  brands: string[]
+  designs: string[]
 }
 
 interface FormData {
@@ -40,6 +48,9 @@ interface FormData {
   cost_price: number | ''
   low_stock_alert: number
   barcode: string
+  size: string
+  brand: string
+  design: string
   sku: string
   batchNumber: string
   expiryDate: string
@@ -122,6 +133,9 @@ const initialFormData: FormData = {
   cost_price: '',
   low_stock_alert: 5,
   barcode: '',
+  size: '',
+  brand: '',
+  design: '',
   sku: '',
   batchNumber: '',
   expiryDate: '',
@@ -133,6 +147,8 @@ const initialFormData: FormData = {
   estimatedHours: '',
   duration: '',
 }
+
+const emptyProductAttributeOptions: ProductAttributeOptions = { sizes: [], brands: [], designs: [] }
 
 const emptyMovementSummary: MovementSummary = {
   productsSold: 0,
@@ -208,6 +224,7 @@ export default function InventoryPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [productAttributeOptions, setProductAttributeOptions] = useState<ProductAttributeOptions>(emptyProductAttributeOptions)
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [branchFilter, setBranchFilter] = useState('')
   const [formData, setFormData] = useState<FormData>(initialFormData)
@@ -328,6 +345,28 @@ export default function InventoryPage() {
       setCategoriesError(error?.message || 'Unable to load categories')
     } finally {
       if (requestId === categoryRequestRef.current) setCategoriesLoading(false)
+    }
+  }
+
+  const loadProductAttributeOptions = async () => {
+    try {
+      if (online) {
+        const options = await inventoryApi.getAttributeOptions()
+        setProductAttributeOptions({
+          sizes: Array.isArray(options?.sizes) ? options.sizes : [],
+          brands: Array.isArray(options?.brands) ? options.brands : [],
+          designs: Array.isArray(options?.designs) ? options.designs : [],
+        })
+        return
+      }
+      const localProducts = await db.products.toArray()
+      const valuesFor = (field: 'size' | 'brand' | 'design') => [...new Set(localProducts
+        .filter(product => !product.itemType || product.itemType === 'product')
+        .map(product => String(product[field] || '').trim())
+        .filter(Boolean))].sort((a, b) => a.localeCompare(b))
+      setProductAttributeOptions({ sizes: valuesFor('size'), brands: valuesFor('brand'), designs: valuesFor('design') })
+    } catch {
+      setProductAttributeOptions(emptyProductAttributeOptions)
     }
   }
 
@@ -493,6 +532,34 @@ export default function InventoryPage() {
       return
     }
 
+    const queuedProductData = (barcode: string, quantity: number) => ({
+      name: formData.product_name,
+      linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined,
+      price: formData.unit_price,
+      cost: formData.cost_price === '' ? 0 : Number(formData.cost_price),
+      quantity,
+      minStock: formData.low_stock_alert,
+      sku: formData.product_id || formData.sku,
+      barcode: barcode || null,
+      size: formData.size || null,
+      brand: formData.brand || null,
+      design: formData.design || null,
+      batchNumber: formData.batchNumber || null,
+      expiryDate: formData.expiryDate || null,
+      categoryId: formData.categoryId || null,
+      branchId: formData.branchId || null,
+      baseUnit: formData.baseUnit || 'Piece',
+      itemType: formData.itemType,
+      serviceCategory: null,
+      estimatedHours: formData.estimatedHours === '' ? null : formData.estimatedHours,
+      duration: formData.duration || null,
+      description: formData.description || null,
+      rentalPrice: null,
+      rentalPeriod: null,
+      depositAmount: null,
+      replacementValue: null,
+    })
+
     try {
       if (editingItem) {
         if (!canEditCurrent) {
@@ -503,11 +570,15 @@ export default function InventoryPage() {
           await inventoryApi.update(String(editingItem.id), { ...formData, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
           if (formData.itemType === 'product') await saveSellingUnits(String(editingItem.id))
         } else {
+          const offlineBarcode = formData.barcode.trim() || (editingItem as any).barcode || (formData.itemType === 'product' ? generateInternalEan13Barcode() : '')
           await db.products.put({
             id: String(editingItem.id),
             name: formData.product_name,
             sku: formData.sku,
-            barcode: formData.barcode,
+            barcode: offlineBarcode,
+            size: formData.size || undefined,
+            brand: formData.brand || undefined,
+            design: formData.design || undefined,
             batchNumber: formData.batchNumber || undefined,
             expiryDate: formData.expiryDate || undefined,
             price: formData.unit_price,
@@ -523,10 +594,7 @@ export default function InventoryPage() {
             duration: formData.duration,
             updatedAt: new Date().toISOString(),
           })
-          await queueMutation('products', 'update', String(editingItem.id), {
-            ...formData,
-            quantity: Number(editingItem.quantity ?? 0),
-          })
+          await queueMutation('products', 'update', String(editingItem.id), queuedProductData(offlineBarcode, Number(editingItem.quantity ?? 0)))
         }
         toast({ title: 'Item updated successfully' })
       } else {
@@ -542,11 +610,15 @@ export default function InventoryPage() {
           }
         } else {
           const newId = `offline-${Date.now()}`
+          const offlineBarcode = formData.barcode.trim() || (formData.itemType === 'product' ? generateInternalEan13Barcode() : '')
           await db.products.put({
             id: newId,
             name: formData.product_name,
             sku: formData.sku,
-            barcode: formData.barcode,
+            barcode: offlineBarcode,
+            size: formData.size || undefined,
+            brand: formData.brand || undefined,
+            design: formData.design || undefined,
             batchNumber: formData.batchNumber || undefined,
             expiryDate: formData.expiryDate || undefined,
             price: formData.unit_price,
@@ -562,7 +634,7 @@ export default function InventoryPage() {
             duration: formData.duration,
             updatedAt: new Date().toISOString(),
           })
-          await queueMutation('products', 'create', newId, formData)
+          await queueMutation('products', 'create', newId, queuedProductData(offlineBarcode, Number(formData.quantity || 0)))
         }
         toast({ title: 'Item created successfully' })
       }
@@ -710,6 +782,7 @@ export default function InventoryPage() {
   }
 
   const openEditForm = (item: InventoryItem) => {
+    void loadProductAttributeOptions()
     setEditingItem(item)
     setFormData({
       product_id: item.product_id || '',
@@ -720,6 +793,9 @@ export default function InventoryPage() {
       cost_price: item.cost_price || 0,
       low_stock_alert: item.low_stock_alert || 5,
       barcode: (item as any).barcode || '',
+      size: (item as any).size || '',
+      brand: (item as any).brand || '',
+      design: (item as any).design || '',
       sku: (item as any).sku || '',
       batchNumber: (item as any).batchNumber || '',
       expiryDate: (item as any).expiryDate ? String((item as any).expiryDate).slice(0, 10) : '',
@@ -740,7 +816,23 @@ export default function InventoryPage() {
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
   }
 
+  const handlePrintBarcode = (item: InventoryItem) => {
+    try {
+      const opened = printProductBarcode({
+        name: item.product_name,
+        barcode: item.barcode,
+        size: item.size,
+        brand: item.brand,
+        design: item.design,
+      })
+      if (!opened) toast({ variant: 'destructive', title: item.barcode ? 'Allow pop-ups to print the barcode label' : 'This item has no barcode to print' })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Barcode could not be printed', description: error?.message || 'Use a valid EAN-13 barcode.' })
+    }
+  }
+
   const openNewForm = () => {
+    void loadProductAttributeOptions()
     setEditingItem(null)
     setFormData({
       ...initialFormData,
@@ -1220,7 +1312,7 @@ export default function InventoryPage() {
                 <p className="text-xs text-muted-foreground">A unique SKU will be generated automatically when the item is saved, using the category and product name with a dynamic identifier.</p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="barcode">Barcode</Label>
+                <Label htmlFor="barcode">Barcode (optional)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="barcode"
@@ -1228,7 +1320,7 @@ export default function InventoryPage() {
                     onChange={(e) =>
                       setFormData((prev) => ({ ...prev, barcode: e.target.value }))
                     }
-                    placeholder="Scan or enter barcode"
+                    placeholder="Leave blank to generate automatically"
                     className="flex-1"
                   />
                   <Button
@@ -1255,7 +1347,11 @@ export default function InventoryPage() {
                     />
                   </div>
                 )}
+                <p className="text-xs text-muted-foreground">Leave blank to generate a unique printable EAN-13 barcode when you save this product.</p>
               </div>
+              <CreatableProductAttribute id="product-size" label="Size" value={formData.size} options={productAttributeOptions.sizes} placeholder="Choose or type a size" onChange={size => setFormData(prev => ({ ...prev, size }))} />
+              <CreatableProductAttribute id="product-brand" label="Brand" value={formData.brand} options={productAttributeOptions.brands} placeholder="Choose or type a brand" onChange={brand => setFormData(prev => ({ ...prev, brand }))} />
+              <CreatableProductAttribute id="product-design" label="Design" value={formData.design} options={productAttributeOptions.designs} placeholder="Choose or type a design" onChange={design => setFormData(prev => ({ ...prev, design }))} />
                 </>
               )}
 
@@ -1617,7 +1713,11 @@ export default function InventoryPage() {
                       </td>
                       )}
                       <td className="py-3 pr-4 whitespace-nowrap">{item.product_id || '-'}</td>
-                      <td className="min-w-40 max-w-xs break-words py-3 pr-4 font-medium [overflow-wrap:anywhere]">{item.product_name}</td>
+                      <td className="min-w-40 max-w-xs break-words py-3 pr-4 font-medium [overflow-wrap:anywhere]">
+                        {item.product_name}
+                        {(item.brand || item.size || item.design) && <p className="mt-1 text-xs font-normal text-muted-foreground">{[item.brand, item.size, item.design].filter(Boolean).join(' · ')}</p>}
+                        {item.barcode && <p className="mt-1 text-xs font-normal text-muted-foreground">Barcode: {item.barcode}</p>}
+                      </td>
                       <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
                         {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
                       </td>
@@ -1746,6 +1846,14 @@ export default function InventoryPage() {
                                 <History className="h-4 w-4" />
                                 Price History
                               </button>}
+                              {hasFeature('inventory.barcode_printing') && item.barcode && <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => { setOpenActionMenu(null); handlePrintBarcode(item) }}
+                              >
+                                <Printer className="h-4 w-4" />
+                                Print Barcode
+                              </button>}
                               {canEditCurrent && (
                                 <button
                                   type="button"
@@ -1797,6 +1905,8 @@ export default function InventoryPage() {
                       <div className="flex-1 min-w-0">
                         <p className="break-words font-medium [overflow-wrap:anywhere]">{item.product_name}</p>
                         <p className="text-xs text-muted-foreground">{item.product_id || '-'}</p>
+                        {(item.brand || item.size || item.design) && <p className="mt-1 break-words text-xs text-muted-foreground">{[item.brand, item.size, item.design].filter(Boolean).join(' · ')}</p>}
+                        {item.barcode && <p className="mt-1 break-all text-xs text-muted-foreground">Barcode: {item.barcode}</p>}
                       </div>
                       <div className="relative shrink-0">
                         <Button
@@ -1833,6 +1943,14 @@ export default function InventoryPage() {
                             >
                               <History className="h-4 w-4" />
                               Price History
+                            </button>}
+                            {hasFeature('inventory.barcode_printing') && item.barcode && <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                              onClick={() => { setOpenActionMenu(null); handlePrintBarcode(item) }}
+                            >
+                              <Printer className="h-4 w-4" />
+                              Print Barcode
                             </button>}
                             {canEditCurrent && (
                               <button

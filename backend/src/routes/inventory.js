@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { moveToTrash, assertOutsideTrash } from '../services/trashService.js';
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission, requireFeature } from "../../middleware/auth.js";
 import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
@@ -46,6 +46,25 @@ const slugify = (value = "") =>
     .replace(/(^-|-$)/g, "");
 
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
+const normalizeProductAttribute = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return String(value).normalize("NFKC").trim().replace(/\s+/g, " ") || null;
+};
+
+async function generateUniqueBarcode(tenantId, branchId, excludeProductId) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const payload = `20${Array.from({ length: 10 }, () => randomInt(10)).join("")}`;
+    const weightedSum = [...payload].reduce((sum, digit, index) => sum + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+    const barcode = `${payload}${(10 - (weightedSum % 10)) % 10}`;
+    const existing = await prisma.product.findFirst({
+      where: { tenantId, branchId, barcode, ...(excludeProductId ? { id: { not: excludeProductId } } : {}) },
+      select: { id: true },
+    });
+    if (!existing) return barcode;
+  }
+  throw new Error("Unable to generate a unique barcode. Please try again.");
+}
 
 const movementTypes = {
   stockIn: new Set(["PURCHASE", "SUPPLIER_PURCHASE", "TRANSFER_IN", "STOCK_IN", "ADJUSTMENT_IN", "PRODUCTION_IN"]),
@@ -754,6 +773,9 @@ router.get("/", authenticateToken, async (req, res) => {
         { name: { contains: String(search), mode: "insensitive" } },
         { sku: { contains: String(search), mode: "insensitive" } },
         { barcode: { contains: String(search), mode: "insensitive" } },
+        { size: { contains: String(search), mode: "insensitive" } },
+        { brand: { contains: String(search), mode: "insensitive" } },
+        { design: { contains: String(search), mode: "insensitive" } },
         { description: { contains: String(search), mode: "insensitive" } },
       ];
       const products = await prisma.product.findMany({
@@ -784,6 +806,31 @@ router.get("/", authenticateToken, async (req, res) => {
     } catch (logErr) {
       console.error("Failed to log inventory list error context", logErr);
     }
+    handleBranchError(res, err);
+  }
+});
+
+// Existing product attribute values power the selectable fields in the product form.
+router.get("/attributes/options", authenticateToken, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const where = {
+      tenantId: scope.tenantId,
+      itemType: "product",
+      isActive: { not: false },
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
+    };
+    const [sizes, brands, designs] = await Promise.all([
+      prisma.product.findMany({ where, select: { size: true }, distinct: ["size"], orderBy: { size: "asc" } }),
+      prisma.product.findMany({ where, select: { brand: true }, distinct: ["brand"], orderBy: { brand: "asc" } }),
+      prisma.product.findMany({ where, select: { design: true }, distinct: ["design"], orderBy: { design: "asc" } }),
+    ]);
+    res.json({
+      sizes: sizes.map(row => normalizeProductAttribute(row.size)).filter(Boolean),
+      brands: brands.map(row => normalizeProductAttribute(row.brand)).filter(Boolean),
+      designs: designs.map(row => normalizeProductAttribute(row.design)).filter(Boolean),
+    });
+  } catch (err) {
     handleBranchError(res, err);
   }
 });
@@ -891,6 +938,8 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     const { tenantId: _tenantId, branchId: _branchId, id: _id, categoryId, itemType, linkedItemIds, ...body } = req.body;
     if (linkedItemIds !== undefined && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) return res.status(403).json({ error: 'Job Cards is not available on this business subscription' });
 
+    for (const field of ["size", "brand", "design"]) body[field] = normalizeProductAttribute(body[field]);
+
     if (body.batchNumber !== undefined && body.batchNumber !== null) {
       body.batchNumber = String(body.batchNumber).trim() || null;
     }
@@ -939,6 +988,7 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     // Set itemType (default to product, allow rental)
     const itemTypeValue = ["service", "rental"].includes(itemType) ? itemType : "product";
     body.itemType = itemTypeValue;
+    body.barcode = typeof body.barcode === "string" ? body.barcode.trim() || null : body.barcode || null;
 
     const duplicateCheck = await ensureUniqueProductName(prisma, scope.tenantId, scope.branchId, normalizedName);
     if (!duplicateCheck.ok) {
@@ -977,6 +1027,9 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
       body.rentalPeriod = body.rentalPeriod || "daily";
       body.depositAmount = body.depositAmount || 0;
       body.replacementValue = body.replacementValue || 0;
+    }
+    if (itemTypeValue === "product" && !body.barcode) {
+      body.barcode = await generateUniqueBarcode(scope.tenantId, scope.branchId);
     }
 
     if (categoryId) {
@@ -1048,6 +1101,10 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, quantity, linkedItemIds, ...body } = req.body;
     if (linkedItemIds !== undefined && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) return res.status(403).json({ error: 'Job Cards is not available on this business subscription' });
     const data = { ...body };
+
+    for (const field of ["size", "brand", "design"]) {
+      if (body[field] !== undefined) data[field] = normalizeProductAttribute(body[field]);
+    }
 
     if (data.batchNumber !== undefined && data.batchNumber !== null) {
       data.batchNumber = String(data.batchNumber).trim() || null;
@@ -1121,6 +1178,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
       data.itemType = "product";
     } else if (itemType === "rental") {
       data.itemType = "rental";
+    }
+
+    if (itemType === "product") {
+      const requestedBarcode = typeof body.barcode === "string" ? body.barcode.trim() : "";
+      data.barcode = requestedBarcode || existing.barcode || await generateUniqueBarcode(
+        existing.tenantId,
+        existing.branchId || scope.branchId,
+        existing.id,
+      );
     }
 
     if (categoryId !== undefined) {

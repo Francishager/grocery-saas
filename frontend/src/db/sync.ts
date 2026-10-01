@@ -116,6 +116,7 @@ export async function pullAll(): Promise<void> {
   if (canPull('inventory', 'canViewProduct'))
   total += await pullTable('/api/inventory?limit=500', 'products', (p: any) => ({
     id: p.id, name: p.name, sku: p.sku, barcode: p.barcode,
+    size: p.size, brand: p.brand, design: p.design,
     price: p.price ?? 0, cost: p.cost ?? 0, quantity: p.quantity ?? 0,
     minStock: p.minStock, baseUnit: p.baseUnit, categoryId: p.categoryId,
     branchId: p.branchId, itemType: p.itemType, isActive: p.isActive,

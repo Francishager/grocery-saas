@@ -118,7 +118,10 @@ export async function getLocalProducts(search?: string, branchId?: string, itemT
     products = products.filter(p =>
       p.name.toLowerCase().includes(lower) ||
       (p.sku || '').toLowerCase().includes(lower) ||
-      (p.barcode || '').toLowerCase().includes(lower)
+      (p.barcode || '').toLowerCase().includes(lower) ||
+      (p.size || '').toLowerCase().includes(lower) ||
+      (p.brand || '').toLowerCase().includes(lower) ||
+      (p.design || '').toLowerCase().includes(lower)
     )
   }
   if (branchId) products = products.filter(p => p.branchId === branchId)
@@ -133,6 +136,9 @@ export async function getLocalProducts(search?: string, branchId?: string, itemT
     low_stock_alert: p.minStock || 10,
     barcode: p.barcode || '',
     sku: p.sku || '',
+    size: p.size || '',
+    brand: p.brand || '',
+    design: p.design || '',
     categoryId: p.categoryId || '',
     branchId: p.branchId || null,
     baseUnit: p.baseUnit || 'Piece',

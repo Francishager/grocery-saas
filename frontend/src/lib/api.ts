@@ -283,6 +283,9 @@ export const dashboardApi = {
 
 // Inventory endpoints
 export const inventoryApi = {
+  getAttributeOptions: () =>
+    api.get<{ sizes: string[]; brands: string[]; designs: string[] }>('/api/inventory/attributes/options'),
+
   list: async (q?: string, branchId?: string, itemType?: string) => {
     const data = await api.get<any>('/api/inventory', { params: { search: q, branchId, itemType, limit: 1000000 } })
     const products = Array.isArray(data?.products) ? data.products : Array.isArray(data) ? data : []
@@ -326,6 +329,9 @@ export const inventoryApi = {
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
+      size: data.size || null,
+      brand: data.brand || null,
+      design: data.design || null,
       batchNumber: data.batchNumber || null,
       expiryDate: data.expiryDate || null,
       categoryId: data.categoryId || null,
@@ -351,6 +357,9 @@ export const inventoryApi = {
       minStock: data.low_stock_alert,
       sku: data.product_id || data.sku,
       barcode: data.barcode || null,
+      size: data.size || null,
+      brand: data.brand || null,
+      design: data.design || null,
       batchNumber: data.batchNumber || null,
       expiryDate: data.expiryDate || null,
       categoryId: data.categoryId || null,
@@ -406,6 +415,9 @@ function mapProductToInventory(p: any): InventoryItem {
     low_stock_alert: p.minStock ?? 10,
     barcode: p.barcode || '',
     sku: p.sku || '',
+    size: p.size || '',
+    brand: p.brand || '',
+    design: p.design || '',
     batchNumber: p.batchNumber || null,
     expiryDate: p.expiryDate || null,
     categoryId: p.categoryId ? String(p.categoryId) : p.category?.id ? String(p.category.id) : '',
@@ -1091,6 +1103,9 @@ export interface InventoryItem {
   low_stock_alert: number
   barcode?: string
   sku?: string
+  size?: string | null
+  brand?: string | null
+  design?: string | null
   batchNumber?: string | null
   expiryDate?: string | null
   categoryId?: string
