@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
@@ -795,25 +796,24 @@ export default function PayablesPage() {
                   const isRental = selectedItemType === 'rental'
                   return (
                   <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_100px_140px_40px]">
-                    <Select value={item.productId} onValueChange={(value) => handlePurchaseProductChange(index, value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {products.map((product) => {
-                          const pType = (product as any)?.itemType || 'product'
-                          const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
-                          return (
-                          <SelectItem key={product.id} value={String(product.id)}>
-                            <span className="flex items-center gap-1.5">
-                              <span className="text-xs text-muted-foreground">[{typeLabel}]</span>
-                              {product.product_name} {product.product_id ? `(${product.product_id})` : ''}
-                            </span>
-                          </SelectItem>
-                          )
-                        })}
-                      </SelectContent>
-                    </Select>
+                    <FormSelectSearch
+                      options={products.map((product) => {
+                        const pType = (product as any)?.itemType || 'product'
+                        const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
+                        const identifiers = [product.product_id, product.barcode, product.size, product.brand, product.design].filter(Boolean)
+                        return {
+                          value: String(product.id),
+                          label: `[${typeLabel}] ${product.product_name}${identifiers.length ? ` (${identifiers.join(' · ')})` : ''}`,
+                        }
+                      })}
+                      value={item.productId}
+                      onChange={(value) => handlePurchaseProductChange(index, String(value || ''))}
+                      placeholder="Select item"
+                      searchPlaceholder="Search item, SKU, barcode, size, brand..."
+                      emptyText="No matching items found"
+                      clearable={false}
+                      className="h-10 w-full border-input bg-background text-foreground"
+                    />
                     <Input
                       type="number"
                       min="1"
