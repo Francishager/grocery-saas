@@ -44,6 +44,7 @@ const fixtures = {
   '@prisma/client': dataUrl('export class PrismaClient { constructor() { return globalThis.receivableReconciliationFixture.db; } }'),
   'auth.js': dataUrl(`export const authenticateToken = (req, res, next) => next();
     export const requirePermission = key => (req, res, next) => req.user?.permissions?.includes(key) ? next() : res.status(403).json({ error: 'Forbidden' });
+    export const requireAnyPermission = keys => (req, res, next) => keys.some(key => req.user?.permissions?.includes(key)) ? next() : res.status(403).json({ error: 'Forbidden' });
     export const requireTenant = (req, res, next) => req.user?.tenantId ? next() : res.status(403).json({ error: 'Tenant required' });
     export const canUsePaymentMethodOrAssignedCash = () => false, canUseTransactionAccountForPayment = () => false, loadUserPermissions = () => {};`),
   'usageLimits.js': dataUrl('export const checkUsageLimit = () => {};'),

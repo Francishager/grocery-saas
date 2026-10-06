@@ -70,7 +70,6 @@ export default function ReceivableReconciliationPage() {
   const [cutoverPreview, setCutoverPreview] = useState<CutoverPreview | null>(null)
   const [cutoverExceptions, setCutoverExceptions] = useState<CutoverException[]>([])
   const [cutoverAt, setCutoverAt] = useState<string | null>(null)
-  const [cutoverFilter, setCutoverFilter] = useState('all')
   const [cutoverConfirmed, setCutoverConfirmed] = useState(false)
   const [cutoverLoading, setCutoverLoading] = useState(false)
 
@@ -236,6 +235,8 @@ export default function ReceivableReconciliationPage() {
   }
 
   const absoluteDifference = issues.reduce((sum, issue) => sum + Math.abs(issue.difference), 0)
+  const accountingActive = Boolean(accountingConfig.isEnabled && payablesConfig.isEnabled)
+  const openCutoverExceptions = cutoverExceptions.filter((row) => row.reviewStatus === 'open')
 
   return (
     <main className="mx-auto w-full max-w-[1600px] space-y-5 px-4 py-5 sm:px-6">
@@ -257,7 +258,7 @@ export default function ReceivableReconciliationPage() {
         </p>
       </div>
 
-      <section className="space-y-4 border-b pb-5">
+      {!accountingActive && <><section className="space-y-4 border-b pb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><h2 className="text-base font-semibold">Automatic accounting</h2><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Existing businesses can start posting from a dated opening snapshot while legacy differences remain visible for review.</p></div>
           <span className={`text-sm font-medium ${accountingConfig.isEnabled && payablesConfig.isEnabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}`}>
@@ -293,11 +294,11 @@ export default function ReceivableReconciliationPage() {
         <p className="text-sm text-muted-foreground">{cutoverPreview.exceptions.length} review flags will be retained. Account differences are included in the opening snapshot; customer/supplier control differences remain flagged for investigation.</p>
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={cutoverConfirmed} onChange={(event) => setCutoverConfirmed(event.target.checked)} /><span>I reviewed this preview. Start accounting from now without replaying legacy transactions; keep listed differences visible for follow-up.</span></label>
         <div className="flex flex-wrap gap-2"><Button onClick={() => void applyCutover()} disabled={!cutoverConfirmed || cutoverLoading}>{cutoverLoading ? 'Starting…' : 'Start accounting from now'}</Button><Button variant="outline" onClick={() => { setCutoverPreview(null); setCutoverConfirmed(false) }} disabled={cutoverLoading}>Cancel</Button></div>
-      </section>}
+      </section>}</>}
 
-      {cutoverExceptions.length > 0 && <section className="space-y-3 border-b pb-5" aria-label="Legacy accounting exceptions">
-        <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-base font-semibold">Legacy differences</h2><p className="mt-1 text-sm text-muted-foreground">These are preserved review items, not automatic corrections. New transactions can continue posting.</p></div><label className="text-sm">Filter <select className="ml-2 h-9 border bg-background px-2" value={cutoverFilter} onChange={(event) => setCutoverFilter(event.target.value)}><option value="all">All types</option><option value="account_balance">Account balances</option><option value="subledger_control">Customer/supplier control</option></select></label></div>
-        <div className="overflow-x-auto border"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Difference</th><th className="px-3 py-2 text-right">Stored balance</th><th className="px-3 py-2 text-right">Journal balance before cutover</th><th className="px-3 py-2 text-right">Variance</th><th className="px-3 py-2">Status</th></tr></thead><tbody className="divide-y">{cutoverExceptions.filter((row) => cutoverFilter === 'all' || row.type === cutoverFilter).map((row) => <tr key={row.key}><td className="px-3 py-2">{row.label}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.storedBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.ledgerBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.difference)}</td><td className="px-3 py-2">{row.reviewStatus === 'included_in_snapshot' ? 'Included in opening snapshot' : 'Open review'}</td></tr>)}</tbody></table></div>
+      {openCutoverExceptions.length > 0 && <section className="space-y-3 border-b pb-5" aria-label="Legacy accounting imbalances">
+        <div><h2 className="text-base font-semibold">Imbalances to review</h2><p className="mt-1 text-sm text-muted-foreground">These unresolved customer/supplier control differences were retained during cutover.</p></div>
+        <div className="overflow-x-auto border"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Difference</th><th className="px-3 py-2 text-right">Subledger balance</th><th className="px-3 py-2 text-right">Journal balance before cutover</th><th className="px-3 py-2 text-right">Variance</th></tr></thead><tbody className="divide-y">{openCutoverExceptions.map((row) => <tr key={row.key}><td className="px-3 py-2">{row.label}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.storedBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.ledgerBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.difference)}</td></tr>)}</tbody></table></div>
       </section>}
 
       <div className="overflow-x-auto border-y">

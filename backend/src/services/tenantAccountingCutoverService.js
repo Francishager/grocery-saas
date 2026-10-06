@@ -22,6 +22,8 @@ async function buildPlan(client, tenantId) {
     client.payablesAccountingConfig.findUnique({ where: { tenantId } }),
   ])
   const cashById = new Map(cashAccounts.map((row) => [row.id, row]))
+  const totalCustomers = money(customers.reduce((sum, row) => sum + Number(row.balance || 0), 0))
+  const totalSuppliers = money(suppliers.reduce((sum, row) => sum + Number(row.balance || 0), 0))
   const journalBalanceByAccount = new Map()
   for (const line of lines) {
     const account = accounts.find((row) => row.id === line.accountId)
@@ -35,15 +37,19 @@ async function buildPlan(client, tenantId) {
     if (account.parentId || Number(account._count?.children || 0) || String(account.subType || '').toLowerCase() === 'category') continue
     const linkedId = linkedCashAccountId(account)
     const cash = linkedId ? cashById.get(linkedId) : null
-    const target = money(cash ? cash.balance : account.balance)
+    const target = money(cash
+      ? cash.balance
+      : account.id === arConfig?.receivableAccountId
+        ? totalCustomers
+        : account.id === apConfig?.payableAccountId
+          ? totalSuppliers
+          : account.balance)
     const journal = money(journalBalanceByAccount.get(account.id) || 0)
     const difference = money(target - journal)
     snapshots.push({ accountId: account.id, code: account.code, accountName: account.name, type: account.type, targetBalance: target, postedJournalBalance: journal, difference })
     if (Math.abs(difference) >= 0.01) exceptions.push({ key: `account:${account.id}`, type: 'account_balance', label: `${account.code} ${account.name}`, storedBalance: target, ledgerBalance: journal, difference, reviewStatus: 'included_in_snapshot' })
   }
 
-  const totalCustomers = money(customers.reduce((sum, row) => sum + Number(row.balance || 0), 0))
-  const totalSuppliers = money(suppliers.reduce((sum, row) => sum + Number(row.balance || 0), 0))
   const ar = accounts.find((row) => row.id === arConfig?.receivableAccountId)
   const ap = accounts.find((row) => row.id === apConfig?.payableAccountId)
   const arJournal = ar ? money(journalBalanceByAccount.get(ar.id) || 0) : 0
@@ -137,7 +143,11 @@ export async function applyTenantAccountingCutover(client, { tenantId, userId, c
     try {
       return await client.$transaction(run, { isolationLevel: 'Serializable' })
     } catch (error) {
-      if (error?.code === 'P2034' || error?.code === '40001') throw Object.assign(new Error('Transactions changed during cutover. No changes were committed; refresh the preview and retry.'), { statusCode: 409 })
+      if (['P2002', 'P2034', '40001'].includes(error?.code)) {
+        const applied = await client.tenantAccountingCutover.findUnique({ where: { tenantId } })
+        if (applied) return { alreadyApplied: true, cutover: applied }
+        if (error?.code === 'P2034' || error?.code === '40001') throw Object.assign(new Error('Transactions changed during cutover. No changes were committed; refresh the preview and retry.'), { statusCode: 409 })
+      }
       throw error
     }
   }

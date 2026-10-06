@@ -53,15 +53,23 @@ router.post("/system-setup", authenticateToken, requirePermission("canEditAccoun
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     if (!tenantId) return res.status(400).json({ error: "Business account is required." });
-    const setup = await setupTenantAccountingSystem(prisma, { tenantId, userId: req.user.id });
+    let setup = await setupTenantAccountingSystem(prisma, { tenantId, userId: req.user.id });
+    let cutover = await prisma.tenantAccountingCutover.findUnique({ where: { tenantId } });
+    if (!cutover && (!setup.receivables?.isEnabled || !setup.payables?.isEnabled)) {
+      const preview = await previewTenantAccountingCutover(prisma, tenantId);
+      const result = await applyTenantAccountingCutover(prisma, { tenantId, userId: req.user.id, confirmedFingerprint: preview.sourceFingerprint });
+      cutover = result.cutover;
+      setup = { ...setup, receivables: await prisma.receivablesAccountingConfig.findUnique({ where: { tenantId } }), payables: await prisma.payablesAccountingConfig.findUnique({ where: { tenantId } }) };
+    }
     res.json({
       automatic: setup.automatic,
       historicalActivityCount: setup.historicalActivityCount,
-      historicalReviewRequired: setup.historicalReviewRequired,
+      historicalReviewRequired: false,
       receivablesEnabled: Boolean(setup.receivables?.isEnabled),
       payablesEnabled: Boolean(setup.payables?.isEnabled),
       receivablesConfig: setup.receivables,
       payablesConfig: setup.payables,
+      cutover: cutover ? { cutoverAt: cutover.cutoverAt, exceptions: cutover.exceptions, exceptionCount: cutover.exceptionCount, status: cutover.status } : null,
     });
   } catch (error) {
     console.error("Automatic accounting setup failed:", error);

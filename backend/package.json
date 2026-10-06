@@ -8,7 +8,7 @@
   "scripts": {
     "test:trash": "node --test tests/trash.test.js",
     "test:reports": "node --test tests/reportAccounting.test.js tests/reportingHelpers.test.js tests/daily-report.test.js tests/saleTaxAllocation.test.js tests/report-contracts.test.js tests/dashboard.test.js tests/cogs.test.js tests/receivable-sales-view.test.js tests/accounting-sync.test.js tests/outstanding-receivables.test.js",
-    "prestart": "node src/scripts/ensure-working-hours-schema.js && node src/scripts/ensure-trash-schema.js",
+    "prestart": "node src/scripts/ensure-working-hours-schema.js && node src/scripts/ensure-trash-schema.js && node src/scripts/ensure-accounting-cutover-schema.js && node src/scripts/enable-existing-tenant-accounting.js",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "db:generate": "prisma generate",
