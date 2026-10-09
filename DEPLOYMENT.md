@@ -66,6 +66,8 @@ https://your-app.railway.app
 | **Build output directory** | `dist` |
 | **Root directory** | `frontend` |
 
+This repository deploys as **Cloudflare Pages**, not as a Worker. If the Cloudflare project uses Workers Builds with a separate deploy-command field, set it to `npm run deploy` (which runs `wrangler pages deploy dist --project-name jibusales`). Do not use `npx wrangler deploy`; that targets the Workers API and can fail with a Workers-service 504 for this Pages site. For a standard Pages Git integration, leave deployment to Pages after the build and do not add a separate Worker deploy command.
+
 ### 3. Set Environment Variables
 In Cloudflare Pages settings, add:
 
