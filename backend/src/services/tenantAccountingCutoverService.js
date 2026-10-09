@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { ensureTenantAccountingSetup } from './tenantAccountingSetupService.js'
 import { linkedCashAccountId } from '../utils/accountingSync.js'
 import { validateReceivablesAccountingConfig } from './receivablesAccountingService.js'
@@ -15,10 +16,8 @@ export function buildSubledgerAdjustmentLines(controlAccount, equityAccount, dif
     { accountId: equityAccount.id, debit: money(creditControl), credit: money(debitControl), description: `${description}: ${equityAccount.name}` },
   ]
 }
-async function fingerprint(value) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value))
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+function fingerprint(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 const postedOrReversed = { OR: [{ status: 'posted' }, { status: 'reversed', reversalJournalId: { not: null } }] }
 
@@ -79,7 +78,7 @@ async function buildPlan(client, tenantId) {
   }
   const openingEquityOffset = money(openingDebit - openingCredit)
   const payload = { tenantId, snapshots, exceptions, customerBalanceTotal: totalCustomers, supplierBalanceTotal: totalSuppliers, postedJournalLineCount: lines.length, openEquityAccountId: openEquityId, openingEquityOffset }
-  return { ...payload, sourceFingerprint: await fingerprint(payload) }
+  return { ...payload, sourceFingerprint: fingerprint(payload) }
 }
 
 export async function previewTenantAccountingCutover(client, tenantId) {
