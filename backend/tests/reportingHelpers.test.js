@@ -22,6 +22,19 @@ test('buildSupplierStatementData summarizes purchases and payments', () => {
   assert.equal(result.openPurchases[0].refNo, 'PO-100');
 });
 
+test('buildSupplierStatementData uses the supplier balance after payments against opening balances', () => {
+  const result = buildSupplierStatementData(
+    { id: 'sup-2', name: 'East Foods', openingBalance: 500, balance: 300 },
+    [],
+    [{ id: 'pay-2', amount: 200, createdAt: '2024-01-10T00:00:00.000Z' }]
+  );
+
+  assert.equal(result.openingBalance.amount, 500);
+  assert.equal(result.summary.openingBalance, 500);
+  assert.equal(result.summary.totalPayments, 200);
+  assert.equal(result.summary.openBalance, 300);
+});
+
 test('buildDecisionSupportSummary highlights finance and inventory risks', () => {
   const result = buildDecisionSupportSummary({
     sales: [{ total: 5000 }],

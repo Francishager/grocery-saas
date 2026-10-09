@@ -6,7 +6,9 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
   const openingBalanceDate = supplier?.openingBalanceDate || supplier?.createdAt || null;
   const totalPurchases = normalizedPurchases.reduce((sum, purchase) => sum + Number(purchase?.total || 0), 0);
   const totalPayments = normalizedPayments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
-  const openBalance = openingBalance + normalizedPurchases.reduce((sum, purchase) => sum + Math.max(0, Number(purchase?.balance || 0)), 0);
+  const openBalance = supplier?.balance != null
+    ? Math.max(0, Number(supplier.balance || 0))
+    : openingBalance + normalizedPurchases.reduce((sum, purchase) => sum + Math.max(0, Number(purchase?.balance || 0)), 0);
   const openPurchases = normalizedPurchases.filter((purchase) => Number(purchase?.balance || 0) > 0);
 
   return {

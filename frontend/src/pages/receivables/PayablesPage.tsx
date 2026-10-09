@@ -41,6 +41,7 @@ interface Supplier {
   address?: string
   balance: number
   openingBalance?: number
+  openingBalanceOutstanding?: number
   openingBalanceDate?: string | null
   openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
@@ -147,6 +148,7 @@ export default function PayablesPage() {
   const [savingPurchase, setSavingPurchase] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPurchase, setSelectedPurchase] = useState<SupplierPurchase | null>(null)
+  const [selectedSupplierForPayment, setSelectedSupplierForPayment] = useState<Supplier | null>(null)
   const [selectedSupplierDetail, setSelectedSupplierDetail] = useState<Supplier | null>(null)
   const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState<SupplierPurchase | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
@@ -387,8 +389,9 @@ export default function PayablesPage() {
   }
 
   const recordPayment = async () => {
-    if (!selectedPurchase) {
-      toast({ variant: 'destructive', title: 'Select a purchase first' })
+    const supplier = selectedPurchase?.supplier || selectedSupplierForPayment
+    if (!supplier) {
+      toast({ variant: 'destructive', title: 'Select a supplier first' })
       return
     }
     if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
@@ -400,8 +403,8 @@ export default function PayablesPage() {
       const response = await apiFetch('/api/payables/payments', {
         method: 'POST',
         body: JSON.stringify({
-          supplierId: selectedPurchase.supplier.id,
-          purchaseId: selectedPurchase.id,
+          supplierId: supplier.id,
+          ...(selectedPurchase ? { purchaseId: selectedPurchase.id } : {}),
           amount: parseFloat(paymentAmount),
           paymentMethod,
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
@@ -421,6 +424,7 @@ export default function PayablesPage() {
       })
       setShowPaymentModal(false)
       setSelectedPurchase(null)
+      setSelectedSupplierForPayment(null)
       setPaymentAmount('')
       setPaymentMethod('cash')
       setMobileProvider('')
@@ -590,6 +594,17 @@ export default function PayablesPage() {
                       </p>
                     </div>
                     <div className="text-right">
+                      {hasPermission('canCreatePayable') && Number(supplier.openingBalanceOutstanding || 0) > 0 && (
+                        <Button size="sm" onClick={() => {
+                          setSelectedSupplierForPayment(supplier)
+                          setSelectedPurchase(null)
+                          setPaymentAmount(String(supplier.openingBalanceOutstanding))
+                          setShowPaymentModal(true)
+                        }}>
+                          <Wallet className="h-4 w-4 mr-1" />
+                          Record Payment
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" onClick={() => setSelectedSupplierDetail(supplier)}>
                         <Eye className="h-4 w-4 mr-1" />
                         View Details
@@ -656,6 +671,7 @@ export default function PayablesPage() {
                         size="sm"
                         onClick={() => {
                           setSelectedPurchase(purchase)
+                          setSelectedSupplierForPayment(null)
                           setPaymentAmount(String(purchase.balance))
                           setShowPaymentModal(true)
                         }}
@@ -892,16 +908,20 @@ export default function PayablesPage() {
       )}
 
       {/* Payment Modal */}
-      {showPaymentModal && selectedPurchase && (
+      {showPaymentModal && (selectedPurchase || selectedSupplierForPayment) && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <h3 className="text-lg font-semibold mb-4">Record Payment</h3>
             <div className="space-y-4">
               <div>
                 <Label>Supplier</Label>
-                <p className="font-medium">{selectedPurchase.supplier.name}</p>
-                <p className="text-sm text-muted-foreground">Ref: {selectedPurchase.refNo}</p>
-                <p className="text-sm text-red-600">Balance: {selectedPurchase.balance.toFixed(2)}</p>
+                <p className="font-medium">{selectedPurchase?.supplier.name || selectedSupplierForPayment?.name}</p>
+                {selectedPurchase ? (
+                  <p className="text-sm text-muted-foreground">Ref: {selectedPurchase.refNo}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Payment against opening balance</p>
+                )}
+                <p className="text-sm text-red-600">Balance: {formatCurrency(selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding ?? 0)}</p>
               </div>
               
               <div>
@@ -913,7 +933,7 @@ export default function PayablesPage() {
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
-                  max={selectedPurchase.balance}
+                  max={selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding}
                 />
               </div>
               
@@ -987,7 +1007,11 @@ export default function PayablesPage() {
             </div>
             
             <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setShowPaymentModal(false)}>
+              <Button variant="outline" onClick={() => {
+                setShowPaymentModal(false)
+                setSelectedPurchase(null)
+                setSelectedSupplierForPayment(null)
+              }}>
                 Cancel
               </Button>
               <Button onClick={recordPayment} disabled={
