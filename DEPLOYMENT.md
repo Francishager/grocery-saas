@@ -8,7 +8,7 @@ grocery-saas/
 │   ├── server.js
 │   ├── package.json
 │   └── .env.example
-├── frontend/          # React + Vite (deploy to Cloudflare Pages)
+├── frontend/          # React + Vite (Cloudflare Worker Static Assets)
 │   ├── src/
 │   ├── package.json
 │   └── wrangler.toml
@@ -39,7 +39,7 @@ In Railway dashboard, add these variables:
 | `GRIST_API_KEY` | Your Grist API key |
 | `GRIST_DOC_ID` | Your Grist document ID |
 | `JWT_SECRET` | Secret key for JWT (min 32 chars) |
-| `FRONTEND_ORIGIN` | Your Cloudflare Pages URL |
+| `FRONTEND_ORIGIN` | Your Cloudflare Worker URL |
 | `ALLOWED_ORIGINS` | Comma-separated allowed CORS origins |
 
 ### 4. Deploy
@@ -50,26 +50,24 @@ https://your-app.railway.app
 
 ---
 
-## Frontend Deployment (Cloudflare Pages)
+## Frontend Deployment (Cloudflare Worker Static Assets)
 
-### 1. Create Cloudflare Pages Project
-1. Go to [pages.cloudflare.com](https://pages.cloudflare.com)
-2. Sign in with GitHub
-3. Click "Create a project" → "Connect to Git"
-4. Select your `grocery-saas` repository
+### 1. Connect the Worker Build
+1. Open the `jibusales` Worker in Cloudflare and connect the `grocery-saas` repository using Workers Builds.
+2. Set the repository root directory to `frontend`.
 
 ### 2. Configure Build Settings
 | Setting | Value |
 |---------|-------|
 | **Production branch** | `main` |
 | **Build command** | `npm run build` |
-| **Build output directory** | `dist` |
 | **Root directory** | `frontend` |
+| **Deploy command** | `npm run deploy` |
 
-This repository deploys as **Cloudflare Pages**, not as a Worker. If the Cloudflare project uses Workers Builds with a separate deploy-command field, set it to `npm run deploy` (which runs `wrangler pages deploy dist --project-name jibusales`). Do not use `npx wrangler deploy`; that targets the Workers API and can fail with a Workers-service 504 for this Pages site. For a standard Pages Git integration, leave deployment to Pages after the build and do not add a separate Worker deploy command.
+The Wrangler config declares `./dist` as the Worker Static Assets directory and enables SPA fallback. The deploy script runs `npx wrangler deploy`. Do not use `wrangler pages deploy` for this Worker.
 
 ### 3. Set Environment Variables
-In Cloudflare Pages settings, add:
+In the Worker Builds environment variables, add:
 
 | Variable | Value |
 |----------|-------|
@@ -78,7 +76,7 @@ In Cloudflare Pages settings, add:
 ### 4. Deploy
 Cloudflare will build and deploy. Your frontend will be at:
 ```
-https://your-project.pages.dev
+https://jibusales.<your-workers-subdomain>.workers.dev
 ```
 
 ---
@@ -90,11 +88,11 @@ https://your-project.pages.dev
 GRIST_API_KEY=xxx
 GRIST_DOC_ID=xxx
 JWT_SECRET=your-secret-key-min-32-chars
-FRONTEND_ORIGIN=https://your-frontend.pages.dev
-ALLOWED_ORIGINS=https://your-frontend.pages.dev
+FRONTEND_ORIGIN=https://jibusales.<your-workers-subdomain>.workers.dev
+ALLOWED_ORIGINS=https://jibusales.<your-workers-subdomain>.workers.dev
 ```
 
-### Frontend (Cloudflare Pages)
+### Frontend (Cloudflare Worker)
 ```env
 VITE_API_URL=https://your-backend.railway.app
 ```
@@ -105,8 +103,8 @@ VITE_API_URL=https://your-backend.railway.app
 
 1. Update `FRONTEND_ORIGIN` in Railway with your Cloudflare URL
 2. Update `VITE_API_URL` in Cloudflare with your Railway URL
-3. Test login at `https://your-frontend.pages.dev/login`
-4. SaaS Admin login at `https://your-frontend.pages.dev/saas/login`
+3. Test login at `https://jibusales.<your-workers-subdomain>.workers.dev/login`
+4. SaaS Admin login at `https://jibusales.<your-workers-subdomain>.workers.dev/saas/login`
 
 ---
 
@@ -120,7 +118,7 @@ VITE_API_URL=https://your-backend.railway.app
 ### Frontend shows blank page
 - Check browser console for errors
 - Verify `VITE_API_URL` is set correctly
-- Check Cloudflare Pages build logs
+- Check Cloudflare Workers Builds logs
 
 ### CORS errors
 - Add frontend URL to `ALLOWED_ORIGINS` in Railway

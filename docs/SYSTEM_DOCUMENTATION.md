@@ -77,7 +77,7 @@ jibuSales is a **multi-tenant SaaS platform** for grocery, retail, pharmacy, har
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Cloudflare Pages (Frontend)              │
+│                 Cloudflare Worker (Frontend)                 │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  React 18 + Vite 6 + TypeScript PWA                   │  │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐ │  │
@@ -167,7 +167,7 @@ jibuSales is a **multi-tenant SaaS platform** for grocery, retail, pharmacy, har
 | Service | Purpose |
 |---|---|
 | Railway | Backend hosting |
-| Cloudflare Pages | Frontend hosting |
+| Cloudflare Workers | Frontend static asset hosting |
 | Railway PostgreSQL | Database |
 | Cloudinary | Image/file storage |
 | Resend / Nodemailer | Transactional email |
@@ -349,7 +349,7 @@ grocery-saas/
 │   ├── tailwind.config.js
 │   └── tsconfig.json
 │
-├── netlify.toml                  # Netlify/Cloudflare Pages config
+├── netlify.toml                  # Optional Netlify deployment config
 ├── railway.toml                  # Railway backend config
 ├── package.json                  # Root package.json
 └── .github/                      # CI/CD workflows
@@ -1023,13 +1023,13 @@ SaaS Admin (Platform-level)
 - Port: `process.env.PORT || 3000`
 - Health check: `GET /`
 
-### Frontend (Cloudflare Pages)
+### Frontend (Cloudflare Worker Static Assets)
 
-**File:** `netlify.toml`, `frontend/package.json`
+**File:** `frontend/wrangler.toml`, `frontend/package.json`
 
-- Build command: `vite build`
-- Output: `dist/`
-- Deploy: `wrangler pages deploy dist`
+- Build command: `npm run build`
+- Static assets: `dist/`
+- Deploy: `npx wrangler deploy`
 - Environment variable: `VITE_API_URL` (API base URL)
 
 ### CI/CD

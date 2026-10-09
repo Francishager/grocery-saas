@@ -65,7 +65,7 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    // Production build settings for Cloudflare Pages
+    // Production build settings for Cloudflare Worker Static Assets
     build: {
       outDir: 'dist',
       sourcemap: false,

@@ -11,7 +11,7 @@
     "prebuild": "npm run test:reports && npm run test:notifications",
     "dev": "vite",
     "build": "vite build",
-    "deploy": "wrangler pages deploy dist --project-name jibusales",
+    "deploy": "npx wrangler deploy",
     "lint": "eslint .",
     "preview": "vite preview"
   },
