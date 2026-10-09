@@ -6,7 +6,7 @@ import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSetupService.js";
-import { applyTenantAccountingCutover, previewTenantAccountingCutover } from "../src/services/tenantAccountingCutoverService.js";
+import { applyTenantAccountingCutover, previewTenantAccountingCutover, resolveTenantAccountingException } from "../src/services/tenantAccountingCutoverService.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -113,6 +113,23 @@ router.post("/cutover", authenticateToken, requirePermission("canEditAccounting"
   } catch (error) {
     console.error("Accounting cutover failed:", error);
     res.status(error.statusCode || 500).json({ error: error.message || "Accounting cutover failed without applying changes." });
+  }
+});
+
+router.post("/cutover/exceptions/:exceptionKey/resolve", authenticateToken, requirePermission("canEditAccounting"), requireFeature("accounting"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const result = await resolveTenantAccountingException(prisma, {
+      tenantId,
+      userId: req.user.id,
+      exceptionKey: req.params.exceptionKey,
+      note: req.body?.note,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("Accounting cutover exception resolution failed:", error);
+    res.status(error.statusCode || 500).json({ error: error.message || "Could not resolve this accounting imbalance." });
   }
 });
 

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { previewTenantAccountingCutover } from '../src/services/tenantAccountingCutoverService.js'
+import { buildSubledgerAdjustmentLines, previewTenantAccountingCutover } from '../src/services/tenantAccountingCutoverService.js'
 
 function makeClient() {
   const accounts = [
@@ -36,4 +36,22 @@ test('cutover preview reports account and subledger differences without mutating
   assert.equal(plan.exceptions.some((row) => row.key === 'subledger:payables'), true)
   assert.equal(typeof plan.sourceFingerprint, 'string')
   assert.equal(plan.sourceFingerprint.length, 64)
+})
+
+test('control-account adjustments align receivables and payables in the correct debit/credit direction', () => {
+  const equity = { id: 'equity', name: 'Opening Balance Equity', type: 'equity' }
+  const ar = { id: 'ar', name: 'Accounts Receivable', type: 'asset' }
+  const ap = { id: 'ap', name: 'Accounts Payable', type: 'liability' }
+  const arIncrease = buildSubledgerAdjustmentLines(ar, equity, 125, 'Reconciliation')
+  const apIncrease = buildSubledgerAdjustmentLines(ap, equity, 125, 'Reconciliation')
+  const arDecrease = buildSubledgerAdjustmentLines(ar, equity, -125, 'Reconciliation')
+  const apDecrease = buildSubledgerAdjustmentLines(ap, equity, -125, 'Reconciliation')
+
+  assert.deepEqual(arIncrease.map(({ debit, credit }) => ({ debit, credit })), [{ debit: 125, credit: 0 }, { debit: 0, credit: 125 }])
+  assert.deepEqual(apIncrease.map(({ debit, credit }) => ({ debit, credit })), [{ debit: 0, credit: 125 }, { debit: 125, credit: 0 }])
+  assert.deepEqual(arDecrease.map(({ debit, credit }) => ({ debit, credit })), [{ debit: 0, credit: 125 }, { debit: 125, credit: 0 }])
+  assert.deepEqual(apDecrease.map(({ debit, credit }) => ({ debit, credit })), [{ debit: 125, credit: 0 }, { debit: 0, credit: 125 }])
+  for (const lines of [arIncrease, apIncrease, arDecrease, apDecrease]) {
+    assert.equal(lines.reduce((sum, line) => sum + line.debit, 0), lines.reduce((sum, line) => sum + line.credit, 0))
+  }
 })

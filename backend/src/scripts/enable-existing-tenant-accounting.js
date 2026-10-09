@@ -1,6 +1,8 @@
 import prisma from '../db.js'
 import { setupTenantAccountingSystem } from '../services/tenantAccountingSetupService.js'
 import { applyTenantAccountingCutover, previewTenantAccountingCutover } from '../services/tenantAccountingCutoverService.js'
+import { validateReceivablesAccountingConfig } from '../services/receivablesAccountingService.js'
+import { validatePayablesAccountingConfig } from '../services/payablesAccountingService.js'
 
 try {
   const tenants = await prisma.tenant.findMany({
@@ -18,11 +20,31 @@ try {
   let failed = 0
 
   for (const tenant of tenants) {
-    if (tenant.accountingCutover || (tenant.receivablesAccountingConfig?.isEnabled && tenant.payablesAccountingConfig?.isEnabled)) {
+    if (tenant.receivablesAccountingConfig?.isEnabled && tenant.payablesAccountingConfig?.isEnabled) {
       skipped += 1
       continue
     }
     try {
+      if (tenant.accountingCutover) {
+        await prisma.$transaction(async (tx) => {
+          const [receivables, payables] = await Promise.all([
+            tx.receivablesAccountingConfig.findUnique({ where: { tenantId: tenant.id } }),
+            tx.payablesAccountingConfig.findUnique({ where: { tenantId: tenant.id } }),
+          ])
+          const [receivablesValidation, payablesValidation] = await Promise.all([
+            validateReceivablesAccountingConfig(tx, tenant.id, receivables),
+            validatePayablesAccountingConfig(tx, tenant.id, payables),
+          ])
+          if (!receivablesValidation.valid || !payablesValidation.valid) {
+            throw new Error('Existing cutover mappings are incomplete or invalid; posting remains disabled for review.')
+          }
+          await tx.receivablesAccountingConfig.update({ where: { tenantId: tenant.id }, data: { isEnabled: true } })
+          await tx.payablesAccountingConfig.update({ where: { tenantId: tenant.id }, data: { isEnabled: true } })
+        }, { timeout: 30000, maxWait: 10000 })
+        activated += 1
+        console.log(`Accounting posting re-enabled for tenant ${tenant.id}; existing cutover and journal were reused.`)
+        continue
+      }
       const user = tenant.ownerId
         ? { id: tenant.ownerId }
         : await prisma.user.findFirst({ where: { tenantId: tenant.id }, select: { id: true }, orderBy: { createdAt: 'asc' } })

@@ -112,7 +112,7 @@ async function ensureWithClient(client, { tenantId, userId, enableNewSetups }) {
 
 export async function ensureTenantAccountingSetup(client, options) {
   if (typeof client.$transaction === 'function') {
-    return client.$transaction((tx) => ensureWithClient(tx, options))
+    return client.$transaction((tx) => ensureWithClient(tx, options), { timeout: 30000, maxWait: 10000 })
   }
   return ensureWithClient(client, options)
 }

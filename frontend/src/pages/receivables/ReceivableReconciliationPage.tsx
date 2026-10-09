@@ -35,7 +35,16 @@ interface ReconciliationIssue {
 type AccountingConfig = { isEnabled?: boolean }
 type PayablesConfig = { isEnabled?: boolean }
 type SetupStatus = { automatic: boolean; historicalActivityCount: number; historicalReviewRequired: boolean; receivablesEnabled: boolean; payablesEnabled: boolean }
-type CutoverException = { key: string; type: string; label: string; storedBalance: number; ledgerBalance: number; difference: number; reviewStatus: string }
+type CutoverException = {
+  key: string
+  type: string
+  label: string
+  storedBalance: number
+  ledgerBalance: number
+  difference: number
+  reviewStatus: string
+  resolution?: { type: string; note: string; resolvedAt: string; resolvedById?: string; journalEntryId?: string | null; journalEntryNo?: string | null; currentDifference?: number }
+}
 type CutoverPreview = { sourceFingerprint: string; snapshots: Array<{ accountId: string; code: string; accountName: string; targetBalance: number; postedJournalBalance: number; difference: number }>; exceptions: CutoverException[]; customerBalanceTotal: number; supplierBalanceTotal: number; openingEquityOffset: number }
 
 const decisionLabels: Record<Decision, string> = {
@@ -72,6 +81,10 @@ export default function ReceivableReconciliationPage() {
   const [cutoverAt, setCutoverAt] = useState<string | null>(null)
   const [cutoverConfirmed, setCutoverConfirmed] = useState(false)
   const [cutoverLoading, setCutoverLoading] = useState(false)
+  const [resolvingExceptionKey, setResolvingExceptionKey] = useState<string | null>(null)
+  const [resolutionNote, setResolutionNote] = useState('')
+  const [resolutionConfirmed, setResolutionConfirmed] = useState(false)
+  const [resolutionLoading, setResolutionLoading] = useState(false)
 
   const loadIssues = useCallback(async (targetPage = page) => {
     setLoading(true)
@@ -234,9 +247,38 @@ export default function ReceivableReconciliationPage() {
     }
   }
 
+  const resolveCutoverException = async (row: CutoverException) => {
+    if (!canEditAccounting || !resolutionConfirmed || resolutionNote.trim().length < 10) return
+    setResolutionLoading(true)
+    try {
+      const response = await apiFetch(`/api/accounting/cutover/exceptions/${encodeURIComponent(row.key)}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ note: resolutionNote.trim() }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.error || 'Could not resolve this imbalance')
+      setCutoverExceptions(data.cutover?.exceptions || [])
+      const resolution = data.resolution
+      toast({
+        title: data.alreadyResolved ? 'Imbalance already resolved' : 'Imbalance resolved',
+        description: resolution?.type === 'adjusting_journal_posted'
+          ? `Posted ${resolution.journalEntryNo || 'a reconciliation journal'} to align the control account with the current subledger. Customer/supplier balances were not changed.`
+          : 'The control account already matched the current subledger, so no journal was posted.',
+      })
+      setResolvingExceptionKey(null)
+      setResolutionNote('')
+      setResolutionConfirmed(false)
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Imbalance was not resolved', description: error instanceof Error ? error.message : 'Refresh and verify the ledger before retrying.' })
+    } finally {
+      setResolutionLoading(false)
+    }
+  }
+
   const absoluteDifference = issues.reduce((sum, issue) => sum + Math.abs(issue.difference), 0)
   const accountingActive = Boolean(accountingConfig.isEnabled && payablesConfig.isEnabled)
   const openCutoverExceptions = cutoverExceptions.filter((row) => row.reviewStatus === 'open')
+  const resolvedCutoverExceptions = cutoverExceptions.filter((row) => row.reviewStatus === 'resolved')
 
   return (
     <main className="mx-auto w-full max-w-[1600px] space-y-5 px-4 py-5 sm:px-6">
@@ -297,9 +339,14 @@ export default function ReceivableReconciliationPage() {
       </section>}</>}
 
       {openCutoverExceptions.length > 0 && <section className="space-y-3 border-b pb-5" aria-label="Legacy accounting imbalances">
-        <div><h2 className="text-base font-semibold">Imbalances to review</h2><p className="mt-1 text-sm text-muted-foreground">These unresolved customer/supplier control differences were retained during cutover.</p></div>
-        <div className="overflow-x-auto border"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Difference</th><th className="px-3 py-2 text-right">Subledger balance</th><th className="px-3 py-2 text-right">Journal balance before cutover</th><th className="px-3 py-2 text-right">Variance</th></tr></thead><tbody className="divide-y">{openCutoverExceptions.map((row) => <tr key={row.key}><td className="px-3 py-2">{row.label}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.storedBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.ledgerBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.difference)}</td></tr>)}</tbody></table></div>
+        <div><h2 className="text-base font-semibold">Imbalances to resolve</h2><p className="mt-1 max-w-4xl text-sm text-muted-foreground">Verify customer or supplier balances against their statements first. An authorized accounting editor can then post a dated, balanced adjustment between the AR/AP control account and Opening Balance Equity. This does not edit customer, supplier, cash, or historical transaction records.</p></div>
+        <div className="overflow-x-auto border"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Difference</th><th className="px-3 py-2 text-right">Subledger balance</th><th className="px-3 py-2 text-right">Journal balance before cutover</th><th className="px-3 py-2 text-right">Variance</th><th className="px-3 py-2">Resolution</th></tr></thead><tbody className="divide-y">{openCutoverExceptions.map((row) => <Fragment key={row.key}><tr><td className="px-3 py-2">{row.label}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.storedBalance)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.ledgerBalance)}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{formatCurrency(row.difference)}</td><td className="px-3 py-2">{canEditAccounting ? <Button size="sm" variant="outline" onClick={() => { setResolvingExceptionKey(resolvingExceptionKey === row.key ? null : row.key); setResolutionNote(''); setResolutionConfirmed(false) }}>Resolve imbalance</Button> : <span className="text-muted-foreground">Requires accounting edit permission</span>}</td></tr>{resolvingExceptionKey === row.key && canEditAccounting && <tr><td colSpan={5} className="bg-muted/20 px-3 py-4"><div className="max-w-3xl space-y-3"><p className="text-sm">The adjustment amount will be recalculated from live balances at posting time. Confirm that the subledger is supported by source records and is the balance to preserve.</p><label className="grid gap-1.5 text-sm">Resolution evidence / reason<Textarea value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} maxLength={1000} rows={3} placeholder="Describe which statements, receipts, or migration records you checked and why the subledger balance is correct." /></label><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={resolutionConfirmed} onChange={(event) => setResolutionConfirmed(event.target.checked)} /><span>I verified the current customer/supplier subledger and authorize a posted control-account adjustment against Opening Balance Equity. I understand no customer/supplier transaction or cash balance will be changed.</span></label><div className="flex flex-wrap gap-2"><Button onClick={() => void resolveCutoverException(row)} disabled={resolutionLoading || !resolutionConfirmed || resolutionNote.trim().length < 10}>{resolutionLoading ? 'Posting adjustment…' : 'Post adjustment and resolve'}</Button><Button variant="outline" onClick={() => { setResolvingExceptionKey(null); setResolutionConfirmed(false); setResolutionNote('') }} disabled={resolutionLoading}>Cancel</Button></div></div></td></tr>}</Fragment>)}</tbody></table></div>
       </section>}
+
+      {resolvedCutoverExceptions.length > 0 && <details className="border-b pb-4">
+        <summary className="cursor-pointer py-2 text-sm font-medium">Resolved imbalance audit ({resolvedCutoverExceptions.length})</summary>
+        <div className="mt-2 overflow-x-auto border"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Difference</th><th className="px-3 py-2 text-right">Original variance</th><th className="px-3 py-2">Resolution record</th><th className="px-3 py-2">Date</th></tr></thead><tbody className="divide-y">{resolvedCutoverExceptions.map((row) => <tr key={row.key}><td className="px-3 py-2">{row.label}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.difference)}</td><td className="px-3 py-2"><div>{row.resolution?.type === 'adjusting_journal_posted' ? `Journal ${row.resolution.journalEntryNo || ''}` : 'Already balanced; no journal needed'}</div><div className="max-w-2xl text-xs text-muted-foreground">{row.resolution?.note}</div></td><td className="px-3 py-2 whitespace-nowrap">{row.resolution?.resolvedAt ? formatDisplayDate(row.resolution.resolvedAt) : '—'}</td></tr>)}</tbody></table></div>
+      </details>}
 
       <div className="overflow-x-auto border-y">
         <table className="w-full min-w-[980px] border-collapse text-left text-sm">

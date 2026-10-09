@@ -1,9 +1,20 @@
 import { ensureTenantAccountingSetup } from './tenantAccountingSetupService.js'
 import { linkedCashAccountId } from '../utils/accountingSync.js'
+import { validateReceivablesAccountingConfig } from './receivablesAccountingService.js'
+import { validatePayablesAccountingConfig } from './payablesAccountingService.js'
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100
 const debitNormal = (type) => ['asset', 'expense', 'expenses'].includes(String(type || '').toLowerCase())
 const normalBalance = (account, debit, credit) => debitNormal(account.type) ? debit - credit : credit - debit
+export function buildSubledgerAdjustmentLines(controlAccount, equityAccount, difference, description) {
+  const amount = money(difference)
+  const debitControl = debitNormal(controlAccount.type) ? Math.max(0, amount) : Math.max(0, -amount)
+  const creditControl = debitNormal(controlAccount.type) ? Math.max(0, -amount) : Math.max(0, amount)
+  return [
+    { accountId: controlAccount.id, debit: money(debitControl), credit: money(creditControl), description: `${description}: ${controlAccount.name}` },
+    { accountId: equityAccount.id, debit: money(creditControl), credit: money(debitControl), description: `${description}: ${equityAccount.name}` },
+  ]
+}
 async function fingerprint(value) {
   const bytes = new TextEncoder().encode(JSON.stringify(value))
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
@@ -141,12 +152,119 @@ export async function applyTenantAccountingCutover(client, { tenantId, userId, c
   }
   if (typeof client.$transaction === 'function') {
     try {
-      return await client.$transaction(run, { isolationLevel: 'Serializable' })
+      return await client.$transaction(run, { isolationLevel: 'Serializable', timeout: 30000, maxWait: 10000 })
     } catch (error) {
       if (['P2002', 'P2034', '40001'].includes(error?.code)) {
         const applied = await client.tenantAccountingCutover.findUnique({ where: { tenantId } })
         if (applied) return { alreadyApplied: true, cutover: applied }
         if (error?.code === 'P2034' || error?.code === '40001') throw Object.assign(new Error('Transactions changed during cutover. No changes were committed; refresh the preview and retry.'), { statusCode: 409 })
+      }
+      throw error
+    }
+  }
+  return run(client)
+}
+
+export async function resolveTenantAccountingException(client, { tenantId, userId, exceptionKey, note }) {
+  const resolutionNote = String(note || '').trim()
+  if (!tenantId || !userId || !exceptionKey || resolutionNote.length < 10) {
+    throw Object.assign(new Error('A tenant, user, imbalance, and a meaningful resolution note are required.'), { statusCode: 400 })
+  }
+
+  const run = async (tx) => {
+    const cutover = await tx.tenantAccountingCutover.findUnique({ where: { tenantId } })
+    if (!cutover) throw Object.assign(new Error('No accounting cutover exists for this business.'), { statusCode: 404 })
+    const exceptions = Array.isArray(cutover.exceptions) ? cutover.exceptions : []
+    const exceptionIndex = exceptions.findIndex((row) => row?.key === exceptionKey)
+    if (exceptionIndex < 0) throw Object.assign(new Error('This imbalance is not part of the saved cutover.'), { statusCode: 404 })
+    if (exceptions[exceptionIndex].reviewStatus !== 'open') {
+      return { alreadyResolved: true, cutover, resolution: exceptions[exceptionIndex].resolution || null }
+    }
+    if (!['subledger:receivables', 'subledger:payables'].includes(exceptionKey)) {
+      throw Object.assign(new Error('Only customer and supplier control-account differences can be resolved here.'), { statusCode: 400 })
+    }
+
+    const plan = await buildPlan(tx, tenantId)
+    const current = plan.exceptions.find((row) => row.key === exceptionKey)
+    const resolvedAt = new Date()
+    let journalEntry = null
+    let resolutionType = 'already_balanced'
+    let currentDifference = 0
+
+    if (current && Math.abs(current.difference) >= 0.01) {
+      currentDifference = money(current.difference)
+      const isReceivables = exceptionKey === 'subledger:receivables'
+      const config = isReceivables
+        ? await tx.receivablesAccountingConfig.findUnique({ where: { tenantId } })
+        : await tx.payablesAccountingConfig.findUnique({ where: { tenantId } })
+      const validation = isReceivables
+        ? await validateReceivablesAccountingConfig(tx, tenantId, config, { requireEnabled: true })
+        : await validatePayablesAccountingConfig(tx, tenantId, config, { requireEnabled: true })
+      if (!validation.valid) throw Object.assign(new Error(validation.errors?.join('. ') || 'Accounting mappings must be valid and active before resolving this imbalance.'), { statusCode: 409 })
+
+      const controlAccountId = isReceivables ? config.receivableAccountId : config.payableAccountId
+      const equityAccountId = config.openingBalanceEquityAccountId
+      if (controlAccountId === equityAccountId) throw Object.assign(new Error('The control account and opening equity account must be different.'), { statusCode: 409 })
+      const [controlAccount, equityAccount] = await Promise.all([
+        tx.account.findFirst({ where: { id: controlAccountId, tenantId, isActive: true } }),
+        tx.account.findFirst({ where: { id: equityAccountId, tenantId, isActive: true } }),
+      ])
+      if (!controlAccount || !equityAccount || String(equityAccount.type).toLowerCase() !== 'equity') {
+        throw Object.assign(new Error('The mapped control/equity accounts are unavailable. Review accounting mappings before resolving.'), { statusCode: 409 })
+      }
+
+      const sourceType = 'TENANT_ACCOUNTING_CUTOVER_RECONCILIATION'
+      const sourceId = `${tenantId}:${exceptionKey}`
+      const existingJournal = await tx.journalEntry.findUnique({ where: { sourceType_sourceId: { sourceType, sourceId } } })
+      if (existingJournal) throw Object.assign(new Error('A reconciliation journal already exists for this imbalance. Refresh the page to load its resolution status.'), { statusCode: 409 })
+
+      const description = `Cutover ${isReceivables ? 'receivables' : 'payables'} control reconciliation`
+      const lines = buildSubledgerAdjustmentLines(controlAccount, equityAccount, currentDifference, description)
+      if (money(lines.reduce((sum, line) => sum + line.debit, 0)) !== money(lines.reduce((sum, line) => sum + line.credit, 0))) {
+        throw Object.assign(new Error('The proposed imbalance correction did not balance; no changes were applied.'), { statusCode: 409 })
+      }
+      const entryNo = `CUTOVER-REC-${tenantId}-${isReceivables ? 'AR' : 'AP'}`.slice(0, 64)
+      journalEntry = await tx.journalEntry.create({ data: {
+        tenantId, userId, date: resolvedAt, status: 'posted', sourceType, sourceId,
+        entryNo, reference: exceptionKey, description: `${description}. ${resolutionNote}`,
+        lines: { create: lines },
+      } })
+      for (const [account, line] of [[controlAccount, lines[0]], [equityAccount, lines[1]]]) {
+        const delta = normalBalance(account, line.debit, line.credit)
+        await tx.account.update({ where: { id: account.id }, data: { balance: { increment: delta } } })
+      }
+      resolutionType = 'adjusting_journal_posted'
+    }
+
+    const resolution = {
+      type: resolutionType,
+      note: resolutionNote,
+      resolvedAt: resolvedAt.toISOString(),
+      resolvedById: userId,
+      journalEntryId: journalEntry?.id || null,
+      journalEntryNo: journalEntry?.entryNo || null,
+      currentDifference,
+    }
+    const nextExceptions = exceptions.map((row, index) => index === exceptionIndex
+      ? { ...row, reviewStatus: 'resolved', resolution }
+      : row)
+    const hasOpenExceptions = nextExceptions.some((row) => row?.reviewStatus === 'open')
+    const updatedCutover = await tx.tenantAccountingCutover.update({
+      where: { tenantId },
+      data: { exceptions: nextExceptions, status: hasOpenExceptions ? 'active_with_exceptions' : 'active' },
+    })
+    return { alreadyResolved: false, cutover: updatedCutover, resolution, journalEntry }
+  }
+
+  if (typeof client.$transaction === 'function') {
+    try {
+      return await client.$transaction(run, { isolationLevel: 'Serializable', timeout: 30000, maxWait: 10000 })
+    } catch (error) {
+      if (['P2002', 'P2034', '40001'].includes(error?.code)) {
+        const latest = await client.tenantAccountingCutover.findUnique({ where: { tenantId } })
+        const resolved = Array.isArray(latest?.exceptions) && latest.exceptions.find((row) => row?.key === exceptionKey && row.reviewStatus === 'resolved')
+        if (resolved) return { alreadyResolved: true, cutover: latest, resolution: resolved.resolution || null }
+        throw Object.assign(new Error('This imbalance changed while being resolved. Refresh the page and verify its latest status before retrying.'), { statusCode: 409 })
       }
       throw error
     }
