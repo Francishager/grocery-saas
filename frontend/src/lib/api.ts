@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from './apiConfig'
+import { getApiBaseUrl, resolveApiUrl } from './apiConfig'
 import { cacheTenantFormattingSettings } from './utils'
 import type { WorkingHours } from '@/components/WorkingHoursEditor'
 
@@ -58,7 +58,7 @@ function redirectToTenantLogin() {
 }
 
 function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
-  const url = new URL(`${API_URL}${path.startsWith('/') ? '' : '/'}${path}`)
+  const url = resolveApiUrl(path, API_URL)
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {

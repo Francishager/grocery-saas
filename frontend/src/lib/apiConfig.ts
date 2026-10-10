@@ -42,3 +42,8 @@ export function buildApiUrl(path: string, explicitUrl?: string): string {
   const base = getApiBaseUrl(explicitUrl)
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`
 }
+
+export function resolveApiUrl(path: string, base = getApiBaseUrl()): URL {
+  const normalizedPath = `${base}${path.startsWith('/') ? '' : '/'}${path}`
+  return base ? new URL(normalizedPath) : new URL(normalizedPath, window.location.origin)
+}

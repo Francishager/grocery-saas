@@ -22,11 +22,14 @@ test('production Railway API configuration routes through same-origin; developme
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const module = { exports: {} };
   const loadWithEnv = env => new Function('exports', 'require', 'module', 'env', compiled)(module.exports, require, module, env);
+  globalThis.window = { location: { origin: 'https://jibusales.jibusales00.workers.dev' } };
 
   loadWithEnv({ PROD: true, VITE_API_URL: 'https://grocery-saas-production-e339.up.railway.app' });
   assert.equal(module.exports.getApiBaseUrl(), '');
   assert.equal(module.exports.getApiBaseUrl('https://api.example.com'), 'https://api.example.com');
   assert.equal(module.exports.getApiBaseUrl('http://localhost:3000'), '');
+  assert.equal(module.exports.resolveApiUrl('/api/dashboard/kpis').href,
+    'https://jibusales.jibusales00.workers.dev/api/dashboard/kpis');
 
   loadWithEnv({ PROD: false, VITE_API_URL: 'https://grocery-saas-production-e339.up.railway.app' });
   assert.equal(module.exports.getApiBaseUrl(), 'https://grocery-saas-production-e339.up.railway.app');
