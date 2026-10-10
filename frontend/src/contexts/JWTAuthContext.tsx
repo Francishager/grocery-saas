@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
 import { featureAccessService } from '@/services/featureAccessService'
+import { isLoginTransportError } from '@/lib/authNetworkError'
 import { clearTenantData } from '@/db/index'
 import { getApiAuthEndpoint } from '@/lib/apiConfig'
 
@@ -193,19 +194,25 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   const login = useCallback(async (email: string, password: string) => {
     setLoading(true)
     setError(null)
+    let loginResponseReceived = false
 
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 15000)
 
-      const response = await fetch(`${resolvedApiEndpoint}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
+      const response = await (async () => {
+        try {
+          return await fetch(`${resolvedApiEndpoint}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+            signal: controller.signal,
+          })
+        } finally {
+          clearTimeout(timeoutId)
+        }
+      })()
+      loginResponseReceived = true
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
@@ -233,11 +240,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       // Network error — try offline login with cached credentials
       // Covers: Chrome "Failed to fetch", Firefox "NetworkError", Safari "Load failed",
       //         AbortError (timeout), ERR_CONNECTION_TIMED_OUT
-      const isNetworkError =
-        err instanceof TypeError ||
-        (err instanceof DOMException && err.name === 'AbortError') ||
-        (err instanceof Error && /fetch|network|load|connect|offline|abort|timeout/i.test(err.message)) ||
-        !navigator.onLine
+      const isNetworkError = !loginResponseReceived && isLoginTransportError(err)
 
       if (isNetworkError) {
         // Check offline cache first (survives logout), then fall back to active session keys
