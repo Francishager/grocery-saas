@@ -88,7 +88,8 @@ test('stale zero summaries are corrected from loaded report rows', () => {
   assert.equal(amount(tree, 'Cash Sales'), 500);
   assert.equal(amount(tree, 'Credit Sales'), 0);
   assert.equal(amount(tree, 'Debt Collections'), 100);
-  assert.equal(amount(tree, 'Expenses'), 50);
+  assert.equal(amount(tree, 'Operating Expenses'), 50);
+  assert.equal(amount(tree, 'Cost of Sales (COGS)'), 100);
   assert.equal(amount(tree, 'Cash at Hand'), 550);
   assert.equal(amount(tree, 'Net Cash Movement'), 550);
   assert.equal(amount(tree, 'Gross Profit'), 400);
@@ -103,7 +104,7 @@ test('real empty zero balances stay zero when there are no detail rows', () => {
     transactions: [],
     expenses: [],
   });
-  for (const label of ['Total Sales', 'Cash Sales', 'Credit Sales', 'Debt Collections', 'Expenses',
+  for (const label of ['Total Sales', 'Cash Sales', 'Credit Sales', 'Debt Collections', 'Operating Expenses', 'Cost of Sales (COGS)',
     'Cash at Hand', 'Net Cash Movement', 'Gross Profit', 'Net Profit']) assert.equal(amount(tree, label), 0, label);
 });
 
@@ -178,7 +179,7 @@ test('gross/net profit drilldowns use revenue minus saved COGS and signed expens
   ] };
   assert.equal(total(drilldown(data, 'Gross Profit')), 400);
   assert.equal(total(drilldown(data, 'Net Profit')), 320);
-  assert.equal(amount(render(data), 'Expenses'), 80);
+  assert.equal(amount(render(data), 'Operating Expenses'), 80);
 });
 
 test('fallback cash calculation subtracts a transfer once, not its destination breakdown again', () => {
