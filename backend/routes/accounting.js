@@ -1,6 +1,6 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { loadLedgerBalances, ledgerBalanceSheet } from "../src/utils/reportAccounting.js";
+import { isCostOfSalesAccount, loadLedgerBalances, ledgerBalanceSheet } from "../src/utils/reportAccounting.js";
 import { authenticateToken, requirePermission, requireAnyPermission, getPaymentMethodPermissions, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
@@ -819,10 +819,15 @@ router.get("/reports/profit-loss", authenticateToken, requirePermission("canView
       .filter((row) => new Date(row.date) >= from)
       .reduce((sum, row) => sum + (["revenue", "income"].includes(account.type) ? row.credit - row.debit : row.debit - row.credit), 0);
     const revenues = accounts.filter((account) => ["revenue", "income"].includes(account.type)).map((account) => ({ ...account, balance: periodBalance(account) }));
-    const expenses = accounts.filter((account) => ["expense", "expenses"].includes(account.type)).map((account) => ({ ...account, balance: periodBalance(account) }));
+    const expenseAccounts = accounts.filter((account) => ["expense", "expenses"].includes(account.type)).map((account) => ({ ...account, balance: periodBalance(account) }));
+    const cogsAccounts = expenseAccounts.filter(isCostOfSalesAccount);
+    const expenses = expenseAccounts.filter((account) => !isCostOfSalesAccount(account));
     const totalRevenue = revenues.reduce((sum, account) => sum + account.balance, 0);
-    const totalExpenses = expenses.reduce((sum, account) => sum + account.balance, 0);
-    res.json({ revenues, expenses, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses });
+    const costOfSales = cogsAccounts.reduce((sum, account) => sum + account.balance, 0);
+    const totalOperatingExpenses = expenses.reduce((sum, account) => sum + account.balance, 0);
+    const totalCosts = costOfSales + totalOperatingExpenses;
+    const grossProfit = totalRevenue - costOfSales;
+    res.json({ revenues, cogsAccounts, expenses, totalRevenue, costOfSales, cogs: costOfSales, grossProfit, totalOperatingExpenses, operatingExpenses: totalOperatingExpenses, totalExpenses: totalOperatingExpenses, totalCosts, netProfit: grossProfit - totalOperatingExpenses });
   } catch (err) { handleBranchError(res, err, "Failed to generate P&L report"); }
 });
 

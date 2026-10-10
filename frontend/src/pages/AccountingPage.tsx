@@ -430,12 +430,21 @@ export default function AccountingPage() {
                   <div className="flex justify-between font-bold border-t pt-2"><span>Total Revenue</span><span>{profitLoss.totalRevenue.toFixed(2)}</span></div>
                 </div>
                 <div>
-                  <h3 className="font-medium mb-2">Expenses</h3>
+                  <h3 className="font-medium mb-2">Cost of Sales (COGS)</h3>
+                  {profitLoss.cogsAccounts?.map((e: any) => (
+                    <div key={e.code} className="flex justify-between text-sm py-1"><span>{e.code} - {e.name}</span><span className="font-mono">{e.balance.toFixed(2)}</span></div>
+                  ))}
+                  <div className="flex justify-between font-bold border-t pt-2"><span>Total Cost of Sales</span><span>{Number(profitLoss.costOfSales || 0).toFixed(2)}</span></div>
+                </div>
+                <div className="flex justify-between font-bold border-t pt-2"><span>Gross Profit</span><span>{Number(profitLoss.grossProfit || 0).toFixed(2)}</span></div>
+                <div>
+                  <h3 className="font-medium mb-2">Operating Expenses</h3>
                   {profitLoss.expenses.map((e: any) => (
                     <div key={e.code} className="flex justify-between text-sm py-1"><span>{e.code} - {e.name}</span><span className="font-mono">{e.balance.toFixed(2)}</span></div>
                   ))}
-                  <div className="flex justify-between font-bold border-t pt-2"><span>Total Expenses</span><span>{profitLoss.totalExpenses.toFixed(2)}</span></div>
+                  <div className="flex justify-between font-bold border-t pt-2"><span>Total Operating Expenses</span><span>{Number(profitLoss.totalOperatingExpenses ?? profitLoss.totalExpenses).toFixed(2)}</span></div>
                 </div>
+                <div className="flex justify-between font-semibold border-t pt-2"><span>Total Costs (COGS + Operating Expenses)</span><span>{Number(profitLoss.totalCosts ?? (Number(profitLoss.costOfSales || 0) + Number(profitLoss.totalOperatingExpenses ?? profitLoss.totalExpenses ?? 0))).toFixed(2)}</span></div>
                 <div className={`flex justify-between font-bold text-lg border-t-2 pt-4 ${profitLoss.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   <span>Net {profitLoss.netProfit >= 0 ? 'Profit' : 'Loss'}</span><span>{Math.abs(profitLoss.netProfit).toFixed(2)}</span>
                 </div>

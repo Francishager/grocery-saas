@@ -106,6 +106,11 @@ export const postedJournalWhere = {
 };
 
 const isExpense = (account) => ['expense', 'expenses'].includes(account?.type?.toLowerCase());
+export const isCostOfSalesAccount = (account) => {
+  const name = String(account?.name || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+  const subType = String(account?.subType || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+  return /\bcogs\b|\bcost of (goods )?(sold|sales)\b/.test(name) || /\bcogs\b|\bcost of (goods )?(sold|sales)\b/.test(subType);
+};
 const isTransaction = (account) => String(account?.subType || '').startsWith('transaction_') || String(account?.description || '').includes('cashAccount:');
 
 export async function loadJournalExpenseRows(client, scope, dateRange, { userId = null } = {}) {
@@ -120,7 +125,7 @@ export async function loadJournalExpenseRows(client, scope, dateRange, { userId 
     include: {
       user: { select: { id: true, fname: true, lname: true, email: true } },
       branch: { select: { id: true, name: true } },
-      lines: { include: { account: { select: { id: true, name: true, type: true, subType: true, description: true } } } },
+      lines: { include: { account: { select: { id: true, code: true, name: true, type: true, subType: true, description: true } } } },
     },
     orderBy: [{ date: 'asc' }, { id: 'asc' }],
   });
@@ -134,7 +139,7 @@ export async function loadJournalExpenseRows(client, scope, dateRange, { userId 
     if ([entry.id, entry.reference, entry.sourceId].some((ref) => ref && directReferences.has(ref))) return [];
     const payment = entry.lines.find((line) => isTransaction(line.account) && (Number(line.credit) || Number(line.debit)));
     const method = payment ? String(payment.account.subType || 'transaction_cash').replace('transaction_', '') : 'accrual';
-    return entry.lines.filter((line) => isExpense(line.account)).map((line) => ({
+    return entry.lines.filter((line) => isExpense(line.account) && !isCostOfSalesAccount(line.account)).map((line) => ({
       id: `journal-expense-${entry.id}-${line.id}`,
       journalEntryId: entry.id,
       source: 'journal',

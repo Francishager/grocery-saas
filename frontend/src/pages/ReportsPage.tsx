@@ -1407,7 +1407,7 @@ function PnLReport({ data }: { data: any }) {
   const fmtChange = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
   const rows = [
     { key: 'revenue', label: 'Revenue', value: data.revenue, bold: true, prev: data.previous?.revenue, change: data.changes?.revenue },
-    { key: 'cogs', label: 'Cost of Goods Sold (COGS)', value: -data.cogs, prev: data.previous ? -data.previous.cogs : undefined, change: data.changes?.cogs },
+    { key: 'cogs', label: 'Cost of Sales (COGS)', value: -data.cogs, prev: data.previous ? -data.previous.cogs : undefined, change: data.changes?.cogs },
     { key: 'grossProfit', label: 'Gross Profit', value: data.grossProfit, bold: true, highlight: true, prev: data.previous?.grossProfit, change: data.changes?.grossProfit },
     { key: 'expenses', label: 'Operating Expenses', value: -data.expenses, prev: data.previous ? -data.previous.expenses : undefined, change: data.changes?.expenses },
     { key: 'netProfit', label: 'Net Profit', value: data.netProfit, bold: true, highlight: true, prev: data.previous?.netProfit, change: data.changes?.netProfit },
@@ -2144,10 +2144,11 @@ export default function ReportsPage() {
       ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
       ['Credit Sales', summary.creditSales, 'Customer balances created by credit invoices; credit/debit notes are adjustments listed separately'],
       ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
-      ['Expenses', summary.expenses, 'Expenses recognized in the selected period'],
+      ['Cost of Sales (COGS)', profitability.cogs, 'Inventory cost recognized for products sold'],
+      ['Operating Expenses', summary.operatingExpenses ?? summary.expenses, 'Recognized running costs, excluding Cost of Sales (COGS)'],
       ['Net Cash Movement', cash.netCashMovement, 'Cash till receipts minus payments, refunds and transfers'],
       ['Gross Profit', profitability.grossProfit, 'Sales minus COGS'],
-      ['Net Profit', profitability.netProfit, 'Gross profit minus expenses'],
+      ['Net Profit', profitability.netProfit, 'Gross profit minus operating expenses'],
     ].forEach(([item, amount, details]) => pushAmount('Day Balancing Totals', String(item), amount, String(details)))
     Object.entries(data?.summary || {}).forEach(([key, value]) => pushAmount('Summary', key.replace(/([A-Z])/g, ' $1'), value))
     Object.entries(data?.cashMovement || {}).forEach(([key, value]) => pushAmount('Cash Status', key.replace(/([A-Z])/g, ' $1'), value))

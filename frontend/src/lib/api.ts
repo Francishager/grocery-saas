@@ -1043,6 +1043,7 @@ export interface DashboardKpis {
   totalDiscount: number
   purchases: number
   expenses: number
+  cogs: number
   grossProfit: number
   netProfit: number
   productCount: number

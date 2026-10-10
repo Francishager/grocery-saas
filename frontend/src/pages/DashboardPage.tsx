@@ -347,15 +347,28 @@ export default function DashboardPage() {
         </Card>
         )}
 
+        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
+        <Card className="border-l-4 border-l-amber-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Cost of Sales (COGS)</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-amber-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold">{formatCurrency(k.cogs)}</div>
+            <p className="text-xs text-muted-foreground">Cost of inventory sold; separate from operating expenses</p>
+          </CardContent>
+        </Card>
+        )}
+
         {hasFeature('expenses') && hasPermission('canViewExpense') && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Expenses</CardTitle>
+            <CardTitle className="text-sm font-medium">Operating Expenses</CardTitle>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold">{formatCurrency(k.expenses)}</div>
-            <p className="text-xs text-muted-foreground">Operating costs</p>
+            <p className="text-xs text-muted-foreground">Running costs, excluding Cost of Sales (COGS)</p>
           </CardContent>
         </Card>
         )}
@@ -444,11 +457,11 @@ export default function DashboardPage() {
 
       {/* Charts Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Revenue vs Expenses Chart */}
+        {/* Revenue vs Operating Expenses Chart */}
         {hasFeature('sales') && hasPermission('canViewSale') && (
         <Card>
           <CardHeader>
-            <CardTitle>Revenue vs Expenses</CardTitle>
+            <CardTitle>Revenue vs Operating Expenses</CardTitle>
             <CardDescription>12-month trend</CardDescription>
           </CardHeader>
           <CardContent>
@@ -459,7 +472,7 @@ export default function DashboardPage() {
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={(value: number) => formatCurrency(value)} />
                 <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Revenue" />
-                <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="7 7" name="Expenses" />
+                <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="7 7" name="Operating Expenses" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>

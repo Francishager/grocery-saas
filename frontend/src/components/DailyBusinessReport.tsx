@@ -532,7 +532,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Mobile Money Sales', value: cardTotals.mobileMoneySales, kinds: ['sale', 'credit-sale'], methods: ['mobile_money'], icon: Smartphone },
     { label: 'Bank / Card Sales', value: cardTotals.bankSales + cardTotals.cardSales, kinds: ['sale', 'credit-sale'], methods: ['bank', 'card'], icon: ArrowUpFromLine },
     { label: 'Debt Collections', value: cardTotals.debtCollections, kinds: ['collection'], icon: ReceiptText },
-    { label: 'Expenses', value: cardTotals.expenses, kinds: ['expense'], icon: ArrowDownToLine },
+    { label: 'Operating Expenses', value: cardTotals.expenses, kinds: ['expense'], icon: ArrowDownToLine },
     { label: 'Sales Tax Collected', value: cardTotals.taxCollected, kinds: ['sale', 'credit-sale', 'sales-adjustment'], icon: ReceiptText },
   ]
 
@@ -543,7 +543,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     ['Cash Debt Collections', metricValue(cash.cashCollections, cardTotals.debtCollections)],
     ['Other Cash In', cash.otherCashIn],
     ['Cash Transfers In', cash.cashTransfersIn],
-    ['Cash Expenses', metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0))],
+    ['Cash Operating Expenses', metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0))],
     ['Other Cash Out', cash.otherCashOut],
     ['Cash Transfers Out', cash.cashTransfersOut],
     ['Moved to Safe', cash.cashToSafe],
@@ -558,7 +558,8 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Credit Sales', value: cardTotals.creditSales, note: 'Customer balances created', kinds: ['credit-sale'] },
     { label: 'Sales Returns / Credit Notes', value: cardTotals.salesReturns, note: 'Issued customer sales adjustments; actual refunds appear in cash movements', kinds: ['sales-adjustment'] },
     { label: 'Debt Collections', value: cardTotals.debtCollections, note: 'Payments on old credit', kinds: ['collection'] },
-    { label: 'Expenses', value: cardTotals.expenses, note: 'Expenses recognized in the selected period', kinds: ['expense'] },
+    { label: 'Cost of Sales (COGS)', value: cardTotals.cogs, note: 'Inventory cost recognized for goods sold; not an operating expense', kinds: ['sale', 'credit-sale', 'sales-adjustment'] },
+    { label: 'Operating Expenses', value: cardTotals.expenses, note: 'Recognized running costs; excludes Cost of Sales (COGS)', kinds: ['expense'] },
     { label: 'Net Cash Movement', value: cardTotals.netCashMovement, note: 'Cash till receipts minus payments, refunds and transfers', kinds: ['sale', 'collection', 'expense', 'cash-movement', 'transfer'] },
     { label: 'Gross Profit', value: cardTotals.grossProfit, note: 'Net revenue after returns less net COGS after returned inventory', kinds: ['sale', 'credit-sale', 'sales-adjustment'] },
     { label: 'Net Profit', value: cardTotals.netProfit, note: 'Gross profit minus recognized expenses', kinds: ['sale', 'credit-sale', 'sales-adjustment', 'expense'] },
@@ -569,7 +570,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     { label: 'Cash Debt Collections', inflow: metricValue(cash.cashCollections ?? cash.debtCollections, cardTotals.debtCollections), outflow: 0 },
     { label: 'Other Cash In', inflow: cash.otherPhysicalCashIn ?? cash.otherCashIn, outflow: 0 },
     { label: 'Cash Transfers In', inflow: cash.cashTransfersIn, outflow: 0 },
-    { label: 'Cash Expenses', inflow: 0, outflow: metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0)) },
+    { label: 'Cash Operating Expenses', inflow: 0, outflow: metricValue(cash.cashExpenses, expenseRows.filter(hasRealCashExpenseImpact).reduce((total, row) => total + numberValue(row.amount), 0)) },
     { label: 'Other Cash Out', inflow: 0, outflow: cash.otherPhysicalCashOut ?? cash.otherCashOut },
     { label: 'Cash Transfers Out', inflow: 0, outflow: cash.cashTransfersOut },
   ].filter((row) => numberValue(row.inflow) || numberValue(row.outflow) || row.label === 'Opening Physical Cash')
@@ -654,7 +655,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
               ['Sales Returns / Credit Notes', -cardTotals.salesReturns],
               ['Sales Tax Collected (liability, excluded from income)', cardTotals.taxCollected],
               ['Net Revenue', cardTotals.revenue],
-              ['COGS', cardTotals.cogs],
+              ['Cost of Sales (COGS)', cardTotals.cogs],
               ['Gross Profit', cardTotals.grossProfit],
               ['Net Profit', cardTotals.netProfit],
             ].map(([label, value]) => <button key={label} className="rounded-md border p-3 text-left hover:bg-muted/40" onClick={() => openKind(`${label} Support`, ['sale', 'credit-sale', 'sales-adjustment'])}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 min-h-[1.5rem] whitespace-nowrap overflow-visible font-semibold tabular-nums" aria-label={`${label}: ${money(value)}`}>{money(value)}</p></button>)}
@@ -697,7 +698,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         <Card>
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-              <span className="flex items-center gap-2"><ArrowDownToLine className="h-4 w-4" />Expense Breakdown</span>
+              <span className="flex items-center gap-2"><ArrowDownToLine className="h-4 w-4" />Operating Expense Breakdown</span>
               <Badge variant="outline">{money(cardTotals.expenses)}</Badge>
             </CardTitle>
           </CardHeader>
@@ -731,7 +732,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
       </section>
 
       <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ArrowDownToLine className="h-4 w-4" />Expenses Paid Today</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ArrowDownToLine className="h-4 w-4" />Operating Expenses Recorded Today</CardTitle></CardHeader>
         <CardContent>
           {expenseRows.length ? (
             <>

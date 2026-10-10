@@ -179,6 +179,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
       totalDiscount: aggregateTotal(salesThisMonth, "discount") + aggregateTotal(saleRecordsThisMonth, "discount"),
       purchases: totalPurchases,
       expenses: totalExpenses,
+      operatingExpenses: totalExpenses,
       cogs,
       grossProfit,
       netProfit,

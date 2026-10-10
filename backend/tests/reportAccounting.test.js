@@ -118,12 +118,14 @@ test('expense belongs to its business date, not both business date and creation 
   assert.deepEqual(expenseDateWhere(range), { date: range });
 });
 
-test('expense journals use signed lines, preserve reversals, and exclude duplicate expense sources', async () => {
+test('expense journals separate Cost of Sales from operating expenses and exclude duplicate sources', async () => {
   const expense = { name: 'Wages', type: 'expense' };
+  const cogs = { name: 'Cost of Goods Sold', type: 'expense' };
   const entries = [
     { id: 'post', date: new Date('2026-08-31'), status: 'reversed', reversalJournalId: 'reverse', lines: [{ id: 'a', account: expense, debit: 300000, credit: 0 }] },
     { id: 'reverse', date: new Date('2026-09-01'), status: 'posted', lines: [{ id: 'b', account: expense, debit: 0, credit: 300000 }] },
     { id: 'duplicate', sourceId: 'direct-expense', lines: [{ id: 'c', account: expense, debit: 50000, credit: 0 }] },
+    { id: 'cogs', lines: [{ id: 'd', account: cogs, debit: 80000, credit: 0 }] },
   ];
   const client = {
     journalEntry: { findMany: async (query) => {

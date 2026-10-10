@@ -1633,6 +1633,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         cashAtHand,
         netCashMovement,
         expenses: expensesTotal,
+        operatingExpenses: expensesTotal,
         grossProfit,
         netProfit,
         customersServed: customerMap.size,
@@ -1640,7 +1641,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       },
       cashMovement,
       cashLedger,
-      profitability: { grossSales: toMoney(totalSales), salesReturns, creditNoteAdjustments, posReturnAdjustments, returnedTax, netSales: revenue, taxCollected: toMoney(taxCollected), revenue, cogs, returnedCogs: toMoney(returnedCogs), grossProfit, expenses: expensesTotal, netProfit },
+      profitability: { grossSales: toMoney(totalSales), salesReturns, creditNoteAdjustments, posReturnAdjustments, returnedTax, netSales: revenue, taxCollected: toMoney(taxCollected), revenue, cogs, costOfSales: cogs, returnedCogs: toMoney(returnedCogs), grossProfit, expenses: expensesTotal, operatingExpenses: expensesTotal, netProfit },
       accountingReconciliation: {
         salesReturns: { creditNotes: creditNoteAdjustments, posReturns: posReturnAdjustments, total: salesReturns },
         tax: {
@@ -2372,7 +2373,7 @@ router.get("/financial/profit-loss", authenticateToken, async (req, res) => {
       transactions: sortFinancialRows([...detailGroups.revenue, ...detailGroups.cogs, ...detailGroups.expenses]),
       data: [
         financialSummaryLine("sales-revenue", "Sales Revenue", current.revenue, { credit: current.revenue, account: "Sales Revenue", type: "Income" }),
-        financialSummaryLine("cogs", "Cost of Goods Sold", current.cogs, { debit: current.cogs, account: "Cost of Goods Sold", type: "Expense" }),
+        financialSummaryLine("cogs", "Cost of Sales (COGS)", current.cogs, { debit: current.cogs, account: "Cost of Sales (COGS)", type: "Cost of Sales" }),
         financialSummaryLine("gross-profit", "Gross Profit", current.grossProfit, { credit: Math.max(0, current.grossProfit), debit: Math.max(0, -current.grossProfit), account: "Gross Profit", type: "Subtotal" }),
         financialSummaryLine("operating-expenses", "Operating Expenses", current.expenses, { debit: current.expenses, account: "Operating Expenses", type: "Expense" }),
         financialSummaryLine("net-profit", "Net Profit", current.netProfit, { credit: Math.max(0, current.netProfit), debit: Math.max(0, -current.netProfit), account: "Net Profit", type: "Result" }),
