@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react';
 import OnboardingGuideModal from './OnboardingGuideModal';
 import { useJWTAuth } from '@/contexts/JWTAuthContext';
+import { getApiBaseUrl } from '@/lib/apiConfig';
 
 interface OnboardingGuideCardProps {
   hasCompleted: boolean;
@@ -27,7 +28,7 @@ export default function OnboardingGuideCard({
   const handleComplete = async () => {
     try {
       setIsLoading(true);
-      const apiBase = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app';
+      const apiBase = getApiBaseUrl();
       const response = await fetch(`${apiBase}/api/onboarding/complete`, {
         method: 'POST',
         headers: {
@@ -50,7 +51,7 @@ export default function OnboardingGuideCard({
   const handleReset = async () => {
     try {
       setIsLoading(true);
-      const apiBase = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app';
+      const apiBase = getApiBaseUrl();
       const response = await fetch(`${apiBase}/api/onboarding/reset`, {
         method: 'POST',
         headers: {

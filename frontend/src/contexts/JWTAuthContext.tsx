@@ -212,6 +212,9 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           clearTimeout(timeoutId)
         }
       })()
+      if (response.headers.get('x-jibusales-proxy-error') === 'upstream-unreachable') {
+        throw new TypeError('The API server could not be reached')
+      }
       loginResponseReceived = true
 
       if (!response.ok) {

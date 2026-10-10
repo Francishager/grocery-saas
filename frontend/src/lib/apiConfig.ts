@@ -15,12 +15,23 @@ function isLocalhostUrl(value: string): boolean {
 export function getApiBaseUrl(explicitUrl?: string): string {
   const configured = explicitUrl || import.meta.env.VITE_API_URL || ''
 
+  // Production clients use the Cloudflare Worker as a same-origin API proxy.
+  // This avoids depending on each customer's DNS resolver for Railway domains.
+  if (import.meta.env.PROD && (!configured || isRailwayUrl(configured))) return ''
   if (!configured) return DEFAULT_API_BASE
   if (import.meta.env.PROD && isLocalhostUrl(configured)) {
-    return DEFAULT_API_BASE
+    return ''
   }
 
   return configured.replace(/\/$/, '')
+}
+
+function isRailwayUrl(value: string): boolean {
+  try {
+    return new URL(value).hostname.toLowerCase().endsWith('.up.railway.app')
+  } catch {
+    return false
+  }
 }
 
 export function getApiAuthEndpoint(explicitUrl?: string): string {

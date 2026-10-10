@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { getApiBaseUrl } from '@/lib/apiConfig'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -101,7 +102,7 @@ export default function SaaSAdminDashboard() {
 
   const loadTenants = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      const API_URL = getApiBaseUrl()
       const params = new URLSearchParams({
         ...(searchTerm && { search: searchTerm }),
         ...(statusFilter !== 'all' && { status: statusFilter })
@@ -129,7 +130,7 @@ export default function SaaSAdminDashboard() {
 
   const loadPlans = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      const API_URL = getApiBaseUrl()
       const response = await fetch(`${API_URL}/api/platform/plans`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
@@ -150,7 +151,7 @@ export default function SaaSAdminDashboard() {
 
   const loadTenantFeatures = async (tenantId: string) => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      const API_URL = getApiBaseUrl()
       const response = await fetch(`${API_URL}/api/platform/tenant/${tenantId}/features`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
@@ -172,7 +173,7 @@ export default function SaaSAdminDashboard() {
 
   const updateTenantStatus = async (tenantId: string, status: string) => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      const API_URL = getApiBaseUrl()
       const response = await fetch(`${API_URL}/api/platform/tenants/${tenantId}/status`, {
         method: 'PUT',
         headers: {
@@ -207,7 +208,7 @@ export default function SaaSAdminDashboard() {
 
   const toggleTenantFeature = async (tenantId: string, featureName: string, enabled: boolean) => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || ''
+      const API_URL = getApiBaseUrl()
       const response = await fetch(`${API_URL}/api/platform/tenant/${tenantId}/features/${featureName}`, {
         method: 'POST',
         headers: {

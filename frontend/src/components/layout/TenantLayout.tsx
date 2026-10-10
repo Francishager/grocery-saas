@@ -5,6 +5,7 @@ import { trashPermissions } from '@/lib/trashPermissions'
 import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
+import { getApiBaseUrl } from '@/lib/apiConfig'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -451,7 +452,7 @@ export function TenantLayout() {
 
   const completeOnboarding = async () => {
     try {
-      const apiBase = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
+      const apiBase = getApiBaseUrl()
       await fetch(`${apiBase}/api/onboarding/complete`, {
         method: 'POST',
         headers: {

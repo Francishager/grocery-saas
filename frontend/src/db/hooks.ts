@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './index'
+import { getApiBaseUrl } from '@/lib/apiConfig'
 import {
   getSyncStatus,
   onSyncStatusChange,
@@ -9,7 +10,7 @@ import {
   type SyncStatus,
 } from './sync'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://grocery-saas-production-e339.up.railway.app'
+const API_URL = getApiBaseUrl()
 
 // Live queries — automatically re-render when IndexedDB data changes
 export function useLocalProducts(search?: string) {

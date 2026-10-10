@@ -1,4 +1,5 @@
 // Business Owner Invitation Service
+import { getApiBaseUrl } from '@/lib/apiConfig'
 
 export interface Invitation {
   id: string
@@ -49,7 +50,7 @@ class InviteService {
   private apiKey?: string
 
   constructor(apiEndpoint?: string, apiKey?: string) {
-    const baseUrl = import.meta.env.VITE_API_URL || ''
+    const baseUrl = getApiBaseUrl()
     this.apiEndpoint = apiEndpoint || `${baseUrl}/api/invitations`
     this.apiKey = apiKey
   }
