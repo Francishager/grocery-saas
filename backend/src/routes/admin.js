@@ -900,7 +900,8 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
     }
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true, owner: { select: { fname: true, lname: true, email: true, phone: true } } } });
     if (!tenant) return res.status(404).json({ error: "Business not found" });
-    const currency = resolveSubscriptionCharge(tenant.plan || {}, tenant).currency;
+    const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+    const currency = charge.currency;
     const cleanReference = typeof reference === "string" ? reference.trim().slice(0, 200) || null : null;
     const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 2000) || null : null;
     const cleanPayerName = typeof payerName === "string" ? payerName.trim().slice(0, 160) || null : null;
@@ -909,6 +910,27 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
       const payerPhone = String(phone || tenant.owner?.phone || "").trim();
       const payerEmail = String(email || tenant.owner?.email || tenant.email || "").trim();
       if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter the payer phone number or email for Pesapal checkout" });
+      const progressBeforePayment = await getSubscriptionPaymentProgress(prisma, tenant.id);
+      const continueOutstandingInvoice = Boolean(progressBeforePayment?.progress.isPartiallyPaid);
+      const invoiceSnapshot = continueOutstandingInvoice ? progressBeforePayment.invoiceSnapshot : null;
+      const invoice = {
+        ...(invoiceSnapshot || {}),
+        planName: invoiceSnapshot?.planName || tenant.plan?.name || "Subscription",
+        currency,
+        invoiceKey: continueOutstandingInvoice
+          ? progressBeforePayment.invoiceKey || `subscription-${tenant.id}-${progressBeforePayment.periodStart.toISOString()}`
+          : `subscription-${tenant.id}-${progressBeforePayment?.periodStart?.toISOString() || new Date().toISOString()}`,
+        billedTotal: continueOutstandingInvoice ? progressBeforePayment.periodTotal : charge.total,
+        priorPaidAmount: continueOutstandingInvoice && !invoiceSnapshot ? progressBeforePayment.progress.paidAmount : Number(invoiceSnapshot?.priorPaidAmount || 0),
+        total: Number(paymentAmount),
+        lineItems: invoiceSnapshot?.lineItems || [
+          ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || "Subscription"} plan`, quantity: 1, unitAmount: charge.planCharge, amount: charge.planCharge }] : []),
+          ...(charge.serviceFee > 0 ? [{ description: "Service fee", quantity: 1, unitAmount: charge.serviceFee, amount: charge.serviceFee }] : []),
+          ...(charge.includedStaticIpFee > 0 ? [{ description: "Static IP service", quantity: 1, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee }] : []),
+        ],
+        issuedAt: invoiceSnapshot?.issuedAt || new Date().toISOString(),
+        ...(cleanNotes ? { adminNote: cleanNotes } : {}),
+      };
       const merchantReference = `JS-${tenant.id.slice(0, 18)}-${Date.now()}-${randomBytes(3).toString("hex")}`;
       const attempt = await prisma.subscriptionPayment.create({
         data: {
@@ -923,7 +945,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           payerEmail: payerEmail || null,
           payerName: cleanPayerName || [tenant.owner?.fname, tenant.owner?.lname].filter(Boolean).join(" ") || tenant.name,
           reference: cleanReference,
-          notes: cleanNotes,
+          notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`,
           recordedById: req.user?.id || null,
           recordedByEmail: req.user?.email || null,
           status: "pending",
@@ -954,6 +976,29 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
     if (Number.isNaN(paymentDate.getTime())) return res.status(400).json({ error: "Enter a valid payment date" });
 
     const payment = await prisma.$transaction(async tx => {
+      const progressBeforePayment = await getSubscriptionPaymentProgress(tx, tenant.id, paymentDate);
+      const continueOutstandingInvoice = Boolean(progressBeforePayment?.progress.isPartiallyPaid);
+      const invoiceSnapshot = continueOutstandingInvoice ? progressBeforePayment.invoiceSnapshot : null;
+      const invoice = {
+        ...(invoiceSnapshot || {}),
+        planName: invoiceSnapshot?.planName || tenant.plan?.name || "Subscription",
+        periodCount: invoiceSnapshot?.periodCount || 1,
+        periodUnit: invoiceSnapshot?.periodUnit || charge.billingCycle,
+        currency,
+        invoiceKey: continueOutstandingInvoice
+          ? progressBeforePayment.invoiceKey || `subscription-${tenant.id}-${progressBeforePayment.periodStart.toISOString()}`
+          : `subscription-${tenant.id}-${progressBeforePayment?.periodStart?.toISOString() || paymentDate.toISOString()}`,
+        billedTotal: continueOutstandingInvoice ? progressBeforePayment.periodTotal : charge.total,
+        priorPaidAmount: continueOutstandingInvoice && !invoiceSnapshot ? progressBeforePayment.progress.paidAmount : Number(invoiceSnapshot?.priorPaidAmount || 0),
+        total: Number(paymentAmount),
+        lineItems: invoiceSnapshot?.lineItems || [
+          ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || "Subscription"} plan`, quantity: 1, unitAmount: charge.planCharge, amount: charge.planCharge }] : []),
+          ...(charge.serviceFee > 0 ? [{ description: "Service fee", quantity: 1, unitAmount: charge.serviceFee, amount: charge.serviceFee }] : []),
+          ...(charge.includedStaticIpFee > 0 ? [{ description: "Static IP service", quantity: 1, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee }] : []),
+        ],
+        issuedAt: invoiceSnapshot?.issuedAt || paymentDate.toISOString(),
+        ...(cleanNotes ? { adminNote: cleanNotes } : {}),
+      };
       const receipt = await tx.subscriptionPayment.create({
         data: {
           tenantId: tenant.id,
@@ -962,7 +1007,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           paymentMethod: method,
           payerName: cleanPayerName,
           reference: cleanReference,
-          notes: cleanNotes,
+          notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`,
           paidAt: paymentDate,
           status: "completed",
           provider: "manual",

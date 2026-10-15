@@ -77,7 +77,9 @@ export default function BusinessSettingsPage() {
   const invoiceTotal = partialBalanceDue
     ? Number(billing.amountDue)
     : invoiceCurrentRemainder + Math.max(0, invoicePeriods - 1) * invoicePeriodTotal
-  const invoiceLineItems = (periodCount: number) => [
+  const invoiceLineItems = (periodCount: number) => partialBalanceDue
+    ? [{ label: 'Outstanding balance carried forward', amount: Number(billing.amountDue) }]
+    : [
     ...(Number(billing?.planPrice) > 0 ? [{ label: `${billing.planName} plan × ${periodCount}`, amount: Number(billing.planPrice) * periodCount }] : []),
     ...(Number(billing?.serviceFee) > 0 ? [{ label: `Service fee × ${periodCount}`, amount: Number(billing.serviceFee) * periodCount }] : []),
     ...(Number(billing?.staticIpFee) > 0 ? [{ label: `Static IP service × ${periodCount}`, amount: Number(billing.staticIpFee) * periodCount }] : []),
@@ -350,7 +352,10 @@ export default function BusinessSettingsPage() {
                   <div className="flex items-center justify-between"><h3 className="font-semibold">Payment history</h3><Button variant="ghost" size="sm" onClick={() => void loadBilling()} disabled={billingLoading}>{billingLoading ? 'Refreshing...' : 'Refresh'}</Button></div>
                   {billing.payments?.length ? <div className="divide-y rounded-lg border">
                     {billing.payments.map((payment: any) => {
-                      const invoiceItems = payment.invoice?.lineItems?.map((item: any) => ({ label: item.description, amount: Number(item.amount) })) || [{ label: 'Subscription payment', amount: Number(payment.amount) }]
+                      const invoiceLines = payment.invoice?.lineItems?.map((item: any) => ({ label: item.description, amount: Number(item.amount) })) || []
+                      const invoiceItems = Math.abs(Number(payment.invoice?.total ?? payment.amount) - Number(payment.amount)) < 0.01 && invoiceLines.length
+                        ? invoiceLines
+                        : [{ label: 'Subscription payment received', amount: Number(payment.amount) }]
                       const date = payment.paidAt || payment.createdAt
                       return <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
                         <div className="min-w-0"><p className="font-medium">{billingMoney(payment.amount, payment.currency)} <span className="ml-1 text-xs font-normal capitalize text-muted-foreground">{payment.status}</span></p><p className="break-all text-xs text-muted-foreground">{date ? new Date(date).toLocaleDateString('en-GB') : 'Date pending'} · {payment.paymentMethod || payment.provider || 'Payment'}{payment.reference ? ` · ${payment.reference}` : ''}</p>{payment.invoice?.periodCount && <p className="text-xs text-muted-foreground">Covers {payment.invoice.periodCount} {payment.invoice.periodUnit === 'yearly' ? 'year(s)' : 'month(s)'}</p>}</div>

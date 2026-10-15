@@ -34,6 +34,7 @@ test('partial subscription payments remain due while the subscription term is ac
         return { _sum: { amount: 40000 } };
       },
       count: async () => 1,
+      findMany: async () => [],
     },
   };
 
@@ -42,6 +43,36 @@ test('partial subscription payments remain due while the subscription term is ac
   assert.equal(result.progress.remainingAmount, 60000);
   assert.equal(result.progress.isPartiallyPaid, true);
   assert.equal(result.progress.isPaid, false);
+});
+
+test('annual-fee invoice balances carry into later monthly windows despite charge-mode changes', async () => {
+  const tenant = {
+    id: 'tenant-2',
+    plan: { price: 100000, billingCycle: 'monthly', currency: 'UGX' },
+    billingChargeMode: 'plan',
+    monthlyServiceFee: 20000,
+    createdAt: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionStart: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-12-01T00:00:00.000Z'),
+  };
+  const tx = {
+    tenant: { findUnique: async () => tenant },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 0 } }),
+      count: async () => 1,
+      findMany: async () => [{
+        amount: 40000,
+        notes: 'JIBUSALES_INVOICE:{"invoiceKey":"annual-invoice-1","billedTotal":120000,"total":40000,"lineItems":[{"description":"Annual service fee","amount":20000}]}',
+        paidAt: new Date('2026-10-10T00:00:00.000Z'),
+      }],
+    },
+  };
+
+  const result = await getSubscriptionPaymentProgress(tx, tenant.id, new Date('2026-11-16T00:00:00.000Z'));
+  assert.equal(result.periodTotal, 120000);
+  assert.equal(result.progress.remainingAmount, 80000);
+  assert.equal(result.progress.isPartiallyPaid, true);
+  assert.equal(result.invoiceSnapshot.lineItems[0].description, 'Annual service fee');
 });
 
 test('Pesapal statuses only settle successful verified payments', () => {
@@ -67,6 +98,7 @@ test('admin cancellation voids a manual receipt with an audit reason and leaves 
       },
       aggregate: async () => ({ _sum: { amount: 0 } }),
       count: async () => 1,
+      findMany: async () => [],
     },
     tenant: {
       findUnique: async ({ include } = {}) => include

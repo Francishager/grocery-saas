@@ -54,25 +54,57 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
     start.setUTCDate(Math.min(day, lastDay));
     periodStart = start;
   }
-  const [aggregate, ledgerCount] = await Promise.all([
+  const paymentWhere = {
+    tenantId,
+    status: 'completed',
+    paidAt: { not: null, gte: periodStart, lte: asOf },
+  };
+  const [aggregate, ledgerCount, receipts] = await Promise.all([
     tx.subscriptionPayment.aggregate({
-      where: {
-        tenantId,
-        status: 'completed',
-        paidAt: { not: null, gte: periodStart, lte: asOf },
-      },
+      where: paymentWhere,
       _sum: { amount: true },
     }),
     tx.subscriptionPayment.count({ where: { tenantId } }),
+    tx.subscriptionPayment.findMany({
+      where: { tenantId, status: 'completed', paidAt: { not: null, lte: asOf } },
+      orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true, amount: true, notes: true, paidAt: true, createdAt: true },
+    }),
   ]);
   const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
-  const periodTotal = charge.total;
+  const invoiceGroups = new Map();
+  for (const receipt of receipts) {
+    const invoice = readBillingInvoice(receipt.notes);
+    const billedTotal = Number(invoice?.billedTotal ?? invoice?.total);
+    if (!invoice || !Number.isFinite(billedTotal) || billedTotal <= 0) continue;
+    const invoiceKey = String(invoice.invoiceKey || `legacy-${invoice.issuedAt || receipt.id}`);
+    const group = invoiceGroups.get(invoiceKey) || {
+      invoiceKey,
+      invoice,
+      billedTotal,
+      paidAmount: Math.max(0, Number(invoice.priorPaidAmount) || 0),
+      hasCurrentPayment: false,
+      firstPaidAt: receipt.paidAt,
+    };
+    group.paidAmount += Number(receipt.amount || 0);
+    group.hasCurrentPayment ||= new Date(receipt.paidAt) >= periodStart;
+    if (new Date(receipt.paidAt) < new Date(group.firstPaidAt)) group.firstPaidAt = receipt.paidAt;
+    invoiceGroups.set(invoiceKey, group);
+  }
+  const groups = [...invoiceGroups.values()].sort((a, b) => new Date(a.firstPaidAt) - new Date(b.firstPaidAt));
+  const openInvoice = groups.find(group => group.paidAmount < group.billedTotal - 0.01);
+  const latestCurrentInvoice = groups.filter(group => group.hasCurrentPayment).at(-1);
+  const trackedInvoice = openInvoice || latestCurrentInvoice;
+  const invoiceSnapshot = trackedInvoice?.invoice || null;
+  const periodTotal = trackedInvoice?.billedTotal || charge.total;
   const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
   const recordedThisPeriod = Number(aggregate._sum.amount || 0) > 0;
-  const progress = (coveredByActiveTerm && !recordedThisPeriod) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
+  const trackedPaidAmount = trackedInvoice?.paidAmount ?? aggregate._sum.amount;
+  const hasOpenHistoricalInvoice = Boolean(openInvoice);
+  const progress = (!hasOpenHistoricalInvoice && coveredByActiveTerm && !recordedThisPeriod) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
     ? calculateSubscriptionPaymentProgress(periodTotal, periodTotal)
-    : calculateSubscriptionPaymentProgress(periodTotal, aggregate._sum.amount);
-  return { tenant, progress };
+    : calculateSubscriptionPaymentProgress(periodTotal, trackedPaidAmount);
+  return { tenant, progress, invoiceSnapshot, periodStart, periodTotal, invoiceKey: trackedInvoice?.invoiceKey || null };
 }
 
 export async function refreshSubscriptionPaymentStatus(tx, tenantId, asOf = new Date()) {

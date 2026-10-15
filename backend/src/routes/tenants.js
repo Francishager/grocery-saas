@@ -285,17 +285,26 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
       const payerEmail = String(email || req.user?.email || "").trim();
       if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter a phone number or email for Pesapal checkout" });
       const names = String(tenant.name || "Business").trim().split(/\s+/);
+      const isBalanceOnlyPayment = Boolean(paymentProgress?.progress.isPartiallyPaid);
+      const billedTotal = isBalanceOnlyPayment ? paymentProgress.periodTotal : amountDue;
       const invoice = {
         planName: tenant.plan?.name || 'Subscription',
         periodCount,
         periodUnit: charge.billingCycle,
         currency: charge.currency,
-        lineItems: [
+        invoiceKey: isBalanceOnlyPayment
+          ? paymentProgress.invoiceKey || `subscription-${tenant.id}-${paymentProgress.periodStart.toISOString()}`
+          : `subscription-${tenant.id}-${paymentProgress?.periodStart?.toISOString() || new Date().toISOString()}`,
+        billedTotal,
+        priorPaidAmount: isBalanceOnlyPayment && !paymentProgress.invoiceSnapshot ? paymentProgress.progress.paidAmount : Number(paymentProgress?.invoiceSnapshot?.priorPaidAmount || 0),
+        lineItems: isBalanceOnlyPayment
+          ? [{ description: 'Outstanding balance carried forward', quantity: 1, unitAmount: amountDue, amount: amountDue }]
+          : [
           ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || 'Subscription'} plan (${periodCount} ${charge.billingCycle === 'yearly' ? 'year' : 'month'}${periodCount === 1 ? '' : charge.billingCycle === 'yearly' ? 's' : 's'})`, quantity: periodCount, unitAmount: charge.planCharge, amount: charge.planCharge * periodCount }] : []),
           ...(charge.serviceFee > 0 ? [{ description: 'Service fee', quantity: periodCount, unitAmount: charge.serviceFee, amount: charge.serviceFee * periodCount }] : []),
           ...(charge.includedStaticIpFee > 0 ? [{ description: 'Static IP service', quantity: periodCount, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee * periodCount }] : []),
           ...(currentPeriodRemainder < periodTotal ? [{ description: 'Previous payments applied', quantity: 1, unitAmount: -Math.min(periodTotal - currentPeriodRemainder, periodTotal), amount: -Math.min(periodTotal - currentPeriodRemainder, periodTotal) }] : []),
-        ],
+          ],
         total: amountDue,
         issuedAt: new Date().toISOString(),
       };
