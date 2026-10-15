@@ -66,7 +66,7 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
     tx.subscriptionPayment.count({ where: { tenantId } }),
   ]);
   const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
-  const periodTotal = charge.price + charge.serviceFee + charge.staticIpFee;
+  const periodTotal = charge.total;
   const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
   const progress = coveredByActiveTerm || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
     ? calculateSubscriptionPaymentProgress(periodTotal, periodTotal)

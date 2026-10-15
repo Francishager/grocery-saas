@@ -14,6 +14,7 @@ interface Subscription {
   monthlyServiceFee?: number | null
   annualServiceFee?: number | null
   staticIpFee?: number | null
+  billingChargeMode?: 'plan' | 'service' | 'both'
   gracePeriodDays?: number | null
   reminderDaysBeforeDue?: number | null
   plan: { id: string; name: string; price: number; currency: string; billingCycle: string; maxUsers?: number; maxProducts?: number }
@@ -59,6 +60,7 @@ export const SubscriptionsPage: React.FC = () => {
   const [monthlyServiceFee, setMonthlyServiceFee] = useState('0')
   const [annualServiceFee, setAnnualServiceFee] = useState('0')
   const [staticIpFee, setStaticIpFee] = useState('0')
+  const [billingChargeMode, setBillingChargeMode] = useState<'plan' | 'service' | 'both'>('both')
   const [gracePeriodDays, setGracePeriodDays] = useState('0')
   const [reminderDaysBeforeDue, setReminderDaysBeforeDue] = useState('10')
   const [planMaxUsers, setPlanMaxUsers] = useState('')
@@ -197,6 +199,7 @@ export const SubscriptionsPage: React.FC = () => {
     setMonthlyServiceFee(String(sub.monthlyServiceFee ?? 0))
     setAnnualServiceFee(String(sub.annualServiceFee ?? 0))
     setStaticIpFee(String(sub.staticIpFee ?? 0))
+    setBillingChargeMode(sub.billingChargeMode || 'both')
     setGracePeriodDays(String(sub.gracePeriodDays ?? 0))
     setReminderDaysBeforeDue(String(sub.reminderDaysBeforeDue ?? 10))
     setPlanMaxUsers(String(sub.plan?.maxUsers || ''))
@@ -301,6 +304,7 @@ export const SubscriptionsPage: React.FC = () => {
       if (monthlyServiceFee !== '') body.monthlyServiceFee = monthlyServiceFee
       if (annualServiceFee !== '') body.annualServiceFee = annualServiceFee
       if (staticIpFee !== '') body.staticIpFee = staticIpFee
+      body.billingChargeMode = billingChargeMode
       if (gracePeriodDays !== '') body.gracePeriodDays = gracePeriodDays
       if (reminderDaysBeforeDue !== '') body.reminderDaysBeforeDue = reminderDaysBeforeDue
       if (planMaxUsers) body.maxUsers = planMaxUsers
@@ -696,6 +700,15 @@ export const SubscriptionsPage: React.FC = () => {
                     <label className="block text-xs font-medium text-gray-500 mb-1">Static IP</label>
                     <input type="number" min="0" step="0.01" value={staticIpFee} onChange={(e) => setStaticIpFee(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Charges on this business invoice</label>
+                  <select value={billingChargeMode} onChange={(e) => setBillingChargeMode(e.target.value as 'plan' | 'service' | 'both')} className="w-full px-3 py-2 border rounded-lg text-sm">
+                    <option value="both">Plan charge + services</option>
+                    <option value="plan">Plan charge only</option>
+                    <option value="service">Services only</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">Services include the applicable service fee and static IP charge. Existing businesses keep both charges unless changed here.</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>

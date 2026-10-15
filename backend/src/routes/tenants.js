@@ -154,8 +154,8 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
     });
 
     const paymentProgress = await getSubscriptionPaymentProgress(prisma, tenant.id);
-    const amountDue = paymentProgress?.progress.remainingAmount ?? resolveSubscriptionCharge(tenant.plan || {}, tenant).price;
     const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+    const amountDue = paymentProgress?.progress.remainingAmount ?? charge.total;
     const payments = await prisma.subscriptionPayment.findMany({
       where: { tenantId: tenant.id },
       orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
@@ -169,13 +169,14 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
       currency: resolveSubscriptionCharge(tenant.plan || {}, tenant).currency,
       planName: tenant.plan?.name || 'Subscription',
       billingCycle: charge.billingCycle,
-      planPrice: charge.price,
+      chargeMode: charge.chargeMode,
+      planPrice: charge.planCharge,
       serviceFee: charge.serviceFee,
-      staticIpFee: charge.staticIpFee,
-      periodTotal: charge.price + charge.serviceFee + charge.staticIpFee,
+      staticIpFee: charge.includedStaticIpFee,
+      periodTotal: charge.total,
       currentPeriodRemainder: tenant.subscriptionEnd && tenant.subscriptionEnd > new Date()
-        ? charge.price + charge.serviceFee + charge.staticIpFee
-        : paymentProgress?.progress.remainingAmount ?? charge.price + charge.serviceFee + charge.staticIpFee,
+        ? charge.total
+        : paymentProgress?.progress.remainingAmount ?? charge.total,
       amountDue,
       subscriptionAmount: paymentProgress?.progress.amountDue ?? amountDue,
       paidToDate: paymentProgress?.progress.paidAmount ?? 0,
@@ -265,7 +266,7 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
     if (!Number.isInteger(periodCount) || periodCount < 1 || periodCount > maxPeriods) {
       return res.status(400).json({ error: `Choose between 1 and ${maxPeriods} ${charge.billingCycle === 'yearly' ? 'years' : 'months'}` });
     }
-    const periodTotal = Number(charge.price || 0) + Number(charge.serviceFee || 0) + Number(charge.staticIpFee || 0);
+    const periodTotal = charge.total;
     let currentPeriodRemainder = tenant.subscriptionEnd && tenant.subscriptionEnd > new Date()
       ? periodTotal
       : paymentProgress?.progress.remainingAmount ?? periodTotal;
@@ -287,9 +288,9 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
         periodUnit: charge.billingCycle,
         currency: charge.currency,
         lineItems: [
-          { description: `${tenant.plan?.name || 'Subscription'} plan (${periodCount} ${charge.billingCycle === 'yearly' ? 'year' : 'month'}${periodCount === 1 ? '' : charge.billingCycle === 'yearly' ? 's' : 's'})`, quantity: periodCount, unitAmount: charge.price, amount: charge.price * periodCount },
+          ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || 'Subscription'} plan (${periodCount} ${charge.billingCycle === 'yearly' ? 'year' : 'month'}${periodCount === 1 ? '' : charge.billingCycle === 'yearly' ? 's' : 's'})`, quantity: periodCount, unitAmount: charge.planCharge, amount: charge.planCharge * periodCount }] : []),
           ...(charge.serviceFee > 0 ? [{ description: 'Service fee', quantity: periodCount, unitAmount: charge.serviceFee, amount: charge.serviceFee * periodCount }] : []),
-          ...(charge.staticIpFee > 0 ? [{ description: 'Static IP service', quantity: periodCount, unitAmount: charge.staticIpFee, amount: charge.staticIpFee * periodCount }] : []),
+          ...(charge.includedStaticIpFee > 0 ? [{ description: 'Static IP service', quantity: periodCount, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee * periodCount }] : []),
           ...(currentPeriodRemainder < periodTotal ? [{ description: 'Previous payments applied', quantity: 1, unitAmount: -Math.min(periodTotal - currentPeriodRemainder, periodTotal), amount: -Math.min(periodTotal - currentPeriodRemainder, periodTotal) }] : []),
         ],
         total: amountDue,

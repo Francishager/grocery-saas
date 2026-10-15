@@ -94,7 +94,17 @@ test('subscription invoices include service and static-IP fees in each billed pe
     monthlyServiceFee: 15,
     staticIpFee: 5,
   });
-  assert.equal(charge.price + charge.serviceFee + charge.staticIpFee, 120);
+  assert.equal(charge.total, 120);
+  assert.equal(charge.chargeMode, 'both');
+});
+
+test('subscription charge mode uses only the selected per-tenant plan and service charges', () => {
+  const basePlan = { price: 100, billingCycle: 'monthly', currency: 'UGX' };
+  const tenant = { monthlyServiceFee: 15, staticIpFee: 5 };
+  assert.deepEqual(
+    ['plan', 'service', 'both'].map(billingChargeMode => resolveSubscriptionCharge(basePlan, { ...tenant, billingChargeMode }).total),
+    [100, 20, 120],
+  );
 });
 
 test('confirmed multi-month subscription payments extend from the current term end without date overflow', () => {

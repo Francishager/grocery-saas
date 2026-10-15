@@ -59,6 +59,7 @@ function subscriptionPayload(tenant) {
     monthlyServiceFee: tenant.monthlyServiceFee ?? 0,
     annualServiceFee: tenant.annualServiceFee ?? 0,
     staticIpFee: tenant.staticIpFee ?? 0,
+    billingChargeMode: effectiveCharge.chargeMode,
     billingPaymentMethod: tenant.billingPaymentMethod || null,
     billingPaymentReference: tenant.billingPaymentReference || null,
     billingNotes: tenant.billingNotes || null,
@@ -136,6 +137,7 @@ async function updateSubscription(req, res) {
       monthlyServiceFee,
       annualServiceFee,
       staticIpFee,
+      billingChargeMode,
       billingPaymentMethod,
       billingPaymentReference,
       billingNotes,
@@ -146,7 +148,7 @@ async function updateSubscription(req, res) {
       autoEnd,
     } = req.body;
 
-    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && trialDays === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && gracePeriodDays === undefined && reminderDaysBeforeDue === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
+    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && trialDays === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingChargeMode === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && gracePeriodDays === undefined && reminderDaysBeforeDue === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
       return res.status(400).json({ error: "At least one subscription field is required" });
     }
 
@@ -251,6 +253,14 @@ async function updateSubscription(req, res) {
         return res.status(400).json({ error: "Static IP fee must be a non-negative number" });
       }
       data.staticIpFee = parsedStaticIpFee;
+    }
+
+    if (billingChargeMode !== undefined) {
+      const mode = String(billingChargeMode).trim().toLowerCase();
+      if (!['plan', 'service', 'both'].includes(mode)) {
+        return res.status(400).json({ error: 'Choose plan, services, or both for subscription billing' });
+      }
+      data.billingChargeMode = mode;
     }
 
     if (billingPaymentMethod !== undefined) {

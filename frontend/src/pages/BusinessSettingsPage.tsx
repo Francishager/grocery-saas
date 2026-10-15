@@ -22,7 +22,7 @@ export default function BusinessSettingsPage() {
   const [billing, setBilling] = useState<any>(null)
   const [billingLoading, setBillingLoading] = useState(false)
   const [billingBusy, setBillingBusy] = useState(false)
-  const [billingPeriods, setBillingPeriods] = useState(1)
+  const [billingPeriods, setBillingPeriods] = useState<number | ''>('')
   const [billingMethod, setBillingMethod] = useState<'mobile_money' | 'card'>('mobile_money')
   const [billingPhone, setBillingPhone] = useState('')
   const [billingEmail, setBillingEmail] = useState('')
@@ -66,11 +66,24 @@ export default function BusinessSettingsPage() {
   const billingMoney = (value: number, currency = billing?.currency || settings?.currency || 'UGX') =>
     `${currency} ${new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(Number(value || 0))}`
 
+  const invoicePeriods = billingPeriods || 1
+  const invoicePeriodTotal = Number(billing?.periodTotal || 0)
+  const invoiceCurrentRemainder = billing?.currentPeriodRemainder == null
+    ? invoicePeriodTotal
+    : Number(billing.currentPeriodRemainder)
+  const invoiceTotal = invoiceCurrentRemainder + Math.max(0, invoicePeriods - 1) * invoicePeriodTotal
+  const invoiceLineItems = (periodCount: number) => [
+    ...(Number(billing?.planPrice) > 0 ? [{ label: `${billing.planName} plan × ${periodCount}`, amount: Number(billing.planPrice) * periodCount }] : []),
+    ...(Number(billing?.serviceFee) > 0 ? [{ label: `Service fee × ${periodCount}`, amount: Number(billing.serviceFee) * periodCount }] : []),
+    ...(Number(billing?.staticIpFee) > 0 ? [{ label: `Static IP service × ${periodCount}`, amount: Number(billing.staticIpFee) * periodCount }] : []),
+    ...(invoiceCurrentRemainder < invoicePeriodTotal ? [{ label: 'Previous payments applied', amount: -(invoicePeriodTotal - invoiceCurrentRemainder) }] : []),
+  ]
+
   const printBillingDocument = (title: string, reference: string, date: string, lineItems: Array<{ label: string; amount: number }>, total: number, status: string) => {
     const safe = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!))
     const popup = window.open('', '_blank', 'width=760,height=800')
     if (!popup) { toast({ variant: 'destructive', title: 'Allow pop-ups to print this document' }); return }
-    popup.document.write(`<!doctype html><html><head><title>${safe(title)}</title><style>body{font:15px Arial,sans-serif;color:#17202a;margin:40px auto;max-width:720px;padding:0 24px}header{border-bottom:2px solid #163b36;padding-bottom:18px;margin-bottom:24px}h1{font-size:24px;margin:0 0 8px}.meta{color:#52615e;line-height:1.6}.row{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #dce3e0}.total{font-size:18px;font-weight:bold;border-top:2px solid #163b36;margin-top:12px;padding-top:16px}.status{display:inline-block;background:#e9f5ee;color:#14623b;padding:6px 10px;font-weight:bold;margin-top:14px}@media print{body{margin:16mm auto}}</style></head><body><header><h1>${safe(settings?.name || 'Business')}</h1><div class="meta">${safe(settings?.address || '')}<br>${safe(settings?.phone || '')} ${safe(settings?.email || '')}</div></header><h2>${safe(title)}</h2><div class="meta">${safe(reference)} · ${safe(date)}</div>${lineItems.map(item => `<div class="row"><span>${safe(item.label)}</span><strong>${safe(billingMoney(item.amount))}</strong></div>`).join('')}<div class="row total"><span>Total</span><span>${safe(billingMoney(total))}</span></div><div class="status">${safe(status)}</div><script>window.onload=()=>window.print()</script></body></html>`)
+    popup.document.write(`<!doctype html><html><head><title>${safe(title)}</title><style>body{font:15px Arial,sans-serif;color:#17202a;margin:40px auto;max-width:720px;padding:0 24px}header{border-bottom:2px solid #163b36;padding-bottom:18px;margin-bottom:24px}h1{font-size:24px;margin:0 0 8px}.meta{color:#52615e;line-height:1.6}.row{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #dce3e0}.total{font-size:18px;font-weight:bold;border-top:2px solid #163b36;margin-top:12px;padding-top:16px}.status{display:inline-block;background:#e9f5ee;color:#14623b;padding:6px 10px;font-weight:bold;margin-top:14px}@media print{body{margin:16mm auto}}</style></head><body><header><h1>JibuSales</h1><div class="meta">Subscription billing document<br>Billed to: ${safe(settings?.name || billing?.name || 'Business')}<br>${safe(settings?.address || '')}<br>${safe(settings?.phone || '')} ${safe(settings?.email || '')}</div></header><h2>${safe(title)}</h2><div class="meta">${safe(reference)} · ${safe(date)}</div>${lineItems.map(item => `<div class="row"><span>${safe(item.label)}</span><strong>${safe(billingMoney(item.amount))}</strong></div>`).join('')}<div class="row total"><span>Total</span><span>${safe(billingMoney(total))}</span></div><div class="status">${safe(status)}</div><script>window.onload=()=>window.print()</script></body></html>`)
     popup.document.close()
   }
 
@@ -78,7 +91,7 @@ export default function BusinessSettingsPage() {
     setBillingBusy(true)
     try {
       const result = await subscriptionBillingApi.startPayment({
-        periodCount: billingPeriods,
+        periodCount: Number(billingPeriods),
         paymentMethod: billingMethod,
         phoneNumber: billingPhone,
         email: billingEmail,
@@ -298,34 +311,30 @@ export default function BusinessSettingsPage() {
               <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
                 <section className="space-y-3 rounded-lg border p-4" aria-label="Subscription invoice preview">
                   <div className="flex items-start justify-between gap-3">
-                    <div><h3 className="font-semibold">Subscription invoice</h3><p className="text-sm text-muted-foreground">{billing.planName}, {billingPeriods} {billing.billingCycle === 'yearly' ? 'year(s)' : 'month(s)'}</p></div>
+                    <div><h3 className="font-semibold">JibuSales Subscription Invoice</h3><p className="text-sm text-muted-foreground">{billing.planName}, {invoicePeriods} {billing.billingCycle === 'yearly' ? 'year(s)' : 'month(s)'}</p></div>
                     <div className="flex flex-wrap items-center gap-2">
-                    {canPaySubscriptionInvoice && <Button size="sm" onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || (!billingPhone.trim() && !billingEmail.trim())}><CreditCard className="mr-2 h-4 w-4" />{billingBusy ? 'Opening checkout...' : 'Pay invoice'}</Button>}
-                    <Button variant="outline" size="sm" onClick={() => printBillingDocument('Subscription Invoice', `INV-${billing.tenantId}-${Date.now()}`, new Date().toLocaleDateString('en-GB'), [
-                      { label: `${billing.planName} plan × ${billingPeriods}`, amount: Number(billing.planPrice || 0) * billingPeriods },
-                      ...(Number(billing.serviceFee) > 0 ? [{ label: `Service fee × ${billingPeriods}`, amount: Number(billing.serviceFee) * billingPeriods }] : []),
-                      ...(Number(billing.staticIpFee) > 0 ? [{ label: `Static IP service × ${billingPeriods}`, amount: Number(billing.staticIpFee) * billingPeriods }] : []),
-                      ...(Number(billing.currentPeriodRemainder) < Number(billing.periodTotal) ? [{ label: 'Previous payments applied', amount: Number(billing.currentPeriodRemainder) - Number(billing.periodTotal) }] : []),
-                    ], Number(billing.currentPeriodRemainder || billing.periodTotal) + (billingPeriods - 1) * Number(billing.periodTotal || 0), 'PAYABLE')}>
+                    <Button variant="outline" size="sm" onClick={() => printBillingDocument('JibuSales Subscription Invoice', `INV-${billing.tenantId}-${Date.now()}`, new Date().toLocaleDateString('en-GB'), invoiceLineItems(invoicePeriods), invoiceTotal, 'PAYABLE')}>
                       <Printer className="mr-2 h-4 w-4" />Print invoice
                     </Button>
                     </div>
                   </div>
                   <div className="divide-y text-sm">
-                    <div className="flex justify-between gap-4 py-2"><span>{billing.planName} plan × {billingPeriods}</span><span>{billingMoney(Number(billing.planPrice || 0) * billingPeriods)}</span></div>
-                    {Number(billing.serviceFee) > 0 && <div className="flex justify-between gap-4 py-2"><span>Service fee × {billingPeriods}</span><span>{billingMoney(Number(billing.serviceFee) * billingPeriods)}</span></div>}
-                    {Number(billing.staticIpFee) > 0 && <div className="flex justify-between gap-4 py-2"><span>Static IP service × {billingPeriods}</span><span>{billingMoney(Number(billing.staticIpFee) * billingPeriods)}</span></div>}
-                    {Number(billing.currentPeriodRemainder) < Number(billing.periodTotal) && <div className="flex justify-between gap-4 py-2 text-emerald-700"><span>Previous payments applied</span><span>-{billingMoney(Number(billing.periodTotal) - Number(billing.currentPeriodRemainder))}</span></div>}
-                    <div className="flex justify-between gap-4 py-3 text-base font-bold"><span>Invoice total</span><span>{billingMoney(Number(billing.currentPeriodRemainder || billing.periodTotal) + (billingPeriods - 1) * Number(billing.periodTotal || 0))}</span></div>
+                    {invoiceLineItems(invoicePeriods).map((item, index) => <div key={`${item.label}-${index}`} className="flex justify-between gap-4 py-2"><span>{item.label}</span><span>{billingMoney(item.amount)}</span></div>)}
+                    <div className="flex justify-between gap-4 py-3 text-base font-bold"><span>Invoice total</span><span>{billingMoney(invoiceTotal)}</span></div>
                   </div>
                   <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
-                    <div className="space-y-1"><Label>Periods to pay</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingPeriods} onChange={event => setBillingPeriods(Number(event.target.value))}>
+                    <div className="space-y-1"><Label>Periods to pay</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingPeriods} onChange={event => setBillingPeriods(event.target.value ? Number(event.target.value) : '')}>
+                      <option value="">Choose periods</option>
                       {Array.from({ length: billing.billingCycle === 'yearly' ? 5 : 12 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count} {billing.billingCycle === 'yearly' ? (count === 1 ? 'year' : 'years') : (count === 1 ? 'month' : 'months')}</option>)}
                     </select></div>
+                  </div>
+                  {canPaySubscriptionInvoice && billingPeriods !== '' && <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
                     <div className="space-y-1"><Label>Payment method</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingMethod} onChange={event => setBillingMethod(event.target.value as 'mobile_money' | 'card')}><option value="mobile_money">Mobile money</option><option value="card">Card</option></select></div>
                     {billingMethod === 'mobile_money' && <div className="space-y-1"><Label>Mobile number</Label><Input value={billingPhone} onChange={event => setBillingPhone(event.target.value)} placeholder="Payment phone number" /></div>}
                     <div className="space-y-1"><Label>Email for payment receipt</Label><Input type="email" value={billingEmail} onChange={event => setBillingEmail(event.target.value)} placeholder="name@example.com" /></div>
-                  </div>
+                    <div className="sm:col-span-2"><Button className="w-full sm:w-auto" onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || (!billingPhone.trim() && !billingEmail.trim())}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />Pay {billingMoney(invoiceTotal)}</>}</Button></div>
+                  </div>}
+                  {canPaySubscriptionInvoice && billingPeriods === '' && <p className="border-t pt-4 text-sm text-muted-foreground">Choose periods to see payment options.</p>}
                   {!canPaySubscriptionInvoice && <p className="text-sm text-muted-foreground">Your account can view and print billing records but cannot start subscription payments.</p>}
                 </section>
 
@@ -337,7 +346,7 @@ export default function BusinessSettingsPage() {
                       const date = payment.paidAt || payment.createdAt
                       return <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
                         <div className="min-w-0"><p className="font-medium">{billingMoney(payment.amount, payment.currency)} <span className="ml-1 text-xs font-normal capitalize text-muted-foreground">{payment.status}</span></p><p className="break-all text-xs text-muted-foreground">{date ? new Date(date).toLocaleDateString('en-GB') : 'Date pending'} · {payment.paymentMethod || payment.provider || 'Payment'}{payment.reference ? ` · ${payment.reference}` : ''}</p>{payment.invoice?.periodCount && <p className="text-xs text-muted-foreground">Covers {payment.invoice.periodCount} {payment.invoice.periodUnit === 'yearly' ? 'year(s)' : 'month(s)'}</p>}</div>
-                        <Button variant="outline" size="sm" disabled={payment.status !== 'completed'} onClick={() => printBillingDocument('Subscription Receipt', payment.reference || payment.merchantReference || payment.id, date ? new Date(date).toLocaleDateString('en-GB') : '', invoiceItems, Number(payment.amount), 'PAID')}><Printer className="mr-2 h-4 w-4" />Receipt</Button>
+                        <Button variant="outline" size="sm" disabled={payment.status !== 'completed'} onClick={() => printBillingDocument('JibuSales Subscription Payment', payment.reference || payment.merchantReference || payment.id, date ? new Date(date).toLocaleDateString('en-GB') : '', invoiceItems, Number(payment.amount), 'PAID')}><Printer className="mr-2 h-4 w-4" />Receipt</Button>
                       </div>
                     })}
                   </div> : <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No subscription receipts have been recorded yet.</div>}

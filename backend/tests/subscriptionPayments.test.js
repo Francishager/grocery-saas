@@ -36,10 +36,13 @@ test('admin cancellation voids a manual receipt with an audit reason and leaves 
         updateData = data;
         return { count: 1 };
       },
+      aggregate: async () => ({ _sum: { amount: 0 } }),
       count: async () => 1,
     },
     tenant: {
-      findUnique: async () => ({ billingPaymentReference: 'NEWER-RECEIPT' }),
+      findUnique: async ({ include } = {}) => include
+        ? { id: 'tenant-1', plan: { price: 25000, billingCycle: 'monthly', currency: 'UGX' }, createdAt: new Date(), subscriptionStart: new Date(), subscriptionEnd: null }
+        : { billingPaymentReference: 'NEWER-RECEIPT' },
       update: async ({ data }) => { tenantUpdate = data; },
     },
   };
@@ -52,7 +55,8 @@ test('admin cancellation voids a manual receipt with an audit reason and leaves 
   assert.equal(result.payment.status, 'cancelled');
   assert.equal(updateData.cancellationReason, 'Duplicate entry');
   assert.equal(updateData.cancelledByEmail, 'admin@example.com');
-  assert.equal(tenantUpdate, undefined);
+  assert.equal(tenantUpdate.paymentReminderStatus, 'due_soon');
+  assert.equal(tenantUpdate.billingPaymentReference, undefined);
 });
 
 test('admin cannot cancel Pesapal transactions through manual receipt cancellation', async () => {

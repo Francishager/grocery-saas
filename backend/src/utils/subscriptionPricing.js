@@ -39,16 +39,26 @@ export function resolveSubscriptionCharge(plan = {}, tenant = {}) {
   const monthlyServiceFee = Number(tenant.monthlyServiceFee ?? 0) || 0;
   const annualServiceFee = Number(tenant.annualServiceFee ?? 0) || 0;
   const staticIpFee = Number(tenant.staticIpFee ?? 0) || 0;
+  const configuredChargeMode = String(tenant.billingChargeMode || 'both').trim().toLowerCase();
+  const chargeMode = ['plan', 'service', 'both'].includes(configuredChargeMode) ? configuredChargeMode : 'both';
+  const serviceFee = normalizedCycle === 'yearly' ? annualServiceFee || monthlyServiceFee : monthlyServiceFee;
+  const planCharge = chargeMode === 'service' ? 0 : normalizedPrice;
+  const includedServiceFee = chargeMode === 'plan' ? 0 : serviceFee;
+  const includedStaticIpFee = chargeMode === 'plan' ? 0 : staticIpFee;
 
   return {
     price: normalizedPrice,
+    planCharge,
     billingCycle: normalizedCycle,
     currency: normalizedCurrency,
+    chargeMode,
     hasCustomPricing: hasCustomPrice,
     monthlyServiceFee,
     annualServiceFee,
     staticIpFee,
-    serviceFee: normalizedCycle === 'yearly' ? annualServiceFee || monthlyServiceFee : monthlyServiceFee,
+    serviceFee: includedServiceFee,
+    includedStaticIpFee,
+    total: planCharge + includedServiceFee + includedStaticIpFee,
     isCustom: hasCustomPrice,
   };
 }
