@@ -66,12 +66,17 @@ export default function BusinessSettingsPage() {
   const billingMoney = (value: number, currency = billing?.currency || settings?.currency || 'UGX') =>
     `${currency} ${new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(Number(value || 0))}`
 
-  const invoicePeriods = billingPeriods || 1
+  const partialBalanceDue = Boolean(billing?.isPartiallyPaid && Number(billing?.amountDue) > 0)
+  const invoicePeriods = partialBalanceDue ? 1 : billingPeriods || 1
   const invoicePeriodTotal = Number(billing?.periodTotal || 0)
-  const invoiceCurrentRemainder = billing?.currentPeriodRemainder == null
+  const invoiceCurrentRemainder = partialBalanceDue
+    ? Number(billing.amountDue)
+    : billing?.currentPeriodRemainder == null
     ? invoicePeriodTotal
     : Number(billing.currentPeriodRemainder)
-  const invoiceTotal = invoiceCurrentRemainder + Math.max(0, invoicePeriods - 1) * invoicePeriodTotal
+  const invoiceTotal = partialBalanceDue
+    ? Number(billing.amountDue)
+    : invoiceCurrentRemainder + Math.max(0, invoicePeriods - 1) * invoicePeriodTotal
   const invoiceLineItems = (periodCount: number) => [
     ...(Number(billing?.planPrice) > 0 ? [{ label: `${billing.planName} plan × ${periodCount}`, amount: Number(billing.planPrice) * periodCount }] : []),
     ...(Number(billing?.serviceFee) > 0 ? [{ label: `Service fee × ${periodCount}`, amount: Number(billing.serviceFee) * periodCount }] : []),
@@ -91,7 +96,7 @@ export default function BusinessSettingsPage() {
     setBillingBusy(true)
     try {
       const result = await subscriptionBillingApi.startPayment({
-        periodCount: Number(billingPeriods),
+        periodCount: partialBalanceDue ? 1 : Number(billingPeriods),
         paymentMethod: billingMethod,
         phoneNumber: billingPhone,
         email: billingEmail,
@@ -309,10 +314,11 @@ export default function BusinessSettingsPage() {
               </div>
 
               <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
-                <section className="space-y-3 rounded-lg border p-4" aria-label="Subscription invoice preview">
+                <section className={`space-y-3 rounded-lg border p-4 ${Number(billing.amountDue) > 0 ? 'border-red-500 bg-red-50/50 dark:bg-red-950/10' : ''}`} aria-label="Subscription invoice preview">
                   <div className="flex items-start justify-between gap-3">
-                    <div><h3 className="font-semibold">JibuSales Subscription Invoice</h3><p className="text-sm text-muted-foreground">{billing.planName}, {invoicePeriods} {billing.billingCycle === 'yearly' ? 'year(s)' : 'month(s)'}</p></div>
+                    <div><h3 className="font-semibold">JibuSales Subscription Invoice</h3><p className="text-sm text-muted-foreground">{partialBalanceDue ? 'Outstanding balance' : `${billing.planName}, ${invoicePeriods} ${billing.billingCycle === 'yearly' ? 'year(s)' : 'month(s)'}`}</p></div>
                     <div className="flex flex-wrap items-center gap-2">
+                    {Number(billing.amountDue) > 0 && <span className="inline-flex items-center gap-2 rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"><span className="h-2 w-2 animate-pulse rounded-full bg-red-600 motion-reduce:animate-none" />{partialBalanceDue ? 'PARTIALLY PAID · BALANCE DUE' : 'PAYMENT DUE'}</span>}
                     <Button variant="outline" size="sm" onClick={() => printBillingDocument('JibuSales Subscription Invoice', `INV-${billing.tenantId}-${Date.now()}`, new Date().toLocaleDateString('en-GB'), invoiceLineItems(invoicePeriods), invoiceTotal, 'PAYABLE')}>
                       <Printer className="mr-2 h-4 w-4" />Print invoice
                     </Button>
@@ -322,19 +328,21 @@ export default function BusinessSettingsPage() {
                     {invoiceLineItems(invoicePeriods).map((item, index) => <div key={`${item.label}-${index}`} className="flex justify-between gap-4 py-2"><span>{item.label}</span><span>{billingMoney(item.amount)}</span></div>)}
                     <div className="flex justify-between gap-4 py-3 text-base font-bold"><span>Invoice total</span><span>{billingMoney(invoiceTotal)}</span></div>
                   </div>
-                  <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                  {partialBalanceDue ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+                    {billingMoney(Number(billing.amountDue), billing.currency)} remains unpaid. Pay this balance before selecting additional subscription periods.
+                  </div> : <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
                     <div className="space-y-1"><Label>Periods to pay</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingPeriods} onChange={event => setBillingPeriods(event.target.value ? Number(event.target.value) : '')}>
                       <option value="">Choose periods</option>
                       {Array.from({ length: billing.billingCycle === 'yearly' ? 5 : 12 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count} {billing.billingCycle === 'yearly' ? (count === 1 ? 'year' : 'years') : (count === 1 ? 'month' : 'months')}</option>)}
                     </select></div>
-                  </div>
-                  {canPaySubscriptionInvoice && billingPeriods !== '' && <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                  </div>}
+                  {canPaySubscriptionInvoice && (partialBalanceDue || billingPeriods !== '') && <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
                     <div className="space-y-1"><Label>Payment method</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingMethod} onChange={event => setBillingMethod(event.target.value as 'mobile_money' | 'card')}><option value="mobile_money">Mobile money</option><option value="card">Card</option></select></div>
                     {billingMethod === 'mobile_money' && <div className="space-y-1"><Label>Mobile number</Label><Input value={billingPhone} onChange={event => setBillingPhone(event.target.value)} placeholder="Payment phone number" /></div>}
                     <div className="space-y-1"><Label>Email for payment receipt</Label><Input type="email" value={billingEmail} onChange={event => setBillingEmail(event.target.value)} placeholder="name@example.com" /></div>
-                    <div className="sm:col-span-2"><Button className="w-full sm:w-auto" onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || (!billingPhone.trim() && !billingEmail.trim())}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />Pay {billingMoney(invoiceTotal)}</>}</Button></div>
+                    <div className="sm:col-span-2"><Button className={`w-full sm:w-auto ${partialBalanceDue ? 'animate-pulse bg-red-600 text-white hover:bg-red-700 motion-reduce:animate-none' : ''}`} onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || (!billingPhone.trim() && !billingEmail.trim())}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />{partialBalanceDue ? 'Pay remaining balance' : 'Pay'} {billingMoney(invoiceTotal)}</>}</Button></div>
                   </div>}
-                  {canPaySubscriptionInvoice && billingPeriods === '' && <p className="border-t pt-4 text-sm text-muted-foreground">Choose periods to see payment options.</p>}
+                  {canPaySubscriptionInvoice && !partialBalanceDue && billingPeriods === '' && <p className="border-t pt-4 text-sm text-muted-foreground">Choose periods to see payment options.</p>}
                   {!canPaySubscriptionInvoice && <p className="text-sm text-muted-foreground">Your account can view and print billing records but cannot start subscription payments.</p>}
                 </section>
 

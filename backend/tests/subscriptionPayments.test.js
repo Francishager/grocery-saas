@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cancelManualSubscriptionPayment, normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from '../src/utils/subscriptionPayments.js';
+import { cancelManualSubscriptionPayment, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from '../src/utils/subscriptionPayments.js';
 import { normalizePesapalStatus } from '../src/services/pesapal.js';
 
 test('subscription receipt amounts normalize to cents without floating point arithmetic', () => {
@@ -13,6 +13,35 @@ test('subscription receipt amount validation rejects zero, negatives, excess dec
   for (const amount of ['', '0', '0.00', '-1', '1.005', '1e4', '12345678901234567']) {
     assert.throws(() => normalizeSubscriptionPaymentAmount(amount));
   }
+});
+
+test('partial subscription payments remain due while the subscription term is active', async () => {
+  const tenant = {
+    id: 'tenant-1',
+    plan: { price: 100000, billingCycle: 'monthly', currency: 'UGX' },
+    billingChargeMode: 'plan',
+    createdAt: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionStart: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-11-01T00:00:00.000Z'),
+    paymentReminderStatus: 'paid',
+  };
+  const tx = {
+    tenant: { findUnique: async () => tenant },
+    subscriptionPayment: {
+      aggregate: async ({ where }) => {
+        assert.equal(where.status, 'completed');
+        assert.equal(where.paidAt.gte.toISOString(), '2026-10-01T00:00:00.000Z');
+        return { _sum: { amount: 40000 } };
+      },
+      count: async () => 1,
+    },
+  };
+
+  const result = await getSubscriptionPaymentProgress(tx, tenant.id, new Date('2026-10-16T00:00:00.000Z'));
+  assert.equal(result.progress.paidAmount, 40000);
+  assert.equal(result.progress.remainingAmount, 60000);
+  assert.equal(result.progress.isPartiallyPaid, true);
+  assert.equal(result.progress.isPaid, false);
 });
 
 test('Pesapal statuses only settle successful verified payments', () => {

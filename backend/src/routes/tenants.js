@@ -174,9 +174,9 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
       serviceFee: charge.serviceFee,
       staticIpFee: charge.includedStaticIpFee,
       periodTotal: charge.total,
-      currentPeriodRemainder: tenant.subscriptionEnd && tenant.subscriptionEnd > new Date()
-        ? charge.total
-        : paymentProgress?.progress.remainingAmount ?? charge.total,
+      currentPeriodRemainder: paymentProgress?.progress.isPartiallyPaid
+        ? paymentProgress.progress.remainingAmount
+        : charge.total,
       amountDue,
       subscriptionAmount: paymentProgress?.progress.amountDue ?? amountDue,
       paidToDate: paymentProgress?.progress.paidAmount ?? 0,
@@ -266,10 +266,13 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
     if (!Number.isInteger(periodCount) || periodCount < 1 || periodCount > maxPeriods) {
       return res.status(400).json({ error: `Choose between 1 and ${maxPeriods} ${charge.billingCycle === 'yearly' ? 'years' : 'months'}` });
     }
+    if (paymentProgress?.progress.isPartiallyPaid && periodCount > 1) {
+      return res.status(409).json({ error: "Pay the outstanding subscription balance before selecting additional periods", code: "SUBSCRIPTION_BALANCE_DUE" });
+    }
     const periodTotal = charge.total;
-    let currentPeriodRemainder = tenant.subscriptionEnd && tenant.subscriptionEnd > new Date()
-      ? periodTotal
-      : paymentProgress?.progress.remainingAmount ?? periodTotal;
+    let currentPeriodRemainder = paymentProgress?.progress.isPartiallyPaid
+      ? paymentProgress.progress.remainingAmount
+      : periodTotal;
     if (currentPeriodRemainder <= 0) currentPeriodRemainder = periodTotal;
     const amountDue = Math.max(0, currentPeriodRemainder) + (periodTotal * (periodCount - 1));
     if (amountDue <= 0) return res.status(409).json({ error: "The selected subscription period is already fully paid" });

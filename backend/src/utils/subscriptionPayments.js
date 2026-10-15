@@ -42,10 +42,10 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
   if (!tenant) return null;
 
   const cycleMonths = String(tenant.customBillingCycle || tenant.plan?.billingCycle || 'monthly').toLowerCase() === 'yearly' ? 12 : 1;
-  const dueBoundary = tenant.subscriptionEnd && tenant.subscriptionEnd < asOf ? tenant.subscriptionEnd : null;
+  const subscriptionBoundary = tenant.subscriptionEnd || null;
   let periodStart = tenant.subscriptionStart || tenant.createdAt;
-  if (dueBoundary) {
-    const dueDate = new Date(dueBoundary);
+  if (subscriptionBoundary) {
+    const dueDate = new Date(subscriptionBoundary);
     const day = dueDate.getUTCDate();
     const start = new Date(dueDate);
     start.setUTCDate(1);
@@ -68,7 +68,8 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
   const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
   const periodTotal = charge.total;
   const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
-  const progress = coveredByActiveTerm || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
+  const recordedThisPeriod = Number(aggregate._sum.amount || 0) > 0;
+  const progress = (coveredByActiveTerm && !recordedThisPeriod) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
     ? calculateSubscriptionPaymentProgress(periodTotal, periodTotal)
     : calculateSubscriptionPaymentProgress(periodTotal, aggregate._sum.amount);
   return { tenant, progress };
