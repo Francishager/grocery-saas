@@ -5,6 +5,7 @@ import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { outstandingCustomerSummary } from '../utils/customerBalance.js';
 import { loadOutstandingReceivableRows } from '../utils/outstandingReceivables.js';
+import { buildAgingReport } from '../utils/agingReport.js';
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, visibleSalesUserId } from "../utils/branchAccess.js";
 import { buildDecisionSupportSummary, buildSupplierStatementData } from "../utils/reportingHelpers.js";
@@ -12,7 +13,6 @@ import { attachCustomerReceivableBalances, effectiveCreditNoteRows, receivableSa
 import {
   transformSalesData,
   transformInventoryMovementData,
-  transformAgingData,
   transformCashFlowData,
 } from "../utils/enrichedReportTransform.js";
 import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
@@ -116,6 +116,42 @@ function saleVisibilityFilter(req) {
 
 function scopedSaleWhere(req, scope, extra = {}) {
   return scopedWhere(scope, { ...df(req), status: { notIn: ["cancelled", "refunded"] }, ...extra, ...saleVisibilityFilter(req) });
+}
+
+async function paymentAccountDetails(tenantId, payments, expectedType) {
+  const paymentReferences = (payment) => [...new Set([
+    payment.reference,
+    payment.id,
+    payment.sale?.receiptNo,
+    payment.purchase?.refNo,
+  ].filter(Boolean))];
+  const references = [...new Set(payments.flatMap(paymentReferences))];
+  if (!references.length) return new Map();
+  const movements = await prisma.cashTransaction.findMany({
+    where: { tenantId, reference: { in: references }, type: expectedType },
+    include: { account: { select: { name: true, type: true, accountNumber: true, bankName: true, accountHolder: true, branchName: true } } },
+    orderBy: { createdAt: 'asc' },
+  });
+  const byReference = new Map();
+  for (const movement of movements) {
+    const rows = byReference.get(movement.reference) || [];
+    rows.push(movement);
+    byReference.set(movement.reference, rows);
+  }
+  const used = new Set();
+  const result = new Map();
+  for (const payment of payments) {
+    const candidates = paymentReferences(payment)
+      .flatMap((reference) => byReference.get(reference) || [])
+      .filter((movement) => !used.has(movement.id) && Math.abs(Number(movement.amount || 0) - Number(payment.amount || 0)) < 0.01)
+      .sort((a, b) => Math.abs(new Date(a.createdAt) - new Date(payment.createdAt)) - Math.abs(new Date(b.createdAt) - new Date(payment.createdAt)));
+    const matched = candidates[0];
+    if (matched) {
+      used.add(matched.id);
+      result.set(payment.id, matched.account);
+    }
+  }
+  return result;
 }
 
 function dateRangeFromQuery(req) {
@@ -4108,13 +4144,21 @@ router.get("/receivables/aging", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const rows = await loadOutstandingReceivableRows(prisma, salesView, s, saleVisibilityFilter(req));
     const range = df(req).createdAt;
-    const data = rows.filter((row) => !range || ((!range.gte || new Date(row.date) >= range.gte)
+    const filteredRows = rows.filter((row) => !range || ((!range.gte || new Date(row.date) >= range.gte)
       && (!range.lte || new Date(row.date) <= range.lte)));
-    const totalOutstanding = data.reduce((sum, row) => sum + row.balance, 0);
-    const enriched = transformAgingData(data, false);
-    enriched.currentBalance = totalOutstanding;
-    enriched.summary.totalOutstanding = totalOutstanding;
-    res.json(enriched);
+    res.json(buildAgingReport(filteredRows.map((row) => ({
+      ...row,
+      customerId: row.customerId,
+      documentDate: row.date,
+      dueDate: row.agingBasis === 'Due date' ? row.dueDate : null,
+      originalAmount: Number(row.total || 0),
+      paidAmount: Number(row.amountPaid || 0),
+      reference: row.reference || row.id,
+      documentType: row.type,
+      status: row.status,
+    })), {
+      entityKey: 'customer', entityIdKey: 'customerId', asOfDate: new Date(), title: 'Customer Aging Report',
+    }));
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -4122,7 +4166,27 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } } }, orderBy: { createdAt: "desc" } });
-    const data = payments.map((p) => ({ createdAt: p.createdAt, customer: p.customer?.name || "Walk-in", amount: p.amount, paymentMethod: p.paymentMethod || "cash" }));
+    const accounts = await paymentAccountDetails(s.tenantId, payments, 'receipt');
+    const data = payments.map((p) => {
+      const account = accounts.get(p.id);
+      return {
+        createdAt: p.createdAt,
+        customer: p.customer?.name || "Walk-in",
+        invoice: p.sale?.receiptNo || '—',
+        amount: p.amount,
+        paymentMethod: p.paymentMethod || "cash",
+        mobileProvider: p.mobileProvider || null,
+        phoneNumber: p.phoneNumber || null,
+        transactionId: p.transactionId || null,
+        reference: p.reference || null,
+        accountName: account?.name || null,
+        accountType: account?.type || null,
+        accountNumber: account?.accountNumber || null,
+        bankName: account?.bankName || null,
+        accountHolder: account?.accountHolder || null,
+        bankBranch: account?.branchName || null,
+      };
+    });
     res.json({ data, summary: { count: data.length, totalCollected: data.reduce((a, p) => a + p.amount, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -4189,67 +4253,46 @@ router.get("/payables/outstanding", authenticateToken, async (req, res) => {
 router.get("/payables/aging", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [suppliers, openingBalances] = await Promise.all([
-      prisma.supplier.findMany({ 
-        where: scopedWhere(s, { balance: { gt: 0 } }), 
-        include: { 
-          purchases: { 
-            where: { balance: { gt: 0 }, ...df(req) }, 
-            select: { id: true, refNo: true, balance: true, dueDate: true, createdAt: true, total: true, amountPaid: true, paymentStatus: true }
-          } 
+    const suppliers = await prisma.supplier.findMany({
+      where: scopedWhere(s, { balance: { gt: 0 } }),
+      include: {
+        purchases: {
+          where: { balance: { gt: 0 } },
+          select: { id: true, supplierId: true, refNo: true, balance: true, dueDate: true, createdAt: true, total: true, amountPaid: true, paymentStatus: true },
         },
-        orderBy: { name: 'asc' }
-      }),
-      prisma.supplier.findMany({ where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }), select: { id: true, name: true, openingBalance: true, openingBalanceDate: true } }),
-    ]);
-    
+      },
+      orderBy: { name: 'asc' },
+    });
+    const range = df(req).createdAt;
     const allTransactions = [];
-    const now = new Date();
-    
-    // Add opening balance transactions
-    openingBalances.forEach((s) => {
-      allTransactions.push({
-        id: `opening-${s.id}`,
-        date: s.openingBalanceDate || new Date(0),
-        dueDate: s.openingBalanceDate || new Date(0),
-        type: 'Opening Balance',
-        description: `Opening Balance - ${s.name}`,
-        details: `Opening balance for supplier`,
-        debit: 0,
-        credit: Number(s.openingBalance || 0),
-        balance: Number(s.openingBalance || 0),
-        reference: '-',
-      });
-    });
-    
-    // Add purchase bills
-    suppliers.forEach((supp) => {
-      supp.purchases.forEach((purchase) => {
+    for (const supplier of suppliers) {
+      const allOpenPurchaseBalance = supplier.purchases.reduce((sum, purchase) => sum + Number(purchase.balance || 0), 0);
+      const openingResidual = Math.max(0, Number(supplier.balance || 0) - allOpenPurchaseBalance);
+      const openingDate = supplier.openingBalanceDate || supplier.createdAt;
+      if (openingResidual > 0 && (!range || ((!range.gte || openingDate >= range.gte) && (!range.lte || openingDate <= range.lte)))) {
         allTransactions.push({
-          id: purchase.id,
-          date: purchase.createdAt,
-          dueDate: purchase.dueDate || purchase.createdAt,
-          type: 'Bill',
-          description: `Purchase Bill - ${supp.name}`,
-          details: `Ref: ${purchase.refNo || '-'}, Total: ${Number(purchase.total || 0)}, Paid: ${Number(purchase.amountPaid || 0)}, Balance: ${Number(purchase.balance || 0)}, Status: ${purchase.paymentStatus}`,
-          debit: 0,
-          credit: Number(purchase.balance || 0),
-          balance: Number(purchase.balance || 0),
-          status: purchase.paymentStatus,
-          reference: purchase.refNo || purchase.id.slice(-6),
+          id: `opening-${supplier.id}`, supplierId: supplier.id, supplier: supplier.name,
+          documentType: 'Opening Balance', reference: 'Opening Balance', documentDate: openingDate,
+          agingBasis: supplier.openingBalanceDate ? 'Opening balance date' : 'Supplier record date (no opening date set)',
+          dueDate: null, originalAmount: Number(supplier.openingBalance || openingResidual),
+          paidAmount: Math.max(0, Number(supplier.openingBalance || 0) - openingResidual), balance: openingResidual,
+          status: 'opening_balance',
         });
-      });
-    });
-    
-    allTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    const totalOutstanding = suppliers.reduce((sum, s) => sum + Number(s.balance || 0), 0);
-    const enriched = transformAgingData(allTransactions, true);
-    enriched.currentBalance = totalOutstanding;
-    enriched.summary.totalOutstanding = totalOutstanding;
-    enriched.title = 'Payables Aging Report';
-    
-    res.json(enriched);
+      }
+      for (const purchase of supplier.purchases) {
+        if (range && ((range.gte && purchase.createdAt < range.gte) || (range.lte && purchase.createdAt > range.lte))) continue;
+        allTransactions.push({
+          id: purchase.id, supplierId: supplier.id, supplier: supplier.name,
+          documentType: 'Supplier Bill', reference: purchase.refNo || purchase.id.slice(-6),
+          documentDate: purchase.createdAt, dueDate: purchase.dueDate || null,
+          originalAmount: Number(purchase.total || 0), paidAmount: Number(purchase.amountPaid || 0),
+          balance: Number(purchase.balance || 0), status: purchase.paymentStatus,
+        });
+      }
+    }
+    res.json(buildAgingReport(allTransactions, {
+      entityKey: 'supplier', entityIdKey: 'supplierId', asOfDate: new Date(), title: 'Supplier Aging Report',
+    }));
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -4257,7 +4300,27 @@ router.get("/payables/payment-history", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const payments = await prisma.supplierPayment.findMany({ where: scopedWhere(s, df(req)), include: { supplier: { select: { name: true } }, purchase: { select: { refNo: true } } }, orderBy: { createdAt: "desc" } });
-    const data = payments.map((p) => ({ createdAt: p.createdAt, supplier: p.supplier?.name || "Unknown", amount: p.amount, paymentMethod: p.paymentMethod || "cash" }));
+    const accounts = await paymentAccountDetails(s.tenantId, payments, 'payment');
+    const data = payments.map((p) => {
+      const account = accounts.get(p.id);
+      return {
+        createdAt: p.createdAt,
+        supplier: p.supplier?.name || "Unknown",
+        bill: p.purchase?.refNo || '—',
+        amount: p.amount,
+        paymentMethod: p.paymentMethod || "cash",
+        mobileProvider: p.mobileProvider || null,
+        phoneNumber: p.phoneNumber || null,
+        transactionId: p.transactionId || null,
+        reference: p.reference || null,
+        accountName: account?.name || null,
+        accountType: account?.type || null,
+        accountNumber: account?.accountNumber || null,
+        bankName: account?.bankName || null,
+        accountHolder: account?.accountHolder || null,
+        bankBranch: account?.branchName || null,
+      };
+    });
     res.json({ data, summary: { count: data.length, totalPaid: data.reduce((a, p) => a + p.amount, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });

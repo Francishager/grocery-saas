@@ -312,7 +312,11 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
         { OR: [{ createdAt: { gte: range.start } }, { updatedAt: { gte: range.start } }] },
         ...(scope.branchId ? [{ OR: [{ fromBranchId: scope.branchId }, { toBranchId: scope.branchId }] }] : []),
       ] } },
-      include: { product: { select: { ...productSelect, barcode: true } }, transfer: { select: { id: true, transferNo: true, createdAt: true, updatedAt: true, status: true, fromBranchId: true, toBranchId: true, user: { select: userSelect } } } },
+      include: {
+        product: { select: { ...productSelect, barcode: true } },
+        destinationProduct: { select: { id: true } },
+        transfer: { select: { id: true, transferNo: true, createdAt: true, updatedAt: true, status: true, fromBranchId: true, toBranchId: true, user: { select: userSelect } } },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.productionOrder.findMany({
@@ -473,11 +477,15 @@ async function buildInventoryMovementSummary(scope, products, range, req) {
       recordTransfer(item.productId, "IN", transfer.updatedAt, "Transfer cancelled - stock restored");
     } else if (transfer.status === "received") {
       // Legacy transfers store only the source ID; receiving creates a branch-local product.
-      const candidates = products.filter((product) => product.branchId === transfer.toBranchId && (
-        (item.product?.sku && product.sku === item.product.sku) ||
-        (item.product?.barcode && product.barcode === item.product.barcode)
-      ));
-      if (candidates.length === 1) recordTransfer(candidates[0].id, "IN", transfer.updatedAt);
+      if (item.destinationProductId) {
+        recordTransfer(item.destinationProductId, "IN", transfer.updatedAt);
+      } else {
+        const candidates = products.filter((product) => product.branchId === transfer.toBranchId && (
+          (item.product?.sku && product.sku === item.product.sku) ||
+          (item.product?.barcode && product.barcode === item.product.barcode)
+        ));
+        if (candidates.length === 1) recordTransfer(candidates[0].id, "IN", transfer.updatedAt);
+      }
     }
   });
 

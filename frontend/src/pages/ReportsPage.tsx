@@ -295,14 +295,16 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'receivablesOutstanding', label: 'Outstanding Invoices', apiFn: reportsApiV2.receivablesOutstanding, renderType: 'table',
         columns: [textCol('customer', 'Customer'), textCol('status', 'Status'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
       },
-      { id: 'receivablesAging', label: 'Customer Aging Report', apiFn: reportsApiV2.receivablesAging, renderType: 'enriched',
+      { id: 'receivablesAging', label: 'Customer Aging Report', apiFn: reportsApiV2.receivablesAging, renderType: 'aging',
+        columns: [textCol('customer', 'Customer'), textCol('documentType', 'Document'), textCol('reference', 'Invoice / Ref'), dateCol('documentDate', 'Invoice Date'), dateCol('dueDate', 'Due Date'), textCol('agingBasis', 'Aging Basis'), textCol('daysPastDue', 'Days Past Due'), textCol('agingBucket', 'Age Band'), currencyCol('originalAmount', 'Original'), currencyCol('paidAmount', 'Paid / adjusted'), currencyCol('creditApplied', 'Credit Applied'), currencyCol('balance', 'Outstanding')],
         summaryKeys: [
           { key: 'totalOutstanding', label: 'Outstanding', format: 'currency' },
-          { key: 'invoiceCount', label: 'Invoice Count', format: 'number' },
+          { key: 'documentCount', label: 'Open Documents', format: 'number' },
+          { key: 'entityCount', label: 'Customers', format: 'number' },
         ]
       },
       { id: 'receivablesCollection', label: 'Collection Report', apiFn: reportsApiV2.receivablesCollection, renderType: 'table',
-        columns: [dateCol('createdAt', 'Date'), textCol('customer', 'Customer'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method')]
+        columns: [dateCol('createdAt', 'Date'), textCol('customer', 'Customer'), textCol('invoice', 'Invoice'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method'), textCol('mobileProvider', 'Provider'), textCol('phoneNumber', 'Mobile Number'), textCol('accountName', 'Received Into'), textCol('accountType', 'Account Type'), textCol('bankName', 'Bank'), textCol('accountNumber', 'Account No.'), textCol('accountHolder', 'Account Holder'), textCol('bankBranch', 'Bank Branch'), textCol('transactionId', 'Transaction ID'), textCol('reference', 'Reference')]
       },
       { id: 'receivablesOverdue', label: 'Overdue Accounts Report', apiFn: reportsApiV2.receivablesOverdue, renderType: 'table',
         columns: [textCol('customer', 'Customer'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
@@ -318,14 +320,16 @@ const CATEGORIES: ReportCategory[] = [
       { id: 'payablesOutstanding', label: 'Outstanding Bills Report', apiFn: reportsApiV2.payablesOutstanding, renderType: 'table',
         columns: [textCol('supplier', 'Supplier'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance'), dateCol('createdAt', 'Date')]
       },
-      { id: 'payablesAging', label: 'Supplier Aging Report', apiFn: reportsApiV2.payablesAging, renderType: 'enriched',
+      { id: 'payablesAging', label: 'Supplier Aging Report', apiFn: reportsApiV2.payablesAging, renderType: 'aging',
+        columns: [textCol('supplier', 'Supplier'), textCol('documentType', 'Document'), textCol('reference', 'Bill / Ref'), dateCol('documentDate', 'Bill Date'), dateCol('dueDate', 'Due Date'), textCol('agingBasis', 'Aging Basis'), textCol('daysPastDue', 'Days Past Due'), textCol('agingBucket', 'Age Band'), currencyCol('originalAmount', 'Original'), currencyCol('paidAmount', 'Paid / adjusted'), currencyCol('balance', 'Outstanding')],
         summaryKeys: [
           { key: 'totalOutstanding', label: 'Outstanding', format: 'currency' },
-          { key: 'invoiceCount', label: 'Bill Count', format: 'number' },
+          { key: 'documentCount', label: 'Open Bills', format: 'number' },
+          { key: 'entityCount', label: 'Suppliers', format: 'number' },
         ]
       },
       { id: 'payablesPaymentHistory', label: 'Payment History Report', apiFn: reportsApiV2.payablesPaymentHistory, renderType: 'table',
-        columns: [dateCol('createdAt', 'Date'), textCol('supplier', 'Supplier'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method')]
+        columns: [dateCol('createdAt', 'Date'), textCol('supplier', 'Supplier'), textCol('bill', 'Bill'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method'), textCol('mobileProvider', 'Provider'), textCol('phoneNumber', 'Mobile Number'), textCol('accountName', 'Paid From'), textCol('accountType', 'Account Type'), textCol('bankName', 'Bank'), textCol('accountNumber', 'Account No.'), textCol('accountHolder', 'Account Holder'), textCol('bankBranch', 'Bank Branch'), textCol('transactionId', 'Transaction ID'), textCol('reference', 'Reference')]
       },
       { id: 'payablesOverdue', label: 'Overdue Supplier Balances', apiFn: reportsApiV2.payablesOverdue, renderType: 'table',
         columns: [textCol('supplier', 'Supplier'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
@@ -1586,46 +1590,93 @@ function TrialBalanceReport({ data }: { data: any }) {
 }
 
 function AgingReport({ data }: { data: any }) {
-  if (!data?.data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
   const buckets = data.buckets || {}
+  const bucketLabels: Record<string, string> = {
+    notDue: 'Not yet due', current: 'Due today', '1-30': '1-30 days overdue',
+    '31-60': '31-60 days overdue', '61-90': '61-90 days overdue', '90+': 'Over 90 days overdue',
+  }
+  const summaryRows = Array.isArray(data.data) ? data.data : []
+  const detailRows = Array.isArray(data.transactions) ? data.transactions : []
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-5">
-        {Object.entries(buckets).map(([k, v]) => (
-          <Card key={k}><CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground">{k === 'current' ? 'Current' : `${k} days`}</p>
-            <p className="mt-1 font-bold">{formatCurrency(Number(v) || 0)}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <p className="text-muted-foreground">Aging calculated from each document's due date as of <span className="font-medium text-foreground">{formatDisplayDate(data.asOfDate)}</span>.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 font-semibold">
+          <span>Open balance: {formatCurrency(Number(data.summary?.totalOutstanding || 0))}</span>
+          <span>{data.summary?.entityCount || 0} customers / suppliers</span>
+          <span>{data.summary?.documentCount || 0} open documents</span>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {Object.entries(bucketLabels).map(([key, label]) => (
+          <Card key={key}><CardContent className="p-3">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="mt-1 font-bold tabular-nums">{formatCurrency(Number(buckets[key]) || 0)}</p>
           </CardContent></Card>
         ))}
       </div>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium">Name</th>
-              <th className="px-4 py-3 text-right font-medium">Total Balance</th>
-              <th className="px-4 py-3 text-right font-medium">Current</th>
-              <th className="px-4 py-3 text-right font-medium">1-30</th>
-              <th className="px-4 py-3 text-right font-medium">31-60</th>
-              <th className="px-4 py-3 text-right font-medium">61-90</th>
-              <th className="px-4 py-3 text-right font-medium">90+</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.data.map((row: any, i: number) => (
-              <tr key={i} className="border-t hover:bg-muted/30">
-                <td className="px-4 py-2">{row.customer || row.supplier}</td>
-                <td className="px-4 py-2 text-right font-medium">{formatCurrency(row.totalBalance || 0)}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(row.aging?.current || 0)}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(row.aging?.['1-30'] || 0)}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(row.aging?.['31-60'] || 0)}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(row.aging?.['61-90'] || 0)}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(row.aging?.['90+'] || 0)}</td>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">Balance by {data.title?.includes('Supplier') ? 'supplier' : 'customer'}</h3>
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="min-w-[1000px] w-full text-sm">
+            <thead className="bg-muted/50"><tr>
+              <th className="px-3 py-3 text-left font-medium">Name</th>
+              <th className="px-3 py-3 text-right font-medium">Open documents</th>
+              {Object.keys(bucketLabels).map((key) => <th key={key} className="px-3 py-3 text-right font-medium">{bucketLabels[key]}</th>)}
+              <th className="px-3 py-3 text-right font-medium">Total outstanding</th>
+              <th className="px-3 py-3 text-right font-medium">Oldest overdue</th>
+            </tr></thead>
+            <tbody>{summaryRows.map((row: any, index: number) => (
+              <tr key={row.customerId || row.supplierId || index} className="border-t hover:bg-muted/30">
+                <td className="px-3 py-2 font-medium">{row.customer || row.supplier}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.documentCount}</td>
+                {Object.keys(bucketLabels).map((key) => <td key={key} className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.aging?.[key] || 0))}</td>)}
+                <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(Number(row.totalBalance || 0))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.oldestDaysPastDue ? `${row.oldestDaysPastDue} days` : '—'}</td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">Open invoices and bills</h3>
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="min-w-[1350px] w-full text-sm">
+            <thead className="bg-muted/50"><tr>
+              <th className="px-3 py-3 text-left font-medium">Customer / Supplier</th>
+              <th className="px-3 py-3 text-left font-medium">Document</th>
+              <th className="px-3 py-3 text-left font-medium">Reference</th>
+              <th className="px-3 py-3 text-left font-medium">Document date</th>
+              <th className="px-3 py-3 text-left font-medium">Due date</th>
+              <th className="px-3 py-3 text-left font-medium">Aging basis</th>
+              <th className="px-3 py-3 text-right font-medium">Days overdue</th>
+              <th className="px-3 py-3 text-left font-medium">Age band</th>
+              <th className="px-3 py-3 text-right font-medium">Original</th>
+              <th className="px-3 py-3 text-right font-medium">Paid / adjusted</th>
+              {detailRows.some((row: any) => Number(row.creditApplied) > 0) && <th className="px-3 py-3 text-right font-medium">Credit applied</th>}
+              <th className="px-3 py-3 text-right font-medium">Outstanding</th>
+            </tr></thead>
+            <tbody>{detailRows.map((row: any, index: number) => (
+              <tr key={row.id || index} className="border-t hover:bg-muted/30">
+                <td className="px-3 py-2 font-medium">{row.customer || row.supplier}</td>
+                <td className="px-3 py-2">{row.documentType}</td>
+                <td className="px-3 py-2 font-mono text-xs">{row.reference || '—'}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{formatDisplayDate(row.documentDate)}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{formatDisplayDate(row.dueDate)}</td>
+                <td className="px-3 py-2">{row.agingBasis}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.daysPastDue ? row.daysPastDue : '—'}</td>
+                <td className="px-3 py-2">{bucketLabels[row.agingBucket] || 'Current'}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.originalAmount || 0))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.paidAmount || 0))}</td>
+                {detailRows.some((item: any) => Number(item.creditApplied) > 0) && <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.creditApplied || 0))}</td>}
+                <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(Number(row.balance || 0))}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {!detailRows.length && <p className="py-6 text-center text-sm text-muted-foreground">No open documents for this period.</p>}
+      </section>
     </div>
   )
 }
@@ -2192,6 +2243,9 @@ export default function ReportsPage() {
     if (currentReport?.renderType === 'dailyBusiness') {
       return { data: buildDailyBusinessExportRows(reportData), columns: dailyBusinessColumns }
     }
+    if (currentReport?.renderType === 'aging') {
+      return { data: reportData?.transactions || [], columns: currentReport.columns }
+    }
     return { data: reportData?.data || reportData, columns: currentReport?.columns }
   }
 
@@ -2390,7 +2444,7 @@ export default function ReportsPage() {
                   </div>
                 ) : reportData ? (
                   <div className="space-y-4">
-                    {currentReport.renderType !== 'dailyBusiness' && reportData.summary && (
+                    {currentReport.renderType !== 'dailyBusiness' && currentReport.renderType !== 'aging' && reportData.summary && (
                       <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
                         {Object.entries(reportData.summary).map(([k, v]) => {
                           // Skip complex objects that should be displayed as breakdowns
@@ -2413,7 +2467,7 @@ export default function ReportsPage() {
                       </div>
                     )}
                     {currentReport.id === 'financialExpense' && reportData?.summary?.byCategory && <ExpenseCategoryBreakdown summary={reportData.summary} />}
-                    {(currentReport.id === 'receivablesAging' || currentReport.id === 'payablesAging') && reportData?.summary?.ageGroups && (
+                    {currentReport.renderType === 'enriched' && (currentReport.id === 'receivablesAging' || currentReport.id === 'payablesAging') && reportData?.summary?.ageGroups && (
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <BreakdownList title="Age Groups" data={reportData.summary.ageGroups} />
                       </div>

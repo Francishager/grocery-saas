@@ -178,7 +178,7 @@ model Tenant {
   receivablesAccountingConfig     ReceivablesAccountingConfig?
   payablesAccountingConfig        PayablesAccountingConfig?
   receivablesGlMigrationBatches   ReceivablesGlMigrationBatch[]
-  accountingCutover              TenantAccountingCutover?
+  accountingCutover               TenantAccountingCutover?
   hrAuditLogs                     HRAuditLog[]
 
   // =====================
@@ -502,8 +502,8 @@ model User {
   calculatorHistory               CalculatorHistory[]
   createdReceiptAllocations       CustomerPaymentAllocation[]              @relation("ReceiptAllocationCreator")
   receivableReconciliationReviews CustomerReceivableReconciliationReview[] @relation("ReceivableReconciliationReviewer")
-  receivablesGlMigrationApprovals ReceivablesGlMigrationBatch[]               @relation("ReceivablesGlMigrationApprover")
-  accountingCutovers              TenantAccountingCutover[]                  @relation("TenantAccountingCutoverPerformer")
+  receivablesGlMigrationApprovals ReceivablesGlMigrationBatch[]            @relation("ReceivablesGlMigrationApprover")
+  accountingCutovers              TenantAccountingCutover[]                @relation("TenantAccountingCutoverPerformer")
 
   advisorCollections   AdvisorCollection[]
   advisorConversations AdvisorConversation[]
@@ -954,27 +954,28 @@ model Product {
   purchaseItems PurchaseItem[]
 
   // New relations
-  saleRecordItems         SaleRecordItem[]
-  supplierPurchaseItems   SupplierPurchaseItem[]
-  units                   ProductUnit[]
-  rentalItems             RentalItem[]
-  saleReturnItems         SaleReturnItem[]
-  stockTransferItems      StockTransferItem[]
-  recipeIngredients       RecipeIngredient[]
-  comboMealItems          ComboMealItem[]
-  orderItems              RestaurantOrderItem[]
-  recipes                 Recipe[]
-  productionOrders        ProductionOrder[]
-  productionWaste         ProductionWaste[]
-  productionBatches       ProductionBatch[]
-  harvests                Harvest[]
-  appointmentProducts     Appointment[]
-  workOrderProducts       WorkOrder[]
-  serviceJobCardProducts  ServiceJobCard[]
-  includedServices        ProductServiceLink[]   @relation("ProductIncludedServices")
-  includedInProducts      ProductServiceLink[]   @relation("ServiceIncludedProducts")
-  serviceFeedbackProducts ServiceFeedback[]
-  priceHistory            ProductPriceHistory[]
+  saleRecordItems               SaleRecordItem[]
+  supplierPurchaseItems         SupplierPurchaseItem[]
+  units                         ProductUnit[]
+  rentalItems                   RentalItem[]
+  saleReturnItems               SaleReturnItem[]
+  stockTransferItems            StockTransferItem[]
+  stockTransferDestinationItems StockTransferItem[]    @relation("TransferDestinationProduct")
+  recipeIngredients             RecipeIngredient[]
+  comboMealItems                ComboMealItem[]
+  orderItems                    RestaurantOrderItem[]
+  recipes                       Recipe[]
+  productionOrders              ProductionOrder[]
+  productionWaste               ProductionWaste[]
+  productionBatches             ProductionBatch[]
+  harvests                      Harvest[]
+  appointmentProducts           Appointment[]
+  workOrderProducts             WorkOrder[]
+  serviceJobCardProducts        ServiceJobCard[]
+  includedServices              ProductServiceLink[]   @relation("ProductIncludedServices")
+  includedInProducts            ProductServiceLink[]   @relation("ServiceIncludedProducts")
+  serviceFeedbackProducts       ServiceFeedback[]
+  priceHistory                  ProductPriceHistory[]
 
   @@unique([tenantId, branchId, sku])
   @@unique([tenantId, branchId, barcode])
@@ -1927,38 +1928,38 @@ model SaleReturnItem {
 // =====================================================
 
 model Account {
-  id           String        @id @default(cuid())
-  tenantId     String
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  code         String // e.g. "1000", "2001"
-  name         String // e.g. "Cash", "Accounts Receivable"
-  type         String // asset, liability, equity, revenue, expense
-  subType      String? // current_asset, fixed_asset, current_liability, etc.
-  parentId     String?
-  parent       Account?      @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children     Account[]     @relation("AccountHierarchy")
-  balance      Float         @default(0)
-  isActive     Boolean       @default(true)
-  isSystemManaged Boolean    @default(false)
-  description  String?
-  branchId     String?
-  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  journalLines JournalLine[]
-  receivablesARConfigs ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
-  receivablesRevenueConfigs ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
-  receivablesTaxConfigs ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
-  receivablesReturnsConfigs ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
-  receivablesCOGSConfigs ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
-  receivablesInventoryConfigs ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
-  receivablesAdvanceConfigs ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
+  id                              String                        @id @default(cuid())
+  tenantId                        String
+  tenant                          Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code                            String // e.g. "1000", "2001"
+  name                            String // e.g. "Cash", "Accounts Receivable"
+  type                            String // asset, liability, equity, revenue, expense
+  subType                         String? // current_asset, fixed_asset, current_liability, etc.
+  parentId                        String?
+  parent                          Account?                      @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children                        Account[]                     @relation("AccountHierarchy")
+  balance                         Float                         @default(0)
+  isActive                        Boolean                       @default(true)
+  isSystemManaged                 Boolean                       @default(false)
+  description                     String?
+  branchId                        String?
+  branch                          Branch?                       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  journalLines                    JournalLine[]
+  receivablesARConfigs            ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
+  receivablesRevenueConfigs       ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
+  receivablesTaxConfigs           ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
+  receivablesReturnsConfigs       ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
+  receivablesCOGSConfigs          ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
+  receivablesInventoryConfigs     ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
+  receivablesAdvanceConfigs       ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
   receivablesOpeningEquityConfigs ReceivablesAccountingConfig[] @relation("ReceivablesOpeningEquityAccount")
-  payablesAPConfigs PayablesAccountingConfig[] @relation("PayablesAPAccount")
-  payablesOpeningEquityConfigs PayablesAccountingConfig[] @relation("PayablesOpeningEquityAccount")
-  payablesPurchaseExpenseConfigs PayablesAccountingConfig[] @relation("PayablesPurchaseExpenseAccount")
-  payablesInventoryConfigs PayablesAccountingConfig[] @relation("PayablesInventoryAccount")
-  payablesReturnsConfigs PayablesAccountingConfig[] @relation("PayablesReturnsAccount")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  payablesAPConfigs               PayablesAccountingConfig[]    @relation("PayablesAPAccount")
+  payablesOpeningEquityConfigs    PayablesAccountingConfig[]    @relation("PayablesOpeningEquityAccount")
+  payablesPurchaseExpenseConfigs  PayablesAccountingConfig[]    @relation("PayablesPurchaseExpenseAccount")
+  payablesInventoryConfigs        PayablesAccountingConfig[]    @relation("PayablesInventoryAccount")
+  payablesReturnsConfigs          PayablesAccountingConfig[]    @relation("PayablesReturnsAccount")
+  createdAt                       DateTime                      @default(now())
+  updatedAt                       DateTime                      @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2423,72 +2424,72 @@ model HRAccountingConfig {
 }
 
 model ReceivablesAccountingConfig {
-  id                      String   @id @default(cuid())
-  tenantId                String   @unique
-  tenant                  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  receivableAccountId      String?
-  receivableAccount        Account? @relation("ReceivablesARAccount", fields: [receivableAccountId], references: [id], onDelete: SetNull)
-  salesRevenueAccountId    String?
-  salesRevenueAccount      Account? @relation("ReceivablesRevenueAccount", fields: [salesRevenueAccountId], references: [id], onDelete: SetNull)
-  taxPayableAccountId      String?
-  taxPayableAccount        Account? @relation("ReceivablesTaxAccount", fields: [taxPayableAccountId], references: [id], onDelete: SetNull)
-  salesReturnsAccountId    String?
-  salesReturnsAccount      Account? @relation("ReceivablesReturnsAccount", fields: [salesReturnsAccountId], references: [id], onDelete: SetNull)
-  costOfGoodsSoldAccountId String?
-  costOfGoodsSoldAccount   Account? @relation("ReceivablesCOGSAccount", fields: [costOfGoodsSoldAccountId], references: [id], onDelete: SetNull)
-  inventoryAccountId       String?
-  inventoryAccount         Account? @relation("ReceivablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
-  customerAdvancesAccountId String?
-  customerAdvancesAccount  Account? @relation("ReceivablesAdvanceAccount", fields: [customerAdvancesAccountId], references: [id], onDelete: SetNull)
+  id                            String    @id @default(cuid())
+  tenantId                      String    @unique
+  tenant                        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivableAccountId           String?
+  receivableAccount             Account?  @relation("ReceivablesARAccount", fields: [receivableAccountId], references: [id], onDelete: SetNull)
+  salesRevenueAccountId         String?
+  salesRevenueAccount           Account?  @relation("ReceivablesRevenueAccount", fields: [salesRevenueAccountId], references: [id], onDelete: SetNull)
+  taxPayableAccountId           String?
+  taxPayableAccount             Account?  @relation("ReceivablesTaxAccount", fields: [taxPayableAccountId], references: [id], onDelete: SetNull)
+  salesReturnsAccountId         String?
+  salesReturnsAccount           Account?  @relation("ReceivablesReturnsAccount", fields: [salesReturnsAccountId], references: [id], onDelete: SetNull)
+  costOfGoodsSoldAccountId      String?
+  costOfGoodsSoldAccount        Account?  @relation("ReceivablesCOGSAccount", fields: [costOfGoodsSoldAccountId], references: [id], onDelete: SetNull)
+  inventoryAccountId            String?
+  inventoryAccount              Account?  @relation("ReceivablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
+  customerAdvancesAccountId     String?
+  customerAdvancesAccount       Account?  @relation("ReceivablesAdvanceAccount", fields: [customerAdvancesAccountId], references: [id], onDelete: SetNull)
   openingBalanceEquityAccountId String?
-  openingBalanceEquityAccount Account? @relation("ReceivablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
-  isEnabled               Boolean  @default(false)
-  configuredBy            String?
-  configuredAt            DateTime?
-  updatedBy               String?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  openingBalanceEquityAccount   Account?  @relation("ReceivablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
+  isEnabled                     Boolean   @default(false)
+  configuredBy                  String?
+  configuredAt                  DateTime?
+  updatedBy                     String?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
 
   @@map("receivables_accounting_configs")
 }
 
 model PayablesAccountingConfig {
-  id                         String   @id @default(cuid())
-  tenantId                   String   @unique
-  tenant                     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  payableAccountId           String?
-  payableAccount             Account? @relation("PayablesAPAccount", fields: [payableAccountId], references: [id], onDelete: SetNull)
+  id                            String    @id @default(cuid())
+  tenantId                      String    @unique
+  tenant                        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payableAccountId              String?
+  payableAccount                Account?  @relation("PayablesAPAccount", fields: [payableAccountId], references: [id], onDelete: SetNull)
   openingBalanceEquityAccountId String?
-  openingBalanceEquityAccount Account? @relation("PayablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
-  purchaseExpenseAccountId   String?
-  purchaseExpenseAccount     Account? @relation("PayablesPurchaseExpenseAccount", fields: [purchaseExpenseAccountId], references: [id], onDelete: SetNull)
-  inventoryAccountId         String?
-  inventoryAccount           Account? @relation("PayablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
-  purchaseReturnsAccountId   String?
-  purchaseReturnsAccount     Account? @relation("PayablesReturnsAccount", fields: [purchaseReturnsAccountId], references: [id], onDelete: SetNull)
-  isEnabled                  Boolean  @default(false)
-  configuredBy               String?
-  configuredAt               DateTime?
-  updatedBy                  String?
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  openingBalanceEquityAccount   Account?  @relation("PayablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
+  purchaseExpenseAccountId      String?
+  purchaseExpenseAccount        Account?  @relation("PayablesPurchaseExpenseAccount", fields: [purchaseExpenseAccountId], references: [id], onDelete: SetNull)
+  inventoryAccountId            String?
+  inventoryAccount              Account?  @relation("PayablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
+  purchaseReturnsAccountId      String?
+  purchaseReturnsAccount        Account?  @relation("PayablesReturnsAccount", fields: [purchaseReturnsAccountId], references: [id], onDelete: SetNull)
+  isEnabled                     Boolean   @default(false)
+  configuredBy                  String?
+  configuredAt                  DateTime?
+  updatedBy                     String?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
 
   @@map("payables_accounting_configs")
 }
 
 model ReceivablesGlMigrationBatch {
-  id                String   @id @default(cuid())
-  tenantId          String
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  fingerprint       String
-  approvedByUserId  String
-  approvedBy        User     @relation("ReceivablesGlMigrationApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
-  approvedAt        DateTime
-  appliedAt         DateTime @default(now())
-  actionCount       Int
-  blockedCount      Int
-  plan              Json
-  createdAt         DateTime @default(now())
+  id               String   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fingerprint      String
+  approvedByUserId String
+  approvedBy       User     @relation("ReceivablesGlMigrationApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  approvedAt       DateTime
+  appliedAt        DateTime @default(now())
+  actionCount      Int
+  blockedCount     Int
+  plan             Json
+  createdAt        DateTime @default(now())
 
   @@unique([tenantId, fingerprint])
   @@index([tenantId, appliedAt])
@@ -2496,19 +2497,19 @@ model ReceivablesGlMigrationBatch {
 }
 
 model TenantAccountingCutover {
-  id               String   @id @default(cuid())
-  tenantId         String   @unique
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  cutoverAt        DateTime @default(now())
-  performedById    String
-  performedBy      User     @relation("TenantAccountingCutoverPerformer", fields: [performedById], references: [id], onDelete: Restrict)
+  id                String   @id @default(cuid())
+  tenantId          String   @unique
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cutoverAt         DateTime @default(now())
+  performedById     String
+  performedBy       User     @relation("TenantAccountingCutoverPerformer", fields: [performedById], references: [id], onDelete: Restrict)
   sourceFingerprint String
-  openingJournalId String?
-  snapshot         Json
-  exceptions       Json
-  exceptionCount   Int      @default(0)
-  status           String   @default("active_with_exceptions")
-  createdAt        DateTime @default(now())
+  openingJournalId  String?
+  snapshot          Json
+  exceptions        Json
+  exceptionCount    Int      @default(0)
+  status            String   @default("active_with_exceptions")
+  createdAt         DateTime @default(now())
 
   @@index([status, cutoverAt])
   @@map("tenant_accounting_cutovers")
@@ -2622,25 +2623,32 @@ model StockTransfer {
   user         User                @relation(fields: [userId], references: [id])
   notes        String?
   items        StockTransferItem[]
+  reversalOfId String?
+  reversalOf   StockTransfer?      @relation("StockTransferReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversals    StockTransfer[]     @relation("StockTransferReversal")
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
   @@unique([tenantId, transferNo])
   @@index([tenantId])
+  @@index([reversalOfId])
   @@map("stock_transfers")
 }
 
 model StockTransferItem {
-  id         String        @id @default(cuid())
-  transferId String
-  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
-  productId  String
-  product    Product       @relation(fields: [productId], references: [id])
-  quantity   Int
-  notes      String?
-  createdAt  DateTime      @default(now())
+  id                   String        @id @default(cuid())
+  transferId           String
+  transfer             StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product       @relation(fields: [productId], references: [id])
+  destinationProductId String?
+  destinationProduct   Product?      @relation("TransferDestinationProduct", fields: [destinationProductId], references: [id], onDelete: SetNull)
+  quantity             Int
+  notes                String?
+  createdAt            DateTime      @default(now())
 
   @@index([transferId])
+  @@index([destinationProductId])
   @@map("stock_transfer_items")
 }
 

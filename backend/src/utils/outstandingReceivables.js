@@ -10,12 +10,14 @@ export function buildOutstandingReceivableRows(customers, sales) {
     if (Number(customer.openingBalance) > 0) rows.push({ id: `opening-${customer.id}`,
       reference: 'Opening Balance', date: customer.openingBalanceDate || customer.createdAt,
       dueDate: customer.openingBalanceDate || customer.createdAt, type: 'Opening Balance',
+      agingBasis: customer.openingBalanceDate ? 'Opening balance date' : 'Customer record date (no opening date set)',
       status: 'opening_balance', total: money(customer.openingBalance), amountPaid: 0,
       balance: money(customer.openingBalance) });
     rows.push(...sales.filter((sale) => sale.customerId === customer.id && sale.balance > 0)
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
       .map((sale) => ({ id: sale.id, reference: sale.receiptNo, date: sale.createdAt,
-        dueDate: sale.dueDate || sale.createdAt, type: 'Invoice', status: sale.paymentStatus,
+        dueDate: sale.dueDate || sale.createdAt,
+        agingBasis: sale.dueDate ? 'Due date' : 'Invoice date (no due date set)', type: 'Invoice', status: sale.paymentStatus,
         total: sale.total, amountPaid: sale.amountPaid, balance: sale.balance })));
     // Apply existing customer credit to the oldest debt for the aging view only.
     let availableCredit = money(Math.max(0, rows.reduce((sum, row) => sum + row.balance, 0) - Math.max(0, customer.balance)));

@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
+import { useAuth } from '@/hooks/useAuth'
 import { apiFetch } from '@/lib/api'
-import { ArrowRightLeft, Plus, Package, Check, X, Truck } from 'lucide-react'
+import { ArrowRightLeft, Plus, Package, Check, X, RotateCcw } from 'lucide-react'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalTransfers, getLocalBranches, getLocalProducts } from '@/db/hybrid'
 
@@ -22,6 +23,7 @@ interface StockTransfer {
   toBranch?: { id: string; name: string }
   user?: { fname: string; lname: string }
   items: { id: string; productId: string; product: { name: string; sku?: string }; quantity: number; notes?: string }[]
+  reversals?: { id: string; transferNo: string; status: string }[]
 }
 
 interface Branch { id: string; name: string }
@@ -29,6 +31,8 @@ interface Product { id: string; name: string; sku?: string; quantity: number; br
 
 export default function TransfersPage() {
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  const canTransferStock = hasPermission('canTransferStock')
   const online = useOnlineStatus()
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -158,9 +162,27 @@ export default function TransfersPage() {
       if (res.ok) {
         toast({ title: 'Transfer cancelled' })
         fetchTransfers()
+      } else {
+        const data = await res.json()
+        toast({ variant: 'destructive', title: data.error || 'Failed to cancel transfer' })
       }
     } catch (err) {
       toast({ variant: 'destructive', title: 'Failed to cancel' })
+    }
+  }
+
+  const handleReturn = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/transfers/${id}/return`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        toast({ title: 'Return transfer created', description: 'Stock was sent back and is awaiting receipt at the source branch.' })
+        fetchTransfers()
+      } else {
+        toast({ variant: 'destructive', title: data.error || 'Failed to return transfer' })
+      }
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to return transfer' })
     }
   }
 
@@ -178,7 +200,7 @@ export default function TransfersPage() {
           <h1 className="text-3xl font-bold tracking-tight">Branch Transfers</h1>
           <p className="text-muted-foreground">Transfer stock between branches</p>
         </div>
-        <Dialog open={showModal} onOpenChange={setShowModal}>
+        {canTransferStock && <Dialog open={showModal} onOpenChange={setShowModal}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> New Transfer</Button></DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader><DialogTitle>Create Stock Transfer</DialogTitle></DialogHeader>
@@ -226,7 +248,7 @@ export default function TransfersPage() {
             </div>
             <DialogFooter><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleCreate}>Create Transfer</Button></DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
 
       <div className="space-y-3">
@@ -255,11 +277,23 @@ export default function TransfersPage() {
                 </div>
               ))}
             </div>
-            {tr.status === 'in_transit' && (
+            {canTransferStock && tr.status === 'in_transit' && (
               <div className="flex gap-2 mt-3">
                 <Button size="sm" onClick={() => handleReceive(tr.id)}><Check className="h-4 w-4 mr-1" /> Receive</Button>
                 <Button size="sm" variant="outline" onClick={() => handleCancel(tr.id)}><X className="h-4 w-4 mr-1" /> Cancel</Button>
               </div>
+            )}
+            {canTransferStock && tr.status === 'received' && !tr.reversals?.some((reversal) => reversal.status !== 'cancelled') && (
+              <div className="mt-3">
+                <Button size="sm" variant="outline" onClick={() => handleReturn(tr.id)}>
+                  <RotateCcw className="h-4 w-4 mr-1" /> Return to source
+                </Button>
+              </div>
+            )}
+            {!!tr.reversals?.length && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Return transfer: {tr.reversals.map((reversal) => reversal.transferNo).join(', ')}
+              </p>
             )}
           </div>
         ))}
