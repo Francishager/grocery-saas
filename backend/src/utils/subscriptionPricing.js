@@ -54,9 +54,13 @@ export function resolveSubscriptionCharge(plan = {}, tenant = {}) {
 }
 
 export function calculateBillingReminder(tenant = {}) {
+  const now = tenant.now ? new Date(tenant.now) : new Date();
   const subscriptionEnd = tenant.subscriptionEnd ? new Date(tenant.subscriptionEnd) : null;
   const trialEndsAt = tenant.trialEndsAt ? new Date(tenant.trialEndsAt) : null;
-  const dueDate = subscriptionEnd && !Number.isNaN(subscriptionEnd.getTime())
+  const isTrial = String(tenant.status || '').toLowerCase() === 'trial';
+  const dueDate = isTrial && trialEndsAt && !Number.isNaN(trialEndsAt.getTime())
+    ? trialEndsAt
+    : subscriptionEnd && !Number.isNaN(subscriptionEnd.getTime())
     ? subscriptionEnd
     : trialEndsAt && !Number.isNaN(trialEndsAt.getTime())
       ? trialEndsAt
@@ -77,22 +81,37 @@ export function calculateBillingReminder(tenant = {}) {
     };
   }
 
-  const now = new Date();
   const diffMs = dueDate.getTime() - now.getTime();
   const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   const gracePeriodEndsAt = new Date(dueDate.getTime() + (gracePeriodDays * 24 * 60 * 60 * 1000));
   const isDueSoon = daysRemaining <= reminderDaysBeforeDue && daysRemaining >= 0;
-  const isGracePeriodActive = now > dueDate && now < gracePeriodEndsAt;
-  const isOverdue = now >= gracePeriodEndsAt; // Subscription fully expired, including grace period
+  const isGracePeriodActive = !isTrial && now > dueDate && now < gracePeriodEndsAt;
+  const isOverdue = isTrial ? now >= dueDate : now >= gracePeriodEndsAt;
 
   return {
     isDueSoon,
     isGracePeriodActive,
     isOverdue,
+    isTrial,
+    isTrialExpired: isTrial && isOverdue,
+    isTrialActive: isTrial && !isOverdue,
     daysRemaining,
     gracePeriodEndsAt: gracePeriodEndsAt.toISOString(),
     reminderDaysBeforeDue,
     gracePeriodDays,
     dueDate: dueDate.toISOString(),
+  };
+}
+
+export function calculateSubscriptionPaymentProgress(amountDue, paidAmount) {
+  const amount = Math.max(0, Number(amountDue) || 0);
+  const paid = Math.max(0, Number(paidAmount) || 0);
+  const remaining = Math.max(0, Math.round((amount - paid) * 100) / 100);
+  return {
+    amountDue: amount,
+    paidAmount: paid,
+    remainingAmount: remaining,
+    isPaid: remaining <= 0.01,
+    isPartiallyPaid: paid > 0 && remaining > 0.01,
   };
 }

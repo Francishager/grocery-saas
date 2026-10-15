@@ -944,6 +944,13 @@ export const settingsApi = {
   },
 }
 
+export const subscriptionBillingApi = {
+  get: () => api.get<any>('/api/tenants/me/billing-reminder'),
+  startPayment: (data: { periodCount: number; paymentMethod: 'mobile_money' | 'card'; phoneNumber?: string; email?: string }) =>
+    api.post<any>('/api/tenants/me/billing-reminder', { body: { ...data, gateway: 'pesapal' } }),
+  getPaymentStatus: (reference: string) => api.get<any>('/api/tenants/me/billing-reminder/status', { params: { reference } }),
+}
+
 // Receipt endpoints
 export const receiptsApi = {
   get: async (saleId: string) => {

@@ -2,18 +2,18 @@ import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
-import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
 import { buildBillingPaymentRequest, getBillingGatewaySummary, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 import { getPesapalCallbackUrl, getPesapalTransactionStatus, normalizePesapalStatus, submitPesapalOrder } from "../services/pesapal.js";
-import { normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
 
-async function startPesapalSubscriptionPayment({ tenant, amount, currency, paymentMethod, phone, email, payerName, firstName, lastName, returnPath, recordedBy }) {
+async function startPesapalSubscriptionPayment({ tenant, amount, currency, paymentMethod, phone, email, payerName, firstName, lastName, returnPath, recordedBy, invoice }) {
   const merchantReference = `JS-${tenant.id.slice(0, 18)}-${Date.now()}-${randomBytes(3).toString("hex")}`;
   const normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
   const attempt = await prisma.subscriptionPayment.create({
@@ -31,7 +31,7 @@ async function startPesapalSubscriptionPayment({ tenant, amount, currency, payme
       recordedById: recordedBy?.id || null,
       recordedByEmail: recordedBy?.email || null,
       status: "pending",
-      notes: "Pesapal checkout initiated",
+      notes: invoice ? `JIBUSALES_INVOICE:${JSON.stringify(invoice)}` : "Pesapal checkout initiated",
     },
   });
 
@@ -146,25 +146,53 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
     const reminder = calculateBillingReminder({
+      status: tenant.status,
       subscriptionEnd: tenant.subscriptionEnd,
       trialEndsAt: tenant.trialEndsAt,
       gracePeriodDays: tenant.gracePeriodDays,
       reminderDaysBeforeDue: tenant.reminderDaysBeforeDue,
     });
 
-    const amountDue = resolveSubscriptionCharge(tenant.plan || {}, tenant).price;
+    const paymentProgress = await getSubscriptionPaymentProgress(prisma, tenant.id);
+    const amountDue = paymentProgress?.progress.remainingAmount ?? resolveSubscriptionCharge(tenant.plan || {}, tenant).price;
+    const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+    const payments = await prisma.subscriptionPayment.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      select: { id: true, amount: true, currency: true, paymentMethod: true, reference: true, merchantReference: true, status: true, provider: true, paidAt: true, createdAt: true, notes: true },
+    });
 
     res.json({
       tenantId: tenant.id,
       name: tenant.name,
       currency: resolveSubscriptionCharge(tenant.plan || {}, tenant).currency,
+      planName: tenant.plan?.name || 'Subscription',
+      billingCycle: charge.billingCycle,
+      planPrice: charge.price,
+      serviceFee: charge.serviceFee,
+      staticIpFee: charge.staticIpFee,
+      periodTotal: charge.price + charge.serviceFee + charge.staticIpFee,
+      currentPeriodRemainder: tenant.subscriptionEnd && tenant.subscriptionEnd > new Date()
+        ? charge.price + charge.serviceFee + charge.staticIpFee
+        : paymentProgress?.progress.remainingAmount ?? charge.price + charge.serviceFee + charge.staticIpFee,
       amountDue,
+      subscriptionAmount: paymentProgress?.progress.amountDue ?? amountDue,
+      paidToDate: paymentProgress?.progress.paidAmount ?? 0,
+      isPartiallyPaid: paymentProgress?.progress.isPartiallyPaid ?? false,
       subscriptionEnd: tenant.subscriptionEnd,
       trialEndsAt: tenant.trialEndsAt,
       gracePeriodDays: tenant.gracePeriodDays ?? 0,
       reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
       billingReference: tenant.billingPaymentReference,
-      paymentStatus: tenant.paymentReminderStatus,
+      payments: payments.map((payment) => {
+        let invoice = null;
+        if (payment.notes?.startsWith('JIBUSALES_INVOICE:')) {
+          try { invoice = JSON.parse(payment.notes.slice('JIBUSALES_INVOICE:'.length)); } catch { /* keep legacy payment visible */ }
+        }
+        return { ...payment, amount: Number(payment.amount), invoice };
+      }),
+      paymentStatus: paymentProgress?.progress.isPaid ? 'paid' : paymentProgress?.progress.isPartiallyPaid ? 'partial' : tenant.paymentReminderStatus === 'grace_period' ? 'grace_period' : 'due_soon',
       ...reminder,
     });
   } catch (err) {
@@ -215,12 +243,12 @@ router.get("/me/billing-reminder/status", authenticateToken, async (req, res) =>
   }
 });
 
-router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
+router.post("/me/billing-reminder", authenticateToken, requirePermission("canPaySubscriptionInvoice"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
-
     const { networkProvider, phoneNumber, paymentMethod = "mobile_money", gateway = "pesapal", email } = req.body || {};
+    const periodCount = Number(req.body?.periodCount ?? 1);
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -232,7 +260,18 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
     }
 
     const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
-    const amountDue = Number(charge.price || 0);
+    const paymentProgress = await getSubscriptionPaymentProgress(prisma, tenant.id);
+    const maxPeriods = charge.billingCycle === 'yearly' ? 5 : 12;
+    if (!Number.isInteger(periodCount) || periodCount < 1 || periodCount > maxPeriods) {
+      return res.status(400).json({ error: `Choose between 1 and ${maxPeriods} ${charge.billingCycle === 'yearly' ? 'years' : 'months'}` });
+    }
+    const periodTotal = Number(charge.price || 0) + Number(charge.serviceFee || 0) + Number(charge.staticIpFee || 0);
+    let currentPeriodRemainder = tenant.subscriptionEnd && tenant.subscriptionEnd > new Date()
+      ? periodTotal
+      : paymentProgress?.progress.remainingAmount ?? periodTotal;
+    if (currentPeriodRemainder <= 0) currentPeriodRemainder = periodTotal;
+    const amountDue = Math.max(0, currentPeriodRemainder) + (periodTotal * (periodCount - 1));
+    if (amountDue <= 0) return res.status(409).json({ error: "The selected subscription period is already fully paid" });
     const provider = String(networkProvider).toUpperCase();
 
     if (String(gateway).toLowerCase() === "pesapal") {
@@ -242,6 +281,20 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
       const payerEmail = String(email || req.user?.email || "").trim();
       if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter a phone number or email for Pesapal checkout" });
       const names = String(tenant.name || "Business").trim().split(/\s+/);
+      const invoice = {
+        planName: tenant.plan?.name || 'Subscription',
+        periodCount,
+        periodUnit: charge.billingCycle,
+        currency: charge.currency,
+        lineItems: [
+          { description: `${tenant.plan?.name || 'Subscription'} plan (${periodCount} ${charge.billingCycle === 'yearly' ? 'year' : 'month'}${periodCount === 1 ? '' : charge.billingCycle === 'yearly' ? 's' : 's'})`, quantity: periodCount, unitAmount: charge.price, amount: charge.price * periodCount },
+          ...(charge.serviceFee > 0 ? [{ description: 'Service fee', quantity: periodCount, unitAmount: charge.serviceFee, amount: charge.serviceFee * periodCount }] : []),
+          ...(charge.staticIpFee > 0 ? [{ description: 'Static IP service', quantity: periodCount, unitAmount: charge.staticIpFee, amount: charge.staticIpFee * periodCount }] : []),
+          ...(currentPeriodRemainder < periodTotal ? [{ description: 'Previous payments applied', quantity: 1, unitAmount: -Math.min(periodTotal - currentPeriodRemainder, periodTotal), amount: -Math.min(periodTotal - currentPeriodRemainder, periodTotal) }] : []),
+        ],
+        total: amountDue,
+        issuedAt: new Date().toISOString(),
+      };
       const payment = await startPesapalSubscriptionPayment({
         tenant,
         amount: amountDue,
@@ -252,8 +305,9 @@ router.post("/me/billing-reminder", authenticateToken, async (req, res) => {
         payerName: [req.user?.fname, req.user?.lname].filter(Boolean).join(" ") || tenant.name,
         firstName: names[0],
         lastName: names.slice(1).join(" ") || "Business",
-        returnPath: "/tenant/dashboard",
+        returnPath: "/tenant/settings",
         recordedBy: req.user,
+        invoice,
       });
       return res.status(201).json({
         message: "Pesapal checkout is ready",
@@ -336,7 +390,7 @@ async function processPesapalNotification(req, res, isIpn) {
     return res.status(200).json({ orderNotificationType: payload.OrderNotificationType || "IPNCHANGE", orderTrackingId: trackingId, orderMerchantReference: merchantReference, status: 200 });
   }
   const origin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173";
-  const returnPath = payment?.checkoutReturnPath === "/saas/subscriptions" ? "/saas/subscriptions" : "/tenant/dashboard";
+  const returnPath = payment?.checkoutReturnPath === "/saas/subscriptions" ? "/saas/subscriptions" : payment?.checkoutReturnPath === "/tenant/settings" ? "/tenant/settings" : "/tenant/dashboard";
   return res.redirect(302, `${origin.replace(/\/$/, "")}${returnPath}?billingRef=${encodeURIComponent(merchantReference)}`);
 }
 
@@ -348,7 +402,7 @@ router.get("/billing-reminder/pesapal/callback", async (req, res) => {
     const origin = process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173";
     const paymentReference = String(req.query.OrderMerchantReference || req.query.merchantReference || "");
     const payment = paymentReference ? await prisma.subscriptionPayment.findUnique({ where: { merchantReference: paymentReference }, select: { checkoutReturnPath: true } }).catch(() => null) : null;
-    const path = payment?.checkoutReturnPath === "/saas/subscriptions" ? "/saas/subscriptions" : "/tenant/dashboard";
+    const path = payment?.checkoutReturnPath === "/saas/subscriptions" ? "/saas/subscriptions" : payment?.checkoutReturnPath === "/tenant/settings" ? "/tenant/settings" : "/tenant/dashboard";
     return res.redirect(302, `${origin.replace(/\/$/, "")}${path}?billingError=verification&billingRef=${encodeURIComponent(paymentReference)}`);
   }
 });
@@ -517,6 +571,11 @@ router.put("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
         return res.status(400).json({ error: "Invalid tenant status" });
       }
       data.status = status;
+      if (status === 'trial') {
+        const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { trialEndsAt: true } });
+        if (!existing) return res.status(404).json({ error: "Tenant not found" });
+        if (!existing.trialEndsAt || existing.trialEndsAt <= new Date()) return res.status(400).json({ error: "Set a future trial end date in subscription settings before enabling trial status" });
+      }
     }
     const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data });
     const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });

@@ -85,6 +85,7 @@ const PERM_LABELS: Record<string, string> = {
   canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
   canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance reports', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
   canViewSettings:'Can view settings', canEditSettings:'Can edit settings', canGiveDiscount:'Can give discounts',
+  canPaySubscriptionInvoice:'Can pay subscription invoices',
   canViewReceipt:'Can view receipts', canCreateReceipt:'Can create receipts',
   canViewTax:'Can view tax', canManageTax:'Can manage tax',
   canViewService:'Can view services', canCreateService:'Can create services', canEditService:'Can edit services', canDeleteService:'Can delete services', canManageServiceCategory:'Can manage service categories', canViewServiceReport:'Can view service reports',
@@ -140,6 +141,7 @@ const REPORT_PERMISSION_KEYS = [
 ]
 
 const FALLBACK_CATEGORY_IDS: Record<string, string> = {
+  'Subscription & Billing': 'subscription_billing',
   Dashboard: 'dashboard',
   Sales: 'sales',
   Products: 'inventory',
@@ -187,6 +189,7 @@ const FALLBACK_CATEGORY_NAMES: Record<string, string> = {
   branches: 'Branches',
   reports: 'Reports',
   settings: 'Settings',
+  subscription_billing: 'Subscription & Billing',
   receipts: 'Receipts',
   tax: 'Tax',
   services: 'Services',
@@ -203,6 +206,7 @@ const FALLBACK_CATEGORY_NAMES: Record<string, string> = {
   other: 'Other',
 }
 const PERM_GROUPS = [
+  { label: 'Subscription & Billing', matcher: (key: string) => key === 'canPaySubscriptionInvoice' },
   { label: 'Dashboard', prefix: 'Dashboard' },
   { label: 'Sales', prefix: 'Sale' },
   { label: 'Products', matcher: (key: string) => key.includes('Product') || key === 'canViewPriceHistory' },

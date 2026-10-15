@@ -122,7 +122,7 @@ router.post("/register", async (req, res) => {
     if (tenantId) {
       const tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, trialEndsAt: true },
       });
       if (!tenant) return res.status(404).json({ error: "Tenant not found" });
       const tenantBlock = tenantAccountAccessPayload(tenant, { role: role || "attendant" });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Upload, Building2, MapPin } from 'lucide-react'
-import { settingsApi } from '@/lib/api'
+import { Upload, Building2, MapPin, Receipt, Printer, CreditCard } from 'lucide-react'
+import { settingsApi, subscriptionBillingApi } from '@/lib/api'
 import { cacheTenantFormattingSettings, DEFAULT_SYSTEM_DATE_FORMAT, getTenantCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,17 +19,81 @@ export default function BusinessSettingsPage() {
   const [saving, setSaving] = useState(false)
   const [capturingLocation, setCapturingLocation] = useState(false)
   const [locationPending, setLocationPending] = useState(false)
+  const [billing, setBilling] = useState<any>(null)
+  const [billingLoading, setBillingLoading] = useState(false)
+  const [billingBusy, setBillingBusy] = useState(false)
+  const [billingPeriods, setBillingPeriods] = useState(1)
+  const [billingMethod, setBillingMethod] = useState<'mobile_money' | 'card'>('mobile_money')
+  const [billingPhone, setBillingPhone] = useState('')
+  const [billingEmail, setBillingEmail] = useState('')
   const { toast } = useToast()
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
+  const canViewBusinessSettings = user?.role === 'owner' || hasPermission('canViewSettings')
+  const canPaySubscriptionInvoice = user?.role === 'owner' || hasPermission('canPaySubscriptionInvoice')
   const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canEditStaff')
 
-  useEffect(() => { loadSettings() }, [])
+  useEffect(() => { loadSettings() }, [online, canViewBusinessSettings])
+  useEffect(() => { if (online) void loadBilling() }, [online])
+  useEffect(() => {
+    const reference = new URLSearchParams(window.location.search).get('billingRef')
+    if (!reference || !online) return
+    let cancelled = false
+    const check = async (attempt = 0) => {
+      try {
+        const result = await subscriptionBillingApi.getPaymentStatus(reference)
+        if (cancelled) return
+        if (result.status === 'COMPLETED') {
+          toast({ title: 'Payment confirmed', description: 'Your receipt is now available below.' })
+          await loadBilling()
+          window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`)
+          return
+        }
+        if (attempt < 5 && ['PENDING', 'NOT_STARTED'].includes(result.status)) window.setTimeout(() => void check(attempt + 1), 3000)
+      } catch { /* the payment remains visible as pending until its provider confirms it */ }
+    }
+    void check()
+    return () => { cancelled = true }
+  }, [online])
+
+  const loadBilling = async () => {
+    setBillingLoading(true)
+    try { setBilling(await subscriptionBillingApi.get()) }
+    catch (error: any) { toast({ variant: 'destructive', title: 'Billing details unavailable', description: error?.message }) }
+    finally { setBillingLoading(false) }
+  }
+
+  const billingMoney = (value: number, currency = billing?.currency || settings?.currency || 'UGX') =>
+    `${currency} ${new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(Number(value || 0))}`
+
+  const printBillingDocument = (title: string, reference: string, date: string, lineItems: Array<{ label: string; amount: number }>, total: number, status: string) => {
+    const safe = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!))
+    const popup = window.open('', '_blank', 'width=760,height=800')
+    if (!popup) { toast({ variant: 'destructive', title: 'Allow pop-ups to print this document' }); return }
+    popup.document.write(`<!doctype html><html><head><title>${safe(title)}</title><style>body{font:15px Arial,sans-serif;color:#17202a;margin:40px auto;max-width:720px;padding:0 24px}header{border-bottom:2px solid #163b36;padding-bottom:18px;margin-bottom:24px}h1{font-size:24px;margin:0 0 8px}.meta{color:#52615e;line-height:1.6}.row{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #dce3e0}.total{font-size:18px;font-weight:bold;border-top:2px solid #163b36;margin-top:12px;padding-top:16px}.status{display:inline-block;background:#e9f5ee;color:#14623b;padding:6px 10px;font-weight:bold;margin-top:14px}@media print{body{margin:16mm auto}}</style></head><body><header><h1>${safe(settings?.name || 'Business')}</h1><div class="meta">${safe(settings?.address || '')}<br>${safe(settings?.phone || '')} ${safe(settings?.email || '')}</div></header><h2>${safe(title)}</h2><div class="meta">${safe(reference)} · ${safe(date)}</div>${lineItems.map(item => `<div class="row"><span>${safe(item.label)}</span><strong>${safe(billingMoney(item.amount))}</strong></div>`).join('')}<div class="row total"><span>Total</span><span>${safe(billingMoney(total))}</span></div><div class="status">${safe(status)}</div><script>window.onload=()=>window.print()</script></body></html>`)
+    popup.document.close()
+  }
+
+  const startSubscriptionPayment = async () => {
+    setBillingBusy(true)
+    try {
+      const result = await subscriptionBillingApi.startPayment({
+        periodCount: billingPeriods,
+        paymentMethod: billingMethod,
+        phoneNumber: billingPhone,
+        email: billingEmail,
+      })
+      if (result.payment?.checkoutUrl) window.location.assign(result.payment.checkoutUrl)
+      else toast({ title: 'Payment request created', description: 'Check your payment device to approve the request.' })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Could not start payment', description: error?.message })
+    } finally { setBillingBusy(false) }
+  }
 
   const loadSettings = async () => {
     try {
       if (online) {
-        const data = await settingsApi.get()
+        const data = canViewBusinessSettings ? await settingsApi.get() : await settingsApi.getBusinessProfile()
         const normalized = { ...data, dateFormat: DEFAULT_SYSTEM_DATE_FORMAT }
         cacheTenantFormattingSettings(normalized)
         setSettings(normalized)
@@ -122,7 +186,7 @@ export default function BusinessSettingsPage() {
         <p className="text-muted-foreground">Manage your core business details and logo</p>
       </div>
 
-      {settings && (
+      {settings && canViewBusinessSettings && (
         <Card>
           <CardHeader><CardTitle>Business Details</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -203,6 +267,83 @@ export default function BusinessSettingsPage() {
             <WorkingHoursEditor value={settings.workingHours || defaultWorkingHours()} timezone={settings.timezone || 'Africa/Kampala'} onChange={(workingHours) => setSettings((previous: any) => ({ ...previous, workingHours }))} disabled={!canManageHours || saving || !online} />
             <p className="text-xs text-muted-foreground">Business owner access remains unrestricted.</p>
             <Button onClick={handleSave} disabled={saving || !online}>{saving ? 'Saving...' : 'Save Changes'}</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {settings && !canViewBusinessSettings && canPaySubscriptionInvoice && (
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" />Business Profile</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-4">
+            {settings.logo && <img src={settings.logo} alt="Business logo" className="h-14 w-14 rounded-md border object-contain" />}
+            <div><p className="font-semibold">{settings.name}</p><p className="text-sm text-muted-foreground">{[settings.address, settings.phone, settings.email].filter(Boolean).join(' · ')}</p></div>
+          </CardContent>
+        </Card>
+      )}
+
+      {settings && online && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Receipt className="h-5 w-5" />Subscription invoices & receipts</CardTitle>
+            <p className="text-sm text-muted-foreground">Review your subscription charges, pay upcoming periods, and print payment documents.</p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {billingLoading && !billing ? <p className="text-sm text-muted-foreground">Loading billing history...</p> : billing ? <>
+              <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-3">
+                <div><p className="text-xs text-muted-foreground">Business</p><p className="font-semibold">{billing.name}</p></div>
+                <div><p className="text-xs text-muted-foreground">Plan & cycle</p><p className="font-semibold">{billing.planName} · {billing.billingCycle}</p></div>
+                <div><p className="text-xs text-muted-foreground">Current status</p><p className="font-semibold capitalize">{billing.paymentStatus || 'Due'}</p></div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+                <section className="space-y-3 rounded-lg border p-4" aria-label="Subscription invoice preview">
+                  <div className="flex items-start justify-between gap-3">
+                    <div><h3 className="font-semibold">Subscription invoice</h3><p className="text-sm text-muted-foreground">{billing.planName}, {billingPeriods} {billing.billingCycle === 'yearly' ? 'year(s)' : 'month(s)'}</p></div>
+                    <div className="flex flex-wrap items-center gap-2">
+                    {canPaySubscriptionInvoice && <Button size="sm" onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || (!billingPhone.trim() && !billingEmail.trim())}><CreditCard className="mr-2 h-4 w-4" />{billingBusy ? 'Opening checkout...' : 'Pay invoice'}</Button>}
+                    <Button variant="outline" size="sm" onClick={() => printBillingDocument('Subscription Invoice', `INV-${billing.tenantId}-${Date.now()}`, new Date().toLocaleDateString('en-GB'), [
+                      { label: `${billing.planName} plan × ${billingPeriods}`, amount: Number(billing.planPrice || 0) * billingPeriods },
+                      ...(Number(billing.serviceFee) > 0 ? [{ label: `Service fee × ${billingPeriods}`, amount: Number(billing.serviceFee) * billingPeriods }] : []),
+                      ...(Number(billing.staticIpFee) > 0 ? [{ label: `Static IP service × ${billingPeriods}`, amount: Number(billing.staticIpFee) * billingPeriods }] : []),
+                      ...(Number(billing.currentPeriodRemainder) < Number(billing.periodTotal) ? [{ label: 'Previous payments applied', amount: Number(billing.currentPeriodRemainder) - Number(billing.periodTotal) }] : []),
+                    ], Number(billing.currentPeriodRemainder || billing.periodTotal) + (billingPeriods - 1) * Number(billing.periodTotal || 0), 'PAYABLE')}>
+                      <Printer className="mr-2 h-4 w-4" />Print invoice
+                    </Button>
+                    </div>
+                  </div>
+                  <div className="divide-y text-sm">
+                    <div className="flex justify-between gap-4 py-2"><span>{billing.planName} plan × {billingPeriods}</span><span>{billingMoney(Number(billing.planPrice || 0) * billingPeriods)}</span></div>
+                    {Number(billing.serviceFee) > 0 && <div className="flex justify-between gap-4 py-2"><span>Service fee × {billingPeriods}</span><span>{billingMoney(Number(billing.serviceFee) * billingPeriods)}</span></div>}
+                    {Number(billing.staticIpFee) > 0 && <div className="flex justify-between gap-4 py-2"><span>Static IP service × {billingPeriods}</span><span>{billingMoney(Number(billing.staticIpFee) * billingPeriods)}</span></div>}
+                    {Number(billing.currentPeriodRemainder) < Number(billing.periodTotal) && <div className="flex justify-between gap-4 py-2 text-emerald-700"><span>Previous payments applied</span><span>-{billingMoney(Number(billing.periodTotal) - Number(billing.currentPeriodRemainder))}</span></div>}
+                    <div className="flex justify-between gap-4 py-3 text-base font-bold"><span>Invoice total</span><span>{billingMoney(Number(billing.currentPeriodRemainder || billing.periodTotal) + (billingPeriods - 1) * Number(billing.periodTotal || 0))}</span></div>
+                  </div>
+                  <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+                    <div className="space-y-1"><Label>Periods to pay</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingPeriods} onChange={event => setBillingPeriods(Number(event.target.value))}>
+                      {Array.from({ length: billing.billingCycle === 'yearly' ? 5 : 12 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count} {billing.billingCycle === 'yearly' ? (count === 1 ? 'year' : 'years') : (count === 1 ? 'month' : 'months')}</option>)}
+                    </select></div>
+                    <div className="space-y-1"><Label>Payment method</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingMethod} onChange={event => setBillingMethod(event.target.value as 'mobile_money' | 'card')}><option value="mobile_money">Mobile money</option><option value="card">Card</option></select></div>
+                    {billingMethod === 'mobile_money' && <div className="space-y-1"><Label>Mobile number</Label><Input value={billingPhone} onChange={event => setBillingPhone(event.target.value)} placeholder="Payment phone number" /></div>}
+                    <div className="space-y-1"><Label>Email for payment receipt</Label><Input type="email" value={billingEmail} onChange={event => setBillingEmail(event.target.value)} placeholder="name@example.com" /></div>
+                  </div>
+                  {!canPaySubscriptionInvoice && <p className="text-sm text-muted-foreground">Your account can view and print billing records but cannot start subscription payments.</p>}
+                </section>
+
+                <section className="space-y-3" aria-label="Subscription receipts">
+                  <div className="flex items-center justify-between"><h3 className="font-semibold">Payment history</h3><Button variant="ghost" size="sm" onClick={() => void loadBilling()} disabled={billingLoading}>{billingLoading ? 'Refreshing...' : 'Refresh'}</Button></div>
+                  {billing.payments?.length ? <div className="divide-y rounded-lg border">
+                    {billing.payments.map((payment: any) => {
+                      const invoiceItems = payment.invoice?.lineItems?.map((item: any) => ({ label: item.description, amount: Number(item.amount) })) || [{ label: 'Subscription payment', amount: Number(payment.amount) }]
+                      const date = payment.paidAt || payment.createdAt
+                      return <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                        <div className="min-w-0"><p className="font-medium">{billingMoney(payment.amount, payment.currency)} <span className="ml-1 text-xs font-normal capitalize text-muted-foreground">{payment.status}</span></p><p className="break-all text-xs text-muted-foreground">{date ? new Date(date).toLocaleDateString('en-GB') : 'Date pending'} · {payment.paymentMethod || payment.provider || 'Payment'}{payment.reference ? ` · ${payment.reference}` : ''}</p>{payment.invoice?.periodCount && <p className="text-xs text-muted-foreground">Covers {payment.invoice.periodCount} {payment.invoice.periodUnit === 'yearly' ? 'year(s)' : 'month(s)'}</p>}</div>
+                        <Button variant="outline" size="sm" disabled={payment.status !== 'completed'} onClick={() => printBillingDocument('Subscription Receipt', payment.reference || payment.merchantReference || payment.id, date ? new Date(date).toLocaleDateString('en-GB') : '', invoiceItems, Number(payment.amount), 'PAID')}><Printer className="mr-2 h-4 w-4" />Receipt</Button>
+                      </div>
+                    })}
+                  </div> : <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No subscription receipts have been recorded yet.</div>}
+                </section>
+              </div>
+            </> : <p className="text-sm text-muted-foreground">Billing details are not available right now.</p>}
           </CardContent>
         </Card>
       )}

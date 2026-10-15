@@ -729,6 +729,7 @@ model UserPermission {
   // Settings
   canViewSettings                   Boolean  @default(false)
   canEditSettings                   Boolean  @default(false)
+  canPaySubscriptionInvoice          Boolean  @default(false)
   // Receipts
   canViewReceipt                    Boolean  @default(false)
   canCreateReceipt                  Boolean  @default(false)

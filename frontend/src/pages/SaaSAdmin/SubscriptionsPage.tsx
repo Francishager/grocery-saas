@@ -49,6 +49,7 @@ export const SubscriptionsPage: React.FC = () => {
   const [subStart, setSubStart] = useState('')
   const [subEnd, setSubEnd] = useState('')
   const [trialEnd, setTrialEnd] = useState('')
+  const [trialDays, setTrialDays] = useState('')
   const [autoEnd, setAutoEnd] = useState(true)
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [tenantStatus, setTenantStatus] = useState('active')
@@ -63,6 +64,7 @@ export const SubscriptionsPage: React.FC = () => {
   const [planMaxUsers, setPlanMaxUsers] = useState('')
   const [planMaxProducts, setPlanMaxProducts] = useState('')
   const [payments, setPayments] = useState<SubscriptionPayment[]>([])
+  const [paymentProgress, setPaymentProgress] = useState<{ amountDue: number; paidAmount: number; remainingAmount: number; isPartiallyPaid: boolean } | null>(null)
   const [allPayments, setAllPayments] = useState<SubscriptionPayment[]>([])
   const [allPaymentsLoading, setAllPaymentsLoading] = useState(false)
   const [paymentLedgerSearch, setPaymentLedgerSearch] = useState('')
@@ -158,6 +160,7 @@ export const SubscriptionsPage: React.FC = () => {
       if (res.ok) {
         const data = await res.json()
         setPayments(Array.isArray(data?.payments) ? data.payments : [])
+        setPaymentProgress(data?.progress || null)
       } else appNotify('Unable to load payment history')
     } catch {
       appNotify('Unable to load payment history')
@@ -169,6 +172,7 @@ export const SubscriptionsPage: React.FC = () => {
   const openModal = (sub: Subscription) => {
     setSelected(sub)
     setPayments([])
+    setPaymentProgress(null)
     setPaymentAmount('')
     setPaymentMethod('cash')
     setPaymentPhone('')
@@ -183,6 +187,7 @@ export const SubscriptionsPage: React.FC = () => {
     setSubStart(sub.startDate ? sub.startDate.split('T')[0] : new Date().toISOString().split('T')[0])
     setSubEnd(sub.endDate ? sub.endDate.split('T')[0] : '')
     setTrialEnd(sub.trialEndsAt ? sub.trialEndsAt.split('T')[0] : '')
+    setTrialDays('')
     setAutoEnd(!sub.endDate)
     setSelectedPlanId(sub.plan?.id || '')
     setTenantStatus(sub.tenant?.status || sub.status || 'active')
@@ -286,7 +291,10 @@ export const SubscriptionsPage: React.FC = () => {
       if (tenantStatus) body.status = tenantStatus
       if (subStart) body.subscriptionStart = subStart
       if (!autoEnd && subEnd) body.subscriptionEnd = subEnd
-      if (trialEnd) body.trialEndsAt = trialEnd
+      if (tenantStatus === 'trial') {
+        if (trialDays) body.trialDays = trialDays
+        else if (trialEnd) body.trialEndsAt = trialEnd
+      }
       if (planPrice !== '') body.customPrice = planPrice
       if (customCurrency) body.customCurrency = customCurrency
       if (customBillingCycle) body.customBillingCycle = customBillingCycle
@@ -321,13 +329,14 @@ export const SubscriptionsPage: React.FC = () => {
   const effectiveStatus = (s: Subscription) => {
     const savedStatus = s.tenant?.status || s.status
     if (savedStatus === 'suspended' || savedStatus === 'cancelled') return savedStatus
+    if (savedStatus === 'trial' && s.trialEndsAt && new Date(s.trialEndsAt) <= new Date()) return 'trial_expired'
+    if (savedStatus === 'trial' && isTrialActive(s.trialEndsAt)) return 'trial'
     if (isExpired(s.endDate)) return 'expired'
-    if (isTrialActive(s.trialEndsAt)) return 'trial'
     return savedStatus
   }
 
   const statusBadge = (s: string) => {
-    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', completed: 'bg-green-100 text-green-800', trial: 'bg-blue-100 text-blue-800', pending: 'bg-amber-100 text-amber-800', past_due: 'bg-yellow-100 text-yellow-800', failed: 'bg-red-100 text-red-800', reversed: 'bg-red-100 text-red-800', cancelled: 'bg-red-100 text-red-800', expired: 'bg-gray-100 text-gray-800', suspended: 'bg-red-100 text-red-800' }
+    const cls: Record<string, string> = { active: 'bg-green-100 text-green-800', completed: 'bg-green-100 text-green-800', trial: 'bg-blue-100 text-blue-800', trial_expired: 'bg-red-100 text-red-800', pending: 'bg-amber-100 text-amber-800', past_due: 'bg-yellow-100 text-yellow-800', failed: 'bg-red-100 text-red-800', reversed: 'bg-red-100 text-red-800', cancelled: 'bg-red-100 text-red-800', expired: 'bg-gray-100 text-gray-800', suspended: 'bg-red-100 text-red-800' }
     const label = (s || 'unknown').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
     return <span className={`px-2 py-1 rounded text-xs font-medium ${cls[s] || 'bg-gray-100 text-gray-800'}`}>{label}</span>
   }
@@ -443,7 +452,10 @@ export const SubscriptionsPage: React.FC = () => {
                       {fmtDate(s.endDate)}
                       {isExpired(s.endDate) && <span className="ml-1 text-xs text-red-600">expired</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(s.trialEndsAt)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      {fmtDate(s.trialEndsAt)}
+                      {s.tenant?.status === 'trial' && s.trialEndsAt && <div className="text-xs font-medium text-blue-700">{Math.max(0, Math.ceil((new Date(s.trialEndsAt).getTime() - Date.now()) / 86400000))} days left</div>}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => openModal(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Manage Subscription"><ArrowRightLeft size={16} /></button>
                     </td>
@@ -496,6 +508,10 @@ export const SubscriptionsPage: React.FC = () => {
               <div className="flex justify-between"><span className="text-gray-500">Start</span><span>{fmtDate(selected.startDate)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">End</span><span>{fmtDate(selected.endDate)}</span></div>
               {selected.trialEndsAt && <div className="flex justify-between"><span className="text-gray-500">Trial Ends</span><span>{fmtDate(selected.trialEndsAt)}</span></div>}
+              {paymentProgress && <div className="rounded-md bg-slate-50 p-3">
+                <div className="flex justify-between"><span className="text-gray-500">Paid this period</span><span className="font-medium">{fmt(paymentProgress.paidAmount, selected.customCurrency || selected.plan?.currency || 'UGX')}</span></div>
+                <div className="mt-1 flex justify-between"><span className="text-gray-500">Remaining</span><span className={`font-semibold ${paymentProgress.remainingAmount > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{fmt(paymentProgress.remainingAmount, selected.customCurrency || selected.plan?.currency || 'UGX')}{paymentProgress.isPartiallyPaid ? ' · partial payment' : ''}</span></div>
+              </div>}
             </div>
 
             <section className="mb-4 border-t pt-4" aria-labelledby="subscription-payment-heading">
@@ -587,7 +603,7 @@ export const SubscriptionsPage: React.FC = () => {
 
             <div className="border-t pt-4 mb-4">
               <label className="block text-sm font-medium mb-2">Tenant Status</label>
-              <select value={tenantStatus} onChange={(e) => setTenantStatus(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
+              <select value={tenantStatus} onChange={(e) => { setTenantStatus(e.target.value); if (e.target.value === 'trial' && !trialDays && !trialEnd) setTrialDays('14') }} className="w-full px-3 py-2 border rounded-lg text-sm">
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>
                 <option value="trial">Trial</option>
@@ -614,8 +630,12 @@ export const SubscriptionsPage: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Trial End Date (optional)</label>
-                    <input type="date" value={trialEnd} onChange={e => setTrialEnd(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                    <input type="date" value={trialEnd} onChange={e => { setTrialEnd(e.target.value); setTrialDays('') }} className="w-full px-3 py-2 border rounded-lg text-sm" />
                   </div>
+                  {tenantStatus === 'trial' && <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Trial duration (days from today)</label>
+                    <input type="number" min="1" max="3650" step="1" inputMode="numeric" value={trialDays} onChange={e => { setTrialDays(e.target.value); if (e.target.value) setTrialEnd('') }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="14" />
+                  </div>}
                   <label className="flex items-center gap-2 text-sm text-gray-600">
                     <input type="checkbox" checked={autoEnd} onChange={e => { setAutoEnd(e.target.checked); if (e.target.checked) setSubEnd('') }} />
                     Auto-calculate end date from plan billing cycle

@@ -41,11 +41,28 @@ test('owners keep branch and staff permissions even without tenant features', ()
   assert.ok(permissions.includes('canCreateStaff'));
 });
 
+test('subscription invoice payment is a separately assignable staff permission', () => {
+  const granted = resolveEffectivePermissions({ role: 'attendant' }, { canPaySubscriptionInvoice: true });
+  const denied = resolveEffectivePermissions({ role: 'attendant' }, { canPaySubscriptionInvoice: false });
+  const owner = resolveEffectivePermissions({ role: 'owner' });
+
+  assert.ok(granted.includes('canPaySubscriptionInvoice'));
+  assert.ok(!denied.includes('canPaySubscriptionInvoice'));
+  assert.ok(owner.includes('canPaySubscriptionInvoice'));
+  assert.equal(PERMISSION_METADATA.canPaySubscriptionInvoice.category, 'subscription_billing');
+});
+
 test('prisma schema exposes the staff till sheet permission field', () => {
   const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
   const schema = readFileSync(schemaPath, 'utf8');
 
   assert.match(schema, /canViewStaffTillSheet\s+Boolean/);
+});
+
+test('prisma schema exposes the subscription invoice payment permission field', () => {
+  const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
+  const schema = readFileSync(schemaPath, 'utf8');
+  assert.match(schema, /canPaySubscriptionInvoice\s+Boolean/);
 });
 
 test('prisma schema exposes transaction account and withdrawal permission fields', () => {

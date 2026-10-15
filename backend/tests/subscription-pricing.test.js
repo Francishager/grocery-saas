@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveSubscriptionCharge, calculateBillingReminder } from '../src/utils/subscriptionPricing.js';
+import { resolveSubscriptionCharge, calculateBillingReminder, calculateSubscriptionPaymentProgress } from '../src/utils/subscriptionPricing.js';
+import { addSubscriptionPeriods } from '../src/utils/subscriptionPayments.js';
 
 test('calculateBillingReminder marks billing as due soon and tracks the grace period window', () => {
   const now = new Date();
@@ -30,6 +31,30 @@ test('calculateBillingReminder treats an expired trial as payment-due within gra
   assert.equal(summary.isGracePeriodActive, true);
   assert.equal(summary.daysRemaining, -2);
   assert.equal(summary.dueDate !== null, true);
+});
+
+test('trial countdown ignores paid subscription end and expires without a grace period', () => {
+  const now = new Date('2026-10-16T12:00:00.000Z');
+  const reminder = calculateBillingReminder({
+    status: 'trial',
+    trialEndsAt: '2026-10-17T12:00:00.000Z',
+    subscriptionEnd: '2027-10-16T12:00:00.000Z',
+    gracePeriodDays: 10,
+    now,
+  });
+  assert.equal(reminder.isTrialActive, true);
+  assert.equal(reminder.daysRemaining, 1);
+
+  const expired = calculateBillingReminder({ status: 'trial', trialEndsAt: '2026-10-16T11:59:59.000Z', gracePeriodDays: 10, now });
+  assert.equal(expired.isTrialExpired, true);
+  assert.equal(expired.isGracePeriodActive, false);
+});
+
+test('subscription payment progress treats partial receipts as outstanding until fully covered', () => {
+  assert.deepEqual(calculateSubscriptionPaymentProgress(100000, 40000), {
+    amountDue: 100000, paidAmount: 40000, remainingAmount: 60000, isPaid: false, isPartiallyPaid: true,
+  });
+  assert.equal(calculateSubscriptionPaymentProgress(100000, 100000).isPaid, true);
 });
 
 test('resolveSubscriptionCharge prefers tenant override values over plan defaults', () => {
@@ -62,4 +87,18 @@ test('resolveSubscriptionCharge falls back to plan values when no tenant overrid
   assert.equal(charge.price, 120);
   assert.equal(charge.billingCycle, 'yearly');
   assert.equal(charge.currency, 'USD');
+});
+
+test('subscription invoices include service and static-IP fees in each billed period', () => {
+  const charge = resolveSubscriptionCharge({ price: 100, billingCycle: 'monthly', currency: 'UGX' }, {
+    monthlyServiceFee: 15,
+    staticIpFee: 5,
+  });
+  assert.equal(charge.price + charge.serviceFee + charge.staticIpFee, 120);
+});
+
+test('confirmed multi-month subscription payments extend from the current term end without date overflow', () => {
+  assert.equal(addSubscriptionPeriods(new Date('2026-01-31T00:00:00.000Z'), 1, 'monthly').toISOString(), '2026-02-28T00:00:00.000Z');
+  assert.equal(addSubscriptionPeriods(new Date('2026-10-16T00:00:00.000Z'), 2, 'monthly').toISOString(), '2026-12-16T00:00:00.000Z');
+  assert.equal(addSubscriptionPeriods(new Date('2026-02-28T00:00:00.000Z'), 1, 'yearly').toISOString(), '2027-02-28T00:00:00.000Z');
 });

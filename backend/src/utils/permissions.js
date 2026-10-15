@@ -107,6 +107,7 @@ const PERMISSION_TO_FEATURES = {
   canExportReport: ['reports'],
   canViewSettings: [],
   canEditSettings: [],
+  canPaySubscriptionInvoice: [],
   canViewTax: ['tax', 'settings.taxes', 'settings'],
   canManageTax: ['tax', 'settings.taxes', 'settings'],
   canViewService: ['services', 'inventory.services'],
@@ -231,6 +232,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewPerformanceReport", "canViewAuditReport", "canExportReport",
   // Settings
   "canViewSettings", "canEditSettings",
+  "canPaySubscriptionInvoice",
   // Receipts
   "canViewReceipt", "canCreateReceipt",
   // Discounts
@@ -294,6 +296,7 @@ export const PERMISSION_CATEGORIES = [
   { id: 'branches', name: 'Branches' },
   { id: 'reports', name: 'Reports' },
   { id: 'settings', name: 'Settings' },
+  { id: 'subscription_billing', name: 'Subscription & Billing' },
   { id: 'receipts', name: 'Receipts' },
   { id: 'tax', name: 'Tax' },
   { id: 'services', name: 'Services' },
@@ -718,6 +721,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Edit business settings',
     description: 'Change business profile, receipt settings, currency, dates, tax setup, and system configuration.',
   },
+  canPaySubscriptionInvoice: {
+    name: 'Pay subscription invoices',
+    description: 'Open secure checkout and pay the business subscription invoice, including service fees and future billing periods.',
+  },
   canViewTax: {
     name: 'View tax settings',
     description: 'See configured taxes, tax rates, and tax reporting setup.',
@@ -985,6 +992,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
 };
 
 function permissionCategoryForKey(key) {
+  if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
   const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
   if (servicePermission) return servicePermission.category;
   if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';

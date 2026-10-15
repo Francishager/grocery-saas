@@ -1,3 +1,5 @@
+import { calculateSubscriptionPaymentProgress, resolveSubscriptionCharge } from './subscriptionPricing.js';
+
 export function normalizeSubscriptionPaymentAmount(value) {
   const amount = typeof value === 'string' ? value.trim() : String(value ?? '');
   if (!/^\d{1,16}(?:\.\d{1,2})?$/.test(amount)) {
@@ -9,6 +11,81 @@ export function normalizeSubscriptionPaymentAmount(value) {
     throw new Error('Payment amount must be greater than zero');
   }
   return BigInt(whole).toString() + '.' + fraction.padEnd(2, '0');
+}
+
+export function addSubscriptionPeriods(dateValue, count, billingCycle = 'monthly') {
+  const date = new Date(dateValue || Date.now());
+  const periods = Math.max(1, Math.trunc(Number(count) || 1));
+  const years = String(billingCycle).toLowerCase() === 'yearly' ? periods : 0;
+  const months = years ? 0 : periods;
+  const originalDay = date.getUTCDate();
+  const targetMonth = date.getUTCMonth() + months;
+  const targetYear = date.getUTCFullYear() + years + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, normalizedMonth + 1, 0)).getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCFullYear(targetYear, normalizedMonth, 1);
+  date.setUTCDate(Math.min(originalDay, lastDay));
+  return date;
+}
+
+function readBillingInvoice(notes) {
+  if (!String(notes || '').startsWith('JIBUSALES_INVOICE:')) return null;
+  try { return JSON.parse(String(notes).slice('JIBUSALES_INVOICE:'.length)); } catch { return null; }
+}
+
+export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Date()) {
+  const tenant = await tx.tenant.findUnique({
+    where: { id: tenantId },
+    include: { plan: true },
+  });
+  if (!tenant) return null;
+
+  const cycleMonths = String(tenant.customBillingCycle || tenant.plan?.billingCycle || 'monthly').toLowerCase() === 'yearly' ? 12 : 1;
+  const dueBoundary = tenant.subscriptionEnd && tenant.subscriptionEnd < asOf ? tenant.subscriptionEnd : null;
+  let periodStart = tenant.subscriptionStart || tenant.createdAt;
+  if (dueBoundary) {
+    const dueDate = new Date(dueBoundary);
+    const day = dueDate.getUTCDate();
+    const start = new Date(dueDate);
+    start.setUTCDate(1);
+    start.setUTCMonth(start.getUTCMonth() - cycleMonths);
+    const lastDay = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+    start.setUTCDate(Math.min(day, lastDay));
+    periodStart = start;
+  }
+  const [aggregate, ledgerCount] = await Promise.all([
+    tx.subscriptionPayment.aggregate({
+      where: {
+        tenantId,
+        status: 'completed',
+        paidAt: { not: null, gte: periodStart, lte: asOf },
+      },
+      _sum: { amount: true },
+    }),
+    tx.subscriptionPayment.count({ where: { tenantId } }),
+  ]);
+  const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+  const periodTotal = charge.price + charge.serviceFee + charge.staticIpFee;
+  const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
+  const progress = coveredByActiveTerm || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
+    ? calculateSubscriptionPaymentProgress(periodTotal, periodTotal)
+    : calculateSubscriptionPaymentProgress(periodTotal, aggregate._sum.amount);
+  return { tenant, progress };
+}
+
+export async function refreshSubscriptionPaymentStatus(tx, tenantId, asOf = new Date()) {
+  const result = await getSubscriptionPaymentProgress(tx, tenantId, asOf);
+  if (!result) return null;
+  const { progress } = result;
+  await tx.tenant.update({
+    where: { id: tenantId },
+    data: {
+      paymentReminderStatus: progress.isPaid ? 'paid' : 'due_soon',
+      paymentReminderSentAt: asOf,
+    },
+  });
+  return progress;
 }
 
 export async function syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus) {
@@ -39,37 +116,41 @@ export async function syncPesapalSubscriptionPayment(prisma, payment, gatewaySta
   return prisma.$transaction(async (tx) => {
     const current = await tx.subscriptionPayment.findUnique({ where: { id: payment.id } });
     if (!current || current.status === 'reversed' || (current.status === 'completed' && status === 'completed')) return current;
-    const updated = await tx.subscriptionPayment.update({
-      where: { id: current.id },
+    const transitioned = await tx.subscriptionPayment.updateMany({
+      where: { id: current.id, status: current.status },
       data: {
         status,
         ...(gatewayStatus?.confirmation_code ? { reference: String(gatewayStatus.confirmation_code).slice(0, 200) } : {}),
         ...(gatewayStatus?.payment_method ? { gatewayPaymentMethod: String(gatewayStatus.payment_method).slice(0, 40) } : {}),
-        ...(status === 'completed' && gatewayStatus?.created_date && !Number.isNaN(new Date(gatewayStatus.created_date).getTime())
-          ? { paidAt: new Date(gatewayStatus.created_date) }
+        ...(status === 'completed'
+          ? { paidAt: gatewayStatus?.created_date && !Number.isNaN(new Date(gatewayStatus.created_date).getTime()) ? new Date(gatewayStatus.created_date) : new Date() }
           : {}),
       },
     });
+    if (transitioned.count !== 1) return tx.subscriptionPayment.findUnique({ where: { id: current.id } });
+    const updated = await tx.subscriptionPayment.findUnique({ where: { id: current.id } });
     if (status === 'completed') {
+      const invoice = readBillingInvoice(current.notes);
+      let subscriptionEnd = undefined;
+      if (invoice?.periodCount) {
+        const tenant = await tx.tenant.findUnique({ where: { id: current.tenantId }, select: { subscriptionEnd: true, plan: { select: { billingCycle: true } }, customBillingCycle: true } });
+        const cycle = String(tenant?.customBillingCycle || tenant?.plan?.billingCycle || invoice.periodUnit || 'monthly').toLowerCase();
+        const coverageStart = tenant?.subscriptionEnd && tenant.subscriptionEnd > new Date() ? tenant.subscriptionEnd : new Date();
+        subscriptionEnd = addSubscriptionPeriods(coverageStart, invoice.periodCount, cycle);
+        const updatedInvoice = { ...invoice, coverageStart: coverageStart.toISOString(), coverageEnd: subscriptionEnd.toISOString() };
+        await tx.subscriptionPayment.update({ where: { id: current.id }, data: { notes: `JIBUSALES_INVOICE:${JSON.stringify(updatedInvoice)}` } });
+      }
       await tx.tenant.update({
         where: { id: current.tenantId },
         data: {
           billingPaymentMethod: updated.paymentMethod,
           billingPaymentReference: current.merchantReference,
-          paymentReminderStatus: 'paid',
-          paymentReminderSentAt: updated.paidAt,
+          ...(subscriptionEnd ? { subscriptionEnd, status: 'active' } : {}),
         },
       });
-    } else if (status === 'reversed') {
-      const otherCompletedPayments = await tx.subscriptionPayment.count({
-        where: { tenantId: current.tenantId, status: 'completed', id: { not: current.id } },
-      });
-      if (otherCompletedPayments === 0) {
-        await tx.tenant.update({
-          where: { id: current.tenantId },
-          data: { paymentReminderStatus: 'due_soon' },
-        });
-      }
+    }
+    if (status === 'completed' || status === 'reversed' || status === 'failed') {
+      await refreshSubscriptionPaymentStatus(tx, current.tenantId, new Date());
     }
     return updated;
   });
@@ -95,19 +176,14 @@ export async function cancelManualSubscriptionPayment(prisma, { paymentId, admin
     });
     if (update.count !== 1) return { error: 'already_changed' };
 
-    const remainingCompleted = await tx.subscriptionPayment.count({
-      where: { tenantId: payment.tenantId, status: 'completed' },
-    });
-    const tenantData = remainingCompleted > 0 ? {} : { paymentReminderStatus: 'due_soon' };
-    if (Object.keys(tenantData).length) {
-      const tenant = await tx.tenant.findUnique({ where: { id: payment.tenantId }, select: { billingPaymentReference: true } });
-      if (tenant?.billingPaymentReference === payment.reference) {
-        tenantData.billingPaymentReference = null;
-        tenantData.billingPaymentMethod = null;
-      }
-      if (payment.paidAt) tenantData.paymentReminderSentAt = payment.paidAt;
-      await tx.tenant.update({ where: { id: payment.tenantId }, data: tenantData });
+    const tenant = await tx.tenant.findUnique({ where: { id: payment.tenantId }, select: { billingPaymentReference: true } });
+    if (tenant?.billingPaymentReference === payment.reference) {
+      await tx.tenant.update({
+        where: { id: payment.tenantId },
+        data: { billingPaymentReference: null, billingPaymentMethod: null },
+      });
     }
-    return { payment: await tx.subscriptionPayment.findUnique({ where: { id: payment.id } }), remainingCompleted };
+    const progress = await refreshSubscriptionPaymentStatus(tx, payment.tenantId, new Date());
+    return { payment: await tx.subscriptionPayment.findUnique({ where: { id: payment.id } }), progress };
   });
 }

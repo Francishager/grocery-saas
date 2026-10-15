@@ -10,7 +10,7 @@ import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
-import { cancelManualSubscriptionPayment, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { cancelManualSubscriptionPayment, getSubscriptionPaymentProgress, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
 
@@ -91,6 +91,14 @@ async function changeTenantStatus(req, res, forcedStatus = null) {
       return res.status(400).json({ error: "Invalid tenant status" });
     }
 
+    if (status === 'trial') {
+      const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { trialEndsAt: true } });
+      if (!existing) return res.status(404).json({ error: "Tenant not found" });
+      if (!existing.trialEndsAt || existing.trialEndsAt <= new Date()) {
+        return res.status(400).json({ error: "Set a future trial end date in subscription settings before enabling trial status" });
+      }
+    }
+
     const tenant = await prisma.tenant.update({
       where: { id: req.params.id },
       data: { status },
@@ -119,6 +127,7 @@ async function updateSubscription(req, res) {
       subscriptionStart,
       subscriptionEnd,
       trialEndsAt,
+      trialDays,
       price,
       billingCycle,
       customPrice,
@@ -137,7 +146,7 @@ async function updateSubscription(req, res) {
       autoEnd,
     } = req.body;
 
-    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && gracePeriodDays === undefined && reminderDaysBeforeDue === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
+    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && trialDays === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && gracePeriodDays === undefined && reminderDaysBeforeDue === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
       return res.status(400).json({ error: "At least one subscription field is required" });
     }
 
@@ -164,6 +173,24 @@ async function updateSubscription(req, res) {
     if (subscriptionStart !== undefined) data.subscriptionStart = subscriptionStart ? new Date(subscriptionStart) : null;
     if (subscriptionEnd !== undefined) data.subscriptionEnd = subscriptionEnd ? new Date(subscriptionEnd) : null;
     if (trialEndsAt !== undefined) data.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
+
+    if (trialDays !== undefined) {
+      const days = Number(trialDays);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) {
+        return res.status(400).json({ error: "Trial duration must be between 1 and 3650 days" });
+      }
+      const trialStart = new Date();
+      data.status = "trial";
+      data.trialEndsAt = new Date(trialStart.getTime() + days * 24 * 60 * 60 * 1000);
+    }
+    if (data.status === 'trial') {
+      const configuredTrialEnd = data.trialEndsAt ?? tenant.trialEndsAt;
+      const parsedTrialEnd = configuredTrialEnd ? new Date(configuredTrialEnd) : null;
+      if (!parsedTrialEnd || Number.isNaN(parsedTrialEnd.getTime()) || parsedTrialEnd <= new Date()) {
+        return res.status(400).json({ error: "Set a future trial duration or trial end date before enabling trial status" });
+      }
+      if (data.trialEndsAt !== undefined) data.trialEndsAt = parsedTrialEnd;
+    }
 
     if (price !== undefined) {
       const parsedPrice = price === '' || price === null ? null : Number(price);
@@ -327,7 +354,9 @@ router.get("/subscriptions/:id/reminder", authenticateToken, async (req, res) =>
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
     const reminder = calculateBillingReminder({
+      status: tenant.status,
       subscriptionEnd: tenant.subscriptionEnd,
+      trialEndsAt: tenant.trialEndsAt,
       gracePeriodDays: tenant.gracePeriodDays,
       reminderDaysBeforeDue: tenant.reminderDaysBeforeDue,
     });
@@ -336,6 +365,7 @@ router.get("/subscriptions/:id/reminder", authenticateToken, async (req, res) =>
       tenantId: tenant.id,
       status: tenant.status,
       subscriptionEnd: tenant.subscriptionEnd,
+      trialEndsAt: tenant.trialEndsAt,
       gracePeriodDays: tenant.gracePeriodDays ?? 0,
       reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
       ...reminder,
@@ -836,7 +866,8 @@ router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmi
       where: { tenantId: tenant.id },
       orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
     });
-    res.json({ payments: refreshedPayments.map(payment => ({ ...payment, amount: payment.amount.toString() })) });
+    const progress = await getSubscriptionPaymentProgress(prisma, tenant.id);
+    res.json({ payments: refreshedPayments.map(payment => ({ ...payment, amount: payment.amount.toString() })), progress: progress?.progress || null });
   } catch (err) {
     console.error("Subscription payments list error:", err);
     res.status(500).json({ error: "Failed to load subscription payments" });
@@ -935,11 +966,10 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           billingPaymentMethod: method,
           billingPaymentReference: cleanReference,
           billingNotes: cleanNotes ?? tenant.billingNotes,
-          paymentReminderStatus: "paid",
-          paymentReminderSentAt: paymentDate,
         },
       });
-      return receipt;
+      const progress = await refreshSubscriptionPaymentStatus(tx, tenant.id, new Date());
+      return { receipt, progress };
     });
 
     auditLog({
@@ -949,13 +979,13 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
       userEmail: req.user?.email || "",
       action: "subscription_payment_recorded",
       model: "SubscriptionPayment",
-      recordId: payment.id,
-      changes: { amount: payment.amount.toString(), currency, paymentMethod: method, reference: cleanReference, paidAt: paymentDate.toISOString() },
+      recordId: payment.receipt.id,
+      changes: { amount: payment.receipt.amount.toString(), currency, paymentMethod: method, reference: cleanReference, paidAt: paymentDate.toISOString(), remainingAmount: payment.progress?.remainingAmount },
       ip: req.ip || req.connection?.remoteAddress,
       severity: "info",
     }).catch(() => {});
 
-    res.status(201).json({ message: "Subscription payment recorded", payment: { ...payment, amount: payment.amount.toString() } });
+    res.status(201).json({ message: "Subscription payment recorded", payment: { ...payment.receipt, amount: payment.receipt.amount.toString() }, progress: payment.progress });
   } catch (err) {
     console.error("Subscription payment record error:", err);
     res.status(500).json({ error: "Failed to record subscription payment" });

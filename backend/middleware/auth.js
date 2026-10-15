@@ -13,6 +13,7 @@ const BLOCKED_TENANT_STATUSES = new Set(['suspended', 'cancelled']);
 const TENANT_STATUS_MESSAGES = {
   suspended: 'This business account is suspended due to subscription. Contact JibuSales support or your JibuSales Admin to reactivate it.',
   cancelled: 'This business account has been cancelled. Contact JibuSales support for help.',
+  trial_expired: 'This business trial has ended. Contact your JibuSales Admin to activate a subscription.',
 };
 const PAYMENT_METHOD_PERMISSION_MAP = {
   cash: 'canUseCash',
@@ -54,6 +55,11 @@ export const isPlatformAdminUser = (user = {}) => (
 export const tenantAccountAccessPayload = (tenant, user = {}) => {
   if (!tenant || isPlatformAdminUser(user)) return null;
   const status = String(tenant.status || '').trim().toLowerCase();
+  const trialEndsAt = tenant.trialEndsAt ? new Date(tenant.trialEndsAt) : null;
+  if (status === 'trial' && trialEndsAt && !Number.isNaN(trialEndsAt.getTime()) && Date.now() >= trialEndsAt.getTime()) {
+    const message = TENANT_STATUS_MESSAGES.trial_expired;
+    return { message, error: message, code: 'TRIAL_EXPIRED', tenantStatus: 'trial_expired' };
+  }
   if (!BLOCKED_TENANT_STATUSES.has(status)) return null;
 
   return {
@@ -111,7 +117,7 @@ export const authenticateToken = async (req, res, next) => {
     if (tenantId) {
       tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { id: true, name: true, slug: true, status: true, timezone: true, workingHours: true },
+        select: { id: true, name: true, slug: true, status: true, trialEndsAt: true, timezone: true, workingHours: true },
       });
       if (!tenant && !isPlatformAdminUser(decoded)) {
         return res.status(403).json({

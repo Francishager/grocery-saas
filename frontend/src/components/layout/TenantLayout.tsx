@@ -18,6 +18,7 @@ import { apiFetch } from '@/lib/api'
 import OnboardingGuideCard from '@/components/OnboardingGuideCard'
 import OnboardingGuideModal from '@/components/OnboardingGuideModal'
 import UserGuideMenu from '@/components/UserGuideMenu'
+import { SubscriptionBillingReminder } from '@/components/layout/SubscriptionBillingReminder'
 
 const inventorySubItems = [
   { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
@@ -77,7 +78,7 @@ const navItems = [
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
-  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', feature: 'settings', isSettings: true },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: ['canViewSettings', 'canPaySubscriptionInvoice'], feature: 'settings', isSettings: true },
   { to: '/tenant/data-importer', label: 'Data Importer', icon: FileSpreadsheet, permission: 'canImportInventory', feature: 'developer.data_importer' },
   { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: 'referrals' },
 ]
@@ -846,6 +847,7 @@ export function TenantLayout() {
         onClose={dismissOnboarding}
         onComplete={completeOnboarding}
       />
+      <SubscriptionBillingReminder />
     </div>
   )
 }

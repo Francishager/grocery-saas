@@ -50,4 +50,7 @@ test('suspended and cancelled business tenants are blocked while platform users 
   assert.match(tenantAccountAccessPayload({ status: 'suspended' }, { role: 'owner' })?.message || '', /subscription/i)
   assert.equal(tenantAccountAccessPayload({ status: 'cancelled' }, { role: 'attendant' })?.code, 'TENANT_CANCELLED')
   assert.equal(tenantAccountAccessPayload({ status: 'suspended' }, { role: 'saas_admin' }), null)
+  assert.equal(tenantAccountAccessPayload({ status: 'trial', trialEndsAt: new Date(Date.now() - 1000) }, { role: 'owner' })?.code, 'TRIAL_EXPIRED')
+  assert.equal(tenantAccountAccessPayload({ status: 'trial', trialEndsAt: new Date(Date.now() + 86400000) }, { role: 'owner' }), null)
+  assert.equal(tenantAccountAccessPayload({ status: 'trial', trialEndsAt: new Date(Date.now() - 1000) }, { role: 'saas_admin' }), null)
 })

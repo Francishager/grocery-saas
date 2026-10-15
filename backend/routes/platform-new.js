@@ -587,8 +587,11 @@ router.put('/tenants/:tenantId/status', authenticateToken, requirePlatformAdmin,
       return res.status(400).json({ error: 'Invalid tenant status' })
     }
 
-    const existing = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } })
+    const existing = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, trialEndsAt: true } })
     if (!existing) return res.status(404).json({ error: 'Tenant not found' })
+    if (status === 'trial' && (!existing.trialEndsAt || existing.trialEndsAt <= new Date())) {
+      return res.status(400).json({ error: 'Set a future trial end date in subscription settings before enabling trial status' })
+    }
 
     const tenant = await prisma.tenant.update({
       where: { id: tenantId },
@@ -965,6 +968,12 @@ router.put('/tenants/:tenantId', authenticateToken, requirePlatformAdmin, async 
     if (currency !== undefined && !currency.trim()) return res.status(400).json({ error: 'Currency cannot be empty' })
     if (timezone !== undefined && !timezone.trim()) return res.status(400).json({ error: 'Timezone cannot be empty' })
     if (status !== undefined && !VALID_TENANT_STATUSES.has(String(status).trim().toLowerCase())) return res.status(400).json({ error: 'Invalid status value' })
+
+    if (String(status || '').trim().toLowerCase() === 'trial') {
+      const existing = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { trialEndsAt: true } })
+      if (!existing) return res.status(404).json({ error: 'Tenant not found' })
+      if (!existing.trialEndsAt || existing.trialEndsAt <= new Date()) return res.status(400).json({ error: 'Set a future trial end date in subscription settings before enabling trial status' })
+    }
 
     const data = {}
     if (name !== undefined) data.name = name
