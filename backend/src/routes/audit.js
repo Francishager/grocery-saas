@@ -4,6 +4,42 @@ import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 
 const router = Router();
 
+const ALLOWED_FEATURE_VIEWS = new Set([
+  'Dashboard', 'Sales', 'AI Advisor', 'Inventory', 'Receivables', 'Payables', 'Rentals',
+  'Restaurant', 'Fuel Station', 'Manufacturing', 'Agriculture', 'Service Business', 'Returns',
+  'Accounting', 'HR Management', 'Communication', 'Integrations', 'Reports', 'Audit Log',
+  'Business Settings', 'Branches', 'Tax Management', 'Receipt Settings', 'Roles & Permissions',
+  'Data Importer', 'Refer & Earn', 'Other',
+]);
+
+// Page views record feature usage only; no record identifiers, business data, or request payloads.
+router.post("/feature-view", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const feature = String(req.body?.feature || '').trim().slice(0, 80);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+    if (!ALLOWED_FEATURE_VIEWS.has(feature) && !/^Report:[a-zA-Z0-9_-]{1,64}$/.test(feature)) {
+      return res.status(400).json({ error: "Invalid feature view" });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: req.user.id,
+        userEmail: "",
+        action: "view",
+        model: feature,
+        statusCode: 200,
+        severity: "info",
+      },
+    });
+    res.status(204).end();
+  } catch (error) {
+    console.error("Feature usage event failed:", error.message);
+    res.status(500).json({ error: "Failed to record feature usage" });
+  }
+});
+
 // List audit logs for the current tenant
 router.get("/", authenticateToken, requirePermission("canViewAuditReport"), async (req, res) => {
   try {

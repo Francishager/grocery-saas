@@ -347,6 +347,40 @@ export function TenantLayout() {
     }
   }, [tenantId])
 
+  useEffect(() => {
+    if (!tenantId || !user?.id) return
+    const path = location.pathname
+    const featureByPrefix: Array<[string, string]> = [
+      ['/tenant/dashboard', 'Dashboard'], ['/tenant/sales', 'Sales'], ['/tenant/ai-advisor', 'AI Advisor'],
+      ['/tenant/inventory', 'Inventory'], ['/tenant/receivables', 'Receivables'], ['/tenant/payables', 'Payables'],
+      ['/tenant/rentals', 'Rentals'], ['/tenant/restaurant', 'Restaurant'], ['/tenant/fuel-station', 'Fuel Station'],
+      ['/tenant/manufacturing', 'Manufacturing'], ['/tenant/agriculture', 'Agriculture'], ['/tenant/service', 'Service Business'],
+      ['/tenant/returns', 'Returns'], ['/tenant/accounting', 'Accounting'], ['/tenant/hr', 'HR Management'],
+      ['/tenant/communication', 'Communication'], ['/tenant/integrations', 'Integrations'], ['/tenant/reports', 'Reports'],
+      ['/tenant/audit', 'Audit Log'], ['/tenant/settings', 'Business Settings'], ['/tenant/branches', 'Branches'],
+      ['/tenant/tax', 'Tax Management'], ['/tenant/receipt-settings', 'Receipt Settings'], ['/tenant/roles', 'Roles & Permissions'],
+      ['/tenant/data-importer', 'Data Importer'], ['/tenant/referrals', 'Refer & Earn'],
+    ]
+    let feature = featureByPrefix.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1] || 'Other'
+    if (feature === 'Reports') {
+      const reportId = new URLSearchParams(location.search).get('report')
+      if (reportId && /^[a-zA-Z0-9_-]{1,64}$/.test(reportId)) feature = `Report:${reportId}`
+    }
+
+    const eventKey = `jibusales_feature_view_${tenantId}_${user.id}_${feature}`
+    const now = Date.now()
+    try {
+      const previous = Number(sessionStorage.getItem(eventKey) || 0)
+      if (now - previous < 5 * 60 * 1000) return
+      sessionStorage.setItem(eventKey, String(now))
+    } catch { /* telemetry should never block navigation */ }
+
+    void apiFetch('/api/audit/feature-view', {
+      method: 'POST',
+      body: JSON.stringify({ feature }),
+    }).catch(() => {})
+  }, [tenantId, user?.id, location.pathname, location.search])
+
   const toggleReports = () => {
     setReportsExpanded(prev => !prev)
     if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }

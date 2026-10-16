@@ -9,6 +9,7 @@ import { sendMail } from "../../mailer.js";
 import { resolveEffectivePermissions } from "../utils/permissions.js";
 import { getTenantFeatures } from "../../middleware/featureCheck.js";
 import { workingHoursAccessPayload, staffWorkingHoursAccess } from "../utils/workingHours.js";
+import { auditLog } from "../utils/audit.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -21,6 +22,20 @@ cloudinary.v2.config({
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
 const supportedLanguages = new Set(["en", "sw", "lg", "nyn", "rw", "nyo", "ach"]);
+
+function logAuthenticationEvent(req, action, user = null, statusCode = 200) {
+  return auditLog({
+    tenantId: user?.tenantId || "platform",
+    targetTenantId: user?.tenantId || null,
+    userId: user?.id || "unknown",
+    userEmail: "",
+    action,
+    model: "Authentication",
+    statusCode,
+    severity: statusCode >= 400 ? "warning" : "info",
+    ip: req.ip || req.connection?.remoteAddress,
+  });
+}
 
 function primaryBranchId(user) {
   const primary = user.branches?.find((item) => item.isPrimary) || user.branches?.[0];
@@ -55,7 +70,10 @@ function userPayload(user, userPerm, tenantFeatures = null) {
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ message: "Email and password required" });
+    if (!email || !password) {
+      await logAuthenticationEvent(req, "login_failed", null, 400);
+      return res.status(400).json({ message: "Email and password required" });
+    }
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -65,18 +83,31 @@ router.post("/login", async (req, res) => {
         branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       },
     });
-    if (!user || !user.isActive) return res.status(401).json({ message: "Invalid credentials" });
+    if (!user || !user.isActive) {
+      await logAuthenticationEvent(req, "login_failed", user, 401);
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
 
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ message: "Invalid credentials" });
+    if (!match) {
+      await logAuthenticationEvent(req, "login_failed", user, 401);
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
 
     const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
-    if (tenantBlock) return res.status(403).json(tenantBlock);
+    if (tenantBlock) {
+      await logAuthenticationEvent(req, "login_blocked_subscription", user, 403);
+      return res.status(403).json(tenantBlock);
+    }
     const hoursBlock = workingHoursAccessPayload(user, user.tenant);
-    if (hoursBlock) return res.status(403).json(hoursBlock);
+    if (hoursBlock) {
+      await logAuthenticationEvent(req, "login_blocked_schedule", user, 403);
+      return res.status(403).json(hoursBlock);
+    }
 
     // Force password reset if otpCode is present (first login after admin invite)
     if (user.otpCode && user.otpExpires && new Date(user.otpExpires) > new Date()) {
+      await logAuthenticationEvent(req, "login_requires_reset", user, 200);
       return res.json({
         forceReset: true,
         email: user.email,
@@ -99,6 +130,7 @@ router.post("/login", async (req, res) => {
     const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
+    await logAuthenticationEvent(req, "login", user);
 
     res.json({
       user: userPayload(user, userPerm, tenantFeatures),

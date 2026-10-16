@@ -68,6 +68,11 @@ export async function logTenantActivity(opts) {
   }
 }
 
+function changedFieldNames(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return [];
+  return Object.keys(body).filter(key => /^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(key)).slice(0, 20);
+}
+
 /**
  * Express middleware to auto-audit all mutating requests
  * Captures POST/PUT/PATCH/DELETE and logs all responses (success and failure)
@@ -77,6 +82,8 @@ export function auditMiddleware() {
   return async (req, res, next) => {
     // Chat content has its own private store; do not duplicate it in shared audit logs.
     if (req.originalUrl.split('?')[0].startsWith('/api/ai/')) return next();
+    // Feature view events are emitted explicitly with a validated, non-sensitive module name.
+    if (req.originalUrl.split('?')[0] === '/api/audit/feature-view') return next();
     // Only audit mutating methods
     if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
 
@@ -109,12 +116,15 @@ export function auditMiddleware() {
         // Log with high priority for SaaS admin, failed operations, or sensitive operations
         auditLog({
           tenantId: isSaaSAdmin || isPlatformRoute ? "platform" : (req.user?.tenantId || "unknown"),
+          targetTenantId: isPlatformRoute
+            ? (req.params?.tenantId || req.body?.tenantId || (req.originalUrl.includes("/subscriptions/") ? req.params?.id : null))
+            : null,
           userId: req.user?.id || "unknown",
           userEmail: req.user?.email || "",
           action: isSensitiveOperation ? action + "_sensitive" : action,
           model,
           recordId,
-          changes: { data: req.body, statusCode: res.statusCode },
+          changes: { statusCode: res.statusCode, changedFields: changedFieldNames(req.body) },
           ip: req.ip || req.connection?.remoteAddress,
           statusCode: res.statusCode,
           severity: isSensitiveOperation || isSaaSAdmin ? "critical" : severity,
@@ -129,7 +139,7 @@ export function auditMiddleware() {
             action: action,
             model,
             recordId,
-            details: req.body,
+            details: { source: 'api', statusCode: res.statusCode, changedFields: changedFieldNames(req.body) },
           }).catch(() => {});
         }
       }

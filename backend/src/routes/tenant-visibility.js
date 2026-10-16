@@ -14,6 +14,134 @@ const HR_FEATURE_CATALOG = [
   { name: "training_management", label: "Training Management", description: "Training plans and employee development" },
 ];
 
+const MAX_AUDIT_PAGE_SIZE = 100;
+
+function parsePositiveInt(value, fallback, max) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+
+function toPlatformAuditEntry(log, tenantNames) {
+  const tenantId = log.tenantId === 'platform' ? log.targetTenantId : log.tenantId;
+  const isPlatformAction = log.tenantId === 'platform';
+  return {
+    id: log.id,
+    tenantId,
+    tenantName: tenantNames.get(tenantId) || (isPlatformAction ? 'Platform' : 'Business unavailable'),
+    actor: isPlatformAction ? (log.userEmail || 'Platform administrator') : 'Business user',
+    action: log.action,
+    model: log.model,
+    statusCode: log.statusCode,
+    severity: log.severity,
+    createdAt: log.createdAt,
+  };
+}
+
+router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const limit = parsePositiveInt(req.query.limit, 25, MAX_AUDIT_PAGE_SIZE);
+    const where = {};
+    const tenantId = String(req.query.tenantId || '').trim();
+    const action = String(req.query.action || '').trim().toLowerCase();
+    const model = String(req.query.model || '').trim().slice(0, 80);
+    const search = String(req.query.search || '').trim().slice(0, 100);
+    const from = req.query.from ? new Date(String(req.query.from)) : null;
+    const to = req.query.to ? new Date(String(req.query.to)) : null;
+
+    if (tenantId) where.OR = [{ tenantId }, { targetTenantId: tenantId }];
+    if (action) where.action = { contains: action, mode: 'insensitive' };
+    if (model) where.model = { contains: model, mode: 'insensitive' };
+    if (from || to) {
+      where.createdAt = {};
+      if (from && !Number.isNaN(from.getTime())) where.createdAt.gte = from;
+      if (to && !Number.isNaN(to.getTime())) where.createdAt.lte = to;
+    }
+    if (search) {
+      const matchedTenants = await prisma.tenant.findMany({
+        where: { OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { slug: { contains: search, mode: 'insensitive' } },
+        ] },
+        select: { id: true },
+        take: 100,
+      });
+      const searchClause = { OR: [
+        { action: { contains: search, mode: 'insensitive' } },
+        { model: { contains: search, mode: 'insensitive' } },
+        { tenantId: { in: matchedTenants.map(item => item.id) } },
+        { targetTenantId: { in: matchedTenants.map(item => item.id) } },
+      ] };
+      where.AND = [...(where.AND || []), searchClause];
+    }
+
+    const [logs, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: { id: true, tenantId: true, targetTenantId: true, userEmail: true, action: true, model: true, statusCode: true, severity: true, createdAt: true },
+      }),
+      prisma.auditLog.count({ where }),
+    ]);
+    const relatedTenantIds = [...new Set(logs.flatMap(log => [log.tenantId === 'platform' ? log.targetTenantId : log.tenantId].filter(Boolean)))];
+    const tenants = relatedTenantIds.length
+      ? await prisma.tenant.findMany({ where: { id: { in: relatedTenantIds } }, select: { id: true, name: true } })
+      : [];
+    const tenantNames = new Map(tenants.map(tenant => [tenant.id, tenant.name]));
+
+    res.json({
+      logs: logs.map(log => toPlatformAuditEntry(log, tenantNames)),
+      pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+      refreshedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Platform audit list error:', error);
+    res.status(500).json({ error: 'Failed to load platform activity' });
+  }
+});
+
+router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const days = parsePositiveInt(req.query.days, 30, 90);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const where = { tenantId: { not: 'platform' }, createdAt: { gte: since } };
+    const logs = await prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 20000,
+      select: { model: true, action: true, createdAt: true },
+    });
+    const byFeature = new Map();
+    const byAction = new Map();
+    const byHour = Array.from({ length: 24 }, () => 0);
+    const byDay = new Map();
+    for (const log of logs) {
+      const feature = String(log.model || 'Other');
+      if (log.action === 'view') byFeature.set(feature, (byFeature.get(feature) || 0) + 1);
+      byAction.set(log.action, (byAction.get(log.action) || 0) + 1);
+      const kampalaTime = new Date(log.createdAt.getTime() + 3 * 60 * 60 * 1000);
+      byHour[kampalaTime.getUTCHours()] += 1;
+      const day = kampalaTime.toISOString().slice(0, 10);
+      byDay.set(day, (byDay.get(day) || 0) + 1);
+    }
+    res.json({
+      days,
+      totalEvents: logs.length,
+      truncated: logs.length === 20000,
+      byFeature: [...byFeature].map(([feature, count]) => ({ feature, count })).sort((a, b) => b.count - a.count).slice(0, 12),
+      byAction: [...byAction].map(([action, count]) => ({ action, count })).sort((a, b) => b.count - a.count),
+      byHour: byHour.map((count, hour) => ({ hour, count })),
+      byDay: [...byDay].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date)),
+      refreshedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Platform audit insights error:', error);
+    res.status(500).json({ error: 'Failed to load platform usage insights' });
+  }
+});
+
 router.get("/hr-features/catalog", authenticateToken, requirePlatformAdmin, async (_req, res) => {
   res.json({ features: HR_FEATURE_CATALOG });
 });
