@@ -171,6 +171,7 @@ const MODULES = [
   {
     id: 'communication', name: 'Communication', icon: MessageSquare, color: 'text-blue-400 bg-blue-50', features: [
       { name: 'communication', displayName: 'Communication' },
+      { name: 'communication.team_messaging', displayName: 'Team Messaging' },
       { name: 'communication.sms', displayName: 'SMS Notifications' },
       { name: 'communication.email', displayName: 'Email Notifications' },
       { name: 'communication.whatsapp', displayName: 'WhatsApp Integration' },

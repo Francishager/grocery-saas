@@ -114,6 +114,7 @@ async function seedFeatures() {
 
     // ===== Communication =====
     { name: 'communication', displayName: 'Communication', module: 'communication', category: 'integration', description: 'Notifications and messaging' },
+    { name: 'communication.team_messaging', displayName: 'Team Messaging', module: 'communication', category: 'integration', description: 'Private in-app messages between active users in the same business' },
     { name: 'communication.sms', displayName: 'SMS Notifications', module: 'communication', category: 'integration', description: 'Send SMS reminders and alerts' },
     { name: 'communication.email', displayName: 'Email Notifications', module: 'communication', category: 'integration', description: 'Send email notifications' },
     { name: 'communication.whatsapp', displayName: 'WhatsApp Integration', module: 'communication', category: 'integration', description: 'Send notifications via WhatsApp' },
@@ -280,7 +281,7 @@ async function seedPlanFeatures() {
           'multi_branch',
           'audit',
           'rentals',
-          'communication', 'communication.sms', 'communication.email', 'communication.whatsapp', 'communication.notifications',
+          'communication', 'communication.team_messaging', 'communication.sms', 'communication.email', 'communication.whatsapp', 'communication.notifications',
           'integrations',
         ]
         break
@@ -297,6 +298,8 @@ async function seedPlanFeatures() {
           'developer.data_importer',
         ]
     }
+
+    if (planFeatureNames.includes('communication')) planFeatureNames.push('communication.team_messaging')
 
     // Resolve feature names to IDs
     const planFeatureIds = new Set(

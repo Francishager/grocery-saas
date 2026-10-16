@@ -4,7 +4,7 @@ import { authenticateToken, requirePermission, requireTenant } from '../middlewa
 import { requireFeature } from '../middleware/featureCheck.js';
 
 const router = Router();
-const access = [authenticateToken, requireTenant, requireFeature('communication')];
+const access = [authenticateToken, requireTenant, requireFeature('communication.team_messaging')];
 const userFields = { id: true, fname: true, lname: true, role: true, avatar: true };
 
 function displayName(user) {

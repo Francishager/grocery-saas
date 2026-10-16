@@ -6,14 +6,14 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
 type Section = 'marketplace' | 'rfqs' | 'orders' | 'relationships' | 'profile'
-type LineDraft = { productName: string; specification: string; quantity: string; unit: string; acceptableAlternatives: string }
+type LineDraft = { productId: string; productName: string; specification: string; quantity: string; unit: string; acceptableAlternatives: string }
 type Business = { id: string; name: string; slug: string; businessType?: string | null; logo?: string | null }
 type Listing = { id: string; name: string; description: string; category: string; unit: string; price: string; currency: string; minimumQty: string; availableQty?: string | null; leadTimeDays?: number | null; visibility: string; status?: string; business?: Business }
 type RFQ = { id: string; title: string; notes: string; visibility: string; status: string; currency: string; isMine: boolean; lines: Array<{ id: string; productName: string; specification: string; quantity: string; unit: string }>; buyer?: Business; quoteCount: number; myQuote?: { id: string; status: string; version: number } | null }
 type Relationship = { id: string; status: string; direction: string; counterparty?: Business }
 type Campaign = { id: string; campaignType: 'promotion' | 'ad'; title: string; message: string; startsAt: string; endsAt?: string | null; status: string; images?: string[]; listing?: { id: string; name: string; price: string; currency: string }; business?: Business }
 
-const blankLine: LineDraft = { productName: '', specification: '', quantity: '1', unit: 'Piece', acceptableAlternatives: '' }
+const blankLine: LineDraft = { productId: '', productName: '', specification: '', quantity: '1', unit: 'Piece', acceptableAlternatives: '' }
 function uninvoicedQuantity(order: any, line: any) {
   const invoiced = (order.invoices || []).filter((invoice: any) => ['submitted', 'approved'].includes(invoice.status))
     .flatMap((invoice: any) => invoice.lines || [])
@@ -110,6 +110,9 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([])
   const [localSuppliers, setLocalSuppliers] = useState<Array<{ id: string; name: string }>>([])
   const [inventoryProducts, setInventoryProducts] = useState<Array<{ id: string; name: string; sku?: string | null; branchId?: string | null }>>([])
+  const [requestProducts, setRequestProducts] = useState<Array<{ id: string; name: string; sku?: string | null; itemType: string; baseUnit: string; branchId?: string | null }>>([])
+  const [requestProductSearch, setRequestProductSearch] = useState('')
+  const [businessAddress, setBusinessAddress] = useState('')
   const [sellerProducts, setSellerProducts] = useState<Array<{ id: string; name: string; sku?: string | null; itemType: string }>>([])
   const [receiveDraft, setReceiveDraft] = useState<Record<string, string>>({})
   const [selectedBranch, setSelectedBranch] = useState('')
@@ -134,7 +137,7 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [profileData, listingData, ownData, directoryData, relationshipData, rfqData, orderData, branchData, supplierData, productData, sellerProductData, campaignData, ownCampaignData, followData] = await Promise.all([
+      const [profileData, listingData, ownData, directoryData, relationshipData, rfqData, orderData, branchData, supplierData, productData, requestProductData, businessData, sellerProductData, campaignData, ownCampaignData, followData] = await Promise.all([
         mode === 'seller' ? request<{ profile: typeof profile | null }>('/profile') : Promise.resolve({ profile: null }),
         mode === 'buyer' ? request<{ listings: Listing[] }>(`/listings?search=${encodeURIComponent(search)}`) : Promise.resolve({ listings: [] }),
         mode === 'seller' ? request<{ listings: Listing[] }>('/listings/mine').catch(() => ({ listings: [] })) : Promise.resolve({ listings: [] }),
@@ -145,6 +148,8 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
         mode === 'buyer' ? request<{ branches: Array<{ id: string; name: string }> }>('/branches') : Promise.resolve({ branches: [] }),
         mode === 'buyer' ? request<{ suppliers: Array<{ id: string; name: string }> }>('/local-suppliers').catch(() => ({ suppliers: [] })) : Promise.resolve({ suppliers: [] }),
         mode === 'buyer' ? request<{ products: typeof inventoryProducts }>('/inventory-products').catch(() => ({ products: [] })) : Promise.resolve({ products: [] }),
+        mode === 'buyer' ? request<{ products: typeof requestProducts }>('/request-products').catch(() => ({ products: [] })) : Promise.resolve({ products: [] }),
+        mode === 'buyer' ? request<{ business: { address: string | null } }>('/business-profile').catch(() => ({ business: { address: null } })) : Promise.resolve({ business: { address: null } }),
         mode === 'seller' ? request<{ products: typeof sellerProducts }>('/seller-products').catch(() => ({ products: [] })) : Promise.resolve({ products: [] }),
         mode === 'buyer' ? request<{ campaigns: Campaign[] }>('/promotions') : Promise.resolve({ campaigns: [] }),
         mode === 'seller' ? request<{ campaigns: Campaign[] }>('/promotions/mine').catch(() => ({ campaigns: [] })) : Promise.resolve({ campaigns: [] }),
@@ -154,6 +159,10 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
       setListings(listingData.listings); setMyListings(ownData.listings); setSuppliers(directoryData.suppliers); setAllRelationships(relationshipData.relationships); setAllRFQs(rfqData.rfqs)
       setOrders(orderData.orders); setBranches(branchData.branches); setLocalSuppliers(supplierData.suppliers)
       setInventoryProducts(productData.products)
+      setRequestProducts(requestProductData.products)
+      const address = businessData.business.address || ''
+      setBusinessAddress(address)
+      setRfqForm((form) => ({ ...form, deliveryAddress: form.deliveryAddress || address }))
       setSellerProducts(sellerProductData.products)
       setCampaigns(campaignData.campaigns)
       setMyCampaigns(ownCampaignData.campaigns)
@@ -368,11 +377,12 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
         <Field label="Request title" value={rfqForm.title} onChange={(e) => setRfqForm({ ...rfqForm, title: e.target.value })} required />
         <label className="grid gap-1.5 text-sm font-medium">Audience<select value={rfqForm.visibility} onChange={(e) => setRfqForm({ ...rfqForm, visibility: e.target.value })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="open">Open to all opted-in sellers</option><option value="private">Specific connected suppliers</option></select></label>
         {rfqForm.visibility === 'private' && <fieldset className="max-h-36 space-y-2 overflow-y-auto rounded-md border p-3"><legend className="px-1 text-xs text-muted-foreground">Connected suppliers</legend>{activeRelationships.filter((r) => r.direction === 'outgoing').map((r) => <label key={r.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rfqForm.sellerTenantIds.includes(r.counterparty?.id || '')} onChange={(e) => setRfqForm((form) => ({ ...form, sellerTenantIds: e.target.checked ? [...form.sellerTenantIds, r.counterparty?.id || ''] : form.sellerTenantIds.filter((id) => id !== r.counterparty?.id) }))} />{r.counterparty?.name}</label>)}{!activeRelationships.some((r) => r.direction === 'outgoing') && <span className="text-xs text-muted-foreground">No approved suppliers. Connect and get approval first.</span>}</fieldset>}
-        {rfqForm.lines.map((line, index) => <div key={index} className="grid gap-2 rounded-md border p-3"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">ITEM {index + 1}</span>{rfqForm.lines.length > 1 && <button type="button" className="text-xs text-red-700" onClick={() => setRfqForm((form) => ({ ...form, lines: form.lines.filter((_, i) => i !== index) }))}>Remove</button>}</div><Field label="Product/specification" value={line.productName} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, productName: e.target.value } : x) }))} required /><div className="grid grid-cols-2 gap-2"><Field label="Quantity" type="number" min="0.001" step="0.001" value={line.quantity} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, quantity: e.target.value } : x) }))} required /><Field label="Unit" value={line.unit} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, unit: e.target.value } : x) }))} required /></div></div>)}
+        {rfqForm.lines.map((line, index) => <div key={index} className="grid gap-2 rounded-md border p-3"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">ITEM {index + 1}</span>{rfqForm.lines.length > 1 && <button type="button" className="text-xs text-red-700" onClick={() => setRfqForm((form) => ({ ...form, lines: form.lines.filter((_, i) => i !== index) }))}>Remove</button>}</div><Field label="Search business items" value={requestProductSearch} onChange={(event) => setRequestProductSearch(event.target.value)} placeholder="Search by item name or SKU" /><label className="grid gap-1.5 text-sm font-medium">Business item<select value={line.productId} onChange={(event) => { const product = requestProducts.find((item) => item.id === event.target.value); setRfqForm((form) => ({ ...form, lines: form.lines.map((item, lineIndex) => lineIndex === index ? { ...item, productId: product?.id || '', productName: product?.name || '', unit: product?.baseUnit || 'Piece' } : item) })); setRequestProductSearch('') }} required className="h-10 min-w-0 rounded-md border bg-background px-3 text-sm font-normal"><option value="">Select an item from your inventory</option>{requestProducts.filter((product) => product.id === line.productId || `${product.name} ${product.sku || ''}`.toLowerCase().includes(requestProductSearch.toLowerCase())).map((product) => <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ''} · {product.itemType}</option>)}</select></label><div className="grid grid-cols-2 gap-2"><Field label="Quantity" type="number" min="0.001" step="0.001" value={line.quantity} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, quantity: e.target.value } : x) }))} required /><Field label="Unit" value={line.unit} readOnly required /></div></div>)}
+        {requestProducts.length === 0 && <p className="text-xs text-muted-foreground">Add or activate items in Inventory before creating a request.</p>}
         <Button type="button" variant="outline" onClick={() => setRfqForm((form) => ({ ...form, lines: [...form.lines, { ...blankLine }] }))}><Plus className="mr-2 size-4" />Add item</Button>
-        <Field label="Delivery location" value={rfqForm.deliveryAddress} onChange={(e) => setRfqForm({ ...rfqForm, deliveryAddress: e.target.value })} />
+        <Field label="Delivery location" value={rfqForm.deliveryAddress} placeholder={businessAddress || 'Set an address in Business Profile'} onChange={(e) => setRfqForm({ ...rfqForm, deliveryAddress: e.target.value })} />
         <TextareaField label="Notes and requirements" value={rfqForm.notes} onChange={(e) => setRfqForm({ ...rfqForm, notes: e.target.value })} />
-        <Button type="submit" disabled={busy}><Send className="mr-2 size-4" />Publish RFQ</Button>
+        <Button type="submit" disabled={busy || requestProducts.length === 0 || rfqForm.lines.some((line) => !line.productId)}><Send className="mr-2 size-4" />Publish RFQ</Button>
       </form></>}</aside>
     </section>}
 

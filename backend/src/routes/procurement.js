@@ -579,12 +579,27 @@ router.post('/rfqs', requireFeature('procurement.buyer'), requirePermission('can
     const active = await prisma.procurementRelationship.findMany({ where: { buyerTenantId: tenantId, sellerTenantId: { in: recipients }, status: 'active' }, select: { sellerTenantId: true } });
     if (active.length !== recipients.length) return res.status(400).json({ error: 'Private RFQs can only be sent to approved suppliers.' });
   }
-  const normalizedLines = lines.map((line) => ({
-    productName: text(line?.productName, 180), specification: text(line?.specification, 1000),
-    quantity: positive(line?.quantity), unit: text(line?.unit, 40), acceptableAlternatives: text(line?.acceptableAlternatives, 500),
+  const requestedLines = lines.map((line) => ({
+    productId: text(line?.productId, 100), specification: text(line?.specification, 1000),
+    quantity: positive(line?.quantity), acceptableAlternatives: text(line?.acceptableAlternatives, 500),
     desiredDelivery: optionalDate(line?.desiredDelivery),
   }));
-  if (normalizedLines.some((line) => !line.productName || !line.quantity || !line.unit || line.desiredDelivery === undefined)) return res.status(400).json({ error: 'Each RFQ line needs an item, positive quantity and unit.' });
+  if (requestedLines.some((line) => !line.productId || !line.quantity || line.desiredDelivery === undefined)) return res.status(400).json({ error: 'Each RFQ line needs a catalog item and positive quantity.' });
+  const branchScope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+  const catalogProducts = await prisma.product.findMany({
+    where: scopedWhere(branchScope, { isActive: true, id: { in: [...new Set(requestedLines.map((line) => line.productId))] } }),
+    select: { id: true, name: true, baseUnit: true },
+  });
+  const productsById = new Map(catalogProducts.map((product) => [product.id, product]));
+  if (requestedLines.some((line) => !productsById.has(line.productId))) return res.status(400).json({ error: 'One or more selected items are no longer active in this business catalog.' });
+  const normalizedLines = requestedLines.map((line) => ({
+    productName: productsById.get(line.productId).name,
+    specification: line.specification,
+    quantity: line.quantity,
+    unit: productsById.get(line.productId).baseUnit || 'Piece',
+    acceptableAlternatives: line.acceptableAlternatives,
+    desiredDelivery: line.desiredDelivery,
+  }));
   const result = await prisma.$transaction(async (tx) => {
     const rfq = await tx.procurementRFQ.create({ data: {
       buyerTenantId: tenantId, createdById: req.user.id, title, notes: text(req.body?.notes, 3000), visibility,
@@ -744,6 +759,15 @@ router.get('/branches', requireFeature('procurement.buyer'), requirePermission('
   res.json({ branches });
 });
 
+router.get('/business-profile', requireFeature('procurement.buyer'), requirePermission('canCreateProcurementRFQ'), async (req, res) => {
+  const business = await prisma.tenant.findUnique({
+    where: { id: tenantIdOf(req) },
+    select: { name: true, address: true },
+  });
+  if (!business) return res.status(404).json({ error: 'Business profile not found.' });
+  res.json({ business });
+});
+
 router.get('/local-suppliers', requireFeature('procurement.buyer'), requirePermission('canReviewProcurementInvoice'), async (req, res) => {
   const suppliers = await prisma.supplier.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 });
   res.json({ suppliers });
@@ -752,6 +776,16 @@ router.get('/local-suppliers', requireFeature('procurement.buyer'), requirePermi
 router.get('/inventory-products', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
   const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
   const products = await prisma.product.findMany({ where: scopedWhere(scope, { isActive: true }), select: { id: true, name: true, sku: true, itemType: true, branchId: true }, orderBy: { name: 'asc' }, take: 1000 });
+  res.json({ products });
+});
+
+router.get('/request-products', requireFeature('procurement.buyer'), requirePermission('canCreateProcurementRFQ'), async (req, res) => {
+  const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+  const products = await prisma.product.findMany({
+    where: scopedWhere(scope, { isActive: true }),
+    select: { id: true, name: true, sku: true, itemType: true, baseUnit: true, branchId: true },
+    orderBy: { name: 'asc' }, take: 2000,
+  });
   res.json({ products });
 });
 
