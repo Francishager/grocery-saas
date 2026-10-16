@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, MessageCircle, Plus, Search, Send, UsersRound, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -218,7 +219,7 @@ export function BusinessChatWidget() {
 
   if (!enabled) return null
 
-  return <>
+  return createPortal(<>
     {incoming && !open && <div role="status" className="fixed bottom-[5.25rem] right-4 z-[80] w-[min(22rem,calc(100vw-2rem))] border bg-card p-3 shadow-xl sm:bottom-20">
       <div className="flex items-start gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(incoming.conversation.participant.name)}</div><button className="min-w-0 flex-1 text-left" onClick={() => { setOpen(true); void loadMessages(incoming.conversation) }}><span className="block text-xs font-semibold">{incoming.conversation.participant.name} sent a message</span><span className="mt-1 block truncate text-sm text-muted-foreground">{incoming.message.body}</span></button><button type="button" aria-label="Dismiss message popup" onClick={() => setIncoming(null)} className="rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button></div>
     </div>}
@@ -265,5 +266,5 @@ export function BusinessChatWidget() {
       <MessageCircle className="relative size-5" />
       {unread > 0 && <span className="absolute -right-1 -top-1 z-10 grid min-w-5 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-5 text-white">{unread > 99 ? '99+' : unread}</span>}
     </button>}
-  </>
+  </>, document.body)
 }
