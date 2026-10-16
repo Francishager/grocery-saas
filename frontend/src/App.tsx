@@ -182,7 +182,9 @@ function App() {
           <Route path="receivables/reconciliation" element={<FeatureGuard feature="receivables" permission="canViewReceivableReconciliation"><ReceivableReconciliationPage /></FeatureGuard>} />
           <Route path="receivables/:tab" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
-          <Route path="procurement" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage /></FeatureGuard>} />
+          <Route path="procurement" element={<Navigate to="/tenant/procurement/buying" replace />} />
+          <Route path="procurement/buying" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" /></FeatureGuard>} />
+          <Route path="procurement/selling" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" /></FeatureGuard>} />
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />

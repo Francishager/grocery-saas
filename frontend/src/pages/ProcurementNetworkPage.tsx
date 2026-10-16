@@ -81,9 +81,9 @@ function TextareaField({ label, ...props }: TextareaHTMLAttributes<HTMLTextAreaE
   return <label className="grid gap-1.5 text-sm font-medium text-foreground">{label}<textarea {...props} className={`min-h-20 min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-normal outline-none focus:ring-2 focus:ring-ring ${props.className || ''}`} /></label>
 }
 
-export default function ProcurementNetworkPage() {
+export default function ProcurementNetworkPage({ mode = 'buyer' }: { mode?: 'buyer' | 'seller' }) {
   const { user, hasPermission } = useJWTAuth()
-  const can = (permission: string) => user?.role === 'owner' || hasPermission(permission)
+  const can = (permission: string) => !(mode === 'seller' && permission === 'canCreateProcurementRFQ') && (user?.role === 'owner' || hasPermission(permission))
   const [tab, setTab] = useState<Tab>('marketplace')
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -101,8 +101,8 @@ export default function ProcurementNetworkPage() {
   const marketInsightAttempted = useRef(false)
   const [myCampaigns, setMyCampaigns] = useState<Campaign[]>([])
   const [suppliers, setSuppliers] = useState<Array<{ tenantId: string; sellerType?: string; category: string; description: string; business?: Business }>>([])
-  const [relationships, setRelationships] = useState<Relationship[]>([])
-  const [rfqs, setRfqs] = useState<RFQ[]>([])
+  const [allRelationships, setAllRelationships] = useState<Relationship[]>([])
+  const [allRFQs, setAllRFQs] = useState<RFQ[]>([])
   const [orders, setOrders] = useState<any[]>([])
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([])
   const [localSuppliers, setLocalSuppliers] = useState<Array<{ id: string; name: string }>>([])
@@ -148,7 +148,7 @@ export default function ProcurementNetworkPage() {
         request<{ sellerTenantIds: string[] }>('/follows').catch(() => ({ sellerTenantIds: [] })),
       ])
       if (profileData.profile) setProfile({ sellerType: profileData.profile.sellerType || 'supplier', category: profileData.profile.category || '', description: profileData.profile.description || '', website: profileData.profile.website || '', discoverable: profileData.profile.discoverable })
-      setListings(listingData.listings); setMyListings(ownData.listings); setSuppliers(directoryData.suppliers); setRelationships(relationshipData.relationships); setRfqs(rfqData.rfqs)
+      setListings(listingData.listings); setMyListings(ownData.listings); setSuppliers(directoryData.suppliers); setAllRelationships(relationshipData.relationships); setAllRFQs(rfqData.rfqs)
       setOrders(orderData.orders); setBranches(branchData.branches); setLocalSuppliers(supplierData.suppliers)
       setInventoryProducts(productData.products)
       setSellerProducts(sellerProductData.products)
@@ -163,13 +163,15 @@ export default function ProcurementNetworkPage() {
 
   useEffect(() => { void load() }, [load])
 
+  const relationships = allRelationships.filter((row) => row.direction === (mode === 'buyer' ? 'outgoing' : 'incoming') && !(mode === 'seller' && row.status === 'pending'))
+  const rfqs = allRFQs.filter((rfq) => mode === 'buyer' ? rfq.isMine : !rfq.isMine)
   const activeRelationships = useMemo(() => relationships.filter((row) => row.status === 'active'), [relationships])
-  const incomingRequests = relationships.filter((row) => row.direction === 'incoming' && row.status === 'pending')
+  const incomingRequests = mode === 'seller' ? allRelationships.filter((row) => row.direction === 'incoming' && row.status === 'pending') : []
   const canUseAI = user?.role === 'owner' || hasPermission('canUseBusinessAI')
   const canFollowSellers = user?.role === 'owner' || hasPermission('canFollowMarketplaceSellers')
 
   useEffect(() => {
-    if (tab !== 'marketplace' || !canUseAI || !user?.id || !user?.tenantId || marketInsightAttempted.current) return
+    if (mode !== 'buyer' || tab !== 'marketplace' || !canUseAI || !user?.id || !user?.tenantId || marketInsightAttempted.current) return
     marketInsightAttempted.current = true
     const today = new Date().toISOString().slice(0, 10)
     const storageKey = `marketplace-insight:${user.tenantId}:${user.id}`
@@ -190,7 +192,7 @@ export default function ProcurementNetworkPage() {
       })
       .catch(() => {})
     return () => { active = false; if (fadeTimer) clearTimeout(fadeTimer); if (dismissTimer) clearTimeout(dismissTimer) }
-  }, [tab, canUseAI, user?.id, user?.tenantId])
+  }, [mode, tab, canUseAI, user?.id, user?.tenantId])
 
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true); setError(''); setNotice('')
@@ -241,19 +243,26 @@ export default function ProcurementNetworkPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load the private quote discussion.') }
   }
 
-  const tabs: Array<{ id: Tab; label: string; icon: typeof Store }> = [
-    { id: 'marketplace', label: 'Marketplace', icon: Store },
-    { id: 'rfqs', label: 'Requests for quote', icon: Tags },
-    { id: 'orders', label: 'Orders & invoices', icon: Package },
-    { id: 'relationships', label: 'Supplier relationships', icon: Handshake },
-    { id: 'profile', label: 'Business profile', icon: Building2 },
+  const tabs: Array<{ id: Tab; label: string; icon: typeof Store }> = mode === 'buyer' ? [
+    { id: 'marketplace', label: 'Find suppliers', icon: Store },
+    { id: 'rfqs', label: 'My quote requests', icon: Tags },
+    { id: 'orders', label: 'Purchases & invoices', icon: Package },
+    { id: 'relationships', label: 'My suppliers', icon: Handshake },
+  ] : [
+    { id: 'marketplace', label: 'Seller studio', icon: Store },
+    { id: 'rfqs', label: 'Incoming quote requests', icon: Tags },
+    { id: 'orders', label: 'Sales & fulfilment', icon: Package },
+    { id: 'relationships', label: 'Buyer relationships', icon: Handshake },
+    { id: 'profile', label: 'Seller profile', icon: Building2 },
   ]
+  const workspaceRFQs = rfqs
+  const workspaceOrders = orders.filter((order) => order.side === mode)
 
   return <main className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8">
     <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-5">
       <div className="flex min-w-0 gap-3">
         <div className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-md bg-emerald-100 text-emerald-800"><Store className="size-5" /></div>
-        <div><h1 className="text-xl font-semibold">Procurement Network</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">Discover opted-in suppliers, publish offers and price updates, and request private or marketplace-wide quotes.</p></div>
+        <div><h1 className="text-xl font-semibold">{mode === 'buyer' ? 'Procurement · Buyer workspace' : 'Supplier Marketplace · Seller workspace'}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{mode === 'buyer' ? 'Discover and follow suppliers, compare visible offers, request quotes, receive goods and manage purchases.' : 'Publish offers and campaigns, respond to buyer requests, fulfil orders, invoice buyers and record receipts.'}</p></div>
       </div>
       <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button>
     </header>
@@ -267,7 +276,7 @@ export default function ProcurementNetworkPage() {
 
     {tab === 'orders' && <section className="space-y-4">
       <div><h2 className="text-lg font-semibold">Purchase orders, receipts and invoices</h2><p className="mt-1 text-sm text-muted-foreground">Approve and send orders, record partial receipts, and match invoices before creating a payable.</p></div>
-      {orders.length ? orders.map((order) => <article key={order.id} className="rounded-md border p-4">
+      {workspaceOrders.length ? workspaceOrders.map((order) => <article key={order.id} className="rounded-md border p-4">
         <div className="flex flex-wrap justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-semibold">{order.poNumber}</h3><span className="rounded-sm bg-muted px-2 py-0.5 text-xs capitalize">{order.status.replace(/_/g, ' ')}</span></div><p className="mt-1 text-sm text-muted-foreground">{order.side === 'buyer' ? `Supplier: ${order.seller?.name || 'Business'}` : `Buyer: ${order.buyer?.name || 'Business'}`} · {order.currency}</p></div></div>
         <div className="my-3 divide-y rounded-md border">{order.lines.map((line: any) => <div key={line.id} className="grid gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_150px]"><div><div className="font-medium">{line.itemName}</div><p className="text-xs text-muted-foreground">Ordered {Number(line.orderedQuantity)} {line.unit} · Received {Number(line.receivedQuantity)} · {order.currency} {Number(line.unitPrice).toLocaleString()}</p>{order.side === 'buyer' && !line.productId && ['acknowledged', 'partially_received'].includes(order.status) && <label className="mt-2 grid max-w-lg gap-1 text-xs">Map to your inventory product<select className="h-9 rounded-md border bg-background px-2 text-sm" defaultValue="" onChange={(e) => { if (e.target.value) void run(() => request(`/orders/${order.id}/lines/${line.id}/product`, { method: 'PATCH', body: JSON.stringify({ productId: e.target.value }) }), 'Inventory mapping saved.') }}><option value="">Choose product</option>{inventoryProducts.map((product) => <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ''}</option>)}</select></label>}</div>{order.side === 'buyer' && ['acknowledged', 'partially_received'].includes(order.status) && <Field label="Receive now" type="number" min="0" max={Math.max(0, Number(line.orderedQuantity) - Number(line.receivedQuantity))} step="1" value={receiveDraft[line.id] || ''} onChange={(e) => setReceiveDraft({ ...receiveDraft, [line.id]: e.target.value })} />}</div>)}</div>
         {order.receipts?.length > 0 && <p className="mb-2 text-xs text-muted-foreground">Receipts: {order.receipts.map((receipt: any) => receipt.receiptNo).join(', ')}</p>}
@@ -290,11 +299,11 @@ export default function ProcurementNetworkPage() {
         {order.side === 'buyer' && can('canReceiveProcurementGoods') && ['acknowledged', 'partially_received'].includes(order.status) && <div className="mt-3 flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs font-medium">Receiving branch<select disabled className="h-9 rounded-md border bg-background px-2 text-sm" value={order.branchId || ''}><option value="">{branches.find((branch) => branch.id === order.branchId)?.name || 'Branch not set'}</option></select></label><Button size="sm" disabled={busy || !order.branchId || !order.lines.some((line: any) => Number(receiveDraft[line.id] || 0) > 0)} onClick={() => void run(async () => { await request(`/orders/${order.id}/receipts`, { method: 'POST', body: JSON.stringify({ branchId: order.branchId, lines: order.lines.filter((line: any) => Number(receiveDraft[line.id] || 0) > 0).map((line: any) => ({ orderLineId: line.id, quantity: receiveDraft[line.id] })) }) }); setReceiveDraft({}) }, 'Goods receipt recorded and accepted quantities added to stock.')}>Record goods received</Button></div>}
         {can('canSubmitProcurementInvoice') && order.side === 'seller' && ['acknowledged', 'partially_received', 'received'].includes(order.status) && <form className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); const lines = order.lines.map((line: any) => ({ line, quantity: uninvoicedQuantity(order, line) })).filter((row: any) => row.quantity > 0); void run(() => request(`/orders/${order.id}/invoices`, { method: 'POST', body: JSON.stringify({ invoiceNo: form.get('invoiceNo'), taxAmount: uninvoicedTax(order), deliveryFee: form.get('deliveryFee') || 0, lines: lines.map((row: any) => ({ orderLineId: row.line.id, quantity: row.quantity, unitPrice: row.line.unitPrice, sellerProductId: sellerProductMappings[row.line.id] })) }) }), 'Invoice submitted for matching.') }}><div><h4 className="text-sm font-medium">Invoice received goods</h4><p className="mt-1 text-xs text-muted-foreground">Map each line to your own product or service so approval can post your receivable, sales, tax and inventory/COGS correctly.</p></div>{order.lines.filter((line: any) => uninvoicedQuantity(order, line) > 0).map((line: any) => <label key={line.id} className="grid max-w-2xl gap-1 text-xs font-medium">Seller item for {line.itemName}<select required value={sellerProductMappings[line.id] || ''} onChange={(e) => setSellerProductMappings({ ...sellerProductMappings, [line.id]: e.target.value })} className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="">Choose your product/service</option>{sellerProducts.map((product) => <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ''}{product.itemType === 'service' ? ' · Service' : ''}</option>)}</select></label>)}<div className="flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs font-medium">Supplier invoice number<input name="invoiceNo" required className="h-9 rounded-md border bg-background px-2 text-sm" /></label><label className="grid gap-1 text-xs font-medium">Output tax (accepted rate)<input aria-label="Output tax from accepted quote" type="text" value={uninvoicedTax(order).toLocaleString()} readOnly className="h-9 w-36 rounded-md border bg-muted px-2 text-sm" /></label><input type="hidden" name="taxAmount" value={uninvoicedTax(order)} /><label className="grid gap-1 text-xs font-medium">Freight / delivery<input name="deliveryFee" type="number" min="0" step="0.01" defaultValue="0" className="h-9 w-36 rounded-md border bg-background px-2 text-sm" /></label><Button size="sm" type="submit" disabled={busy || !order.lines.some((line: any) => uninvoicedQuantity(order, line) > 0) || order.lines.some((line: any) => uninvoicedQuantity(order, line) > 0 && !sellerProductMappings[line.id])}>Submit invoice for received goods</Button></div></form>}
         {order.side === 'buyer' && can('canReviewProcurementInvoice') && order.invoices?.some((invoice: any) => invoice.status === 'submitted') && <div className="mt-3 flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs font-medium">Supplier record<select className="h-9 rounded-md border bg-background px-2 text-sm" value={selectedSupplier} onChange={(e) => setSelectedSupplier(e.target.value)}><option value="">Select supplier</option>{localSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label><Button size="sm" disabled={busy || !selectedSupplier} onClick={() => { const invoice = order.invoices.find((row: any) => row.status === 'submitted'); void run(() => request(`/invoices/${invoice.id}/approve`, { method: 'PATCH', body: JSON.stringify({ supplierId: selectedSupplier, branchId: order.branchId || selectedBranch }) }), 'Invoice approved and posted to supplier payables.') }}>Approve matched invoice</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => { const invoice = order.invoices.find((row: any) => row.status === 'submitted'); void run(() => request(`/invoices/${invoice.id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason: 'Invoice requires correction' }) }), 'Invoice rejected for correction.') }}>Reject invoice</Button></div>}
-      </article>) : <p className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No purchase orders yet. Select a supplier quote in Requests for quote.</p>}
+      </article>) : <p className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">{mode === 'buyer' ? 'No purchases yet. Select a supplier quote to create your first purchase order.' : 'No buyer orders or fulfilment tasks yet.'}</p>}
     </section>}
 
-    {tab === 'marketplace' && <section className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="min-w-0">
+    {tab === 'marketplace' && <section className={mode === 'seller' ? 'grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_360px]' : 'space-y-6'}>
+      {mode === 'buyer' ? <div className="min-w-0">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold">Supplier offers</h2><p className="text-sm text-muted-foreground">Prices shown are current supplier listings; accepted quotes retain their own terms.</p></div><label className="relative w-full max-w-sm"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search offers and suppliers" className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm" /></label></div>
         {campaigns.length > 0 && <section aria-label="Featured marketplace offers" className="mb-5 border-y py-3"><div className="mb-2 flex items-center justify-between gap-3"><h3 className="text-xs font-semibold uppercase text-muted-foreground">Featured offers</h3>{campaigns.length > 2 && <button type="button" className="text-xs font-medium text-emerald-800 underline underline-offset-2" onClick={() => setShowAllCampaigns((visible) => !visible)}>{showAllCampaigns ? 'Show fewer' : `See all ${campaigns.length}`}</button>}</div><div className="grid gap-2 md:grid-cols-2">{(showAllCampaigns ? campaigns : campaigns.slice(0, 2)).map((campaign) => <article key={campaign.id} className="min-w-0 border bg-card px-3 py-2.5"><CampaignImageShowcase images={campaign.images} title={campaign.title} /><div className="flex items-start gap-3"><div className="grid size-8 shrink-0 place-items-center rounded-sm bg-emerald-50 text-emerald-800"><Megaphone className="size-4" /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="text-[11px] font-semibold uppercase text-emerald-800">{campaign.campaignType === 'ad' ? 'Sponsored' : 'Seller offer'}</span><span className="text-xs text-muted-foreground">{campaign.business?.name}</span></div><h4 className="mt-0.5 break-words text-sm font-semibold">{campaign.title}</h4><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">{campaign.message}</p>{campaign.listing && <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs"><span className="min-w-0 truncate font-medium">{campaign.listing.name}</span><span className="shrink-0 tabular-nums">{campaign.listing.currency} {Number(campaign.listing.price).toLocaleString()}</span></div>}<div className="mt-1 flex items-center justify-between gap-3"><p className="text-[11px] text-muted-foreground">{campaign.endsAt ? `Offer ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Available while active'}</p>{campaign.listing && <button type="button" className="shrink-0 text-xs font-medium text-emerald-800 underline underline-offset-2" onClick={() => document.getElementById(`market-listing-${campaign.listing!.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>View listing</button>}</div></div></div></article>)}</div></section>}
         {listings.length ? <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">{listings.map((item) => <article id={`market-listing-${item.id}`} key={item.id} className="min-w-0 rounded-md border bg-card p-4">
@@ -305,8 +314,11 @@ export default function ProcurementNetworkPage() {
         </article>)}</div> : <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No supplier offers match this search. Discover an opted-in supplier or publish your own catalogue from the panel.</div>}
         <h2 className="mb-3 mt-8 text-lg font-semibold">Discover suppliers</h2>
         {suppliers.length ? <div className="max-h-[32rem] divide-y overflow-y-auto rounded-md border">{suppliers.map((supplier) => { const existing = relationships.find((r) => r.counterparty?.id === supplier.tenantId); const following = followedSellerIds.has(supplier.tenantId); return <div key={supplier.tenantId} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-md bg-slate-100"><Building2 className="size-4" /></div><div className="min-w-0"><div className="truncate font-medium">{supplier.business?.name || 'Business'}</div><div className="text-xs capitalize text-muted-foreground">{supplier.sellerType || 'supplier'} · {supplier.category}{supplier.business?.businessType ? ` · ${supplier.business.businessType}` : ''}</div></div></div><div className="flex flex-wrap items-center gap-2">{canFollowSellers && <Button size="sm" variant={following ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(supplier.tenantId)}>{following ? <><UserRoundCheck className="mr-1.5 size-4" />Following</> : <><UserPlus className="mr-1.5 size-4" />Follow seller</>}</Button>}{existing ? <span className="text-xs capitalize text-muted-foreground">{existing.direction === 'incoming' && existing.status === 'pending' ? 'Request awaiting your review' : existing.status}</span> : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request('/relationships', { method: 'POST', body: JSON.stringify({ sellerTenantId: supplier.tenantId }) }), 'Supplier relationship request sent.')}>Connect</Button>}</div></div>})}</div> : <p className="text-sm text-muted-foreground">No other supplier profiles are discoverable yet.</p>}
-      </div>
-      <aside className="border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+      </div> : <div className="min-w-0">
+        <section className="mb-5 border-b pb-5"><h2 className="text-lg font-semibold">Seller overview</h2><p className="mt-1 text-sm text-muted-foreground">A focused workspace for managing your marketplace presence and buyer activity.</p><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><div className="border p-3"><p className="text-xs text-muted-foreground">Published offers</p><p className="mt-1 text-xl font-semibold tabular-nums">{myListings.length}</p></div><div className="border p-3"><p className="text-xs text-muted-foreground">Active campaigns</p><p className="mt-1 text-xl font-semibold tabular-nums">{myCampaigns.filter((campaign) => campaign.status === 'active').length}</p></div><div className="border p-3"><p className="text-xs text-muted-foreground">Incoming quote requests</p><p className="mt-1 text-xl font-semibold tabular-nums">{workspaceRFQs.filter((rfq) => rfq.status === 'open').length}</p></div><div className="border p-3"><p className="text-xs text-muted-foreground">Orders to fulfil</p><p className="mt-1 text-xl font-semibold tabular-nums">{workspaceOrders.filter((order) => ['sent', 'acknowledged', 'partially_received', 'received'].includes(order.status)).length}</p></div></div></section>
+        <div className="grid gap-5 lg:grid-cols-2"><section><h3 className="mb-3 text-sm font-semibold">Your marketplace offers</h3>{myListings.length ? <div className="divide-y border">{myListings.map((listing) => <div key={listing.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="break-words text-sm font-medium">{listing.name}</p><p className="mt-1 text-xs text-muted-foreground">{listing.category} · {listing.currency} {Number(listing.price).toLocaleString()} · {listing.visibility === 'public' ? 'Public' : 'Connected buyers only'}</p></div><span className="text-xs capitalize text-muted-foreground">{listing.status}</span></div>)}</div> : <p className="border border-dashed p-5 text-sm text-muted-foreground">No offers published yet. Use the seller panel to publish your first offer.</p>}</section><section><h3 className="mb-3 text-sm font-semibold">Campaigns</h3>{myCampaigns.length ? <div className="divide-y border">{myCampaigns.slice(0, 8).map((campaign) => <div key={campaign.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="truncate text-sm font-medium">{campaign.title}</p><p className="mt-1 text-xs text-muted-foreground">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Promotion'} · {campaign.images?.length || 0} images</p></div><span className="text-xs capitalize text-muted-foreground">{campaign.status}</span></div>)}</div> : <p className="border border-dashed p-5 text-sm text-muted-foreground">No campaigns yet. Campaigns can be created for any active offer.</p>}</section></div>
+      </div>}
+      {mode === 'seller' && <aside className="border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
         <h2 className="mb-4 text-lg font-semibold">Publish a supplier offer</h2>
         {can('canCreateMarketplaceListing') && <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => request('/listings', { method: 'POST', body: JSON.stringify(listingForm) }), 'Offer published.'); setListingForm((form) => ({ ...form, name: '', description: '', price: '', availableQty: '' })) }}>
           <Field label="Product or offer name" value={listingForm.name} onChange={(e) => setListingForm({ ...listingForm, name: e.target.value })} required />
@@ -347,7 +359,7 @@ export default function ProcurementNetworkPage() {
           </form>
           {myCampaigns.length > 0 && <div className="mt-4 space-y-2"><h4 className="text-xs font-semibold">Your campaigns</h4>{myCampaigns.map((campaign) => <div key={campaign.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span className="min-w-0 truncate">{campaign.title} · {campaign.status}</span>{can('canManageMarketplacePromotions') && campaign.status !== 'cancelled' && <div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/promotions/${campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: campaign.status === 'active' ? 'paused' : 'active' }) }), campaign.status === 'active' ? 'Campaign paused.' : 'Campaign resumed.')}>{campaign.status === 'active' ? 'Pause' : 'Resume'}</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/promotions/${campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }), 'Campaign cancelled.')}>Cancel</Button></div>}</div>)}</div>}
         </div>}
-      </aside>
+      </aside>}
     </section>}
 
     {tab === 'rfqs' && <section className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_380px]">
