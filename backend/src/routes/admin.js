@@ -911,7 +911,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
       const payerEmail = String(email || tenant.owner?.email || tenant.email || "").trim();
       if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter the payer phone number or email for Pesapal checkout" });
       const progressBeforePayment = await getSubscriptionPaymentProgress(prisma, tenant.id);
-      const continueOutstandingInvoice = Boolean(progressBeforePayment?.progress.isPartiallyPaid);
+      const continueOutstandingInvoice = Boolean(progressBeforePayment?.hasOutstandingBalance);
       const invoiceSnapshot = continueOutstandingInvoice ? progressBeforePayment.invoiceSnapshot : null;
       const invoice = {
         ...(invoiceSnapshot || {}),
@@ -923,11 +923,13 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
         billedTotal: continueOutstandingInvoice ? progressBeforePayment.periodTotal : charge.total,
         priorPaidAmount: continueOutstandingInvoice && !invoiceSnapshot ? progressBeforePayment.progress.paidAmount : Number(invoiceSnapshot?.priorPaidAmount || 0),
         total: Number(paymentAmount),
-        lineItems: invoiceSnapshot?.lineItems || [
+        lineItems: invoiceSnapshot?.lineItems || (continueOutstandingInvoice
+          ? [{ description: "Outstanding subscription balance", quantity: 1, unitAmount: progressBeforePayment.periodTotal, amount: progressBeforePayment.periodTotal }]
+          : [
           ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || "Subscription"} plan`, quantity: 1, unitAmount: charge.planCharge, amount: charge.planCharge }] : []),
           ...(charge.serviceFee > 0 ? [{ description: "Service fee", quantity: 1, unitAmount: charge.serviceFee, amount: charge.serviceFee }] : []),
           ...(charge.includedStaticIpFee > 0 ? [{ description: "Static IP service", quantity: 1, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee }] : []),
-        ],
+        ]),
         issuedAt: invoiceSnapshot?.issuedAt || new Date().toISOString(),
         ...(cleanNotes ? { adminNote: cleanNotes } : {}),
       };
@@ -977,7 +979,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
 
     const payment = await prisma.$transaction(async tx => {
       const progressBeforePayment = await getSubscriptionPaymentProgress(tx, tenant.id, paymentDate);
-      const continueOutstandingInvoice = Boolean(progressBeforePayment?.progress.isPartiallyPaid);
+      const continueOutstandingInvoice = Boolean(progressBeforePayment?.hasOutstandingBalance);
       const invoiceSnapshot = continueOutstandingInvoice ? progressBeforePayment.invoiceSnapshot : null;
       const invoice = {
         ...(invoiceSnapshot || {}),
@@ -991,11 +993,13 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
         billedTotal: continueOutstandingInvoice ? progressBeforePayment.periodTotal : charge.total,
         priorPaidAmount: continueOutstandingInvoice && !invoiceSnapshot ? progressBeforePayment.progress.paidAmount : Number(invoiceSnapshot?.priorPaidAmount || 0),
         total: Number(paymentAmount),
-        lineItems: invoiceSnapshot?.lineItems || [
+        lineItems: invoiceSnapshot?.lineItems || (continueOutstandingInvoice
+          ? [{ description: "Outstanding subscription balance", quantity: 1, unitAmount: progressBeforePayment.periodTotal, amount: progressBeforePayment.periodTotal }]
+          : [
           ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || "Subscription"} plan`, quantity: 1, unitAmount: charge.planCharge, amount: charge.planCharge }] : []),
           ...(charge.serviceFee > 0 ? [{ description: "Service fee", quantity: 1, unitAmount: charge.serviceFee, amount: charge.serviceFee }] : []),
           ...(charge.includedStaticIpFee > 0 ? [{ description: "Static IP service", quantity: 1, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee }] : []),
-        ],
+        ]),
         issuedAt: invoiceSnapshot?.issuedAt || paymentDate.toISOString(),
         ...(cleanNotes ? { adminNote: cleanNotes } : {}),
       };

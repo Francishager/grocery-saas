@@ -105,7 +105,8 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
   const progress = (!hasOpenHistoricalInvoice && coveredByActiveTerm && !recordedThisPeriod) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
     ? calculateSubscriptionPaymentProgress(periodTotal, periodTotal)
     : calculateSubscriptionPaymentProgress(periodTotal, trackedPaidAmount);
-  return { tenant, progress, invoiceSnapshot, periodStart, periodTotal, invoiceKey: trackedInvoice?.invoiceKey || null };
+  const hasOutstandingBalance = !progress.isPaid && progress.remainingAmount > 0.01;
+  return { tenant, progress, hasOutstandingBalance, invoiceSnapshot, periodStart, periodTotal, invoiceKey: trackedInvoice?.invoiceKey || null };
 }
 
 export async function refreshSubscriptionPaymentStatus(tx, tenantId, asOf = new Date()) {

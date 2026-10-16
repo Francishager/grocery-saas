@@ -173,8 +173,8 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
       planPrice: charge.planCharge,
       serviceFee: charge.serviceFee,
       staticIpFee: charge.includedStaticIpFee,
-      periodTotal: charge.total,
-      currentPeriodRemainder: paymentProgress?.progress.isPartiallyPaid
+      periodTotal: paymentProgress?.hasOutstandingBalance ? paymentProgress.periodTotal : charge.total,
+      currentPeriodRemainder: paymentProgress?.hasOutstandingBalance
         ? paymentProgress.progress.remainingAmount
         : charge.total,
       amountDue,
@@ -266,11 +266,11 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
     if (!Number.isInteger(periodCount) || periodCount < 1 || periodCount > maxPeriods) {
       return res.status(400).json({ error: `Choose between 1 and ${maxPeriods} ${charge.billingCycle === 'yearly' ? 'years' : 'months'}` });
     }
-    if (paymentProgress?.progress.isPartiallyPaid && periodCount > 1) {
+    if (paymentProgress?.hasOutstandingBalance && periodCount > 1) {
       return res.status(409).json({ error: "Pay the outstanding subscription balance before selecting additional periods", code: "SUBSCRIPTION_BALANCE_DUE" });
     }
     const periodTotal = charge.total;
-    let currentPeriodRemainder = paymentProgress?.progress.isPartiallyPaid
+    let currentPeriodRemainder = paymentProgress?.hasOutstandingBalance
       ? paymentProgress.progress.remainingAmount
       : periodTotal;
     if (currentPeriodRemainder <= 0) currentPeriodRemainder = periodTotal;
@@ -285,7 +285,7 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
       const payerEmail = String(email || req.user?.email || "").trim();
       if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter a phone number or email for Pesapal checkout" });
       const names = String(tenant.name || "Business").trim().split(/\s+/);
-      const isBalanceOnlyPayment = Boolean(paymentProgress?.progress.isPartiallyPaid);
+      const isBalanceOnlyPayment = Boolean(paymentProgress?.hasOutstandingBalance);
       const billedTotal = isBalanceOnlyPayment ? paymentProgress.periodTotal : amountDue;
       const invoice = {
         planName: tenant.plan?.name || 'Subscription',
