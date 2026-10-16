@@ -34,6 +34,11 @@ function readBillingInvoice(notes) {
   try { return JSON.parse(String(notes).slice('JIBUSALES_INVOICE:'.length)); } catch { return null; }
 }
 
+function isServiceOnlyInvoice(invoice) {
+  const lineItems = Array.isArray(invoice?.lineItems) ? invoice.lineItems : [];
+  return lineItems.length > 0 && lineItems.every(item => /service|static\s*ip/i.test(String(item.description || '')));
+}
+
 export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Date()) {
   const tenant = await tx.tenant.findUnique({
     where: { id: tenantId },
@@ -92,17 +97,25 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
     invoiceGroups.set(invoiceKey, group);
   }
   const groups = [...invoiceGroups.values()].sort((a, b) => new Date(a.firstPaidAt) - new Date(b.firstPaidAt));
-  const openInvoice = groups.find(group => group.paidAmount < group.billedTotal - 0.01);
+  const isServiceOnlyOverride = charge.chargeMode === 'service' && charge.hasCustomPricing;
+  const openInvoices = groups.filter(group => group.paidAmount < group.billedTotal - 0.01);
+  const openPlanInvoice = openInvoices.find(group => !isServiceOnlyInvoice(group.invoice));
+  const latestCurrentPlanInvoice = groups.filter(group => group.hasCurrentPayment && !isServiceOnlyInvoice(group.invoice)).at(-1);
+  const openInvoice = openInvoices[0];
   const latestCurrentInvoice = groups.filter(group => group.hasCurrentPayment).at(-1);
-  const trackedInvoice = openInvoice || latestCurrentInvoice;
+  const trackedInvoice = openPlanInvoice || (isServiceOnlyOverride ? latestCurrentPlanInvoice : openInvoice || latestCurrentInvoice);
   const invoiceSnapshot = trackedInvoice?.invoice || null;
   const legacyBalanceTotal = charge.chargeMode === 'service' ? charge.price : charge.total;
   const periodTotal = trackedInvoice?.billedTotal || legacyBalanceTotal;
   const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
   const recordedThisPeriod = Number(aggregate._sum.amount || 0) > 0;
-  const trackedPaidAmount = trackedInvoice?.paidAmount ?? aggregate._sum.amount;
-  const hasOpenHistoricalInvoice = Boolean(openInvoice);
-  const progress = (!hasOpenHistoricalInvoice && coveredByActiveTerm && !recordedThisPeriod) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid')
+  const legacyReceiptsThisPeriod = receipts
+    .filter(receipt => new Date(receipt.paidAt) >= periodStart && !readBillingInvoice(receipt.notes))
+    .reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+  const trackedPaidAmount = trackedInvoice?.paidAmount ?? (isServiceOnlyOverride ? legacyReceiptsThisPeriod : aggregate._sum.amount);
+  const hasOpenHistoricalInvoice = openInvoices.length > 0;
+  const canAssumeOverridePaid = !charge.hasCustomPricing;
+  const progress = (!hasOpenHistoricalInvoice && coveredByActiveTerm && !recordedThisPeriod && canAssumeOverridePaid) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid' && canAssumeOverridePaid)
     ? calculateSubscriptionPaymentProgress(periodTotal, periodTotal)
     : calculateSubscriptionPaymentProgress(periodTotal, trackedPaidAmount);
   const hasOutstandingBalance = !progress.isPaid && progress.remainingAmount > 0.01;

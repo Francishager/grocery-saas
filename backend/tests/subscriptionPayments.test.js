@@ -136,6 +136,64 @@ test('fully unpaid tenant price override remains outstanding when billing mode i
   assert.equal(result.hasOutstandingBalance, true);
 });
 
+test('a paid services-only invoice does not settle the separate tenant plan override', async () => {
+  const tenant = {
+    id: 'tenant-5',
+    plan: { price: 100000, billingCycle: 'monthly', currency: 'UGX' },
+    customPrice: 350000,
+    billingChargeMode: 'service',
+    monthlyServiceFee: 50000,
+    createdAt: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionStart: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-11-01T00:00:00.000Z'),
+  };
+  const tx = {
+    tenant: { findUnique: async () => tenant },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 50000 } }),
+      count: async () => 1,
+      findMany: async () => [{
+        id: 'service-receipt',
+        amount: 50000,
+        notes: 'JIBUSALES_INVOICE:{"invoiceKey":"service-only","billedTotal":50000,"total":50000,"lineItems":[{"description":"Service fee","amount":50000}]}',
+        paidAt: new Date('2026-10-12T00:00:00.000Z'),
+        createdAt: new Date('2026-10-12T00:00:00.000Z'),
+      }],
+    },
+  };
+
+  const result = await getSubscriptionPaymentProgress(tx, tenant.id, new Date('2026-10-16T00:00:00.000Z'));
+  assert.equal(result.periodTotal, 350000);
+  assert.equal(result.progress.remainingAmount, 350000);
+  assert.equal(result.hasOutstandingBalance, true);
+});
+
+test('tenant override is not assumed paid from active dates or a legacy paid flag without receipts', async () => {
+  const tenant = {
+    id: 'tenant-6',
+    plan: { price: 100000, billingCycle: 'monthly', currency: 'UGX' },
+    customPrice: 200000,
+    billingChargeMode: 'plan',
+    createdAt: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionStart: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-11-01T00:00:00.000Z'),
+    paymentReminderStatus: 'paid',
+  };
+  const tx = {
+    tenant: { findUnique: async () => tenant },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 0 } }),
+      count: async () => 0,
+      findMany: async () => [],
+    },
+  };
+
+  const result = await getSubscriptionPaymentProgress(tx, tenant.id, new Date('2026-10-16T00:00:00.000Z'));
+  assert.equal(result.periodTotal, 200000);
+  assert.equal(result.progress.remainingAmount, 200000);
+  assert.equal(result.hasOutstandingBalance, true);
+});
+
 test('Pesapal statuses only settle successful verified payments', () => {
   assert.equal(normalizePesapalStatus({ payment_status_description: 'COMPLETED', status_code: 1 }), 'completed');
   assert.equal(normalizePesapalStatus({ payment_status_description: 'FAILED', status_code: 2 }), 'failed');
