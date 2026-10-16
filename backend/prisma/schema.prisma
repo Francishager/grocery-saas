@@ -200,6 +200,7 @@ model Tenant {
   marketplaceFollowers MarketplaceSellerFollow[] @relation("MarketplaceFollowSeller")
   businessConversations BusinessConversation[]
   businessMessages     BusinessMessage[]
+  businessMessageReactions BusinessMessageReaction[]
   pushTokens           PushToken[]
   integrations         IntegrationConfig[]
   restaurantTables     RestaurantTable[]
@@ -518,6 +519,7 @@ model User {
   businessConversationsTwo BusinessConversation[] @relation("BusinessConversationParticipantTwo")
   businessMessagesSent    BusinessMessage[]       @relation("BusinessMessageSender")
   businessMessagesReceived BusinessMessage[]      @relation("BusinessMessageRecipient")
+  businessMessageReactions BusinessMessageReaction[]
 
   @@map("users")
 }
@@ -1966,6 +1968,10 @@ model BusinessMessage {
   recipientId    String
   recipient      User               @relation("BusinessMessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   body           String
+  replyToMessageId String?
+  replyToMessage BusinessMessage?   @relation("BusinessMessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies        BusinessMessage[] @relation("BusinessMessageReplies")
+  reactions      BusinessMessageReaction[]
   deliveredAt    DateTime?
   readAt         DateTime?
   createdAt      DateTime           @default(now())
@@ -1973,6 +1979,22 @@ model BusinessMessage {
   @@index([conversationId, createdAt])
   @@index([tenantId, recipientId, readAt])
   @@map("business_messages")
+}
+
+model BusinessMessageReaction {
+  id             String           @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messageId      String
+  message        BusinessMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji          String
+  createdAt      DateTime          @default(now())
+
+  @@unique([messageId, userId])
+  @@index([tenantId, messageId])
+  @@map("business_message_reactions")
 }
 
 model ProcurementPurchaseOrder {

@@ -7,6 +7,13 @@ const router = Router();
 const access = [authenticateToken, requireTenant, requireFeature('communication.team_messaging')];
 const userFields = { id: true, fname: true, lname: true, role: true, avatar: true };
 const ONLINE_WINDOW_MS = 60_000;
+const MESSAGE_REACTION_EMOJIS = new Set(['👍', '❤️', '😂', '😮', '😢', '🙏']);
+const messageDetails = {
+  id: true, senderId: true, recipientId: true, body: true,
+  deliveredAt: true, readAt: true, createdAt: true,
+  replyToMessage: { select: { id: true, senderId: true, body: true } },
+  reactions: { select: { id: true, userId: true, emoji: true } },
+};
 
 function displayName(user) {
   return [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || 'Team member';
@@ -54,7 +61,7 @@ router.get('/conversations', requirePermission('canViewTeamMessaging'), async (r
     include: {
       participantOne: { select: userFields },
       participantTwo: { select: userFields },
-      messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true } },
+      messages: { orderBy: { createdAt: 'desc' }, take: 1, select: messageDetails },
     },
     orderBy: { updatedAt: 'desc' },
     take: 100,
@@ -68,7 +75,7 @@ router.get('/conversations', requirePermission('canViewTeamMessaging'), async (r
   const unreadMessages = rows.length ? await prisma.businessMessage.findMany({
     where: { tenantId, recipientId: req.user.id, readAt: null, conversationId: { in: rows.map(({ id }) => id) } },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, conversationId: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true },
+    select: { ...messageDetails, conversationId: true },
   }) : [];
   const unreadLatest = new Map();
   for (const message of unreadMessages) if (!unreadLatest.has(message.conversationId)) unreadLatest.set(message.conversationId, message);
@@ -103,7 +110,7 @@ router.get('/conversations/:id/messages', requirePermission('canViewTeamMessagin
   const messages = await prisma.businessMessage.findMany({
     where: { tenantId, conversationId: conversation.id },
     orderBy: { createdAt: 'desc' }, take: 100,
-    select: { id: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true },
+    select: messageDetails,
   });
   const readAt = new Date();
   await prisma.businessMessage.updateMany({
@@ -130,15 +137,58 @@ router.post('/conversations/:id/typing', requirePermission('canViewTeamMessaging
   res.json({ ok: true });
 });
 
+router.post('/conversations/:id/messages/:messageId/reactions', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
+  const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+  const emoji = String(req.body?.emoji || '');
+  if (!MESSAGE_REACTION_EMOJIS.has(emoji)) return res.status(400).json({ error: 'Choose a supported reaction.' });
+  const message = await prisma.businessMessage.findFirst({
+    where: {
+      id: req.params.messageId,
+      conversationId: req.params.id,
+      tenantId,
+      conversation: { OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
+    },
+    select: { id: true },
+  });
+  if (!message) return res.status(404).json({ error: 'Message not found.' });
+  const existing = await prisma.businessMessageReaction.findUnique({
+    where: { messageId_userId: { messageId: message.id, userId: req.user.id } },
+    select: { id: true, emoji: true },
+  });
+  if (existing?.emoji === emoji) {
+    await prisma.businessMessageReaction.delete({ where: { id: existing.id } });
+  } else {
+    await prisma.businessMessageReaction.upsert({
+      where: { messageId_userId: { messageId: message.id, userId: req.user.id } },
+      create: { tenantId, messageId: message.id, userId: req.user.id, emoji },
+      update: { emoji, createdAt: new Date() },
+    });
+  }
+  const reactions = await prisma.businessMessageReaction.findMany({
+    where: { tenantId, messageId: message.id },
+    select: { id: true, userId: true, emoji: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  res.json({ reactions });
+});
+
 router.post('/conversations/:id/messages', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const body = String(req.body?.body || '').trim();
+  const replyToMessageId = String(req.body?.replyToMessageId || '').trim() || null;
   if (!body || body.length > 4000) return res.status(400).json({ error: 'Write a message of 1 to 4,000 characters.' });
   const conversation = await prisma.businessConversation.findFirst({
     where: { id: req.params.id, tenantId, OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
     select: { id: true, participantOneId: true, participantTwoId: true },
   });
   if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+  if (replyToMessageId) {
+    const original = await prisma.businessMessage.findFirst({
+      where: { id: replyToMessageId, tenantId, conversationId: conversation.id },
+      select: { id: true },
+    });
+    if (!original) return res.status(400).json({ error: 'You can only reply to a message in this conversation.' });
+  }
   const recipientId = conversation.participantOneId === req.user.id ? conversation.participantTwoId : conversation.participantOneId;
   const recipient = await prisma.user.findFirst({
     where: { id: recipientId, tenantId, isActive: true },
@@ -148,8 +198,8 @@ router.post('/conversations/:id/messages', requirePermission('canViewTeamMessagi
   const recipientOnline = Boolean(recipient?.teamMessagingLastSeenAt && now.getTime() - recipient.teamMessagingLastSeenAt.getTime() < ONLINE_WINDOW_MS);
   const [message] = await prisma.$transaction([
     prisma.businessMessage.create({
-      data: { tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body, deliveredAt: recipientOnline ? now : null },
-      select: { id: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true },
+      data: { tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body, replyToMessageId, deliveredAt: recipientOnline ? now : null },
+      select: messageDetails,
     }),
     prisma.businessConversation.update({
       where: { id: conversation.id },
