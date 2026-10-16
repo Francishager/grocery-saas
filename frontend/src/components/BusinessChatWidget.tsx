@@ -59,6 +59,7 @@ export function BusinessChatWidget() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [peerTyping, setPeerTyping] = useState(false)
   const [draft, setDraft] = useState('')
   const [incoming, setIncoming] = useState<{ conversation: Conversation; message: Message } | null>(null)
   const [error, setError] = useState('')
@@ -66,6 +67,8 @@ export function BusinessChatWidget() {
   const [launcherPosition, setLauncherPosition] = useState<LauncherPosition | null>(null)
   const seenMessages = useRef<Set<string> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const typingTimeout = useRef<number | null>(null)
+  const lastTypingSentAt = useRef(0)
   const launcherDrag = useRef<{ pointerId: number; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean } | null>(null)
   const suppressLauncherClick = useRef(false)
 
@@ -116,8 +119,9 @@ export function BusinessChatWidget() {
 
   const loadMessages = useCallback(async (conversation: Conversation) => {
     try {
-      const { messages: rows } = await api<{ messages: Message[] }>(`/conversations/${conversation.id}/messages`)
+      const { messages: rows, peerTyping: isPeerTyping } = await api<{ messages: Message[]; peerTyping: boolean }>(`/conversations/${conversation.id}/messages`)
       setMessages(rows)
+      setPeerTyping(isPeerTyping)
       setConversations((current) => current.map((row) => row.id === conversation.id ? { ...row, unreadCount: 0 } : row))
       setSelected(conversation)
       setIncoming((current) => current?.conversation.id === conversation.id ? null : current)
@@ -129,11 +133,20 @@ export function BusinessChatWidget() {
   useEffect(() => {
     if (!open || !selected) return
     const timer = window.setInterval(() => {
-      void api<{ messages: Message[] }>(`/conversations/${selected.id}/messages`)
-        .then(({ messages: rows }) => setMessages(rows))
+      void api<{ messages: Message[]; peerTyping: boolean }>(`/conversations/${selected.id}/messages`)
+        .then(({ messages: rows, peerTyping: isPeerTyping }) => {
+          setMessages(rows)
+          setPeerTyping(isPeerTyping)
+        })
         .catch(() => {})
-    }, 5000)
-    return () => window.clearInterval(timer)
+    }, 1800)
+    return () => {
+      window.clearInterval(timer)
+      if (typingTimeout.current !== null) window.clearTimeout(typingTimeout.current)
+      typingTimeout.current = null
+      lastTypingSentAt.current = 0
+      void api(`/conversations/${selected.id}/typing`, { method: 'POST', body: JSON.stringify({ typing: false }) }).catch(() => {})
+    }
   }, [open, selected?.id])
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [messages])
@@ -172,9 +185,33 @@ export function BusinessChatWidget() {
       const { message } = await api<{ message: Message }>(`/conversations/${selected.id}/messages`, { method: 'POST', body: JSON.stringify({ body: draft.trim() }) })
       setMessages((current) => [...current, message])
       setDraft('')
+      setPeerTyping(false)
+      if (typingTimeout.current !== null) window.clearTimeout(typingTimeout.current)
+      typingTimeout.current = null
+      lastTypingSentAt.current = 0
       await refreshConversations()
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Message could not be sent.') }
     finally { setSending(false) }
+  }
+
+  function changeDraft(value: string) {
+    setDraft(value)
+    if (!selected || !canSend) return
+    if (typingTimeout.current !== null) window.clearTimeout(typingTimeout.current)
+    if (!value.trim()) {
+      lastTypingSentAt.current = 0
+      void api(`/conversations/${selected.id}/typing`, { method: 'POST', body: JSON.stringify({ typing: false }) }).catch(() => {})
+      return
+    }
+    if (Date.now() - lastTypingSentAt.current >= 1200) {
+      lastTypingSentAt.current = Date.now()
+      void api(`/conversations/${selected.id}/typing`, { method: 'POST', body: JSON.stringify({ typing: true }) }).catch(() => {})
+    }
+    typingTimeout.current = window.setTimeout(() => {
+      lastTypingSentAt.current = 0
+      typingTimeout.current = null
+      void api(`/conversations/${selected.id}/typing`, { method: 'POST', body: JSON.stringify({ typing: false }) }).catch(() => {})
+    }, 2200)
   }
 
   function moveLauncher(x: number, y: number) {
@@ -228,13 +265,13 @@ export function BusinessChatWidget() {
       <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-4">
         {selected ? <button type="button" aria-label="Back to chats" onClick={() => { setSelected(null); setMessages([]); setNewMessageMode(false) }} className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-muted"><ArrowLeft className="size-5" /></button> : <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-900"><MessageCircle className="size-5" /></div>}
         {selected && <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(selected.participant.name)}</div>}
-        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{selected?.participant.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p className="truncate text-xs capitalize text-muted-foreground">{selected ? selected.participant.role.replace(/_/g, ' ') : 'Private business team messaging'}</p></div>
+        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{selected?.participant.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p aria-live="polite" className={cn('truncate text-xs', peerTyping ? 'font-medium text-emerald-700' : 'capitalize text-muted-foreground')}>{selected && peerTyping ? 'Typing…' : selected ? selected.participant.role.replace(/_/g, ' ') : 'Private business team messaging'}</p></div>
         {!selected && canSend && <button type="button" aria-label="Choose a contact" title="New chat" onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
       {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : selected ? <>
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 sm:px-4">{messages.map((message) => { const own = message.senderId === user?.id; return <div key={message.id} className={cn('max-w-[88%] px-3 py-2 shadow-sm sm:max-w-[82%]', own ? 'ml-auto rounded-2xl rounded-br-sm bg-[#d9fdd3]' : 'rounded-2xl rounded-bl-sm bg-white')}><p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b]">{message.body}</p><time className="mt-1 block text-right text-[10px] tabular-nums text-[#667781]">{conversationTime(message.createdAt)}</time></div> })}</div>
-        {canSend ? <form onSubmit={sendMessage} className="flex shrink-0 items-end gap-2 border-t bg-card p-3"><textarea aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm" /><button type="submit" aria-label="Send message" disabled={!draft.trim() || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-800 text-white disabled:opacity-50"><Send className="size-4" /></button></form> : <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>}
+        {canSend ? <form onSubmit={sendMessage} className="flex shrink-0 items-end gap-2 border-t bg-card p-3"><textarea aria-label="Message" value={draft} onChange={(event) => changeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm" /><button type="submit" aria-label="Send message" disabled={!draft.trim() || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-800 text-white disabled:opacity-50"><Send className="size-4" /></button></form> : <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>}
       </> : <>
         <div className="shrink-0 border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input aria-label={newMessageMode ? 'Search contacts' : 'Search conversations'} value={peopleSearch} onChange={(event) => setPeopleSearch(event.target.value)} placeholder={newMessageMode ? 'Search contacts' : 'Search chats'} className="h-10 w-full rounded-full border-0 bg-muted/70 pl-10 pr-4 text-sm" /></div></div>
         <div className="min-h-0 flex-1 overflow-y-auto">{newMessageMode ? filteredPeople.map((person) => <button key={person.id} type="button" onClick={() => void startConversation(person)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(person.name)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{person.name}</p><p className="text-xs capitalize text-muted-foreground">{person.role.replace(/_/g, ' ')}</p></div></button>) : [...conversations].filter((conversation) => !peopleSearch || conversation.participant.name.toLowerCase().includes(peopleSearch.toLowerCase())).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).map((conversation) => <button key={conversation.id} type="button" onClick={() => void loadMessages(conversation)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(conversation.participant.name)}</div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-semibold">{conversation.participant.name}</p><time className={cn('shrink-0 text-[11px]', conversation.unreadCount ? 'font-medium text-emerald-800' : 'text-muted-foreground')}>{conversationTime(conversation.latestMessage?.createdAt || conversation.updatedAt)}</time></div><div className="mt-1 flex items-center justify-between gap-2"><p className={cn('truncate text-xs', conversation.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground')}>{conversation.latestMessage?.body || 'Start a conversation'}</p>{conversation.unreadCount > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{conversation.unreadCount}</span>}</div></div></button>)}

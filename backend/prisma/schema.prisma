@@ -1941,6 +1941,8 @@ model BusinessConversation {
   participantOne       User             @relation("BusinessConversationParticipantOne", fields: [participantOneId], references: [id], onDelete: Cascade)
   participantTwoId     String
   participantTwo       User             @relation("BusinessConversationParticipantTwo", fields: [participantTwoId], references: [id], onDelete: Cascade)
+  participantOneTypingAt DateTime?
+  participantTwoTypingAt DateTime?
   messages             BusinessMessage[]
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt

@@ -85,7 +85,7 @@ router.get('/conversations/:id/messages', requirePermission('canViewTeamMessagin
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const conversation = await prisma.businessConversation.findFirst({
     where: { id: req.params.id, tenantId, OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
-    select: { id: true },
+    select: { id: true, participantOneId: true, participantTwoId: true, participantOneTypingAt: true, participantTwoTypingAt: true },
   });
   if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
   const messages = await prisma.businessMessage.findMany({
@@ -97,7 +97,24 @@ router.get('/conversations/:id/messages', requirePermission('canViewTeamMessagin
     where: { tenantId, conversationId: conversation.id, recipientId: req.user.id, readAt: null },
     data: { readAt: new Date() },
   });
-  res.json({ messages: messages.reverse() });
+  const peerTypingAt = conversation.participantOneId === req.user.id
+    ? conversation.participantTwoTypingAt
+    : conversation.participantOneTypingAt;
+  const peerTyping = Boolean(peerTypingAt && Date.now() - peerTypingAt.getTime() < 7000);
+  res.json({ messages: messages.reverse(), peerTyping });
+});
+
+router.post('/conversations/:id/typing', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
+  const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+  const conversation = await prisma.businessConversation.findFirst({
+    where: { id: req.params.id, tenantId, OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
+    select: { id: true, participantOneId: true },
+  });
+  if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+  const field = conversation.participantOneId === req.user.id ? 'participantOneTypingAt' : 'participantTwoTypingAt';
+  const typingAt = req.body?.typing === true ? new Date() : null;
+  await prisma.businessConversation.update({ where: { id: conversation.id }, data: { [field]: typingAt } });
+  res.json({ ok: true });
 });
 
 router.post('/conversations/:id/messages', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
@@ -115,7 +132,13 @@ router.post('/conversations/:id/messages', requirePermission('canViewTeamMessagi
       data: { tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body },
       select: { id: true, senderId: true, recipientId: true, body: true, readAt: true, createdAt: true },
     }),
-    prisma.businessConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } }),
+    prisma.businessConversation.update({
+      where: { id: conversation.id },
+      data: {
+        updatedAt: new Date(),
+        [conversation.participantOneId === req.user.id ? 'participantOneTypingAt' : 'participantTwoTypingAt']: null,
+      },
+    }),
   ]);
   res.status(201).json({ message });
 });
