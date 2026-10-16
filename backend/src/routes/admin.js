@@ -1222,8 +1222,8 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
           description: String(marketplace.description || "").trim().slice(0, 2000),
           discoverable: true,
         } });
-        const marketplaceFeature = await tx.feature.findUnique({ where: { name: 'procurement.marketplace' }, select: { id: true } });
-        if (!marketplaceFeature) throw new Error('Procurement marketplace feature is not installed. Apply the marketplace migration before provisioning a seller.');
+        const marketplaceFeature = await tx.feature.findUnique({ where: { name: 'procurement.seller' }, select: { id: true } });
+        if (!marketplaceFeature) throw new Error('Supplier Marketplace · Seller is not installed. Apply the procurement access migration before provisioning a seller.');
         await tx.tenantFeature.upsert({
           where: { tenantId_featureId: { tenantId: createdTenant.id, featureId: marketplaceFeature.id } },
           create: { tenantId: createdTenant.id, featureId: marketplaceFeature.id, enabled: true },

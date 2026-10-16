@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import prisma from '../db.js';
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js';
-import { requireFeature } from '../../middleware/featureCheck.js';
+import { requireAnyFeature, requireFeature } from '../../middleware/featureCheck.js';
 import { resolveBranchScope, scopedWhere } from '../utils/branchAccess.js';
 import { getCashAccountLedgerId, getPayablesAccountingConfig, postPayablesJournal, procurementInvoiceLines } from '../services/payablesAccountingService.js';
 import { getReceivablesAccountingConfig } from '../services/receivablesAccountingService.js';
@@ -22,7 +22,7 @@ const campaignImageUpload = multer({
   fileFilter: (_req, file, callback) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)
     ? callback(null, true) : callback(new Error('UNSUPPORTED_IMAGE')),
 });
-const access = [authenticateToken, requireTenant, requireFeature('procurement.marketplace')];
+const access = [authenticateToken, requireTenant, requireAnyFeature(['procurement.buyer', 'procurement.seller'])];
 const text = (value, max = 500) => String(value ?? '').trim().slice(0, max);
 const positive = (value, { zero = false } = {}) => {
   const number = Number(value);
@@ -147,12 +147,12 @@ const canAccessRFQ = async (rfq, tenantId) => {
 
 router.use(...access);
 
-router.get('/profile', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/profile', requireFeature('procurement.seller'), requirePermission('canViewProcurement'), async (req, res) => {
   const profile = await prisma.procurementProfile.findUnique({ where: { tenantId: tenantIdOf(req) } });
   res.json({ profile });
 });
 
-router.put('/profile', requirePermission('canManageSupplierNetwork'), async (req, res) => {
+router.put('/profile', requireFeature('procurement.seller'), requirePermission('canManageSupplierNetwork'), async (req, res) => {
   const sellerType = text(req.body?.sellerType || 'supplier', 30).toLowerCase();
   const category = text(req.body?.category, 100);
   const description = text(req.body?.description, 2000);
@@ -168,7 +168,7 @@ router.put('/profile', requirePermission('canManageSupplierNetwork'), async (req
   res.json({ profile });
 });
 
-router.get('/directory', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/directory', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
   const search = text(req.query.search, 100);
   const category = text(req.query.category, 100);
   const profiles = await prisma.procurementProfile.findMany({
@@ -203,7 +203,7 @@ router.get('/relationships', requirePermission('canViewProcurement'), async (req
   })) });
 });
 
-router.get('/follows', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/follows', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
   const follows = await prisma.marketplaceSellerFollow.findMany({
     where: { followerTenantId: tenantIdOf(req), followerUserId: req.user.id },
     orderBy: { createdAt: 'desc' },
@@ -212,7 +212,7 @@ router.get('/follows', requirePermission('canViewProcurement'), async (req, res)
   res.json({ follows, sellerTenantIds: follows.map(({ sellerTenantId }) => sellerTenantId) });
 });
 
-router.post('/sellers/:sellerTenantId/follow', requirePermission('canFollowMarketplaceSellers'), async (req, res) => {
+router.post('/sellers/:sellerTenantId/follow', requireFeature('procurement.buyer'), requirePermission('canFollowMarketplaceSellers'), async (req, res) => {
   const followerTenantId = tenantIdOf(req);
   const sellerTenantId = text(req.params.sellerTenantId, 100);
   if (!sellerTenantId || sellerTenantId === followerTenantId) return res.status(400).json({ error: 'Choose another seller to follow.' });
@@ -229,14 +229,14 @@ router.post('/sellers/:sellerTenantId/follow', requirePermission('canFollowMarke
   res.status(201).json({ follow });
 });
 
-router.delete('/sellers/:sellerTenantId/follow', requirePermission('canFollowMarketplaceSellers'), async (req, res) => {
+router.delete('/sellers/:sellerTenantId/follow', requireFeature('procurement.buyer'), requirePermission('canFollowMarketplaceSellers'), async (req, res) => {
   await prisma.marketplaceSellerFollow.deleteMany({
     where: { followerTenantId: tenantIdOf(req), followerUserId: req.user.id, sellerTenantId: text(req.params.sellerTenantId, 100) },
   });
   res.json({ success: true });
 });
 
-router.post('/relationships', requirePermission('canManageSupplierNetwork'), async (req, res) => {
+router.post('/relationships', requireFeature('procurement.buyer'), requirePermission('canManageSupplierNetwork'), async (req, res) => {
   const buyerTenantId = tenantIdOf(req);
   const sellerTenantId = text(req.body?.sellerTenantId, 100);
   if (!sellerTenantId || sellerTenantId === buyerTenantId) return res.status(400).json({ error: 'Choose another opted-in business.' });
@@ -269,7 +269,7 @@ router.patch('/relationships/:id', requirePermission('canManageSupplierNetwork')
   res.json({ relationship: updated });
 });
 
-router.get('/listings', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/listings', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const search = text(req.query.search, 100);
   const category = text(req.query.category, 100);
@@ -293,7 +293,7 @@ router.get('/listings', requirePermission('canViewProcurement'), async (req, res
   res.json({ listings });
 });
 
-router.get('/market-insight', requirePermission('canViewProcurement'), requirePermission('canUseBusinessAI'), requireFeature('dashboard'), async (req, res) => {
+router.get('/market-insight', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), requirePermission('canUseBusinessAI'), requireFeature('dashboard'), async (req, res) => {
   let release;
   const tenantId = tenantIdOf(req);
   try {
@@ -384,12 +384,12 @@ router.get('/market-insight', requirePermission('canViewProcurement'), requirePe
   } finally { release(); }
 });
 
-router.get('/listings/mine', requireAnyPermission(['canCreateMarketplaceListing', 'canChangeMarketplacePrice']), async (req, res) => {
+router.get('/listings/mine', requireFeature('procurement.seller'), requireAnyPermission(['canCreateMarketplaceListing', 'canChangeMarketplacePrice']), async (req, res) => {
   const listings = await prisma.marketplaceListing.findMany({ where: { sellerTenantId: tenantIdOf(req) }, orderBy: { updatedAt: 'desc' }, take: 200 });
   res.json({ listings });
 });
 
-router.post('/listings', requirePermission('canCreateMarketplaceListing'), async (req, res) => {
+router.post('/listings', requireFeature('procurement.seller'), requirePermission('canCreateMarketplaceListing'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const name = text(req.body?.name, 180);
   const category = text(req.body?.category, 100);
@@ -423,7 +423,7 @@ router.post('/listings', requirePermission('canCreateMarketplaceListing'), async
   res.status(201).json({ listing });
 });
 
-router.patch('/listings/:id/price', requirePermission('canChangeMarketplacePrice'), async (req, res) => {
+router.patch('/listings/:id/price', requireFeature('procurement.seller'), requirePermission('canChangeMarketplacePrice'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const listing = await prisma.marketplaceListing.findFirst({ where: { id: req.params.id, sellerTenantId: tenantId } });
   if (!listing) return res.status(404).json({ error: 'Listing not found.' });
@@ -448,7 +448,7 @@ router.patch('/listings/:id/price', requirePermission('canChangeMarketplacePrice
   res.json({ listing: updated });
 });
 
-router.get('/promotions', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/promotions', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const [relationships, discoverable] = await Promise.all([
     prisma.procurementRelationship.findMany({ where: { buyerTenantId: tenantId, status: 'active' }, select: { sellerTenantId: true } }),
@@ -476,7 +476,7 @@ router.get('/promotions', requirePermission('canViewProcurement'), async (req, r
   })) });
 });
 
-router.get('/promotions/mine', requireAnyPermission(['canCreateMarketplacePromotion', 'canRunMarketplaceAds', 'canManageMarketplacePromotions']), async (req, res) => {
+router.get('/promotions/mine', requireFeature('procurement.seller'), requireAnyPermission(['canCreateMarketplacePromotion', 'canRunMarketplaceAds', 'canManageMarketplacePromotions']), async (req, res) => {
   const campaigns = await prisma.marketplacePromotion.findMany({
     where: { sellerTenantId: tenantIdOf(req) }, include: { listing: { select: { id: true, name: true, price: true, currency: true } } },
     orderBy: { createdAt: 'desc' }, take: 200,
@@ -535,10 +535,10 @@ async function createMarketplaceCampaign(req, res, campaignType) {
   }
 }
 
-router.post('/promotions', requirePermission('canCreateMarketplacePromotion'), uploadCampaignFiles, (req, res) => createMarketplaceCampaign(req, res, 'promotion'));
-router.post('/ads', requirePermission('canRunMarketplaceAds'), uploadCampaignFiles, (req, res) => createMarketplaceCampaign(req, res, 'ad'));
+router.post('/promotions', requireFeature('procurement.seller'), requirePermission('canCreateMarketplacePromotion'), uploadCampaignFiles, (req, res) => createMarketplaceCampaign(req, res, 'promotion'));
+router.post('/ads', requireFeature('procurement.seller'), requirePermission('canRunMarketplaceAds'), uploadCampaignFiles, (req, res) => createMarketplaceCampaign(req, res, 'ad'));
 
-router.patch('/promotions/:id/status', requirePermission('canManageMarketplacePromotions'), async (req, res) => {
+router.patch('/promotions/:id/status', requireFeature('procurement.seller'), requirePermission('canManageMarketplacePromotions'), async (req, res) => {
   const status = text(req.body?.status, 20);
   if (!['active', 'paused', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Campaign status must be active, paused, or cancelled.' });
   const current = await prisma.marketplacePromotion.findFirst({ where: { id: req.params.id, sellerTenantId: tenantIdOf(req) } });
@@ -553,7 +553,7 @@ router.patch('/promotions/:id/status', requirePermission('canManageMarketplacePr
   res.json({ campaign });
 });
 
-router.get('/listings/:id/price-history', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/listings/:id/price-history', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const listing = await prisma.marketplaceListing.findUnique({ where: { id: req.params.id } });
   if (!listing) return res.status(404).json({ error: 'Listing not found.' });
@@ -565,7 +565,7 @@ router.get('/listings/:id/price-history', requirePermission('canViewProcurement'
   res.json({ history });
 });
 
-router.post('/rfqs', requirePermission('canCreateProcurementRFQ'), async (req, res) => {
+router.post('/rfqs', requireFeature('procurement.buyer'), requirePermission('canCreateProcurementRFQ'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const title = text(req.body?.title, 180);
   const lines = Array.isArray(req.body?.lines) ? req.body.lines.slice(0, 100) : [];
@@ -643,7 +643,7 @@ router.get('/rfqs/:id/quotes', requirePermission('canViewProcurement'), async (r
   res.json({ quotes: latest.map((quote) => ({ ...quote, seller: businesses[quote.sellerTenantId] })) });
 });
 
-router.post('/rfqs/:id/quotes', requirePermission('canRespondToProcurementRFQ'), async (req, res) => {
+router.post('/rfqs/:id/quotes', requireFeature('procurement.seller'), requirePermission('canRespondToProcurementRFQ'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const rfq = await prisma.procurementRFQ.findUnique({ where: { id: req.params.id }, include: { lines: true } });
   if (!rfq || rfq.buyerTenantId === tenantId || rfq.status !== 'open' || (rfq.closesAt && rfq.closesAt < new Date())) return res.status(404).json({ error: 'Open RFQ not found.' });
@@ -681,7 +681,7 @@ router.post('/rfqs/:id/quotes', requirePermission('canRespondToProcurementRFQ'),
   res.status(201).json({ quote });
 });
 
-router.post('/rfqs/:id/quotes/:quoteId/select', requirePermission('canManageProcurementQuotes'), async (req, res) => {
+router.post('/rfqs/:id/quotes/:quoteId/select', requireFeature('procurement.buyer'), requirePermission('canManageProcurementQuotes'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const rfq = await prisma.procurementRFQ.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: 'open' } });
   if (!rfq) return res.status(404).json({ error: 'Open RFQ not found.' });
@@ -725,7 +725,7 @@ router.get('/orders', requirePermission('canViewProcurement'), async (req, res) 
   res.json({ orders: orders.map((row) => ({ ...row, side: row.buyerTenantId === tenantId ? 'buyer' : 'seller', buyer: businesses[row.buyerTenantId], seller: businesses[row.sellerTenantId], invoices: row.invoices.map((invoice) => ({ ...invoice, payment: invoice.supplierPurchaseId ? paymentsByPurchase.get(invoice.supplierPurchaseId) || null : null, sellerReceivable: row.sellerTenantId === tenantId ? sellerSalesById.get(invoice.sellerSaleRecordId) || null : null, paymentApprovals: (approvalsByInvoice.get(invoice.id) || []).map((approval) => ({ id: approval.id, invoiceId: approval.invoiceId, amount: approval.amount, status: approval.status, initiatedBySide: approval.initiatedBySide, receivedPaymentMethod: approval.receivedPaymentMethod, reviewedAt: approval.reviewedAt, createdAt: approval.createdAt, supplierPayment: approval.supplierPayment })) })) })) });
 });
 
-router.get('/invoices/:id/payment-accounts', loadUserPermissions, requirePermission('canRecordProcurementPayment'), async (req, res) => {
+router.get('/invoices/:id/payment-accounts', requireFeature('procurement.seller'), loadUserPermissions, requirePermission('canRecordProcurementPayment'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
   const invoice = await prisma.procurementInvoice.findFirst({ where: { id: req.params.id, sellerTenantId: tenantId, status: 'approved' }, include: { sellerSaleRecord: { select: { branchId: true } } } });
@@ -738,24 +738,24 @@ router.get('/invoices/:id/payment-accounts', loadUserPermissions, requirePermiss
   }).map((account) => ({ ...account, paymentMethod: paymentMethodForAccount(account.type) })) });
 });
 
-router.get('/branches', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/branches', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
   const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
   const branches = await prisma.branch.findMany({ where: scopedWhere(scope, {}), select: { id: true, name: true }, orderBy: { name: 'asc' } });
   res.json({ branches });
 });
 
-router.get('/local-suppliers', requirePermission('canReviewProcurementInvoice'), async (req, res) => {
+router.get('/local-suppliers', requireFeature('procurement.buyer'), requirePermission('canReviewProcurementInvoice'), async (req, res) => {
   const suppliers = await prisma.supplier.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 });
   res.json({ suppliers });
 });
 
-router.get('/inventory-products', requirePermission('canReceiveProcurementGoods'), async (req, res) => {
+router.get('/inventory-products', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
   const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
   const products = await prisma.product.findMany({ where: scopedWhere(scope, { isActive: true }), select: { id: true, name: true, sku: true, itemType: true, branchId: true }, orderBy: { name: 'asc' }, take: 1000 });
   res.json({ products });
 });
 
-router.get('/seller-products', requirePermission('canSubmitProcurementInvoice'), async (req, res) => {
+router.get('/seller-products', requireFeature('procurement.seller'), requirePermission('canSubmitProcurementInvoice'), async (req, res) => {
   const products = await prisma.product.findMany({
     where: { tenantId: tenantIdOf(req), isActive: true },
     select: { id: true, name: true, sku: true, itemType: true },
@@ -764,7 +764,7 @@ router.get('/seller-products', requirePermission('canSubmitProcurementInvoice'),
   res.json({ products });
 });
 
-router.post('/rfqs/:id/quotes/:quoteId/order', requirePermission('canCreateProcurementOrder'), async (req, res) => {
+router.post('/rfqs/:id/quotes/:quoteId/order', requireFeature('procurement.buyer'), requirePermission('canCreateProcurementOrder'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const quote = await prisma.procurementQuote.findFirst({
     where: { id: req.params.quoteId, rfqId: req.params.id, status: 'selected', rfq: { buyerTenantId: tenantId, status: 'awarded' } },
@@ -821,7 +821,7 @@ router.get('/orders/:id', requirePermission('canViewProcurement'), async (req, r
   res.json({ order: { ...order, side: order.buyerTenantId === tenantId ? 'buyer' : 'seller' } });
 });
 
-router.patch('/orders/:id/lines/:lineId/product', requirePermission('canReceiveProcurementGoods'), async (req, res) => {
+router.patch('/orders/:id/lines/:lineId/product', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: { in: ['acknowledged', 'partially_received'] } } });
   if (!order) return res.status(404).json({ error: 'Active buyer purchase order not found.' });
@@ -835,7 +835,7 @@ router.patch('/orders/:id/lines/:lineId/product', requirePermission('canReceiveP
   res.json({ line: updated });
 });
 
-router.patch('/orders/:id/approve', requirePermission('canApproveProcurementOrder'), async (req, res) => {
+router.patch('/orders/:id/approve', requireFeature('procurement.buyer'), requirePermission('canApproveProcurementOrder'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: 'pending_approval' } });
   if (!order) return res.status(404).json({ error: 'Purchase order awaiting approval not found.' });
@@ -843,7 +843,7 @@ router.patch('/orders/:id/approve', requirePermission('canApproveProcurementOrde
   res.json({ order: updated });
 });
 
-router.patch('/orders/:id/send', requirePermission('canApproveProcurementOrder'), async (req, res) => {
+router.patch('/orders/:id/send', requireFeature('procurement.buyer'), requirePermission('canApproveProcurementOrder'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: 'approved' } });
   if (!order) return res.status(409).json({ error: 'Only an approved purchase order can be sent.' });
@@ -852,7 +852,7 @@ router.patch('/orders/:id/send', requirePermission('canApproveProcurementOrder')
   res.json({ order: updated });
 });
 
-router.patch('/orders/:id/acknowledge', requirePermission('canAcknowledgeProcurementOrder'), async (req, res) => {
+router.patch('/orders/:id/acknowledge', requireFeature('procurement.seller'), requirePermission('canAcknowledgeProcurementOrder'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const decision = req.body?.decision === 'reject' ? 'rejected' : 'acknowledged';
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, sellerTenantId: tenantId, status: 'sent' } });
@@ -864,7 +864,7 @@ router.patch('/orders/:id/acknowledge', requirePermission('canAcknowledgeProcure
   res.json({ order: updated });
 });
 
-router.post('/orders/:id/receipts', requirePermission('canReceiveProcurementGoods'), async (req, res) => {
+router.post('/orders/:id/receipts', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false });
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: { in: ['acknowledged', 'partially_received'] } }, include: { lines: true } });
@@ -924,7 +924,7 @@ router.post('/orders/:id/receipts', requirePermission('canReceiveProcurementGood
   }
 });
 
-router.post('/orders/:id/invoices', requirePermission('canSubmitProcurementInvoice'), async (req, res) => {
+router.post('/orders/:id/invoices', requireFeature('procurement.seller'), requirePermission('canSubmitProcurementInvoice'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, sellerTenantId: tenantId, status: { in: ['acknowledged', 'partially_received', 'received'] } }, include: { lines: true } });
   if (!order) return res.status(404).json({ error: 'Acknowledged purchase order not found.' });
@@ -969,7 +969,7 @@ router.post('/orders/:id/invoices', requirePermission('canSubmitProcurementInvoi
   }
 });
 
-router.patch('/invoices/:id/approve', requirePermission('canReviewProcurementInvoice'), async (req, res) => {
+router.patch('/invoices/:id/approve', requireFeature('procurement.buyer'), requirePermission('canReviewProcurementInvoice'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const invoice = await prisma.procurementInvoice.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: 'submitted' }, include: { order: { include: { lines: true } }, lines: true } });
   if (!invoice) return res.status(404).json({ error: 'Submitted supplier invoice not found.' });
@@ -1103,7 +1103,7 @@ router.patch('/invoices/:id/approve', requirePermission('canReviewProcurementInv
   }
 });
 
-router.patch('/invoices/:id/reject', requirePermission('canReviewProcurementInvoice'), async (req, res) => {
+router.patch('/invoices/:id/reject', requireFeature('procurement.buyer'), requirePermission('canReviewProcurementInvoice'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const invoice = await prisma.procurementInvoice.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: 'submitted' } });
   if (!invoice) return res.status(404).json({ error: 'Submitted supplier invoice not found.' });
@@ -1111,7 +1111,7 @@ router.patch('/invoices/:id/reject', requirePermission('canReviewProcurementInvo
   res.json({ invoice: updated });
 });
 
-router.patch('/payment-approvals/:id/approve', requirePermission('canApproveProcurementPayment'), async (req, res) => {
+router.patch('/payment-approvals/:id/approve', requireFeature('procurement.seller'), requirePermission('canApproveProcurementPayment'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -1149,7 +1149,7 @@ router.patch('/payment-approvals/:id/approve', requirePermission('canApproveProc
   }
 });
 
-router.post('/invoices/:id/repayments', loadUserPermissions, requirePermission('canRecordProcurementPayment'), async (req, res) => {
+router.post('/invoices/:id/repayments', requireFeature('procurement.seller'), loadUserPermissions, requirePermission('canRecordProcurementPayment'), async (req, res) => {
   const sellerTenantId = tenantIdOf(req);
   const amount = positive(req.body?.amount);
   const cashAccountId = text(req.body?.cashAccountId, 100);
@@ -1259,7 +1259,7 @@ router.post('/invoices/:id/repayments', loadUserPermissions, requirePermission('
   }
 });
 
-router.get('/rfqs/:id/quotes/:quoteId/messages', requirePermission('canViewProcurement'), async (req, res) => {
+router.get('/rfqs/:id/quotes/:quoteId/messages', requireFeature('communication'), requirePermission('canViewCommunication'), requirePermission('canViewProcurement'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const quote = await prisma.procurementQuote.findFirst({
     where: { id: req.params.quoteId, rfqId: req.params.id },
@@ -1273,7 +1273,7 @@ router.get('/rfqs/:id/quotes/:quoteId/messages', requirePermission('canViewProcu
   res.json({ messages });
 });
 
-router.post('/rfqs/:id/quotes/:quoteId/messages', requireAnyPermission(['canManageProcurementQuotes', 'canRespondToProcurementRFQ']), async (req, res) => {
+router.post('/rfqs/:id/quotes/:quoteId/messages', requireFeature('communication'), requirePermission('canCreateCommunication'), requireAnyPermission(['canManageProcurementQuotes', 'canRespondToProcurementRFQ']), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const body = text(req.body?.body, 4000);
   if (!body) return res.status(400).json({ error: 'Write a message before sending.' });

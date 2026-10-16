@@ -58,16 +58,19 @@ const serviceSubItems = [
   { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'service' },
 ]
 
-const procurementSubItems = [
-  { to: '/tenant/procurement/buying/marketplace', label: 'Buyer · Marketplace', icon: Store, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/buying/rfqs', label: 'Buyer · Quote requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/buying/purchases', label: 'Buyer · Purchases & invoices', icon: Package, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/buying/suppliers', label: 'Buyer · Suppliers', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/selling/studio', label: 'Seller · Studio', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/selling/rfqs', label: 'Seller · Incoming requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/selling/fulfilment', label: 'Seller · Sales & fulfilment', icon: Package, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/selling/buyers', label: 'Seller · Buyer relationships', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
-  { to: '/tenant/procurement/selling/profile', label: 'Seller · Profile', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+const procurementBuyerItems = [
+  { to: '/tenant/procurement/buying/marketplace', label: 'Marketplace', icon: Store, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+  { to: '/tenant/procurement/buying/rfqs', label: 'Quote requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+  { to: '/tenant/procurement/buying/purchases', label: 'Purchases & invoices', icon: Package, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+  { to: '/tenant/procurement/buying/suppliers', label: 'Suppliers', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+]
+
+const procurementSellerItems = [
+  { to: '/tenant/procurement/selling/studio', label: 'Seller studio', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/rfqs', label: 'Incoming requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/fulfilment', label: 'Sales & fulfilment', icon: Package, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/buyers', label: 'Buyer relationships', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/profile', label: 'Seller profile', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.seller' },
 ]
 
 const navItems = [
@@ -77,7 +80,7 @@ const navItems = [
   { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
   { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable', isReceivables: true },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
-  { to: '/tenant/procurement/buying/marketplace', label: 'Procurement Network', icon: Truck, feature: 'procurement.marketplace', permission: 'canViewProcurement', isProcurement: true },
+  { to: '/tenant/procurement', label: 'Procurement Network', icon: Truck, permission: 'canViewProcurement', isProcurement: true },
   { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant' },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
@@ -328,6 +331,8 @@ export function TenantLayout() {
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
   const [procurementExpanded, setProcurementExpanded] = useState(false)
+  const [procurementBuyerExpanded, setProcurementBuyerExpanded] = useState(false)
+  const [procurementSellerExpanded, setProcurementSellerExpanded] = useState(false)
   const [hrExpanded, setHRExpanded] = useState(false)
   const [hrAccountingExpanded, setHRAccountingExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
@@ -439,7 +444,11 @@ export function TenantLayout() {
     if (location.pathname.startsWith('/tenant/fuel-station')) setFuelStationExpanded(true)
     if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
-    if (location.pathname.startsWith('/tenant/procurement')) setProcurementExpanded(true)
+    if (location.pathname.startsWith('/tenant/procurement')) {
+      setProcurementExpanded(true)
+      if (location.pathname.startsWith('/tenant/procurement/buying')) setProcurementBuyerExpanded(true)
+      if (location.pathname.startsWith('/tenant/procurement/selling')) setProcurementSellerExpanded(true)
+    }
     if (location.pathname.startsWith('/tenant/hr')) setHRExpanded(true)
     if (location.pathname.startsWith('/tenant/hr/accounting')) setHRAccountingExpanded(true)
   }, [location.pathname, location.search])
@@ -465,7 +474,8 @@ export function TenantLayout() {
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
-  const visibleProcurementSubItems = procurementSubItems.filter(subItemVisible)
+  const visibleProcurementBuyerItems = procurementBuyerItems.filter(subItemVisible)
+  const visibleProcurementSellerItems = procurementSellerItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
   const visibleReportCategories = reportCategories.map(cat => cat.id === 'service' ? { ...cat, items: cat.items.filter(item => hasPermission(serviceReportPermissions[serviceReportIds[item.id]])) } : cat).filter((cat) => {
     if (!cat.items.length) return false
@@ -474,6 +484,7 @@ export function TenantLayout() {
     return true
   })
   const visibleNavItems = navItems.filter((item) => {
+    if (item.isProcurement) return visibleProcurementBuyerItems.length > 0 || visibleProcurementSellerItems.length > 0
     // Special handling for Communication: only show if the exact 'communication' feature is enabled
     // (not when only sub-features like 'communication.notifications' are enabled)
     if (item.feature === 'communication') {
@@ -685,10 +696,18 @@ export function TenantLayout() {
                     {procurementExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                   </button>
                   {procurementExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
-                    {visibleProcurementSubItems.map((sub) => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
-                      className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
-                      <sub.icon className="h-4 w-4" />{t(sub.label)}
-                    </NavLink>)}
+                    {visibleProcurementBuyerItems.length > 0 && <div>
+                      <button type="button" aria-expanded={procurementBuyerExpanded} onClick={() => setProcurementBuyerExpanded((expanded) => !expanded)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white">
+                        <ShoppingBag className="h-4 w-4" /><span className="flex-1 text-left">Buyer</span>{procurementBuyerExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      </button>
+                      {procurementBuyerExpanded && <div className="ml-3 space-y-1 border-l border-white/10 pl-2">{visibleProcurementBuyerItems.map((sub) => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}</div>}
+                    </div>}
+                    {visibleProcurementSellerItems.length > 0 && <div>
+                      <button type="button" aria-expanded={procurementSellerExpanded} onClick={() => setProcurementSellerExpanded((expanded) => !expanded)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white">
+                        <Building2 className="h-4 w-4" /><span className="flex-1 text-left">Seller</span>{procurementSellerExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      </button>
+                      {procurementSellerExpanded && <div className="ml-3 space-y-1 border-l border-white/10 pl-2">{visibleProcurementSellerItems.map((sub) => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}</div>}
+                    </div>}
                   </div>}
                 </div>
               ) : item.isService ? (

@@ -184,16 +184,16 @@ function App() {
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
           <Route path="procurement" element={<Navigate to="/tenant/procurement/buying/marketplace" replace />} />
           <Route path="procurement/buying" element={<Navigate to="/tenant/procurement/buying/marketplace" replace />} />
-          <Route path="procurement/buying/marketplace" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="marketplace" /></FeatureGuard>} />
-          <Route path="procurement/buying/rfqs" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="rfqs" /></FeatureGuard>} />
-          <Route path="procurement/buying/purchases" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="orders" /></FeatureGuard>} />
-          <Route path="procurement/buying/suppliers" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="relationships" /></FeatureGuard>} />
+          <Route path="procurement/buying/marketplace" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="marketplace" /></FeatureGuard>} />
+          <Route path="procurement/buying/rfqs" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="rfqs" /></FeatureGuard>} />
+          <Route path="procurement/buying/purchases" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="orders" /></FeatureGuard>} />
+          <Route path="procurement/buying/suppliers" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="relationships" /></FeatureGuard>} />
           <Route path="procurement/selling" element={<Navigate to="/tenant/procurement/selling/studio" replace />} />
-          <Route path="procurement/selling/studio" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="marketplace" /></FeatureGuard>} />
-          <Route path="procurement/selling/rfqs" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="rfqs" /></FeatureGuard>} />
-          <Route path="procurement/selling/fulfilment" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="orders" /></FeatureGuard>} />
-          <Route path="procurement/selling/buyers" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="relationships" /></FeatureGuard>} />
-          <Route path="procurement/selling/profile" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="profile" /></FeatureGuard>} />
+          <Route path="procurement/selling/studio" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="marketplace" /></FeatureGuard>} />
+          <Route path="procurement/selling/rfqs" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="rfqs" /></FeatureGuard>} />
+          <Route path="procurement/selling/fulfilment" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="orders" /></FeatureGuard>} />
+          <Route path="procurement/selling/buyers" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="relationships" /></FeatureGuard>} />
+          <Route path="procurement/selling/profile" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="profile" /></FeatureGuard>} />
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />

@@ -63,7 +63,7 @@ export default function ProcurementGuidePage() {
         <Section id="overview" title="What Procurement Network is">
           <p className="max-w-4xl text-sm leading-6 text-muted-foreground">Procurement Network is JibuSales’ opt-in business-to-business sourcing workflow. It lets businesses discover eligible suppliers, build approved relationships, request and compare offers, issue purchase orders, receive goods, match supplier invoices, and reconcile payments. It uses existing tenant accounts and inventory/accounting records instead of creating a separate seller application.</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="border-l-2 border-emerald-700 pl-3"><strong className="text-sm">Not universal by default</strong><p className="mt-1 text-xs text-muted-foreground">The marketplace feature must be included in the tenant plan or explicitly enabled by override.</p></div>
+            <div className="border-l-2 border-emerald-700 pl-3"><strong className="text-sm">Buyer and Seller are separate</strong><p className="mt-1 text-xs text-muted-foreground">SaaS Admin can grant either workspace independently; businesses with both see both nested under Procurement Network.</p></div>
             <div className="border-l-2 border-sky-700 pl-3"><strong className="text-sm">Not every user gets every action</strong><p className="mt-1 text-xs text-muted-foreground">Staff need the marketplace view permission and the specific action permissions assigned to them.</p></div>
             <div className="border-l-2 border-amber-600 pl-3"><strong className="text-sm">A quote is not a transaction</strong><p className="mt-1 text-xs text-muted-foreground">A selected offer becomes an order workflow; accounting and stock post only at their defined lifecycle steps.</p></div>
           </div>
@@ -71,13 +71,14 @@ export default function ProcurementGuidePage() {
 
         <Section id="enablement" title="Tenant feature enablement">
           <ol className="space-y-3 text-sm leading-6 text-muted-foreground">
-            <li><strong className="text-foreground">Plan access:</strong> `procurement.marketplace` must be enabled for the tenant’s plan. A plan feature is the standard way to offer the module to a group of tenants.</li>
-            <li><strong className="text-foreground">Tenant override:</strong> SaaS Admin can explicitly turn the feature on or off for one tenant. Overrides take precedence over the plan feature.</li>
-            <li><strong className="text-foreground">Seller onboarding:</strong> In SaaS Admin → Provision, choosing Supplier / reseller, Manufacturer, or Both and entering a category creates a discoverable seller profile and enables the marketplace feature for that newly provisioned seller tenant.</li>
+            <li><strong className="text-foreground">Plan access:</strong> `procurement.buyer` and `procurement.seller` are separate plan features, so plans can offer either workspace or both.</li>
+            <li><strong className="text-foreground">Tenant overrides:</strong> SaaS Admin can independently turn Buyer and Seller on or off for one tenant. Each explicit override takes precedence for its own workspace.</li>
+            <li><strong className="text-foreground">Seller onboarding:</strong> In SaaS Admin → Provision, choosing Supplier / reseller, Manufacturer, or Both and entering a category creates a discoverable seller profile and enables the Seller workspace for that newly provisioned seller tenant.</li>
             <li><strong className="text-foreground">Ordinary tenant provisioning:</strong> Leaving the marketplace seller profile empty does not run the seller-specific enablement. Other tenants rely on their plan or a tenant override.</li>
-            <li><strong className="text-foreground">After enablement:</strong> The feature gate is checked on both tenant navigation and API routes. A staff user still needs `canViewProcurement` to open the workspace; action permissions alone do not grant the feature or page access.</li>
+            <li><strong className="text-foreground">After enablement:</strong> Navigation and API routes check the matching Buyer or Seller entitlement. A staff user still needs `canViewProcurement`; action permissions alone do not grant workspace access.</li>
+            <li><strong className="text-foreground">Private quote messaging:</strong> Discussion threads use the existing Communication feature and its view/create permissions; they are not available when Communication is disabled.</li>
           </ol>
-          <div className="mt-4 flex items-start gap-2 border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground"><ArrowDown className="mt-0.5 size-4 shrink-0" />Database migrations install marketplace tables and the feature registry entry; they do not automatically grant the feature to every tenant. Apply migrations before provisioning marketplace sellers.</div>
+          <div className="mt-4 flex items-start gap-2 border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground"><ArrowDown className="mt-0.5 size-4 shrink-0" />Apply database migrations before provisioning marketplace sellers. Existing plans and tenant overrides for the former combined feature are carried forward to both workspaces; SaaS Admin can then adjust each independently.</div>
         </Section>
 
         <Section id="permissions" title="Marketplace permissions board">

@@ -49,6 +49,10 @@ async function seedFeatures() {
     { name: 'suppliers.grn', displayName: 'Goods Received Notes', module: 'suppliers', category: 'advanced', description: 'Record goods received' },
     { name: 'suppliers.statements', displayName: 'Supplier Statements', module: 'suppliers', category: 'advanced', description: 'Generate supplier statements' },
 
+    // ===== Procurement Network =====
+    { name: 'procurement.buyer', displayName: 'Procurement · Buyer', module: 'procurement', category: 'advanced', description: 'Discover sellers, request quotes, place purchase orders, receive goods, and manage supplier relationships.' },
+    { name: 'procurement.seller', displayName: 'Supplier Marketplace · Seller', module: 'procurement', category: 'advanced', description: 'Publish offers, respond to buyer requests, fulfil orders, issue invoices, and manage buyer relationships.' },
+
     // ===== Financial =====
     { name: 'expenses', displayName: 'Expense Tracking', module: 'financial', category: 'advanced', description: 'Track business expenses' },
     { name: 'financial.income', displayName: 'Income Tracking', module: 'financial', category: 'advanced', description: 'Track income sources' },

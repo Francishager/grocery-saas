@@ -80,7 +80,8 @@ const MODULES = [
   },
   {
     id: 'procurement', name: 'Procurement Network', features: [
-      { name: 'procurement.marketplace', displayName: 'Procurement Network' },
+      { name: 'procurement.buyer', displayName: 'Procurement · Buyer' },
+      { name: 'procurement.seller', displayName: 'Supplier Marketplace · Seller' },
     ]
   },
   {

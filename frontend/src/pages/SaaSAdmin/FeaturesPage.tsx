@@ -64,7 +64,8 @@ const MODULES = [
   },
   {
     id: 'procurement', name: 'Procurement Network', icon: Store, color: 'text-teal-700 bg-teal-100', features: [
-      { name: 'procurement.marketplace', displayName: 'Procurement Network' },
+      { name: 'procurement.buyer', displayName: 'Procurement · Buyer' },
+      { name: 'procurement.seller', displayName: 'Supplier Marketplace · Seller' },
     ]
   },
   {
