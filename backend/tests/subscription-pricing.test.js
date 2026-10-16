@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveSubscriptionCharge, calculateBillingReminder, calculateSubscriptionPaymentProgress } from '../src/utils/subscriptionPricing.js';
+import { resolveSubscriptionCharge, calculateBillingReminder, calculateSubscriptionPaymentProgress, shouldSuspendForSubscriptionPayment } from '../src/utils/subscriptionPricing.js';
 import { addSubscriptionPeriods } from '../src/utils/subscriptionPayments.js';
 
 test('calculateBillingReminder marks billing as due soon and tracks the grace period window', () => {
@@ -48,6 +48,18 @@ test('trial countdown ignores paid subscription end and expires without a grace 
   const expired = calculateBillingReminder({ status: 'trial', trialEndsAt: '2026-10-16T11:59:59.000Z', gracePeriodDays: 10, now });
   assert.equal(expired.isTrialExpired, true);
   assert.equal(expired.isGracePeriodActive, false);
+});
+
+test('unpaid active subscriptions suspend only after the configured grace period', () => {
+  const tenant = {
+    status: 'active',
+    subscriptionEnd: '2026-10-10T12:00:00.000Z',
+    gracePeriodDays: 5,
+  };
+  assert.equal(shouldSuspendForSubscriptionPayment(tenant, true, new Date('2026-10-10T12:00:00.000Z')), false);
+  assert.equal(shouldSuspendForSubscriptionPayment(tenant, true, new Date('2026-10-14T12:00:00.000Z')), false);
+  assert.equal(shouldSuspendForSubscriptionPayment(tenant, true, new Date('2026-10-15T12:00:00.000Z')), true);
+  assert.equal(shouldSuspendForSubscriptionPayment(tenant, false, new Date('2026-10-15T12:00:00.000Z')), false);
 });
 
 test('subscription payment progress treats partial receipts as outstanding until fully covered', () => {

@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import cloudinary from "cloudinary";
 import prisma from "../db.js";
-import { authenticateToken, tenantAccountAccessPayload } from "../../middleware/auth.js";
+import { authenticateToken, enforceTenantSubscriptionAccess, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { sendMail } from "../../mailer.js";
 import { resolveEffectivePermissions } from "../utils/permissions.js";
 import { getTenantFeatures } from "../../middleware/featureCheck.js";
@@ -70,7 +70,7 @@ router.post("/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ message: "Invalid credentials" });
 
-    const tenantBlock = tenantAccountAccessPayload(user.tenant, user);
+    const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
     if (tenantBlock) return res.status(403).json(tenantBlock);
     const hoursBlock = workingHoursAccessPayload(user, user.tenant);
     if (hoursBlock) return res.status(403).json(hoursBlock);
@@ -179,7 +179,7 @@ router.post("/refresh", async (req, res) => {
       return res.status(401).json({ message: "User not found or inactive" });
     }
 
-    const tenantBlock = tenantAccountAccessPayload(user.tenant, user);
+    const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
     if (tenantBlock) return res.status(403).json(tenantBlock);
     const hoursBlock = workingHoursAccessPayload(user, user.tenant);
     if (hoursBlock) return res.status(403).json(hoursBlock);

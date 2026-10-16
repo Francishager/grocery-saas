@@ -96,7 +96,8 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
   const latestCurrentInvoice = groups.filter(group => group.hasCurrentPayment).at(-1);
   const trackedInvoice = openInvoice || latestCurrentInvoice;
   const invoiceSnapshot = trackedInvoice?.invoice || null;
-  const periodTotal = trackedInvoice?.billedTotal || charge.total;
+  const legacyBalanceTotal = charge.chargeMode === 'service' ? charge.price : charge.total;
+  const periodTotal = trackedInvoice?.billedTotal || legacyBalanceTotal;
   const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
   const recordedThisPeriod = Number(aggregate._sum.amount || 0) > 0;
   const trackedPaidAmount = trackedInvoice?.paidAmount ?? aggregate._sum.amount;

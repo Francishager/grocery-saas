@@ -75,6 +75,39 @@ test('annual-fee invoice balances carry into later monthly windows despite charg
   assert.equal(result.invoiceSnapshot.lineItems[0].description, 'Annual service fee');
 });
 
+test('legacy partial plan override remains due when the current invoice is services-only', async () => {
+  const tenant = {
+    id: 'tenant-3',
+    plan: { price: 100000, billingCycle: 'monthly', currency: 'UGX' },
+    customPrice: 500000,
+    billingChargeMode: 'service',
+    monthlyServiceFee: 50000,
+    createdAt: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionStart: new Date('2026-10-01T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-11-01T00:00:00.000Z'),
+  };
+  const tx = {
+    tenant: { findUnique: async () => tenant },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 200000 } }),
+      count: async () => 1,
+      findMany: async () => [{
+        id: 'legacy-partial',
+        amount: 200000,
+        notes: 'Cash received against the tenant-specific plan price',
+        paidAt: new Date('2026-10-12T00:00:00.000Z'),
+        createdAt: new Date('2026-10-12T00:00:00.000Z'),
+      }],
+    },
+  };
+
+  const result = await getSubscriptionPaymentProgress(tx, tenant.id, new Date('2026-10-16T00:00:00.000Z'));
+  assert.equal(result.periodTotal, 500000);
+  assert.equal(result.progress.paidAmount, 200000);
+  assert.equal(result.progress.remainingAmount, 300000);
+  assert.equal(result.progress.isPartiallyPaid, true);
+});
+
 test('Pesapal statuses only settle successful verified payments', () => {
   assert.equal(normalizePesapalStatus({ payment_status_description: 'COMPLETED', status_code: 1 }), 'completed');
   assert.equal(normalizePesapalStatus({ payment_status_description: 'FAILED', status_code: 2 }), 'failed');

@@ -4,6 +4,8 @@ import { resolveEffectivePermissions, ROLE_DEFAULTS } from '../src/utils/permiss
 import { platformPermissionForRequest } from '../src/utils/platformPermissions.js';
 import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
 import { workingHoursAccessPayload } from '../src/utils/workingHours.js';
+import { shouldSuspendForSubscriptionPayment } from '../src/utils/subscriptionPricing.js';
+import { getSubscriptionPaymentProgress } from '../src/utils/subscriptionPayments.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -70,6 +72,28 @@ export const tenantAccountAccessPayload = (tenant, user = {}) => {
   };
 };
 
+export const enforceTenantSubscriptionAccess = async (tenant, user = {}) => {
+  const existingBlock = tenantAccountAccessPayload(tenant, user);
+  if (existingBlock || !tenant?.subscriptionEnd || isPlatformAdminUser(user)) return existingBlock;
+  if (!shouldSuspendForSubscriptionPayment(tenant, true)) return null;
+
+  const billing = await getSubscriptionPaymentProgress(prisma, tenant.id);
+  const hasOutstandingBalance = Number(billing?.progress.remainingAmount || 0) > 0.01;
+  if (!shouldSuspendForSubscriptionPayment(tenant, hasOutstandingBalance)) return null;
+
+  const suspended = await prisma.tenant.updateMany({
+    where: { id: tenant.id, status: 'active', subscriptionEnd: tenant.subscriptionEnd },
+    data: { status: 'suspended' },
+  });
+  if (suspended.count === 1) return tenantAccountAccessPayload({ ...tenant, status: 'suspended' }, user);
+
+  const latestTenant = await prisma.tenant.findUnique({
+    where: { id: tenant.id },
+    select: { id: true, name: true, status: true, trialEndsAt: true, subscriptionEnd: true, gracePeriodDays: true },
+  });
+  return tenantAccountAccessPayload(latestTenant, user);
+};
+
 export const canUseCashTransactions = (user, hasAssignedCashAccount) => {
   if (!user) return false;
 
@@ -117,7 +141,7 @@ export const authenticateToken = async (req, res, next) => {
     if (tenantId) {
       tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { id: true, name: true, slug: true, status: true, trialEndsAt: true, timezone: true, workingHours: true },
+        select: { id: true, name: true, slug: true, status: true, trialEndsAt: true, subscriptionEnd: true, gracePeriodDays: true, timezone: true, workingHours: true },
       });
       if (!tenant && !isPlatformAdminUser(decoded)) {
         return res.status(403).json({
@@ -126,7 +150,7 @@ export const authenticateToken = async (req, res, next) => {
           code: 'TENANT_NOT_FOUND',
         });
       }
-      const tenantBlock = tenantAccountAccessPayload(tenant, decoded);
+      const tenantBlock = await enforceTenantSubscriptionAccess(tenant, decoded);
       if (tenantBlock) return res.status(403).json(tenantBlock);
       const hoursBlock = workingHoursAccessPayload(currentUser, tenant);
       if (hoursBlock) return res.status(403).json(hoursBlock);

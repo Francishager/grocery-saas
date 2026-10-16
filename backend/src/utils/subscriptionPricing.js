@@ -113,6 +113,12 @@ export function calculateBillingReminder(tenant = {}) {
   };
 }
 
+export function shouldSuspendForSubscriptionPayment(tenant = {}, hasOutstandingBalance = false, now = new Date()) {
+  if (String(tenant.status || '').trim().toLowerCase() !== 'active' || !hasOutstandingBalance) return false;
+  const reminder = calculateBillingReminder({ ...tenant, now });
+  return reminder.isOverdue === true;
+}
+
 export function calculateSubscriptionPaymentProgress(amountDue, paidAmount) {
   const amount = Math.max(0, Number(amountDue) || 0);
   const paid = Math.max(0, Number(paidAmount) || 0);
