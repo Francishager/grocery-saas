@@ -3,6 +3,7 @@ import { ArrowDown, ArrowRight, BadgeCheck, BookOpen, Building2, CircleDollarSig
 
 const permissionRows = [
   ['View Procurement Marketplace', 'Open the marketplace workspace and view supplier discovery, listings, campaigns, RFQs, and procurement records available to the tenant.'],
+  ['Follow Marketplace Sellers', 'Follow sellers visible to the user and receive in-app/push notices for their new listings, public price changes, and campaigns. This is an individual user follow, not a tenant-wide subscription.'],
   ['Manage Supplier Relationships', 'Maintain the seller profile and request, approve, reject, or suspend supplier relationships.'],
   ['Publish Marketplace Listings', 'Create offers from the seller business catalogue.'],
   ['Publish Marketplace Price Changes', 'Change listing prices; every changed price is retained in price history.'],
@@ -30,7 +31,7 @@ const workflow = [
   { icon: FileCheck2, title: '5. Order and fulfil', text: 'The buyer creates a draft purchase order from the selected quote, approves it, and sends it. The supplier acknowledges or rejects it. The buyer maps order items to its own products and records goods received against a branch; partial receipts are supported.' },
   { icon: PackageCheck, title: '6. Invoice and account', text: 'The seller submits an invoice only for received quantities and maps each line to its own inventory product or service. The buyer matches the supplier, branch, order, and accepted receipts before approving. Approval creates buyer payables and the linked seller sale, receivable, journal and stock/COGS effects; it is not a second buyer sale.' },
   { icon: CircleDollarSign, title: '7. Receive and reconcile payment', text: 'A buyer-submitted payment remains pending until the seller confirms receipt. Alternatively, authorized seller staff can record money actually received into a permitted transaction account; the seller-side receivable is updated and the buyer-side payable is mirrored through Marketplace Settlement Clearing. The buyer reconciles that clearing balance to the actual account used. Both parties can print the payment acknowledgment or receipt provided by the workflow.' },
-  { icon: Megaphone, title: '8. Promote offers', text: 'Authorized staff can publish a marketplace promotion or sponsored offer linked to an active seller listing, set its run dates, and separately manage campaign status. This is an in-JibuSales placement only: it does not purchase Google/Meta ads, send social posts, or charge an advertising fee.' },
+  { icon: Megaphone, title: '8. Promote offers', text: 'Authorized staff can publish a marketplace promotion or sponsored offer linked to an active seller listing, attach up to four campaign images, set run dates, and separately manage campaign status. Buyers see up to two images at a time without autoplay controls or image counters. This is an in-JibuSales placement only: it does not purchase external ads, send social posts, or charge an advertising fee.' },
 ]
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
@@ -110,7 +111,8 @@ export default function ProcurementGuidePage() {
             <p>Public discovery includes only opted-in seller profiles and listings explicitly marked public. Private listings require an active supplier relationship. Open RFQs are visible to eligible opted-in sellers; private RFQs and quote discussions are limited to their participants.</p>
             <p>Unrelated businesses must not see private quotations, negotiated prices, customer lists, purchase histories, invoices, account balances, or other confidential records. Public campaign placements are shown only where the linked listing is already visible to the viewer.</p>
             <p>Marketplace promotions and sponsored offers are internal JibuSales placements attached to active listings. Their title, message, and run dates are visible to eligible buyers. The current implementation does not buy external media, post to social networks, or incur advertising charges.</p>
-            <p>Campaign creation, status changes, price changes, and financial posting steps should remain permission-checked and auditable. Sellers can pause/resume or cancel campaigns only with the campaign-management permission.</p>
+            <p>Campaign creation, status changes, price changes, image uploads, and financial posting steps should remain permission-checked and auditable. Sellers can pause/resume or cancel campaigns only with the campaign-management permission. Followers are individual buyer users; a post notification is sent only if the underlying listing is still visible to that buyer.</p>
+            <p>AI market notes use only currently visible marketplace listings, recent public/connected price changes, and active campaign copy. They do not receive private RFQs, invoices, customer lists, purchase history, or account balances. The system does not label an offer as trending without real marketplace engagement data to support that claim.</p>
           </div>
         </Section>
 

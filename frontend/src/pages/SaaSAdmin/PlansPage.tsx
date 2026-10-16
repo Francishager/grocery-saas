@@ -79,6 +79,11 @@ const MODULES = [
     ]
   },
   {
+    id: 'procurement', name: 'Procurement Network', features: [
+      { name: 'procurement.marketplace', displayName: 'Procurement Network' },
+    ]
+  },
+  {
     id: 'financial', name: 'Financial Management', features: [
       { name: 'expenses', displayName: 'Expense Tracking' },
       { name: 'financial.income', displayName: 'Income Tracking' },

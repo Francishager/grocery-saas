@@ -128,6 +128,7 @@ export const permissions: Permission[] = [
   { id: 'canEditSupplier', name: 'Edit Suppliers', description: 'Edit existing suppliers', category: 'suppliers', accessesBusinessData: true },
   { id: 'canDeleteSupplier', name: 'Delete Suppliers', description: 'Delete supplier records', category: 'suppliers', accessesBusinessData: true },
   { id: 'canViewProcurement', name: 'View Procurement Marketplace', description: 'Discover opted-in suppliers, marketplace offers, and open RFQs', category: 'procurement', accessesBusinessData: true },
+  { id: 'canFollowMarketplaceSellers', name: 'Follow Marketplace Sellers', description: 'Follow visible sellers and receive updates when they publish listings, price changes, or campaigns', category: 'procurement', accessesBusinessData: true },
   { id: 'canManageSupplierNetwork', name: 'Manage Supplier Relationships', description: 'Request, approve, suspend, and manage supplier relationships', category: 'procurement', accessesBusinessData: true },
   { id: 'canCreateMarketplaceListing', name: 'Publish Marketplace Listings', description: 'Create and publish product or service offers to the selected marketplace audience', category: 'procurement', accessesBusinessData: true },
   { id: 'canChangeMarketplacePrice', name: 'Publish Marketplace Price Changes', description: 'Change offer prices and record the reason in price history', category: 'procurement', accessesBusinessData: true },

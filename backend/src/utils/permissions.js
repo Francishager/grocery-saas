@@ -229,7 +229,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
   "canCreateSupplier", "canViewSupplier", "canEditSupplier", "canDeleteSupplier",
-  "canViewProcurement", "canManageSupplierNetwork", "canManageMarketplaceCatalogue",
+  "canViewProcurement", "canFollowMarketplaceSellers", "canManageSupplierNetwork", "canManageMarketplaceCatalogue",
   "canCreateMarketplaceListing", "canChangeMarketplacePrice",
   "canCreateMarketplacePromotion", "canRunMarketplaceAds", "canManageMarketplacePromotions",
   "canCreateProcurementRFQ", "canRespondToProcurementRFQ", "canManageProcurementQuotes",
@@ -513,6 +513,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
     description: 'Remove suppliers where the system allows it.',
   },
   canViewProcurement: { name: 'View procurement marketplace', description: 'Discover opted-in suppliers, public product offers, and open RFQs.' },
+  canFollowMarketplaceSellers: { name: 'Follow marketplace sellers', description: 'Follow visible sellers and receive marketplace notifications for their new listings, price changes, and campaigns.' },
   canManageSupplierNetwork: { name: 'Manage supplier relationships', description: 'Request, approve, suspend, and manage private supplier relationships.' },
   canManageMarketplaceCatalogue: { name: 'Manage marketplace catalogue', description: 'Publish and update product offers and prices visible to permitted buyers.' },
   canCreateMarketplaceListing: { name: 'Publish marketplace listings', description: 'Create and publish product or service offers to the selected marketplace audience.' },

@@ -194,18 +194,20 @@ model Tenant {
   employmentHistories EmploymentHistory[] @relation("TenantEmploymentHistory")
   hrModuleFeatures    HRModuleFeature[]   @relation("TenantHRFeatures")
 
-  stockTransfers   StockTransfer[]
-  notifications    Notification[]
-  pushTokens       PushToken[]
-  integrations     IntegrationConfig[]
-  restaurantTables RestaurantTable[]
-  restaurantOrders RestaurantOrder[]
-  reservations     Reservation[]
-  recipes          Recipe[]
-  waiters          Waiter[]
-  happyHourRules   HappyHourRule[]
-  comboMeals       ComboMeal[]
-  deliveries       Delivery[]
+  stockTransfers       StockTransfer[]
+  notifications        Notification[]
+  marketplaceFollowing MarketplaceSellerFollow[] @relation("MarketplaceFollowTenant")
+  marketplaceFollowers MarketplaceSellerFollow[] @relation("MarketplaceFollowSeller")
+  pushTokens           PushToken[]
+  integrations         IntegrationConfig[]
+  restaurantTables     RestaurantTable[]
+  restaurantOrders     RestaurantOrder[]
+  reservations         Reservation[]
+  recipes              Recipe[]
+  waiters              Waiter[]
+  happyHourRules       HappyHourRule[]
+  comboMeals           ComboMeal[]
+  deliveries           Delivery[]
 
   // =====================
   // FUEL STATION
@@ -506,8 +508,9 @@ model User {
   receivablesGlMigrationApprovals ReceivablesGlMigrationBatch[]            @relation("ReceivablesGlMigrationApprover")
   accountingCutovers              TenantAccountingCutover[]                @relation("TenantAccountingCutoverPerformer")
 
-  advisorCollections   AdvisorCollection[]
-  advisorConversations AdvisorConversation[]
+  advisorCollections       AdvisorCollection[]
+  advisorConversations     AdvisorConversation[]
+  marketplaceSellerFollows MarketplaceSellerFollow[] @relation("MarketplaceFollowUser")
 
   @@map("users")
 }
@@ -670,13 +673,14 @@ model UserPermission {
   canEditSupplier                   Boolean  @default(false)
   canDeleteSupplier                 Boolean  @default(false)
   canViewProcurement                Boolean  @default(false)
+  canFollowMarketplaceSellers       Boolean  @default(false)
   canManageSupplierNetwork          Boolean  @default(false)
   canManageMarketplaceCatalogue     Boolean  @default(false)
   canCreateMarketplaceListing       Boolean  @default(false)
   canChangeMarketplacePrice         Boolean  @default(false)
-  canCreateMarketplacePromotion    Boolean  @default(false)
+  canCreateMarketplacePromotion     Boolean  @default(false)
   canRunMarketplaceAds              Boolean  @default(false)
-  canManageMarketplacePromotions   Boolean  @default(false)
+  canManageMarketplacePromotions    Boolean  @default(false)
   canCreateProcurementRFQ           Boolean  @default(false)
   canRespondToProcurementRFQ        Boolean  @default(false)
   canManageProcurementQuotes        Boolean  @default(false)
@@ -686,8 +690,8 @@ model UserPermission {
   canReceiveProcurementGoods        Boolean  @default(false)
   canSubmitProcurementInvoice       Boolean  @default(false)
   canReviewProcurementInvoice       Boolean  @default(false)
-  canApproveProcurementPayment     Boolean  @default(false)
-  canRecordProcurementPayment      Boolean  @default(false)
+  canApproveProcurementPayment      Boolean  @default(false)
+  canRecordProcurementPayment       Boolean  @default(false)
   // Staff
   canCreateStaff                    Boolean  @default(false)
   canViewStaff                      Boolean  @default(false)
@@ -749,7 +753,7 @@ model UserPermission {
   // Settings
   canViewSettings                   Boolean  @default(false)
   canEditSettings                   Boolean  @default(false)
-  canPaySubscriptionInvoice          Boolean  @default(false)
+  canPaySubscriptionInvoice         Boolean  @default(false)
   // Receipts
   canViewReceipt                    Boolean  @default(false)
   canCreateReceipt                  Boolean  @default(false)
@@ -981,7 +985,7 @@ model Product {
   rentalItems                   RentalItem[]
   saleReturnItems               SaleReturnItem[]
   stockTransferItems            StockTransferItem[]
-  stockTransferDestinationItems StockTransferItem[]    @relation("TransferDestinationProduct")
+  stockTransferDestinationItems StockTransferItem[]      @relation("TransferDestinationProduct")
   recipeIngredients             RecipeIngredient[]
   comboMealItems                ComboMealItem[]
   orderItems                    RestaurantOrderItem[]
@@ -993,8 +997,8 @@ model Product {
   appointmentProducts           Appointment[]
   workOrderProducts             WorkOrder[]
   serviceJobCardProducts        ServiceJobCard[]
-  includedServices              ProductServiceLink[]   @relation("ProductIncludedServices")
-  includedInProducts            ProductServiceLink[]   @relation("ServiceIncludedProducts")
+  includedServices              ProductServiceLink[]     @relation("ProductIncludedServices")
+  includedInProducts            ProductServiceLink[]     @relation("ServiceIncludedProducts")
   serviceFeedbackProducts       ServiceFeedback[]
   priceHistory                  ProductPriceHistory[]
   procurementInvoiceLines       ProcurementInvoiceLine[]
@@ -1288,7 +1292,7 @@ model Customer {
   fuelCards                       FuelCard[]
   Tenant                          Tenant                                   @relation(fields: [tenantId], references: [id])
   procurementCounterpartyLink     ProcurementCustomerLink?
-  procurementSellerInvoices       ProcurementInvoice[] @relation("ProcurementInvoiceSellerCustomer")
+  procurementSellerInvoices       ProcurementInvoice[]                     @relation("ProcurementInvoiceSellerCustomer")
 
   creditNotes CreditNote[]
 
@@ -1383,25 +1387,25 @@ model SaleRecordItem {
 
 // Customer Payments
 model CustomerPayment {
-  id             String                      @id @default(cuid())
-  tenantId       String
-  branchId       String?
-  branch         Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customerId     String
-  customer       Customer                    @relation(fields: [customerId], references: [id])
-  saleId         String?
-  sale           SaleRecord?                 @relation(fields: [saleId], references: [id])
-  amount         Float
-  paymentMethod  String // cash, mobile_money, bank_transfer
-  mobileProvider String?
-  phoneNumber    String?
-  transactionId  String?
-  reference      String? // Transaction reference
-  idempotencyKey String?                     @unique
-  allocationMode String                      @default("legacy")
-  notes          String?
-  createdAt      DateTime                    @default(now())
-  allocations    CustomerPaymentAllocation[]
+  id                         String                      @id @default(cuid())
+  tenantId                   String
+  branchId                   String?
+  branch                     Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId                 String
+  customer                   Customer                    @relation(fields: [customerId], references: [id])
+  saleId                     String?
+  sale                       SaleRecord?                 @relation(fields: [saleId], references: [id])
+  amount                     Float
+  paymentMethod              String // cash, mobile_money, bank_transfer
+  mobileProvider             String?
+  phoneNumber                String?
+  transactionId              String?
+  reference                  String? // Transaction reference
+  idempotencyKey             String?                     @unique
+  allocationMode             String                      @default("legacy")
+  notes                      String?
+  createdAt                  DateTime                    @default(now())
+  allocations                CustomerPaymentAllocation[]
   procurementPaymentApproval ProcurementPaymentApproval?
 
   @@index([tenantId, branchId])
@@ -1672,23 +1676,23 @@ model SupplierPurchaseItem {
 
 // Supplier Payments
 model SupplierPayment {
-  id             String            @id @default(cuid())
-  tenantId       String
-  branchId       String?
-  branch         Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  supplierId     String
-  supplier       Supplier          @relation(fields: [supplierId], references: [id])
-  purchaseId     String?
-  purchase       SupplierPurchase? @relation(fields: [purchaseId], references: [id])
-  amount         Float
-  paymentMethod  String
-  mobileProvider String?
-  phoneNumber    String?
-  transactionId  String?
-  reference      String?
-  notes          String?
-  idempotencyKey String?           @unique
-  createdAt      DateTime          @default(now())
+  id                         String                      @id @default(cuid())
+  tenantId                   String
+  branchId                   String?
+  branch                     Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplierId                 String
+  supplier                   Supplier                    @relation(fields: [supplierId], references: [id])
+  purchaseId                 String?
+  purchase                   SupplierPurchase?           @relation(fields: [purchaseId], references: [id])
+  amount                     Float
+  paymentMethod              String
+  mobileProvider             String?
+  phoneNumber                String?
+  transactionId              String?
+  reference                  String?
+  notes                      String?
+  idempotencyKey             String?                     @unique
+  createdAt                  DateTime                    @default(now())
   procurementPaymentApproval ProcurementPaymentApproval?
 
   @@index([tenantId, branchId])
@@ -1696,31 +1700,47 @@ model SupplierPayment {
 }
 
 model ProcurementProfile {
-  id           String   @id @default(cuid())
-  tenantId     String   @unique
-  sellerType   String   @default("supplier")
+  id           String    @id @default(cuid())
+  tenantId     String    @unique
+  sellerType   String    @default("supplier")
   category     String
-  description  String   @default("")
+  description  String    @default("")
   website      String?
-  discoverable Boolean  @default(false)
+  discoverable Boolean   @default(false)
   verifiedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([discoverable, category])
   @@map("procurement_profiles")
 }
 
+model MarketplaceSellerFollow {
+  id               String   @id @default(cuid())
+  followerTenantId String
+  followerTenant   Tenant   @relation("MarketplaceFollowTenant", fields: [followerTenantId], references: [id], onDelete: Cascade)
+  followerUserId   String
+  followerUser     User     @relation("MarketplaceFollowUser", fields: [followerUserId], references: [id], onDelete: Cascade)
+  sellerTenantId   String
+  sellerTenant     Tenant   @relation("MarketplaceFollowSeller", fields: [sellerTenantId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
+
+  @@unique([followerUserId, sellerTenantId])
+  @@index([sellerTenantId, createdAt])
+  @@index([followerTenantId, followerUserId])
+  @@map("marketplace_seller_follows")
+}
+
 model ProcurementRelationship {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   buyerTenantId  String
   sellerTenantId String
-  status         String   @default("pending")
+  status         String    @default("pending")
   requestedById  String
   approvedById   String?
-  requestedAt    DateTime @default(now())
+  requestedAt    DateTime  @default(now())
   reviewedAt     DateTime?
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime  @updatedAt
 
   @@unique([buyerTenantId, sellerTenantId])
   @@index([sellerTenantId, status])
@@ -1729,28 +1749,28 @@ model ProcurementRelationship {
 }
 
 model MarketplaceListing {
-  id              String   @id @default(cuid())
+  id              String                   @id @default(cuid())
   sellerTenantId  String
   linkedProductId String?
   name            String
-  description     String   @default("")
+  description     String                   @default("")
   category        String
   brand           String?
   supplierCode    String?
   unit            String
   packaging       String?
-  price           Decimal  @db.Decimal(18, 2)
-  currency        String   @default("UGX")
-  minimumQty      Decimal  @default(1) @db.Decimal(18, 3)
-  availableQty    Decimal? @db.Decimal(18, 3)
+  price           Decimal                  @db.Decimal(18, 2)
+  currency        String                   @default("UGX")
+  minimumQty      Decimal                  @default(1) @db.Decimal(18, 3)
+  availableQty    Decimal?                 @db.Decimal(18, 3)
   leadTimeDays    Int?
-  visibility      String   @default("public")
-  status          String   @default("active")
+  visibility      String                   @default("public")
+  status          String                   @default("active")
   priceValidTo    DateTime?
   priceChanges    MarketplacePriceChange[]
   promotions      MarketplacePromotion[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
 
   @@index([sellerTenantId, status])
   @@index([visibility, status, category])
@@ -1759,19 +1779,20 @@ model MarketplaceListing {
 }
 
 model MarketplacePromotion {
-  id             String   @id @default(cuid())
+  id             String             @id @default(cuid())
   sellerTenantId String
   listingId      String
   listing        MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   campaignType   String
   title          String
-  message        String   @default("")
+  message        String             @default("")
+  images         Json               @default("[]")
   startsAt       DateTime
   endsAt         DateTime?
-  status         String   @default("active")
+  status         String             @default("active")
   createdById    String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@index([sellerTenantId, status, startsAt, endsAt])
   @@index([listingId, status, startsAt])
@@ -1779,17 +1800,17 @@ model MarketplacePromotion {
 }
 
 model MarketplacePriceChange {
-  id             String   @id @default(cuid())
+  id             String             @id @default(cuid())
   listingId      String
   listing        MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   sellerTenantId String
-  oldPrice       Decimal  @db.Decimal(18, 2)
-  newPrice       Decimal  @db.Decimal(18, 2)
+  oldPrice       Decimal            @db.Decimal(18, 2)
+  newPrice       Decimal            @db.Decimal(18, 2)
   currency       String
-  reason         String   @default("")
+  reason         String             @default("")
   changedById    String
-  effectiveAt    DateTime @default(now())
-  createdAt      DateTime @default(now())
+  effectiveAt    DateTime           @default(now())
+  createdAt      DateTime           @default(now())
 
   @@index([listingId, createdAt])
   @@index([sellerTenantId, createdAt])
@@ -1797,22 +1818,22 @@ model MarketplacePriceChange {
 }
 
 model ProcurementRFQ {
-  id              String   @id @default(cuid())
+  id              String                    @id @default(cuid())
   buyerTenantId   String
   createdById     String
   title           String
-  notes           String   @default("")
-  visibility      String   @default("private")
-  status          String   @default("open")
-  currency        String   @default("UGX")
+  notes           String                    @default("")
+  visibility      String                    @default("private")
+  status          String                    @default("open")
+  currency        String                    @default("UGX")
   deliveryAddress String?
   closesAt        DateTime?
   lines           ProcurementRFQLine[]
   recipients      ProcurementRFQRecipient[]
   quotes          ProcurementQuote[]
   messages        ProcurementMessage[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
 
   @@index([buyerTenantId, status, createdAt])
   @@index([visibility, status, closesAt])
@@ -1820,16 +1841,16 @@ model ProcurementRFQ {
 }
 
 model ProcurementRFQLine {
-  id                     String   @id @default(cuid())
+  id                     String                 @id @default(cuid())
   rfqId                  String
-  rfq                    ProcurementRFQ @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  rfq                    ProcurementRFQ         @relation(fields: [rfqId], references: [id], onDelete: Cascade)
   productName            String
-  specification          String   @default("")
-  quantity               Decimal  @db.Decimal(18, 3)
+  specification          String                 @default("")
+  quantity               Decimal                @db.Decimal(18, 3)
   unit                   String
-  acceptableAlternatives String   @default("")
+  acceptableAlternatives String                 @default("")
   desiredDelivery        DateTime?
-  createdAt              DateTime @default(now())
+  createdAt              DateTime               @default(now())
   quoteLines             ProcurementQuoteLine[]
 
   @@index([rfqId])
@@ -1837,11 +1858,11 @@ model ProcurementRFQLine {
 }
 
 model ProcurementRFQRecipient {
-  id             String   @id @default(cuid())
+  id             String         @id @default(cuid())
   rfqId          String
   rfq            ProcurementRFQ @relation(fields: [rfqId], references: [id], onDelete: Cascade)
   sellerTenantId String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime       @default(now())
 
   @@unique([rfqId, sellerTenantId])
   @@index([sellerTenantId, rfqId])
@@ -1849,22 +1870,22 @@ model ProcurementRFQRecipient {
 }
 
 model ProcurementQuote {
-  id             String   @id @default(cuid())
+  id             String                 @id @default(cuid())
   rfqId          String
-  rfq            ProcurementRFQ @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  rfq            ProcurementRFQ         @relation(fields: [rfqId], references: [id], onDelete: Cascade)
   sellerTenantId String
   submittedById  String
-  status         String   @default("submitted")
-  notes          String   @default("")
+  status         String                 @default("submitted")
+  notes          String                 @default("")
   deliveryDays   Int?
-  deliveryFee    Decimal  @default(0) @db.Decimal(18, 2)
-  paymentTerms   String   @default("")
+  deliveryFee    Decimal                @default(0) @db.Decimal(18, 2)
+  paymentTerms   String                 @default("")
   validUntil     DateTime?
-  version        Int      @default(1)
+  version        Int                    @default(1)
   lines          ProcurementQuoteLine[]
   messages       ProcurementMessage[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
 
   @@unique([rfqId, sellerTenantId, version])
   @@index([rfqId, sellerTenantId, status])
@@ -1872,17 +1893,17 @@ model ProcurementQuote {
 }
 
 model ProcurementQuoteLine {
-  id          String   @id @default(cuid())
+  id          String             @id @default(cuid())
   quoteId     String
-  quote       ProcurementQuote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quote       ProcurementQuote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   rfqLineId   String
   rfqLine     ProcurementRFQLine @relation(fields: [rfqLineId], references: [id], onDelete: Cascade)
-  quantity    Decimal  @db.Decimal(18, 3)
-  unitPrice   Decimal  @db.Decimal(18, 2)
-  taxRate     Decimal? @db.Decimal(7, 4)
+  quantity    Decimal            @db.Decimal(18, 3)
+  unitPrice   Decimal            @db.Decimal(18, 2)
+  taxRate     Decimal?           @db.Decimal(7, 4)
   alternative String?
-  notes       String   @default("")
-  createdAt   DateTime @default(now())
+  notes       String             @default("")
+  createdAt   DateTime           @default(now())
 
   @@unique([quoteId, rfqLineId])
   @@index([quoteId])
@@ -1890,39 +1911,39 @@ model ProcurementQuoteLine {
 }
 
 model ProcurementMessage {
-  id             String   @id @default(cuid())
+  id             String            @id @default(cuid())
   rfqId          String
-  rfq            ProcurementRFQ @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  rfq            ProcurementRFQ    @relation(fields: [rfqId], references: [id], onDelete: Cascade)
   quoteId        String?
   quote          ProcurementQuote? @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   senderTenantId String
   senderUserId   String
   body           String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime          @default(now())
 
   @@index([rfqId, createdAt])
   @@map("procurement_messages")
 }
 
 model ProcurementPurchaseOrder {
-  id               String   @id @default(cuid())
+  id               String                         @id @default(cuid())
   buyerTenantId    String
   sellerTenantId   String
-  quoteId          String   @unique
+  quoteId          String                         @unique
   poNumber         String
-  status           String   @default("pending_approval")
-  currency         String   @default("UGX")
+  status           String                         @default("pending_approval")
+  currency         String                         @default("UGX")
   branchId         String?
   deliveryAddress  String?
-  terms            String   @default("")
+  terms            String                         @default("")
   createdById      String
   approvedById     String?
   acknowledgedById String?
   approvedAt       DateTime?
   sentAt           DateTime?
   acknowledgedAt   DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
   lines            ProcurementPurchaseOrderLine[]
   receipts         ProcurementGoodsReceipt[]
   invoices         ProcurementInvoice[]
@@ -1934,18 +1955,18 @@ model ProcurementPurchaseOrder {
 }
 
 model ProcurementPurchaseOrderLine {
-  id               String   @id @default(cuid())
+  id               String                        @id @default(cuid())
   orderId          String
-  order            ProcurementPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  quoteLineId      String   @unique
+  order            ProcurementPurchaseOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  quoteLineId      String                        @unique
   itemName         String
   unit             String
-  orderedQuantity  Decimal  @db.Decimal(18, 3)
-  unitPrice        Decimal  @db.Decimal(18, 2)
-  taxRate          Decimal? @db.Decimal(7, 4)
+  orderedQuantity  Decimal                       @db.Decimal(18, 3)
+  unitPrice        Decimal                       @db.Decimal(18, 2)
+  taxRate          Decimal?                      @db.Decimal(7, 4)
   productId        String?
-  receivedQuantity Decimal  @default(0) @db.Decimal(18, 3)
-  createdAt        DateTime @default(now())
+  receivedQuantity Decimal                       @default(0) @db.Decimal(18, 3)
+  createdAt        DateTime                      @default(now())
   receipts         ProcurementGoodsReceiptLine[]
   invoiceLines     ProcurementInvoiceLine[]
 
@@ -1954,15 +1975,15 @@ model ProcurementPurchaseOrderLine {
 }
 
 model ProcurementGoodsReceipt {
-  id           String   @id @default(cuid())
+  id           String                        @id @default(cuid())
   orderId      String
-  order        ProcurementPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  order        ProcurementPurchaseOrder      @relation(fields: [orderId], references: [id], onDelete: Restrict)
   tenantId     String
   branchId     String?
   receiptNo    String
   receivedById String
-  notes        String   @default("")
-  receivedAt   DateTime @default(now())
+  notes        String                        @default("")
+  receivedAt   DateTime                      @default(now())
   lines        ProcurementGoodsReceiptLine[]
 
   @@unique([tenantId, receiptNo])
@@ -1971,46 +1992,46 @@ model ProcurementGoodsReceipt {
 }
 
 model ProcurementGoodsReceiptLine {
-  id          String   @id @default(cuid())
+  id          String                       @id @default(cuid())
   receiptId   String
-  receipt     ProcurementGoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receipt     ProcurementGoodsReceipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   orderLineId String
   orderLine   ProcurementPurchaseOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
-  quantity    Decimal  @db.Decimal(18, 3)
+  quantity    Decimal                      @db.Decimal(18, 3)
 
   @@unique([receiptId, orderLineId])
   @@map("procurement_goods_receipt_lines")
 }
 
 model ProcurementInvoice {
-  id                 String   @id @default(cuid())
-  orderId            String
-  order              ProcurementPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  buyerTenantId      String
-  sellerTenantId     String
-  invoiceNo          String
-  status             String   @default("submitted")
-  currency           String   @default("UGX")
-  taxAmount          Decimal  @default(0) @db.Decimal(18, 2)
-  deliveryFee        Decimal  @default(0) @db.Decimal(18, 2)
-  freightInventoryAmount Decimal @default(0) @db.Decimal(18, 2)
-  freightExpenseAmount Decimal @default(0) @db.Decimal(18, 2)
-  total              Decimal  @db.Decimal(18, 2)
-  dueDate            DateTime?
-  documentUrl        String?
-  notes              String   @default("")
-  submittedById      String
-  reviewedById       String?
-  reviewedAt         DateTime?
-  supplierPurchaseId String?  @unique
-  sellerCustomerId   String?
-  sellerCustomer     Customer? @relation("ProcurementInvoiceSellerCustomer", fields: [sellerCustomerId], references: [id], onDelete: SetNull)
-  sellerSaleRecordId String?  @unique
-  sellerSaleRecord   SaleRecord? @relation(fields: [sellerSaleRecordId], references: [id], onDelete: SetNull)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  lines              ProcurementInvoiceLine[]
-  paymentApprovals   ProcurementPaymentApproval[]
+  id                     String                       @id @default(cuid())
+  orderId                String
+  order                  ProcurementPurchaseOrder     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  buyerTenantId          String
+  sellerTenantId         String
+  invoiceNo              String
+  status                 String                       @default("submitted")
+  currency               String                       @default("UGX")
+  taxAmount              Decimal                      @default(0) @db.Decimal(18, 2)
+  deliveryFee            Decimal                      @default(0) @db.Decimal(18, 2)
+  freightInventoryAmount Decimal                      @default(0) @db.Decimal(18, 2)
+  freightExpenseAmount   Decimal                      @default(0) @db.Decimal(18, 2)
+  total                  Decimal                      @db.Decimal(18, 2)
+  dueDate                DateTime?
+  documentUrl            String?
+  notes                  String                       @default("")
+  submittedById          String
+  reviewedById           String?
+  reviewedAt             DateTime?
+  supplierPurchaseId     String?                      @unique
+  sellerCustomerId       String?
+  sellerCustomer         Customer?                    @relation("ProcurementInvoiceSellerCustomer", fields: [sellerCustomerId], references: [id], onDelete: SetNull)
+  sellerSaleRecordId     String?                      @unique
+  sellerSaleRecord       SaleRecord?                  @relation(fields: [sellerSaleRecordId], references: [id], onDelete: SetNull)
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+  lines                  ProcurementInvoiceLine[]
+  paymentApprovals       ProcurementPaymentApproval[]
 
   @@unique([buyerTenantId, sellerTenantId, invoiceNo])
   @@index([buyerTenantId, status, createdAt])
@@ -2019,24 +2040,24 @@ model ProcurementInvoice {
 }
 
 model ProcurementPaymentApproval {
-  id                       String            @id @default(cuid())
-  invoiceId                String
-  invoice                  ProcurementInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
-  supplierPaymentId        String            @unique
-  supplierPayment          SupplierPayment   @relation(fields: [supplierPaymentId], references: [id], onDelete: Restrict)
-  sellerTenantId           String
-  buyerTenantId            String
-  amount                   Decimal           @db.Decimal(18, 2)
-  status                   String            @default("pending")
-  initiatedBySide          String            @default("buyer")
-  receivedPaymentMethod    String?
-  reviewedById             String?
-  reviewedAt               DateTime?
-  decisionNote             String?
-  sellerCustomerPaymentId  String?           @unique
-  sellerCustomerPayment    CustomerPayment?  @relation(fields: [sellerCustomerPaymentId], references: [id], onDelete: SetNull)
-  createdAt                DateTime          @default(now())
-  updatedAt                DateTime          @updatedAt
+  id                      String             @id @default(cuid())
+  invoiceId               String
+  invoice                 ProcurementInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  supplierPaymentId       String             @unique
+  supplierPayment         SupplierPayment    @relation(fields: [supplierPaymentId], references: [id], onDelete: Restrict)
+  sellerTenantId          String
+  buyerTenantId           String
+  amount                  Decimal            @db.Decimal(18, 2)
+  status                  String             @default("pending")
+  initiatedBySide         String             @default("buyer")
+  receivedPaymentMethod   String?
+  reviewedById            String?
+  reviewedAt              DateTime?
+  decisionNote            String?
+  sellerCustomerPaymentId String?            @unique
+  sellerCustomerPayment   CustomerPayment?   @relation(fields: [sellerCustomerPaymentId], references: [id], onDelete: SetNull)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
 
   @@index([sellerTenantId, status, createdAt])
   @@index([buyerTenantId, status, createdAt])
@@ -2045,16 +2066,16 @@ model ProcurementPaymentApproval {
 }
 
 model ProcurementInvoiceLine {
-  id          String   @id @default(cuid())
-  invoiceId   String
-  invoice     ProcurementInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  orderLineId String
-  orderLine   ProcurementPurchaseOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
+  id              String                       @id @default(cuid())
+  invoiceId       String
+  invoice         ProcurementInvoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  orderLineId     String
+  orderLine       ProcurementPurchaseOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   sellerProductId String?
-  sellerProduct Product? @relation(fields: [sellerProductId], references: [id], onDelete: SetNull)
-  quantity    Decimal  @db.Decimal(18, 3)
-  unitPrice   Decimal  @db.Decimal(18, 2)
-  taxRate     Decimal? @db.Decimal(7, 4)
+  sellerProduct   Product?                     @relation(fields: [sellerProductId], references: [id], onDelete: SetNull)
+  quantity        Decimal                      @db.Decimal(18, 3)
+  unitPrice       Decimal                      @db.Decimal(18, 2)
+  taxRate         Decimal?                     @db.Decimal(7, 4)
 
   @@unique([invoiceId, orderLineId])
   @@map("procurement_invoice_lines")
@@ -2336,42 +2357,42 @@ model SaleReturnItem {
 // =====================================================
 
 model Account {
-  id                              String                        @id @default(cuid())
-  tenantId                        String
-  tenant                          Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  code                            String // e.g. "1000", "2001"
-  name                            String // e.g. "Cash", "Accounts Receivable"
-  type                            String // asset, liability, equity, revenue, expense
-  subType                         String? // current_asset, fixed_asset, current_liability, etc.
-  parentId                        String?
-  parent                          Account?                      @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children                        Account[]                     @relation("AccountHierarchy")
-  balance                         Float                         @default(0)
-  isActive                        Boolean                       @default(true)
-  isSystemManaged                 Boolean                       @default(false)
-  description                     String?
-  branchId                        String?
-  branch                          Branch?                       @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  journalLines                    JournalLine[]
-  receivablesARConfigs            ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
-  receivablesRevenueConfigs       ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
-  receivablesTaxConfigs           ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
-  receivablesReturnsConfigs       ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
-  receivablesCOGSConfigs          ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
-  receivablesInventoryConfigs     ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
-  receivablesAdvanceConfigs       ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
-  receivablesOpeningEquityConfigs ReceivablesAccountingConfig[] @relation("ReceivablesOpeningEquityAccount")
+  id                                      String                        @id @default(cuid())
+  tenantId                                String
+  tenant                                  Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code                                    String // e.g. "1000", "2001"
+  name                                    String // e.g. "Cash", "Accounts Receivable"
+  type                                    String // asset, liability, equity, revenue, expense
+  subType                                 String? // current_asset, fixed_asset, current_liability, etc.
+  parentId                                String?
+  parent                                  Account?                      @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children                                Account[]                     @relation("AccountHierarchy")
+  balance                                 Float                         @default(0)
+  isActive                                Boolean                       @default(true)
+  isSystemManaged                         Boolean                       @default(false)
+  description                             String?
+  branchId                                String?
+  branch                                  Branch?                       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  journalLines                            JournalLine[]
+  receivablesARConfigs                    ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
+  receivablesRevenueConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
+  receivablesTaxConfigs                   ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
+  receivablesReturnsConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
+  receivablesCOGSConfigs                  ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
+  receivablesInventoryConfigs             ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
+  receivablesAdvanceConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
+  receivablesOpeningEquityConfigs         ReceivablesAccountingConfig[] @relation("ReceivablesOpeningEquityAccount")
   receivablesMarketplaceSettlementConfigs ReceivablesAccountingConfig[] @relation("ReceivablesMarketplaceSettlementAccount")
-  payablesAPConfigs               PayablesAccountingConfig[]    @relation("PayablesAPAccount")
-  payablesOpeningEquityConfigs    PayablesAccountingConfig[]    @relation("PayablesOpeningEquityAccount")
-  payablesPurchaseExpenseConfigs  PayablesAccountingConfig[]    @relation("PayablesPurchaseExpenseAccount")
-  payablesInventoryConfigs        PayablesAccountingConfig[]    @relation("PayablesInventoryAccount")
-  payablesReturnsConfigs          PayablesAccountingConfig[]    @relation("PayablesReturnsAccount")
-  payablesInputTaxConfigs          PayablesAccountingConfig[]    @relation("PayablesInputTaxAccount")
-  payablesFreightInventoryConfigs  PayablesAccountingConfig[]    @relation("PayablesFreightInventoryAccount")
-  payablesFreightExpenseConfigs    PayablesAccountingConfig[]    @relation("PayablesFreightExpenseAccount")
-  createdAt                       DateTime                      @default(now())
-  updatedAt                       DateTime                      @updatedAt
+  payablesAPConfigs                       PayablesAccountingConfig[]    @relation("PayablesAPAccount")
+  payablesOpeningEquityConfigs            PayablesAccountingConfig[]    @relation("PayablesOpeningEquityAccount")
+  payablesPurchaseExpenseConfigs          PayablesAccountingConfig[]    @relation("PayablesPurchaseExpenseAccount")
+  payablesInventoryConfigs                PayablesAccountingConfig[]    @relation("PayablesInventoryAccount")
+  payablesReturnsConfigs                  PayablesAccountingConfig[]    @relation("PayablesReturnsAccount")
+  payablesInputTaxConfigs                 PayablesAccountingConfig[]    @relation("PayablesInputTaxAccount")
+  payablesFreightInventoryConfigs         PayablesAccountingConfig[]    @relation("PayablesFreightInventoryAccount")
+  payablesFreightExpenseConfigs           PayablesAccountingConfig[]    @relation("PayablesFreightExpenseAccount")
+  createdAt                               DateTime                      @default(now())
+  updatedAt                               DateTime                      @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2836,33 +2857,33 @@ model HRAccountingConfig {
 }
 
 model ReceivablesAccountingConfig {
-  id                            String    @id @default(cuid())
-  tenantId                      String    @unique
-  tenant                        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  receivableAccountId           String?
-  receivableAccount             Account?  @relation("ReceivablesARAccount", fields: [receivableAccountId], references: [id], onDelete: SetNull)
-  salesRevenueAccountId         String?
-  salesRevenueAccount           Account?  @relation("ReceivablesRevenueAccount", fields: [salesRevenueAccountId], references: [id], onDelete: SetNull)
-  taxPayableAccountId           String?
-  taxPayableAccount             Account?  @relation("ReceivablesTaxAccount", fields: [taxPayableAccountId], references: [id], onDelete: SetNull)
-  salesReturnsAccountId         String?
-  salesReturnsAccount           Account?  @relation("ReceivablesReturnsAccount", fields: [salesReturnsAccountId], references: [id], onDelete: SetNull)
-  costOfGoodsSoldAccountId      String?
-  costOfGoodsSoldAccount        Account?  @relation("ReceivablesCOGSAccount", fields: [costOfGoodsSoldAccountId], references: [id], onDelete: SetNull)
-  inventoryAccountId            String?
-  inventoryAccount              Account?  @relation("ReceivablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
-  customerAdvancesAccountId     String?
-  customerAdvancesAccount       Account?  @relation("ReceivablesAdvanceAccount", fields: [customerAdvancesAccountId], references: [id], onDelete: SetNull)
-  openingBalanceEquityAccountId String?
-  openingBalanceEquityAccount   Account?  @relation("ReceivablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
+  id                             String    @id @default(cuid())
+  tenantId                       String    @unique
+  tenant                         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivableAccountId            String?
+  receivableAccount              Account?  @relation("ReceivablesARAccount", fields: [receivableAccountId], references: [id], onDelete: SetNull)
+  salesRevenueAccountId          String?
+  salesRevenueAccount            Account?  @relation("ReceivablesRevenueAccount", fields: [salesRevenueAccountId], references: [id], onDelete: SetNull)
+  taxPayableAccountId            String?
+  taxPayableAccount              Account?  @relation("ReceivablesTaxAccount", fields: [taxPayableAccountId], references: [id], onDelete: SetNull)
+  salesReturnsAccountId          String?
+  salesReturnsAccount            Account?  @relation("ReceivablesReturnsAccount", fields: [salesReturnsAccountId], references: [id], onDelete: SetNull)
+  costOfGoodsSoldAccountId       String?
+  costOfGoodsSoldAccount         Account?  @relation("ReceivablesCOGSAccount", fields: [costOfGoodsSoldAccountId], references: [id], onDelete: SetNull)
+  inventoryAccountId             String?
+  inventoryAccount               Account?  @relation("ReceivablesInventoryAccount", fields: [inventoryAccountId], references: [id], onDelete: SetNull)
+  customerAdvancesAccountId      String?
+  customerAdvancesAccount        Account?  @relation("ReceivablesAdvanceAccount", fields: [customerAdvancesAccountId], references: [id], onDelete: SetNull)
+  openingBalanceEquityAccountId  String?
+  openingBalanceEquityAccount    Account?  @relation("ReceivablesOpeningEquityAccount", fields: [openingBalanceEquityAccountId], references: [id], onDelete: SetNull)
   marketplaceSettlementAccountId String?
   marketplaceSettlementAccount   Account?  @relation("ReceivablesMarketplaceSettlementAccount", fields: [marketplaceSettlementAccountId], references: [id], onDelete: SetNull)
-  isEnabled                     Boolean   @default(false)
-  configuredBy                  String?
-  configuredAt                  DateTime?
-  updatedBy                     String?
-  createdAt                     DateTime  @default(now())
-  updatedAt                     DateTime  @updatedAt
+  isEnabled                      Boolean   @default(false)
+  configuredBy                   String?
+  configuredAt                   DateTime?
+  updatedBy                      String?
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
 
   @@map("receivables_accounting_configs")
 }

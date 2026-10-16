@@ -1,7 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift, Store } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 
@@ -60,6 +60,11 @@ const MODULES = [
       { name: 'suppliers.purchase_orders', displayName: 'Purchase Orders' },
       { name: 'suppliers.grn', displayName: 'Goods Received Notes' },
       { name: 'suppliers.statements', displayName: 'Supplier Statements' },
+    ]
+  },
+  {
+    id: 'procurement', name: 'Procurement Network', icon: Store, color: 'text-teal-700 bg-teal-100', features: [
+      { name: 'procurement.marketplace', displayName: 'Procurement Network' },
     ]
   },
   {

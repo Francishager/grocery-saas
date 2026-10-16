@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles, Lightbulb } from 'lucide-react'
+import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles, Lightbulb, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '@/lib/api'
@@ -36,7 +36,7 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   hr: Users, service: Wrench, job_card: Receipt, receivable: CircleDollarSign,
   payable: CircleDollarSign, refund: ArrowLeftRight, transfer: ArrowLeftRight,
   account: Settings2, customer: UserRound, supplier: Truck, user: UserRound,
-  approval: UserCheck, system: Settings2, communication: Bell, advisor_tip: Lightbulb,
+  approval: UserCheck, system: Settings2, communication: Bell, advisor_tip: Lightbulb, procurement: Store,
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -50,6 +50,7 @@ const TYPE_COLORS: Record<string, string> = {
   overdue_payable: 'bg-amber-100 text-amber-600',
   leave_request: 'bg-indigo-100 text-indigo-600',
   advisor_tip: 'bg-emerald-100 text-emerald-700',
+  procurement: 'bg-teal-100 text-teal-700',
 }
 
 function timeAgo(date: string | Date): string {
