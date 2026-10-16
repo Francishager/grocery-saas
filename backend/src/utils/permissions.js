@@ -51,6 +51,25 @@ const PERMISSION_TO_FEATURES = {
   canViewSupplier: ['suppliers'],
   canEditSupplier: ['suppliers'],
   canDeleteSupplier: ['suppliers'],
+  canViewProcurement: ['procurement.marketplace'],
+  canManageSupplierNetwork: ['procurement.marketplace'],
+  canManageMarketplaceCatalogue: ['procurement.marketplace'],
+  canCreateMarketplaceListing: ['procurement.marketplace'],
+  canChangeMarketplacePrice: ['procurement.marketplace'],
+  canCreateMarketplacePromotion: ['procurement.marketplace'],
+  canRunMarketplaceAds: ['procurement.marketplace'],
+  canManageMarketplacePromotions: ['procurement.marketplace'],
+  canCreateProcurementRFQ: ['procurement.marketplace'],
+  canRespondToProcurementRFQ: ['procurement.marketplace'],
+  canManageProcurementQuotes: ['procurement.marketplace'],
+  canCreateProcurementOrder: ['procurement.marketplace'],
+  canApproveProcurementOrder: ['procurement.marketplace'],
+  canAcknowledgeProcurementOrder: ['procurement.marketplace'],
+  canReceiveProcurementGoods: ['procurement.marketplace'],
+  canSubmitProcurementInvoice: ['procurement.marketplace'],
+  canReviewProcurementInvoice: ['procurement.marketplace'],
+  canApproveProcurementPayment: ['procurement.marketplace'],
+  canRecordProcurementPayment: ['procurement.marketplace'],
   canCreateStaff: [],
   canViewStaff: [],
   canEditStaff: [],
@@ -210,6 +229,12 @@ export const ALL_PERMISSION_KEYS = [
   "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
   "canCreateSupplier", "canViewSupplier", "canEditSupplier", "canDeleteSupplier",
+  "canViewProcurement", "canManageSupplierNetwork", "canManageMarketplaceCatalogue",
+  "canCreateMarketplaceListing", "canChangeMarketplacePrice",
+  "canCreateMarketplacePromotion", "canRunMarketplaceAds", "canManageMarketplacePromotions",
+  "canCreateProcurementRFQ", "canRespondToProcurementRFQ", "canManageProcurementQuotes",
+  "canCreateProcurementOrder", "canApproveProcurementOrder", "canAcknowledgeProcurementOrder",
+  "canReceiveProcurementGoods", "canSubmitProcurementInvoice", "canReviewProcurementInvoice", "canApproveProcurementPayment", "canRecordProcurementPayment",
   // Staff
   "canCreateStaff", "canViewStaff", "canEditStaff", "canDeleteStaff",
   // HR Management
@@ -282,6 +307,7 @@ export const PERMISSION_CATEGORIES = [
   { id: 'expenses', name: 'Expenses' },
   { id: 'customers', name: 'Customers & Receivables' },
   { id: 'suppliers', name: 'Suppliers' },
+  { id: 'procurement', name: 'Procurement Network' },
   { id: 'staff', name: 'Staff Access' },
   { id: 'hr', name: 'HR Dashboard' },
   { id: 'hr_employees', name: 'HR Employees' },
@@ -486,6 +512,25 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Delete suppliers',
     description: 'Remove suppliers where the system allows it.',
   },
+  canViewProcurement: { name: 'View procurement marketplace', description: 'Discover opted-in suppliers, public product offers, and open RFQs.' },
+  canManageSupplierNetwork: { name: 'Manage supplier relationships', description: 'Request, approve, suspend, and manage private supplier relationships.' },
+  canManageMarketplaceCatalogue: { name: 'Manage marketplace catalogue', description: 'Publish and update product offers and prices visible to permitted buyers.' },
+  canCreateMarketplaceListing: { name: 'Publish marketplace listings', description: 'Create and publish product or service offers to the selected marketplace audience.' },
+  canChangeMarketplacePrice: { name: 'Publish marketplace price changes', description: 'Change an offer price and record the reason in its price history.' },
+  canCreateMarketplacePromotion: { name: 'Publish marketplace promotions', description: 'Create time-limited promotions tied to the business’s marketplace listings.' },
+  canRunMarketplaceAds: { name: 'Run marketplace sponsored offers', description: 'Publish a sponsored marketplace placement tied to an active listing. This does not authorize paid advertising spend.' },
+  canManageMarketplacePromotions: { name: 'Manage marketplace campaigns', description: 'Pause, resume, or cancel promotions and sponsored offers published by this business.' },
+  canCreateProcurementRFQ: { name: 'Create procurement RFQs', description: 'Create private or open requests for quotation.' },
+  canRespondToProcurementRFQ: { name: 'Respond to procurement RFQs', description: 'Submit and revise offers for RFQs the business is authorised to access.' },
+  canManageProcurementQuotes: { name: 'Review procurement quotes', description: 'Review, compare, negotiate, and select quotes addressed to this business.' },
+  canCreateProcurementOrder: { name: 'Create purchase orders', description: 'Create purchase orders from selected supplier quotes.' },
+  canApproveProcurementOrder: { name: 'Approve purchase orders', description: 'Approve purchase orders before they are sent to suppliers.' },
+  canAcknowledgeProcurementOrder: { name: 'Acknowledge purchase orders', description: 'Accept or reject purchase orders addressed to this supplier business.' },
+  canReceiveProcurementGoods: { name: 'Receive procurement goods', description: 'Record verified partial or complete deliveries into the selected branch inventory.' },
+  canSubmitProcurementInvoice: { name: 'Submit supplier invoices', description: 'Submit invoices against goods or services covered by acknowledged procurement orders.' },
+  canReviewProcurementInvoice: { name: 'Review supplier invoices', description: 'Match, approve, or reject invoices against purchase orders and accepted receipts.' },
+  canApproveProcurementPayment: { name: 'Confirm buyer-submitted marketplace repayments', description: 'Confirm repayments reported by a buyer before they reduce seller receivables.' },
+  canRecordProcurementPayment: { name: 'Record seller-received marketplace repayments', description: 'Record funds received by the seller into a permitted transaction account and post the linked marketplace settlement.' },
   canCreateStaff: {
     name: 'Create staff users',
     description: 'Invite or create staff logins for this business.',
@@ -993,6 +1038,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
 
 function permissionCategoryForKey(key) {
   if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
+  if (key.includes('Procurement') || key.includes('SupplierNetwork') || key.includes('Marketplace')) return 'procurement';
   const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
   if (servicePermission) return servicePermission.category;
   if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';

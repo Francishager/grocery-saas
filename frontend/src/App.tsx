@@ -69,6 +69,7 @@ import ReferralPage from '@/pages/ReferralPage'
 import ExpensesPage from '@/pages/expenses/ExpensesPage'
 import CreditDebitNotesPage from '@/pages/CreditDebitNotesPage'
 import PaymentPage from '@/pages/PaymentPage'
+import ProcurementNetworkPage from '@/pages/ProcurementNetworkPage'
  
 // SaaS Admin Pages
 import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
@@ -85,6 +86,7 @@ import PlatformAuditPage from '@/pages/SaaSAdmin/PlatformAuditPage'
 import ReferralDashboard from '@/pages/SaaSAdmin/ReferralDashboard'
 import UserGuidePage from '@/pages/SaaSAdmin/UserGuidePage'
 import ManufacturingGuidePage from '@/pages/SaaSAdmin/ManufacturingGuidePage'
+import ProcurementGuidePage from '@/pages/SaaSAdmin/ProcurementGuidePage'
 import PlatformStaffPage from '@/pages/SaaSAdmin/PlatformStaffPage'
  
 // Public Route — redirects logged-in users to their dashboard
@@ -156,6 +158,7 @@ function App() {
           <Route path="referrals" element={<ReferralDashboard />} />
           <Route path="user-guide" element={<UserGuidePage />} />
           <Route path="manufacturing-guide" element={<ManufacturingGuidePage />} />
+          <Route path="procurement-guide" element={<ProcurementGuidePage />} />
           <Route path="payment" element={<PaymentPage />} />
         </Route>
  
@@ -179,6 +182,7 @@ function App() {
           <Route path="receivables/reconciliation" element={<FeatureGuard feature="receivables" permission="canViewReceivableReconciliation"><ReceivableReconciliationPage /></FeatureGuard>} />
           <Route path="receivables/:tab" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />
           <Route path="payables" element={<FeatureGuard feature="payables"><PayablesPage /></FeatureGuard>} />
+          <Route path="procurement" element={<FeatureGuard feature="procurement.marketplace" permission="canViewProcurement"><ProcurementNetworkPage /></FeatureGuard>} />
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />

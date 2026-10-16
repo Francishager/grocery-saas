@@ -1183,6 +1183,13 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     if (!owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
     if (owner?.password && owner.password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
 
+    const marketplace = business.marketplaceProfile;
+    const sellerType = String(marketplace?.sellerType || "").trim().toLowerCase();
+    const marketplaceCategory = String(marketplace?.category || "").trim().slice(0, 100);
+    if (marketplace && (!['supplier', 'manufacturer', 'both'].includes(sellerType) || !marketplaceCategory)) {
+      return res.status(400).json({ error: "Choose supplier, manufacturer, or both, and provide a marketplace category." });
+    }
+
     const existingUser = await prisma.user.findUnique({ where: { email: owner.email } });
     if (existingUser) return res.status(409).json({ error: "Owner email already exists" });
 
@@ -1207,6 +1214,22 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
 
       await tx.tenant.update({ where: { id: createdTenant.id }, data: { ownerId: user.id } });
       await ensureTenantAccountingSetup(tx, { tenantId: createdTenant.id, userId: user.id, enableNewSetups: true });
+      if (marketplace) {
+        await tx.procurementProfile.create({ data: {
+          tenantId: createdTenant.id,
+          sellerType,
+          category: marketplaceCategory,
+          description: String(marketplace.description || "").trim().slice(0, 2000),
+          discoverable: true,
+        } });
+        const marketplaceFeature = await tx.feature.findUnique({ where: { name: 'procurement.marketplace' }, select: { id: true } });
+        if (!marketplaceFeature) throw new Error('Procurement marketplace feature is not installed. Apply the marketplace migration before provisioning a seller.');
+        await tx.tenantFeature.upsert({
+          where: { tenantId_featureId: { tenantId: createdTenant.id, featureId: marketplaceFeature.id } },
+          create: { tenantId: createdTenant.id, featureId: marketplaceFeature.id, enabled: true },
+          update: { enabled: true },
+        });
+      }
 
       return { tenant: createdTenant, user };
     });
@@ -1235,6 +1258,8 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
         data: {
           businessName: business.name,
           businessType: business.businessType,
+          marketplaceSellerType: marketplace ? sellerType : null,
+          marketplaceCategory: marketplace ? marketplaceCategory : null,
           ownerEmail: owner.email,
           planId: business.planId,
           slug: tenant.slug,
@@ -1251,6 +1276,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       ownerEmail: owner.email,
       emailSent,
       emailError,
+      marketplaceProfileCreated: Boolean(marketplace),
       tempPassword,
       otp,
     });

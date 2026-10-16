@@ -38,6 +38,8 @@ const createEmptyForm = () => ({
   businessEmail: '',
   businessPhone: '',
   businessType: '',
+  marketplaceSellerType: '',
+  marketplaceCategory: '',
   planId: '',
   ownerName: '',
   ownerEmail: '',
@@ -140,6 +142,7 @@ export const ProvisionPage: React.FC = () => {
             phone: form.businessPhone,
             businessType: form.businessType || undefined,
             planId: form.planId || undefined,
+            ...(form.marketplaceSellerType ? { marketplaceProfile: { sellerType: form.marketplaceSellerType, category: form.marketplaceCategory } } : {}),
           },
           owner: {
             name: form.ownerName,
@@ -260,6 +263,17 @@ export const ProvisionPage: React.FC = () => {
               <option value="manufacturing">Manufacturing</option>
               <option value="other">Other</option>
             </select>
+          </div>
+          <div className="rounded-md border p-4 space-y-3">
+            <div>
+              <h3 className="font-medium">Marketplace seller profile</h3>
+              <p className="mt-1 text-sm text-gray-500">Optional. The business remains a standard JibuSales tenant and can use POS and other modules included in its plan.</p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div><label className="block text-sm font-medium mb-1">Seller type</label><select value={form.marketplaceSellerType} onChange={(e) => handleChange('marketplaceSellerType', e.target.value)} className="w-full px-3 py-2 border rounded-lg"><option value="">No marketplace profile</option><option value="supplier">Supplier / reseller</option><option value="manufacturer">Manufacturer</option><option value="both">Supplier and manufacturer</option></select></div>
+              {form.marketplaceSellerType && <div><label className="block text-sm font-medium mb-1">Marketplace category *</label><input required value={form.marketplaceCategory} onChange={(e) => handleChange('marketplaceCategory', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g. Food wholesaler, building materials" /></div>}
+            </div>
+            {form.marketplaceSellerType && <p className="text-xs text-gray-500">This creates a discoverable marketplace profile. Private quotations, customers, purchase history, invoices, and balances remain private.</p>}
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Subscription Plan *</label>

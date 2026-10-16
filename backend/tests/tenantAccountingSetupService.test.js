@@ -48,11 +48,15 @@ test('new tenant setup provisions valid account mappings and is idempotent', asy
   const first = await ensureTenantAccountingSetup(db, { tenantId: 'new-tenant', userId: 'owner', enableNewSetups: true })
   assert.equal(first.receivables.isEnabled, true)
   assert.equal(first.payables.isEnabled, true)
-  assert.equal(db._accounts.length, 11)
+  assert.equal(db._accounts.length, 15)
+  assert.ok(first.payables.inputTaxAccountId)
+  assert.ok(first.payables.freightInventoryAccountId)
+  assert.ok(first.payables.freightExpenseAccountId)
+  assert.ok(first.receivables.marketplaceSettlementAccountId)
   const second = await ensureTenantAccountingSetup(db, { tenantId: 'new-tenant', userId: 'owner', enableNewSetups: true })
   assert.equal(second.receivables.isEnabled, true)
   assert.equal(second.payables.isEnabled, true)
-  assert.equal(db._accounts.length, 11)
+  assert.equal(db._accounts.length, 15)
 })
 
 test('existing tenant with transaction history gets mappings but stays disabled for signed-off migration', async () => {
@@ -62,7 +66,7 @@ test('existing tenant with transaction history gets mappings but stays disabled 
   assert.equal(setup.historicalActivityCount, 21)
   assert.equal(setup.receivables.isEnabled, false)
   assert.equal(setup.payables.isEnabled, false)
-  assert.equal(db._accounts.length, 11)
+  assert.equal(db._accounts.length, 15)
 })
 
 test('existing incomplete configuration gets only missing mappings and stays disabled', async () => {

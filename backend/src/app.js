@@ -48,6 +48,7 @@ import onboardingRoutes from "./routes/onboarding.js";
 import userGuideRoutes from "./routes/user-guide.js";
 import widgetsRouter from "../routes/widgets.js";
 import creditDebitNotesRouter from "../routes/credit-debit-notes.js";
+import procurementRouter from "./routes/procurement.js";
 
 // Phase 1 HR Core Routes
 import positionRoutes from "./routes/positionRoutes.js";
@@ -258,6 +259,7 @@ app.use("/api/referrals", referralRoutes);
 app.use("/api/user-guide", userGuideRoutes);
 app.use("/api/widgets", widgetsRouter);
 app.use("/api/credit-debit-notes", creditDebitNotesRouter);
+app.use("/api/procurement", procurementRouter);
 
 // 404
 app.use("/{*path}", (req, res) => {

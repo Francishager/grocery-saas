@@ -37,6 +37,15 @@ test('credit sale recognition debits receivables and recognizes net revenue, tax
   assert.equal(lines.find((line) => line.accountId === 'inventory').credit, 40)
 })
 
+test('seller marketplace invoice recognizes delivery recovery as revenue without altering product COGS', () => {
+  const lines = saleRecognitionLines(config, { total: 130, tax: 15, freightAmount: 15 }, [{ cost: 20, quantity: 2, product: { itemType: 'product' } }])
+  assertBalanced(lines)
+  assert.equal(lines.find((line) => line.accountId === 'ar').debit, 130)
+  assert.equal(lines.find((line) => line.accountId === 'revenue').credit, 115)
+  assert.equal(lines.find((line) => line.accountId === 'tax').credit, 15)
+  assert.equal(lines.find((line) => line.accountId === 'cogs').debit, 40)
+})
+
 test('cash sale recognition posts proceeds to the linked transaction account', () => {
   const lines = cashSaleRecognitionLines(config, { total: 115, tax: 15 }, [{ cost: 20, quantity: 2, product: { itemType: 'product' } }], 'till')
   assertBalanced(lines)
@@ -105,6 +114,22 @@ test('mapping validation accepts distinct tenant-owned leaf accounts with matchi
   const client = { account: { findMany: async () => Object.entries(types).map(([field, type]) => ({ id: field, type, name: field, description: null, _count: { children: 0 } })) } }
   const result = await validateReceivablesAccountingConfig(client, 'tenant', config, { requireEnabled: true })
   assert.equal(result.valid, true)
+})
+
+test('marketplace settlements require a separate postable asset account', async () => {
+  const mapped = {
+    ...Object.fromEntries(Object.keys({
+      receivableAccountId: 1, salesRevenueAccountId: 1, taxPayableAccountId: 1,
+      salesReturnsAccountId: 1, costOfGoodsSoldAccountId: 1, inventoryAccountId: 1,
+      customerAdvancesAccountId: 1, openingBalanceEquityAccountId: 1,
+    }).map((field) => [field, field])),
+    marketplaceSettlementAccountId: 'settlement', isEnabled: true,
+  }
+  const types = { receivableAccountId: 'asset', salesRevenueAccountId: 'revenue', taxPayableAccountId: 'liability', salesReturnsAccountId: 'revenue', costOfGoodsSoldAccountId: 'expense', inventoryAccountId: 'asset', customerAdvancesAccountId: 'liability', openingBalanceEquityAccountId: 'equity', marketplaceSettlementAccountId: 'asset' }
+  const client = { account: { findMany: async () => Object.entries(types).map(([field, type]) => ({ id: field === 'marketplaceSettlementAccountId' ? 'settlement' : field, type, name: field, description: null, _count: { children: 0 } })) } }
+  const result = await validateReceivablesAccountingConfig(client, 'tenant', mapped, { requireEnabled: true })
+  assert.equal(result.valid, true)
+  assert.equal(receiptCollectionLines(mapped, { transactionAccountId: mapped.marketplaceSettlementAccountId, amount: 125, receivableApplied: 125 }).find((line) => line.accountId === 'settlement').debit, 125)
 })
 
 test('inventory accounting refuses sales with no saved line cost', () => {

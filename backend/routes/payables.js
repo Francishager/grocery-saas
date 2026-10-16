@@ -8,6 +8,8 @@ import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { getPayablesAccountingConfig, getCashAccountLedgerId, postPayablesJournal, supplierOpeningBalanceLines, supplierPaymentLines, supplierPurchaseLines } from '../src/services/payablesAccountingService.js'
+import { registerProcurementSupplierPaymentApproval } from '../src/services/procurementSellerAccountingService.js'
+import { createTenantNotification } from '../src/utils/notifications.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -772,6 +774,15 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
     }
 
     const payment = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "suppliers" WHERE "id" = ${supplierId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const lockedSupplier = await tx.supplier.findFirst({ where: scopedWhere(scope, { id: supplierId, status: 'active' }) })
+      if (!lockedSupplier || paidAmount > Number(lockedSupplier.balance || 0) + 0.001) throw Object.assign(new Error('The supplier balance changed. Refresh and enter a payment within its current balance.'), { statusCode: 409 })
+      let lockedPurchase = purchase
+      if (purchaseId) {
+        await tx.$queryRaw`SELECT "id" FROM "supplier_purchases" WHERE "id" = ${purchaseId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+        lockedPurchase = await tx.supplierPurchase.findFirst({ where: { id: purchaseId, tenantId: scope.tenantId, supplierId } })
+        if (!lockedPurchase || paidAmount > Number(lockedPurchase.balance || 0)) throw Object.assign(new Error('The supplier purchase balance changed. Refresh and enter a payment within its current balance.'), { statusCode: 409 })
+      }
       const createdPayment = await tx.supplierPayment.create({
         data: {
           tenantId: scope.tenantId,
@@ -820,15 +831,15 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
         })
       }
 
-      const newBalance = Math.max(0, supplier.balance - paidAmount)
+      const newBalance = Math.max(0, lockedSupplier.balance - paidAmount)
       await tx.supplier.update({
         where: { id: supplierId },
         data: { balance: newBalance }
       })
 
-      if (purchase) {
-        const newAmountPaid = Math.min(purchase.total, purchase.amountPaid + paidAmount)
-        const newPurchaseBalance = Math.max(0, purchase.balance - paidAmount)
+      if (lockedPurchase) {
+        const newAmountPaid = Math.min(lockedPurchase.total, lockedPurchase.amountPaid + paidAmount)
+        const newPurchaseBalance = Math.max(0, lockedPurchase.balance - paidAmount)
 
         await tx.supplierPurchase.update({
           where: { id: purchaseId },
@@ -838,12 +849,36 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
             paymentStatus: newPurchaseBalance <= 0 ? 'paid' : 'partial'
           }
         })
+        const marketplaceApproval = await registerProcurementSupplierPaymentApproval(tx, { supplierPayment: createdPayment, purchaseId })
+        return { payment: createdPayment, marketplaceApproval }
       }
 
-      return createdPayment
+      return { payment: createdPayment, marketplaceApproval: null }
     })
 
-    res.status(201).json(payment)
+    if (payment.marketplaceApproval) {
+      try {
+        const [reviewers, sellerTenant] = await Promise.all([
+          prisma.userPermission.findMany({
+            where: { canApproveProcurementPayment: true, user: { tenantId: payment.marketplaceApproval.sellerTenantId, isActive: true } },
+            select: { userId: true },
+          }),
+          prisma.tenant.findUnique({ where: { id: payment.marketplaceApproval.sellerTenantId }, select: { ownerId: true } }),
+        ])
+        const reviewerIds = [...new Set([...reviewers.map(({ userId }) => userId), sellerTenant?.ownerId].filter(Boolean))]
+        await Promise.all(reviewerIds.map((userId) => createTenantNotification({
+          tenantId: payment.marketplaceApproval.sellerTenantId,
+          userId,
+          title: 'Marketplace repayment awaiting approval',
+          message: 'A buyer submitted a repayment. Approve it to apply it to the seller receivable.',
+          type: 'procurement',
+          metadata: { url: '/tenant/procurement', paymentApprovalId: payment.marketplaceApproval.id },
+        })))
+      } catch (notificationError) {
+        console.error('Marketplace repayment notification failed:', notificationError)
+      }
+    }
+    res.status(201).json(payment.payment)
   } catch (error) {
     console.error('Record supplier payment error:', error)
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })

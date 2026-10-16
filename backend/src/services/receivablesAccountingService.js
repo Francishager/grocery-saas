@@ -19,7 +19,7 @@ export async function validateReceivablesAccountingConfig(client, tenantId, conf
   const missing = Object.keys(accountRoles).filter((key) => !config[key])
   if (missing.length) return { valid: false, missing }
   const accounts = await client.account.findMany({
-    where: { tenantId, id: { in: Object.keys(accountRoles).map((field) => config[field]) }, isActive: true },
+    where: { tenantId, id: { in: [...Object.keys(accountRoles).map((field) => config[field]), config.marketplaceSettlementAccountId].filter(Boolean) }, isActive: true },
     include: { _count: { select: { children: true } } },
   })
   const byId = new Map(accounts.map((account) => [account.id, account]))
@@ -31,7 +31,12 @@ export async function validateReceivablesAccountingConfig(client, tenantId, conf
     else if (Number(account._count?.children || 0) > 0 || String(account.subType || '').toLowerCase() === 'category') errors.push(`${account.name} is a parent account and cannot receive postings`)
     else if (linkedCashAccountId(account)) errors.push(`${account.name} is a transaction account; select a normal chart account for ${field}`)
   }
-  const ids = Object.keys(accountRoles).map((field) => config[field])
+  if (config.marketplaceSettlementAccountId) {
+    const settlement = byId.get(config.marketplaceSettlementAccountId)
+    if (!settlement) errors.push('Marketplace settlement account is missing, inactive, or belongs to another business')
+    else if (String(settlement.type).toLowerCase() !== 'asset' || Number(settlement._count?.children || 0) > 0 || String(settlement.subType || '').toLowerCase() === 'category' || linkedCashAccountId(settlement)) errors.push('Marketplace settlement account must be a postable asset account, not a transaction account')
+  }
+  const ids = [...Object.keys(accountRoles).map((field) => config[field]), config.marketplaceSettlementAccountId].filter(Boolean)
   if (new Set(ids).size !== ids.length) errors.push('Each receivables accounting role must use a different account')
   return { valid: errors.length === 0, missing: [], errors, accounts: [...byId.values()] }
 }

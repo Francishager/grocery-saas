@@ -9,6 +9,7 @@ const SYSTEM_ACCOUNT_ROLES = [
   { key: 'inventoryAccountId', name: 'Inventory', code: '1300', type: 'asset', subType: 'inventory', candidates: ['1300', 'Inventory', 'Inventory Asset'] },
   { key: 'taxPayableAccountId', name: 'Output Tax Payable', code: '2200', type: 'liability', subType: 'current_liability', candidates: ['2200', 'VAT Payable', 'Sales Tax Payable', 'Output Tax Payable'] },
   { key: 'customerAdvancesAccountId', name: 'Customer Advances', code: '2300', type: 'liability', subType: 'current_liability', candidates: ['2300', 'Customer Advances', 'Customer Deposits', 'Unearned Revenue'] },
+  { key: 'marketplaceSettlementAccountId', name: 'Marketplace Settlement Clearing', code: '1280', type: 'asset', subType: 'current_asset', candidates: ['1280', 'Marketplace Settlement Clearing'] },
   { key: 'salesRevenueAccountId', name: 'Sales Revenue', code: '4000', type: 'revenue', subType: 'operating_revenue', candidates: ['4000', 'Sales Revenue', 'Sales'] },
   { key: 'salesReturnsAccountId', name: 'Sales Returns and Allowances', code: '4050', type: 'revenue', subType: 'contra_revenue', candidates: ['4050', 'Sales Returns', 'Sales Returns and Allowances'] },
   { key: 'costOfGoodsSoldAccountId', name: 'Cost of Goods Sold', code: '5000', type: 'expense', subType: 'cost_of_sales', candidates: ['5000', 'Cost of Goods Sold', 'Cost of Sales'] },
@@ -16,6 +17,9 @@ const SYSTEM_ACCOUNT_ROLES = [
   { key: 'openingBalanceEquityAccountId', name: 'Opening Balance Equity', code: '3900', type: 'equity', subType: 'opening_balance', candidates: ['Opening Balance Equity'] },
   { key: 'purchaseExpenseAccountId', name: 'Supplier Service Purchases', code: '6200', type: 'expense', subType: 'operating_expense', candidates: ['6200', 'Supplier Service Purchases'] },
   { key: 'purchaseReturnsAccountId', name: 'Purchase Returns and Allowances', code: '6050', type: 'expense', subType: 'contra_expense', candidates: ['6050', 'Purchase Returns', 'Purchase Returns and Allowances'] },
+  { key: 'inputTaxAccountId', name: 'Recoverable Input Tax', code: '1410', type: 'asset', subType: 'current_asset', candidates: ['1410', 'Recoverable Input Tax', 'Input VAT', 'Input Tax'] },
+  { key: 'freightInventoryAccountId', name: 'Freight-in Inventory Allocation', code: '1420', type: 'asset', subType: 'inventory', candidates: ['1420', 'Freight-in Inventory Allocation'] },
+  { key: 'freightExpenseAccountId', name: 'Freight on Services Expense', code: '6250', type: 'expense', subType: 'operating_expense', candidates: ['6250', 'Freight on Services Expense'] },
 ]
 
 function isPostable(account) {
@@ -77,8 +81,8 @@ async function ensureWithClient(client, { tenantId, userId, enableNewSetups }) {
       if (existingAccount) accountsByRole.set(role.key, existingAccount)
     }
   }
-  const receivablesRoles = SYSTEM_ACCOUNT_ROLES.filter((role) => ['receivableAccountId', 'salesRevenueAccountId', 'taxPayableAccountId', 'salesReturnsAccountId', 'costOfGoodsSoldAccountId', 'inventoryAccountId', 'customerAdvancesAccountId', 'openingBalanceEquityAccountId'].includes(role.key))
-  const payablesRoles = SYSTEM_ACCOUNT_ROLES.filter((role) => ['payableAccountId', 'openingBalanceEquityAccountId', 'purchaseExpenseAccountId', 'inventoryAccountId', 'purchaseReturnsAccountId'].includes(role.key))
+  const receivablesRoles = SYSTEM_ACCOUNT_ROLES.filter((role) => ['receivableAccountId', 'salesRevenueAccountId', 'taxPayableAccountId', 'salesReturnsAccountId', 'costOfGoodsSoldAccountId', 'inventoryAccountId', 'customerAdvancesAccountId', 'openingBalanceEquityAccountId', 'marketplaceSettlementAccountId'].includes(role.key))
+  const payablesRoles = SYSTEM_ACCOUNT_ROLES.filter((role) => ['payableAccountId', 'openingBalanceEquityAccountId', 'purchaseExpenseAccountId', 'inventoryAccountId', 'purchaseReturnsAccountId', 'inputTaxAccountId', 'freightInventoryAccountId', 'freightExpenseAccountId'].includes(role.key))
   const rolesToProvision = new Set([
     ...receivablesRoles.filter((role) => !receivablesExisting?.[role.key]).map((role) => role.key),
     ...payablesRoles.filter((role) => !payablesExisting?.[role.key]).map((role) => role.key),

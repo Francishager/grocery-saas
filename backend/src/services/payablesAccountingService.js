@@ -9,6 +9,11 @@ const roles = {
   inventoryAccountId: 'asset',
   purchaseReturnsAccountId: 'expense',
 }
+const optionalRoles = {
+  inputTaxAccountId: 'asset',
+  freightInventoryAccountId: 'asset',
+  freightExpenseAccountId: 'expense',
+}
 
 export async function getPayablesAccountingConfig(client, tenantId) {
   return client.payablesAccountingConfig.findUnique({ where: { tenantId } })
@@ -18,20 +23,21 @@ export async function validatePayablesAccountingConfig(client, tenantId, config,
   if (!config || (requireEnabled && !config.isEnabled)) return { valid: false, missing: Object.keys(roles) }
   const missing = Object.keys(roles).filter((key) => !config[key])
   if (missing.length) return { valid: false, missing }
+  const configuredRoles = { ...roles, ...Object.fromEntries(Object.entries(optionalRoles).filter(([key]) => config[key])) }
   const accounts = await client.account.findMany({
-    where: { tenantId, id: { in: Object.keys(roles).map((key) => config[key]) }, isActive: true },
+    where: { tenantId, id: { in: Object.keys(configuredRoles).map((key) => config[key]) }, isActive: true },
     include: { _count: { select: { children: true } } },
   })
   const byId = new Map(accounts.map((account) => [account.id, account]))
   const errors = []
-  for (const [field, expected] of Object.entries(roles)) {
+  for (const [field, expected] of Object.entries(configuredRoles)) {
     const account = byId.get(config[field])
     if (!account) errors.push(`${field} is missing, inactive, or belongs to another business`)
     else if (String(account.type).toLowerCase() !== expected && !(expected === 'expense' && String(account.type).toLowerCase() === 'expenses')) errors.push(`${account.name} must be a ${expected} account`)
     else if (Number(account._count?.children || 0) || String(account.subType || '').toLowerCase() === 'category') errors.push(`${account.name} is a parent account and cannot receive postings`)
     else if (linkedCashAccountId(account)) errors.push(`${account.name} is a transaction account; select a normal chart account for ${field}`)
   }
-  if (new Set(Object.keys(roles).map((key) => config[key])).size !== Object.keys(roles).length) errors.push('Each payables accounting role must use a different account')
+  if (new Set(Object.keys(configuredRoles).map((key) => config[key])).size !== Object.keys(configuredRoles).length) errors.push('Each payables accounting role must use a different account')
   return { valid: errors.length === 0, missing: [], errors, accounts }
 }
 
@@ -107,6 +113,31 @@ export function supplierPurchaseLines(config, purchase, items, cashAccountLedger
   if (serviceTotal) lines.push({ accountId: config.purchaseExpenseAccountId, debit: serviceTotal, credit: 0, description: 'Supplier service purchase expense' })
   if (purchase.amountPaid > 0) lines.push({ accountId: cashAccountLedgerId, debit: 0, credit: money(purchase.amountPaid), description: 'Supplier purchase paid at receipt' })
   if (purchase.balance > 0) lines.push({ accountId: config.payableAccountId, debit: 0, credit: money(purchase.balance), description: 'Supplier payable recognized' })
+  return lines
+}
+
+export function procurementInvoiceLines(config, { items, taxAmount = 0, freightInventoryAmount = 0, freightExpenseAmount = 0, total, reference }) {
+  const lines = items.map((item) => ({
+    accountId: String(item.product?.itemType || '').toLowerCase() === 'service' ? config.purchaseExpenseAccountId : config.inventoryAccountId,
+    debit: money(item.subtotal), credit: 0,
+    description: `Received ${item.product?.name || 'procurement item'}`,
+  }))
+  const tax = money(taxAmount)
+  const inventoryFreight = money(freightInventoryAmount)
+  const serviceFreight = money(freightExpenseAmount)
+  if (tax > 0) {
+    if (!config.inputTaxAccountId) throw Object.assign(new Error('Recoverable Input Tax account is not configured.'), { statusCode: 409 })
+    lines.push({ accountId: config.inputTaxAccountId, debit: tax, credit: 0, description: `Recoverable input tax ${reference}` })
+  }
+  if (inventoryFreight > 0) {
+    if (!config.freightInventoryAccountId) throw Object.assign(new Error('Freight-in Inventory Allocation account is not configured.'), { statusCode: 409 })
+    lines.push({ accountId: config.freightInventoryAccountId, debit: inventoryFreight, credit: 0, description: `Capitalized freight-in for inventory ${reference}` })
+  }
+  if (serviceFreight > 0) {
+    if (!config.freightExpenseAccountId) throw Object.assign(new Error('Freight on Services Expense account is not configured.'), { statusCode: 409 })
+    lines.push({ accountId: config.freightExpenseAccountId, debit: serviceFreight, credit: 0, description: `Freight allocated to services ${reference}` })
+  }
+  lines.push({ accountId: config.payableAccountId, debit: 0, credit: money(total), description: `Supplier payable ${reference}` })
   return lines
 }
 

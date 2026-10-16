@@ -5,6 +5,7 @@ import {
   supplierOpeningBalanceLines,
   supplierPaymentLines,
   supplierPurchaseLines,
+  procurementInvoiceLines,
 } from '../src/services/payablesAccountingService.js'
 
 test('supplier opening balance is credited to AP with equity offset', () => {
@@ -39,4 +40,23 @@ test('supplier debit note credits returned stock cost and books the allowance di
   assert.equal(lines.reduce((sum, line) => sum + line.debit, 0), 120)
   assert.equal(lines.reduce((sum, line) => sum + line.credit, 0), 120)
   assert.deepEqual(lines.map((line) => [line.accountId, line.debit, line.credit]), [['ap', 120, 0], ['inventory', 0, 100], ['returns', 0, 20]])
+})
+
+test('procurement invoice separately posts recoverable tax and allocated goods/service freight and balances AP', () => {
+  const lines = procurementInvoiceLines({
+    payableAccountId: 'ap', inventoryAccountId: 'inventory', purchaseExpenseAccountId: 'service-expense',
+    inputTaxAccountId: 'input-tax', freightInventoryAccountId: 'freight-in', freightExpenseAccountId: 'service-freight',
+  }, {
+    items: [
+      { subtotal: 1000, product: { itemType: 'product', name: 'Stock item' } },
+      { subtotal: 500, product: { itemType: 'service', name: 'Installation' } },
+    ],
+    taxAmount: 180, freightInventoryAmount: 60, freightExpenseAmount: 30, total: 1770, reference: 'INV-1',
+  })
+  assert.equal(lines.reduce((sum, line) => sum + line.debit, 0), 1770)
+  assert.equal(lines.reduce((sum, line) => sum + line.credit, 0), 1770)
+  assert.deepEqual(lines.map((line) => [line.accountId, line.debit, line.credit]), [
+    ['inventory', 1000, 0], ['service-expense', 500, 0], ['input-tax', 180, 0],
+    ['freight-in', 60, 0], ['service-freight', 30, 0], ['ap', 0, 1770],
+  ])
 })
