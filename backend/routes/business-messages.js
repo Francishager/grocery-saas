@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import prisma from '../src/db.js';
-import { authenticateToken, requireTenant } from '../middleware/auth.js';
+import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js';
 import { requireFeature } from '../middleware/featureCheck.js';
 
 const router = Router();
@@ -25,7 +25,7 @@ function conversationView(row, currentUserId, unreadCounts = new Map()) {
 
 router.use(...access);
 
-router.get('/people', async (req, res) => {
+router.get('/people', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const people = await prisma.user.findMany({
     where: { tenantId, isActive: true, id: { not: req.user.id } },
@@ -35,7 +35,7 @@ router.get('/people', async (req, res) => {
   res.json({ people: people.map((person) => ({ ...person, name: displayName(person) })) });
 });
 
-router.get('/conversations', async (req, res) => {
+router.get('/conversations', requirePermission('canViewTeamMessaging'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const rows = await prisma.businessConversation.findMany({
     where: { tenantId, OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
@@ -66,7 +66,7 @@ router.get('/conversations', async (req, res) => {
   })) });
 });
 
-router.post('/conversations', async (req, res) => {
+router.post('/conversations', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const recipientId = String(req.body?.recipientId || '').trim();
   if (!recipientId || recipientId === req.user.id) return res.status(400).json({ error: 'Choose another active team member.' });
@@ -81,7 +81,7 @@ router.post('/conversations', async (req, res) => {
   res.status(200).json({ conversation: { id: conversation.id, participant: { ...recipient, name: displayName(recipient) }, updatedAt: conversation.updatedAt } });
 });
 
-router.get('/conversations/:id/messages', async (req, res) => {
+router.get('/conversations/:id/messages', requirePermission('canViewTeamMessaging'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const conversation = await prisma.businessConversation.findFirst({
     where: { id: req.params.id, tenantId, OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
@@ -100,7 +100,7 @@ router.get('/conversations/:id/messages', async (req, res) => {
   res.json({ messages: messages.reverse() });
 });
 
-router.post('/conversations/:id/messages', async (req, res) => {
+router.post('/conversations/:id/messages', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const body = String(req.body?.body || '').trim();
   if (!body || body.length > 4000) return res.status(400).json({ error: 'Write a message of 1 to 4,000 characters.' });

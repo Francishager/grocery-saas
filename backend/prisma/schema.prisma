@@ -867,6 +867,8 @@ model UserPermission {
   canCreateCommunication            Boolean  @default(false)
   canEditCommunication              Boolean  @default(false)
   canDeleteCommunication            Boolean  @default(false)
+  canViewTeamMessaging              Boolean  @default(false)
+  canSendTeamMessages               Boolean  @default(false)
   // Accounting
   canViewAccounting                 Boolean  @default(false)
   canCreateAccounting               Boolean  @default(false)

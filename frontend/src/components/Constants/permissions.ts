@@ -49,6 +49,7 @@ export const permissionCategories = [
   { id: 'agriculture', name: 'Agriculture' },
   ...SERVICE_PERMISSION_CATEGORIES,
   { id: 'communication', name: 'Communication' },
+  { id: 'team_messaging', name: 'Team Messaging' },
   { id: 'accounting', name: 'Accounting' },
   { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
   { id: 'billing', name: 'Billing & Subscription' },
@@ -272,8 +273,10 @@ export const permissions: Permission[] = [
   ...SERVICE_PERMISSION_DEFINITIONS.map(p => ({ ...p, accessesBusinessData: true })),
 
   // Communication
-  { id: 'canViewCommunication', name: 'View Communication', description: 'Access communication module', category: 'communication', accessesBusinessData: true },
-  { id: 'canCreateCommunication', name: 'Create Communication', description: 'Create and send messages/notifications', category: 'communication', accessesBusinessData: true },
+  { id: 'canViewCommunication', name: 'View Communication Records', description: 'View business communication and notification records', category: 'communication', accessesBusinessData: true },
+  { id: 'canCreateCommunication', name: 'Create Communication Records', description: 'Create business communication and notification records', category: 'communication', accessesBusinessData: true },
+  { id: 'canViewTeamMessaging', name: 'View Team Messaging', description: 'Open team chats, conversations, and active business-user contacts', category: 'team_messaging', accessesBusinessData: true },
+  { id: 'canSendTeamMessages', name: 'Send Team Messages', description: 'Start private team chats and send messages', category: 'team_messaging', accessesBusinessData: true },
   { id: 'canEditCommunication', name: 'Edit Communication', description: 'Edit communication templates and settings', category: 'communication', accessesBusinessData: true },
   { id: 'canDeleteCommunication', name: 'Delete Communication', description: 'Delete communication records', category: 'communication', accessesBusinessData: true },
 

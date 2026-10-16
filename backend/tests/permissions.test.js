@@ -93,6 +93,28 @@ test('new transaction permissions are grouped separately from accounting permiss
   assert.equal(PERMISSION_METADATA.canCreateWithdrawal.category, 'transactions');
 });
 
+test('team messaging permissions are separate from generic communication permissions', () => {
+  const messagingPermissions = resolveEffectivePermissions(
+    { role: 'attendant' },
+    { canViewCommunication: true, canCreateCommunication: true },
+    [],
+    new Set(['communication', 'communication.team_messaging']),
+  );
+  const explicitlyGranted = resolveEffectivePermissions(
+    { role: 'attendant' },
+    { canViewTeamMessaging: true, canSendTeamMessages: false },
+    [],
+    new Set(['communication.team_messaging']),
+  );
+
+  assert.ok(!messagingPermissions.includes('canViewTeamMessaging'));
+  assert.ok(!messagingPermissions.includes('canSendTeamMessages'));
+  assert.ok(explicitlyGranted.includes('canViewTeamMessaging'));
+  assert.ok(!explicitlyGranted.includes('canSendTeamMessages'));
+  assert.equal(PERMISSION_METADATA.canViewTeamMessaging.category, 'team_messaging');
+  assert.equal(PERMISSION_METADATA.canSendTeamMessages.category, 'team_messaging');
+});
+
 test('receivable reconciliation access and review are independently permissioned', () => {
   assert.equal(PERMISSION_METADATA.canViewReceivableReconciliation.category, 'customers');
   assert.equal(PERMISSION_METADATA.canApplyReceivableReconciliation.category, 'customers');

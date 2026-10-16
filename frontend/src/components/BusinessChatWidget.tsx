@@ -46,10 +46,11 @@ function conversationTime(value?: string | null) {
 }
 
 export function BusinessChatWidget() {
-  const { user } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { canAccessFeature } = useFeatureAccess()
   const enabled = Boolean(user && canAccessFeature('communication.team_messaging'))
-  const canSend = enabled
+  const canView = user?.role === 'owner' || hasPermission('canViewTeamMessaging')
+  const canSend = canView && (user?.role === 'owner' || hasPermission('canSendTeamMessages'))
   const [open, setOpen] = useState(false)
   const [newMessageMode, setNewMessageMode] = useState(false)
   const [people, setPeople] = useState<Person[]>([])
@@ -87,7 +88,7 @@ export function BusinessChatWidget() {
   }, [launcherPosition])
 
   const refreshConversations = useCallback(async () => {
-    if (!enabled) return
+    if (!enabled || !canView) return
     try {
       const { conversations: rows } = await api<{ conversations: Conversation[] }>('/conversations')
       const firstLoad = seenMessages.current === null
@@ -102,15 +103,15 @@ export function BusinessChatWidget() {
       seenMessages.current = new Set(rows.flatMap((row) => [row.latestMessage?.id, row.latestUnread?.id]).filter((id): id is string => Boolean(id)))
       setConversations(rows)
     } catch { /* Keep the current inbox usable during short network interruptions. */ }
-  }, [enabled, user?.id])
+  }, [enabled, canView, user?.id])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !canView) return
     seenMessages.current = null
     void refreshConversations()
     const timer = window.setInterval(() => void refreshConversations(), 5000)
     return () => window.clearInterval(timer)
-  }, [enabled, refreshConversations])
+  }, [enabled, canView, refreshConversations])
 
   const loadMessages = useCallback(async (conversation: Conversation) => {
     try {
@@ -230,7 +231,7 @@ export function BusinessChatWidget() {
         {!selected && canSend && <button type="button" aria-label="Choose a contact" title="New chat" onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
-      {selected ? <>
+      {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : selected ? <>
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 sm:px-4">{messages.map((message) => { const own = message.senderId === user?.id; return <div key={message.id} className={cn('max-w-[88%] px-3 py-2 shadow-sm sm:max-w-[82%]', own ? 'ml-auto rounded-2xl rounded-br-sm bg-[#d9fdd3]' : 'rounded-2xl rounded-bl-sm bg-white')}><p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b]">{message.body}</p><time className="mt-1 block text-right text-[10px] tabular-nums text-[#667781]">{conversationTime(message.createdAt)}</time></div> })}</div>
         {canSend ? <form onSubmit={sendMessage} className="flex shrink-0 items-end gap-2 border-t bg-card p-3"><textarea aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm" /><button type="submit" aria-label="Send message" disabled={!draft.trim() || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-800 text-white disabled:opacity-50"><Send className="size-4" /></button></form> : <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>}
       </> : <>

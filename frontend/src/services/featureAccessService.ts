@@ -37,6 +37,10 @@ class FeatureAccessService {
   private loadedTenantId: string | null = null
   private error: string | null = null
   private listeners: Array<() => void> = []
+  private refreshTimer: number | null = null
+  private refreshTenantId: string | null = null
+  private refreshInFlight = false
+  private visibilityHandler: (() => void) | null = null
 
   private constructor() {}
 
@@ -75,7 +79,7 @@ class FeatureAccessService {
     this.notifyListeners()
 
     try {
-      const response = await apiFetch('/api/admin/me/features')
+      const response = await apiFetch('/api/admin/me/features', { cache: 'no-store' })
 
       if (!response.ok) {
         throw new Error('Failed to load features')
@@ -295,6 +299,7 @@ class FeatureAccessService {
 
   // Reset service
   reset() {
+    this.stopAutoRefresh()
     this.features = {}
     this.usageLimits = null
     localStorage.removeItem('cachedFeatures')
@@ -309,6 +314,52 @@ class FeatureAccessService {
     this.features = {}
     this.loading = false // reset so loadFeatures doesn't skip
     return this.loadFeatures(tenantId)
+  }
+
+  async refreshFeatures(tenantId: string) {
+    if (!tenantId || this.refreshInFlight) return
+    this.refreshInFlight = true
+    try {
+      const response = await apiFetch('/api/admin/me/features', { cache: 'no-store' })
+      if (!response.ok) return
+      const data = await response.json()
+      if (this.refreshTenantId !== tenantId) return
+      this.features = this.normalizeFeatures(data.features || {})
+      this.loadedTenantId = tenantId
+      this.error = null
+      try { localStorage.setItem('cachedFeatures', JSON.stringify(this.features)) } catch { /* Cache is optional. */ }
+      this.notifyListeners()
+    } catch {
+      // Keep the last verified feature map during temporary network failures.
+    } finally {
+      this.refreshInFlight = false
+    }
+  }
+
+  startAutoRefresh(tenantId: string) {
+    if (typeof window === 'undefined') return
+    if (!tenantId) {
+      this.stopAutoRefresh()
+      return
+    }
+    if (this.refreshTenantId === tenantId && this.refreshTimer !== null) return
+    this.stopAutoRefresh()
+    this.refreshTenantId = tenantId
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') void this.refreshFeatures(tenantId)
+    }
+    document.addEventListener('visibilitychange', this.visibilityHandler)
+    this.refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void this.refreshFeatures(tenantId)
+    }, 30_000)
+  }
+
+  private stopAutoRefresh() {
+    if (this.refreshTimer !== null && typeof window !== 'undefined') window.clearInterval(this.refreshTimer)
+    if (this.visibilityHandler && typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.visibilityHandler)
+    this.refreshTimer = null
+    this.refreshTenantId = null
+    this.visibilityHandler = null
   }
 }
 
@@ -341,9 +392,11 @@ export function useFeatureAccess() {
       if (!featureAccessService.isLoading()) {
         featureAccessService.loadFeatures(user.tenantId)
       }
+      featureAccessService.startAutoRefresh(user.tenantId)
     } else {
       // No tenantId — not loading
       setLoading(false)
+      featureAccessService.startAutoRefresh('')
     }
 
     return unsubscribe

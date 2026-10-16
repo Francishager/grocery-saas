@@ -167,8 +167,8 @@ const PERMISSION_TO_FEATURES = {
   canEditServiceBusiness: ['service_business', 'service', 'service.appointments'],
   canDeleteServiceBusiness: ['service_business', 'service', 'service.appointments'],
   canViewServiceBusinessReport: ['reports', 'service_business', 'service', 'service.appointments'],
-  canViewCommunication: ['communication', 'communication.team_messaging'],
-  canCreateCommunication: ['communication', 'communication.team_messaging'],
+  canViewTeamMessaging: ['communication.team_messaging'],
+  canSendTeamMessages: ['communication.team_messaging'],
   canEditCommunication: ['communication'],
   canDeleteCommunication: ['communication'],
   canViewAccounting: ['accounting'],
@@ -285,8 +285,9 @@ export const ALL_PERMISSION_KEYS = [
   "canViewAgricultureReport",
   // Service Business (appointments, work orders, contracts)
   ...SERVICE_PERMISSION_KEYS,
-  // Communication
+  // Communication and team messaging
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
+  "canViewTeamMessaging", "canSendTeamMessages",
   // Accounting
   "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting", "canReverseAccountingEntry", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
   // Transaction Accounts & Cash Movements
@@ -334,6 +335,7 @@ export const PERMISSION_CATEGORIES = [
   { id: 'agriculture', name: 'Agriculture' },
   ...SERVICE_PERMISSION_CATEGORIES,
   { id: 'communication', name: 'Communication' },
+  { id: 'team_messaging', name: 'Team Messaging' },
   { id: 'accounting', name: 'Accounting' },
   { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
   { id: 'payment_methods', name: 'Payment Methods' },
@@ -929,12 +931,12 @@ const PERMISSION_DETAIL_OVERRIDES = {
     description: 'See appointment, work order, contract, service revenue, and customer service reports.',
   },
   canViewCommunication: {
-    name: 'View communication',
-    description: 'Read in-app team conversations and business communication records where available.',
+    name: 'View communication records',
+    description: 'View business communication and notification records.',
   },
   canCreateCommunication: {
-    name: 'Create communication',
-    description: 'Start and send in-app messages to active users in this business, and create other communication records.',
+    name: 'Create communication records',
+    description: 'Create business communication and notification records.',
   },
   canEditCommunication: {
     name: 'Edit communication',
@@ -943,6 +945,14 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canDeleteCommunication: {
     name: 'Delete communication',
     description: 'Remove communication records where allowed.',
+  },
+  canViewTeamMessaging: {
+    name: 'View Team Messaging',
+    description: 'Open team chats, view conversations, and see active business-user contacts.',
+  },
+  canSendTeamMessages: {
+    name: 'Send Team Messages',
+    description: 'Start a private chat with an active user in this business and send messages.',
   },
   canViewAccounting: {
     name: 'View accounting',
@@ -1040,6 +1050,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
 
 function permissionCategoryForKey(key) {
   if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
+  if (key === 'canViewTeamMessaging' || key === 'canSendTeamMessages') return 'team_messaging';
   if (key.includes('Procurement') || key.includes('SupplierNetwork') || key.includes('Marketplace')) return 'procurement';
   const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
   if (servicePermission) return servicePermission.category;
