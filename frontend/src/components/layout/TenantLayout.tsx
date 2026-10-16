@@ -2,7 +2,7 @@ import { servicePagePermissions, serviceReportPermissions, serviceReportIds } fr
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { MessageSquare, Trash2 } from 'lucide-react'
 import { trashPermissions } from '@/lib/trashPermissions'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar, Store, Handshake } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
 import { getApiBaseUrl } from '@/lib/apiConfig'
@@ -58,6 +58,18 @@ const serviceSubItems = [
   { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'service' },
 ]
 
+const procurementSubItems = [
+  { to: '/tenant/procurement/buying/marketplace', label: 'Buyer · Marketplace', icon: Store, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/buying/rfqs', label: 'Buyer · Quote requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/buying/purchases', label: 'Buyer · Purchases & invoices', icon: Package, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/buying/suppliers', label: 'Buyer · Suppliers', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/selling/studio', label: 'Seller · Studio', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/selling/rfqs', label: 'Seller · Incoming requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/selling/fulfilment', label: 'Seller · Sales & fulfilment', icon: Package, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/selling/buyers', label: 'Seller · Buyer relationships', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+  { to: '/tenant/procurement/selling/profile', label: 'Seller · Profile', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.marketplace' },
+]
+
 const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard', feature: 'dashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
@@ -65,8 +77,7 @@ const navItems = [
   { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
   { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable', isReceivables: true },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
-  { to: '/tenant/procurement/buying', label: 'Procurement · Buyer', icon: Truck, feature: 'procurement.marketplace', permission: 'canViewProcurement' },
-  { to: '/tenant/procurement/selling', label: 'Supplier Marketplace · Seller', icon: Building2, feature: 'procurement.marketplace', permission: 'canViewProcurement' },
+  { to: '/tenant/procurement/buying/marketplace', label: 'Procurement Network', icon: Truck, feature: 'procurement.marketplace', permission: 'canViewProcurement', isProcurement: true },
   { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant' },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
@@ -86,7 +97,7 @@ const navItems = [
 ]
 
 interface ReportSubItem { id: string; label: string }
-interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string; feature?: string; items: ReportSubItem[] }
+interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string | string[]; feature?: string; items: ReportSubItem[] }
 
 const reportCategories: ReportCategoryDef[] = [
   {
@@ -316,6 +327,7 @@ export function TenantLayout() {
   const [fuelStationExpanded, setFuelStationExpanded] = useState(false)
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
+  const [procurementExpanded, setProcurementExpanded] = useState(false)
   const [hrExpanded, setHRExpanded] = useState(false)
   const [hrAccountingExpanded, setHRAccountingExpanded] = useState(false)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
@@ -411,6 +423,10 @@ export function TenantLayout() {
     setServiceExpanded(prev => !prev)
     if (!serviceExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setHRExpanded(false) }
   }
+  const toggleProcurement = () => {
+    setProcurementExpanded(prev => !prev)
+    if (!procurementExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false); setHRExpanded(false) }
+  }
   const toggleHR = () => {
     setHRExpanded(prev => !prev)
     if (!hrExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
@@ -423,6 +439,7 @@ export function TenantLayout() {
     if (location.pathname.startsWith('/tenant/fuel-station')) setFuelStationExpanded(true)
     if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
     if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
+    if (location.pathname.startsWith('/tenant/procurement')) setProcurementExpanded(true)
     if (location.pathname.startsWith('/tenant/hr')) setHRExpanded(true)
     if (location.pathname.startsWith('/tenant/hr/accounting')) setHRAccountingExpanded(true)
   }, [location.pathname, location.search])
@@ -432,8 +449,11 @@ export function TenantLayout() {
     return permissions.some((perm) => hasPermission(perm))
   }
 
-  function subItemVisible(item: { feature?: string | null; permission?: string | string[] }) {
-    if (item.feature && !canAccessFeature(item.feature)) return false
+  function subItemVisible(item: { feature?: string | string[] | null; permission?: string | string[] }) {
+    if (item.feature) {
+      const features = Array.isArray(item.feature) ? item.feature : [item.feature]
+      if (!features.some((feature) => canAccessFeature(feature))) return false
+    }
     if (item.permission && !hasRequiredPermission(item.permission)) return false
     return true
   }
@@ -445,6 +465,7 @@ export function TenantLayout() {
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
+  const visibleProcurementSubItems = procurementSubItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
   const visibleReportCategories = reportCategories.map(cat => cat.id === 'service' ? { ...cat, items: cat.items.filter(item => hasPermission(serviceReportPermissions[serviceReportIds[item.id]])) } : cat).filter((cat) => {
     if (!cat.items.length) return false
@@ -651,6 +672,24 @@ export function TenantLayout() {
                       ))}
                     </div>
                   )}
+                </div>
+              ) : item.isProcurement ? (
+                <div key={item.to}>
+                  <button
+                    onClick={toggleProcurement}
+                    aria-expanded={procurementExpanded}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', procurementExpanded || location.pathname.startsWith('/tenant/procurement') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{t(item.label)}</span>
+                    {procurementExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {procurementExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleProcurementSubItems.map((sub) => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                      className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                      <sub.icon className="h-4 w-4" />{t(sub.label)}
+                    </NavLink>)}
+                  </div>}
                 </div>
               ) : item.isService ? (
                 <div key={item.to}>
