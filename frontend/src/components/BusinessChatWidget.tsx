@@ -46,10 +46,10 @@ function conversationTime(value?: string | null) {
 }
 
 export function BusinessChatWidget() {
-  const { user, hasPermission } = useJWTAuth()
+  const { user } = useJWTAuth()
   const { canAccessFeature } = useFeatureAccess()
-  const enabled = canAccessFeature('communication.team_messaging') && (user?.role === 'owner' || hasPermission('canViewCommunication'))
-  const canSend = user?.role === 'owner' || hasPermission('canCreateCommunication')
+  const enabled = Boolean(user && canAccessFeature('communication.team_messaging'))
+  const canSend = enabled
   const [open, setOpen] = useState(false)
   const [newMessageMode, setNewMessageMode] = useState(false)
   const [people, setPeople] = useState<Person[]>([])
