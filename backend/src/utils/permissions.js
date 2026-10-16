@@ -930,11 +930,11 @@ const PERMISSION_DETAIL_OVERRIDES = {
   },
   canViewCommunication: {
     name: 'View communication',
-    description: 'Read customer, supplier, employee, and business communication records where available.',
+    description: 'Read in-app team conversations and business communication records where available.',
   },
   canCreateCommunication: {
     name: 'Create communication',
-    description: 'Send or record business communication such as messages, notes, and notifications.',
+    description: 'Start and send in-app messages to active users in this business, and create other communication records.',
   },
   canEditCommunication: {
     name: 'Edit communication',

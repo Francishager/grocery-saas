@@ -19,6 +19,7 @@ import OnboardingGuideCard from '@/components/OnboardingGuideCard'
 import OnboardingGuideModal from '@/components/OnboardingGuideModal'
 import UserGuideMenu from '@/components/UserGuideMenu'
 import { SubscriptionBillingReminder } from '@/components/layout/SubscriptionBillingReminder'
+import { BusinessChatWidget } from '@/components/BusinessChatWidget'
 
 const inventorySubItems = [
   { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
@@ -882,6 +883,7 @@ export function TenantLayout() {
           </div>
           <div className="flex-1" />
           <SyncIndicator />
+          <BusinessChatWidget />
           <button
             type="button"
             onClick={toggleTheme}

@@ -33,6 +33,7 @@ import accountingRouter from "../routes/accounting.js";
 import hrRouter from "../routes/hr.js";
 import transfersRouter from "../routes/transfers.js";
 import notificationsRouter from "../routes/notifications.js";
+import businessMessagesRouter from "../routes/business-messages.js";
 import pushRouter from "./routes/push.js";
 import integrationsRouter from "../routes/integrations.js";
 import restaurantRouter from "../routes/restaurant.js";
@@ -248,6 +249,7 @@ app.use("/api/hr", hrRouter);
 
 app.use("/api/transfers", transfersRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/messages", businessMessagesRouter);
 app.use("/api/push", pushRouter);
 app.use("/api/integrations", integrationsRouter);
 app.use("/api/restaurant", restaurantRouter);
