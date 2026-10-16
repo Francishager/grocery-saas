@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, MessageCircle, Plus, Search, Send, UsersRound, X } from 'lucide-react'
+import { ArrowLeft, Check, CheckCheck, MessageCircle, Plus, Search, Send, UsersRound, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { cn } from '@/lib/utils'
 
 type Person = { id: string; name: string; role: string; avatar?: string | null }
-type Message = { id: string; senderId: string; recipientId: string; body: string; readAt: string | null; createdAt: string }
+type Message = { id: string; senderId: string; recipientId: string; body: string; deliveredAt: string | null; readAt: string | null; createdAt: string }
 type Conversation = { id: string; participant: Person; latestMessage: Message | null; latestUnread?: Message | null; unreadCount: number; updatedAt: string }
 type LauncherPosition = { x: number; y: number }
 const LAUNCHER_SIZE = 48
@@ -116,6 +116,22 @@ export function BusinessChatWidget() {
     const timer = window.setInterval(() => void refreshConversations(), 5000)
     return () => window.clearInterval(timer)
   }, [enabled, canView, refreshConversations])
+
+  useEffect(() => {
+    if (!enabled || !canView) return
+    const heartbeat = () => {
+      if (document.visibilityState === 'visible') {
+        void api('/presence', { method: 'POST' }).catch(() => {})
+      }
+    }
+    heartbeat()
+    const timer = window.setInterval(heartbeat, 15_000)
+    document.addEventListener('visibilitychange', heartbeat)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', heartbeat)
+    }
+  }, [enabled, canView])
 
   const loadMessages = useCallback(async (conversation: Conversation) => {
     try {
@@ -270,7 +286,7 @@ export function BusinessChatWidget() {
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
       {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : selected ? <>
-        <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 sm:px-4">{messages.map((message) => { const own = message.senderId === user?.id; return <div key={message.id} className={cn('max-w-[88%] px-3 py-2 shadow-sm sm:max-w-[82%]', own ? 'ml-auto rounded-2xl rounded-br-sm bg-[#d9fdd3]' : 'rounded-2xl rounded-bl-sm bg-white')}><p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b]">{message.body}</p><time className="mt-1 block text-right text-[10px] tabular-nums text-[#667781]">{conversationTime(message.createdAt)}</time></div> })}</div>
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 sm:px-4">{messages.map((message) => { const own = message.senderId === user?.id; const status = message.readAt ? 'Read' : message.deliveredAt ? 'Delivered' : 'Sent; recipient offline'; const StatusIcon = message.deliveredAt ? CheckCheck : Check; return <div key={message.id} className={cn('max-w-[88%] px-3 py-2 shadow-sm sm:max-w-[82%]', own ? 'ml-auto rounded-2xl rounded-br-sm bg-[#d9fdd3]' : 'rounded-2xl rounded-bl-sm bg-white')}><p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b]">{message.body}</p><div className="mt-1 flex items-center justify-end gap-1"><time className="text-[10px] tabular-nums text-[#667781]">{conversationTime(message.createdAt)}</time>{own && <span className={cn('inline-flex items-center', message.readAt ? 'text-sky-600' : 'text-slate-500')} title={status} aria-label={status}>{StatusIcon && <StatusIcon className="size-3.5" aria-hidden="true" />}</span>}</div></div> })}</div>
         {canSend ? <form onSubmit={sendMessage} className="flex shrink-0 items-end gap-2 border-t bg-card p-3"><textarea aria-label="Message" value={draft} onChange={(event) => changeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm" /><button type="submit" aria-label="Send message" disabled={!draft.trim() || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-800 text-white disabled:opacity-50"><Send className="size-4" /></button></form> : <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>}
       </> : <>
         <div className="shrink-0 border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input aria-label={newMessageMode ? 'Search contacts' : 'Search conversations'} value={peopleSearch} onChange={(event) => setPeopleSearch(event.target.value)} placeholder={newMessageMode ? 'Search contacts' : 'Search chats'} className="h-10 w-full rounded-full border-0 bg-muted/70 pl-10 pr-4 text-sm" /></div></div>

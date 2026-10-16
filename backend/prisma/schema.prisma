@@ -457,6 +457,7 @@ model User {
   isActive               Boolean      @default(true)
   workingHours           Json?
   lastLogin              DateTime?
+  teamMessagingLastSeenAt DateTime?
   otpCode                String?
   otpExpires             DateTime?
   hasCompletedOnboarding Boolean      @default(false) // Tenant onboarding guide completion status
@@ -1965,6 +1966,7 @@ model BusinessMessage {
   recipientId    String
   recipient      User               @relation("BusinessMessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   body           String
+  deliveredAt    DateTime?
   readAt         DateTime?
   createdAt      DateTime           @default(now())
 

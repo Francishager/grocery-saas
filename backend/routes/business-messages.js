@@ -6,6 +6,7 @@ import { requireFeature } from '../middleware/featureCheck.js';
 const router = Router();
 const access = [authenticateToken, requireTenant, requireFeature('communication.team_messaging')];
 const userFields = { id: true, fname: true, lname: true, role: true, avatar: true };
+const ONLINE_WINDOW_MS = 60_000;
 
 function displayName(user) {
   return [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || 'Team member';
@@ -25,6 +26,17 @@ function conversationView(row, currentUserId, unreadCounts = new Map()) {
 
 router.use(...access);
 
+router.post('/presence', requirePermission('canViewTeamMessaging'), async (req, res) => {
+  const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+  const now = new Date();
+  await prisma.user.updateMany({ where: { id: req.user.id, tenantId, isActive: true }, data: { teamMessagingLastSeenAt: now } });
+  await prisma.businessMessage.updateMany({
+    where: { tenantId, recipientId: req.user.id, deliveredAt: null },
+    data: { deliveredAt: now },
+  });
+  res.json({ online: true });
+});
+
 router.get('/people', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const people = await prisma.user.findMany({
@@ -42,7 +54,7 @@ router.get('/conversations', requirePermission('canViewTeamMessaging'), async (r
     include: {
       participantOne: { select: userFields },
       participantTwo: { select: userFields },
-      messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, senderId: true, recipientId: true, body: true, readAt: true, createdAt: true } },
+      messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true } },
     },
     orderBy: { updatedAt: 'desc' },
     take: 100,
@@ -56,7 +68,7 @@ router.get('/conversations', requirePermission('canViewTeamMessaging'), async (r
   const unreadMessages = rows.length ? await prisma.businessMessage.findMany({
     where: { tenantId, recipientId: req.user.id, readAt: null, conversationId: { in: rows.map(({ id }) => id) } },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, conversationId: true, senderId: true, recipientId: true, body: true, readAt: true, createdAt: true },
+    select: { id: true, conversationId: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true },
   }) : [];
   const unreadLatest = new Map();
   for (const message of unreadMessages) if (!unreadLatest.has(message.conversationId)) unreadLatest.set(message.conversationId, message);
@@ -91,11 +103,12 @@ router.get('/conversations/:id/messages', requirePermission('canViewTeamMessagin
   const messages = await prisma.businessMessage.findMany({
     where: { tenantId, conversationId: conversation.id },
     orderBy: { createdAt: 'desc' }, take: 100,
-    select: { id: true, senderId: true, recipientId: true, body: true, readAt: true, createdAt: true },
+    select: { id: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true },
   });
+  const readAt = new Date();
   await prisma.businessMessage.updateMany({
     where: { tenantId, conversationId: conversation.id, recipientId: req.user.id, readAt: null },
-    data: { readAt: new Date() },
+    data: { deliveredAt: readAt, readAt },
   });
   const peerTypingAt = conversation.participantOneId === req.user.id
     ? conversation.participantTwoTypingAt
@@ -127,10 +140,16 @@ router.post('/conversations/:id/messages', requirePermission('canViewTeamMessagi
   });
   if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
   const recipientId = conversation.participantOneId === req.user.id ? conversation.participantTwoId : conversation.participantOneId;
+  const recipient = await prisma.user.findFirst({
+    where: { id: recipientId, tenantId, isActive: true },
+    select: { teamMessagingLastSeenAt: true },
+  });
+  const now = new Date();
+  const recipientOnline = Boolean(recipient?.teamMessagingLastSeenAt && now.getTime() - recipient.teamMessagingLastSeenAt.getTime() < ONLINE_WINDOW_MS);
   const [message] = await prisma.$transaction([
     prisma.businessMessage.create({
-      data: { tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body },
-      select: { id: true, senderId: true, recipientId: true, body: true, readAt: true, createdAt: true },
+      data: { tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body, deliveredAt: recipientOnline ? now : null },
+      select: { id: true, senderId: true, recipientId: true, body: true, deliveredAt: true, readAt: true, createdAt: true },
     }),
     prisma.businessConversation.update({
       where: { id: conversation.id },
