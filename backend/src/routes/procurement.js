@@ -3,6 +3,7 @@ import prisma from '../db.js';
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js';
 import { requireAnyFeature, requireFeature } from '../../middleware/featureCheck.js';
 import { resolveBranchScope, scopedWhere } from '../utils/branchAccess.js';
+import { checkUsageLimit } from '../utils/usageLimits.js';
 import { getCashAccountLedgerId, getPayablesAccountingConfig, postPayablesJournal, procurementInvoiceLines } from '../services/payablesAccountingService.js';
 import { getReceivablesAccountingConfig } from '../services/receivablesAccountingService.js';
 import { syncLinkedTransactionAccountBalance } from '../utils/accountingSync.js';
@@ -131,6 +132,9 @@ const isRelationshipActive = async (buyerTenantId, sellerTenantId) => {
   });
   return relationship?.status === 'active';
 };
+const isDirectOfferRFQ = async (rfq) => Array.isArray(rfq.lines)
+  ? rfq.lines.some((line) => line.sourceListingId)
+  : (await prisma.procurementRFQLine.count({ where: { rfqId: rfq.id, sourceListingId: { not: null } } })) > 0;
 const canAccessRFQ = async (rfq, tenantId) => {
   if (rfq.buyerTenantId === tenantId) return { side: 'buyer' };
   if (rfq.visibility === 'open' && rfq.status === 'open') {
@@ -141,7 +145,7 @@ const canAccessRFQ = async (rfq, tenantId) => {
     where: { rfqId_sellerTenantId: { rfqId: rfq.id, sellerTenantId: tenantId } },
     select: { id: true },
   });
-  if (recipient && await isRelationshipActive(rfq.buyerTenantId, tenantId)) return { side: 'seller' };
+  if (recipient && (await isDirectOfferRFQ(rfq) || await isRelationshipActive(rfq.buyerTenantId, tenantId))) return { side: 'seller' };
   return null;
 };
 
@@ -467,7 +471,7 @@ router.get('/promotions', requireFeature('procurement.buyer'), requirePermission
         ...(connectedIds.length ? [{ visibility: 'private', sellerTenantId: { in: connectedIds } }] : []),
       ] } },
     },
-    include: { listing: { select: { id: true, name: true, description: true, category: true, unit: true, price: true, currency: true } } },
+    include: { listing: { select: { id: true, name: true, description: true, category: true, unit: true, price: true, currency: true, minimumQty: true } } },
     orderBy: [{ campaignType: 'asc' }, { startsAt: 'desc' }], take: 100,
   });
   const businesses = await publicTenantData(campaigns.map((campaign) => campaign.sellerTenantId));
@@ -569,48 +573,97 @@ router.post('/rfqs', requireFeature('procurement.buyer'), requirePermission('can
   const tenantId = tenantIdOf(req);
   const title = text(req.body?.title, 180);
   const lines = Array.isArray(req.body?.lines) ? req.body.lines.slice(0, 100) : [];
-  const visibility = req.body?.visibility === 'open' ? 'open' : 'private';
-  const recipients = [...new Set((Array.isArray(req.body?.sellerTenantIds) ? req.body.sellerTenantIds : []).map((id) => text(id, 100)).filter(Boolean))];
+  const sourceOffer = req.body?.sourceOffer && typeof req.body.sourceOffer === 'object' ? req.body.sourceOffer : null;
+  const visibility = sourceOffer ? 'private' : req.body?.visibility === 'open' ? 'open' : 'private';
+  let recipients = [...new Set((Array.isArray(req.body?.sellerTenantIds) ? req.body.sellerTenantIds : []).map((id) => text(id, 100)).filter(Boolean))];
+  let originListing = null;
+  let originCampaign = null;
+  if (sourceOffer) {
+    const listingId = text(sourceOffer.listingId, 100);
+    const campaignId = text(sourceOffer.campaignId, 100);
+    originListing = listingId ? await prisma.marketplaceListing.findFirst({ where: { id: listingId, status: 'active', sellerTenantId: { not: tenantId } } }) : null;
+    if (!originListing) return res.status(409).json({ error: 'This offer is no longer available. Refresh the marketplace and choose a current offer.' });
+    const connected = await isRelationshipActive(tenantId, originListing.sellerTenantId);
+    if (originListing.visibility !== 'public' && !connected) return res.status(404).json({ error: 'This offer is not available to your business.' });
+    if (originListing.visibility === 'public' && !connected) {
+      const discoverable = await prisma.procurementProfile.findFirst({ where: { tenantId: originListing.sellerTenantId, discoverable: true }, select: { id: true } });
+      if (!discoverable) return res.status(404).json({ error: 'This offer is not available to your business.' });
+    }
+    if (campaignId) {
+      const now = new Date();
+      originCampaign = await prisma.marketplacePromotion.findFirst({ where: {
+        id: campaignId, listingId: originListing.id, sellerTenantId: originListing.sellerTenantId,
+        status: 'active', startsAt: { lte: now }, OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+      }, select: { id: true, title: true, message: true } });
+      if (!originCampaign) return res.status(409).json({ error: 'This campaign has ended or changed. Refresh the marketplace before requesting a quote.' });
+    }
+    recipients = [originListing.sellerTenantId];
+    if (lines.length !== 1) return res.status(400).json({ error: 'An offer inquiry must contain exactly one advertised item.' });
+  }
   const closesAt = optionalDate(req.body?.closesAt);
   if (!title || !lines.length) return res.status(400).json({ error: 'An RFQ title and at least one item are required.' });
   if (req.body?.closesAt && (!closesAt || closesAt <= new Date())) return res.status(400).json({ error: 'The closing time must be a valid future date.' });
   if (visibility === 'private' && !recipients.length) return res.status(400).json({ error: 'Choose at least one connected supplier for a private RFQ.' });
-  if (visibility === 'private') {
+  if (visibility === 'private' && !sourceOffer) {
     const active = await prisma.procurementRelationship.findMany({ where: { buyerTenantId: tenantId, sellerTenantId: { in: recipients }, status: 'active' }, select: { sellerTenantId: true } });
     if (active.length !== recipients.length) return res.status(400).json({ error: 'Private RFQs can only be sent to approved suppliers.' });
   }
   const requestedLines = lines.map((line) => ({
-    productId: text(line?.productId, 100), specification: text(line?.specification, 1000),
+    productId: sourceOffer ? null : text(line?.productId, 100) || null,
+    productName: sourceOffer ? originListing.name : text(line?.productName, 180),
+    unit: sourceOffer ? originListing.unit : text(line?.unit, 40) || 'Piece',
+    specification: sourceOffer ? [originListing.description, originCampaign ? `Campaign: ${originCampaign.title}. ${originCampaign.message}` : ''].filter(Boolean).join('\n').slice(0, 1000) : text(line?.specification, 1000),
+    sourceListingId: sourceOffer ? originListing.id : null,
+    sourceCampaignId: sourceOffer ? originCampaign?.id || null : null,
+    referencePrice: sourceOffer ? originListing.price : null,
+    referenceCurrency: sourceOffer ? originListing.currency : null,
     quantity: positive(line?.quantity), acceptableAlternatives: text(line?.acceptableAlternatives, 500),
     desiredDelivery: optionalDate(line?.desiredDelivery),
   }));
-  if (requestedLines.some((line) => !line.productId || !line.quantity || line.desiredDelivery === undefined)) return res.status(400).json({ error: 'Each RFQ line needs a catalog item and positive quantity.' });
+  if (requestedLines.some((line) => !line.quantity || line.desiredDelivery === undefined || (!line.productId && (!line.productName || !line.unit)))) return res.status(400).json({ error: 'Each RFQ line needs an existing or custom item, a name and a positive quantity.' });
+  if (sourceOffer && requestedLines[0].quantity < Number(originListing.minimumQty)) return res.status(400).json({ error: `The seller's minimum quantity for this offer is ${originListing.minimumQty} ${originListing.unit}.` });
   const branchScope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
-  const catalogProducts = await prisma.product.findMany({
-    where: scopedWhere(branchScope, { isActive: true, id: { in: [...new Set(requestedLines.map((line) => line.productId))] } }),
+  const selectedProductIds = [...new Set(requestedLines.map((line) => line.productId).filter(Boolean))];
+  const catalogProducts = selectedProductIds.length ? await prisma.product.findMany({
+    where: scopedWhere(branchScope, { isActive: true, id: { in: selectedProductIds } }),
     select: { id: true, name: true, baseUnit: true },
-  });
+  }) : [];
   const productsById = new Map(catalogProducts.map((product) => [product.id, product]));
-  if (requestedLines.some((line) => !productsById.has(line.productId))) return res.status(400).json({ error: 'One or more selected items are no longer active in this business catalog.' });
+  if (requestedLines.some((line) => line.productId && !productsById.has(line.productId))) return res.status(400).json({ error: 'One or more selected items are no longer active in this business catalog.' });
   const normalizedLines = requestedLines.map((line) => ({
-    productName: productsById.get(line.productId).name,
+    productId: line.productId,
+    sourceListingId: line.sourceListingId,
+    sourceCampaignId: line.sourceCampaignId,
+    referencePrice: line.referencePrice,
+    referenceCurrency: line.referenceCurrency,
+    productName: productsById.get(line.productId)?.name || line.productName,
     specification: line.specification,
     quantity: line.quantity,
-    unit: productsById.get(line.productId).baseUnit || 'Piece',
+    unit: productsById.get(line.productId)?.baseUnit || line.unit,
     acceptableAlternatives: line.acceptableAlternatives,
     desiredDelivery: line.desiredDelivery,
   }));
   const result = await prisma.$transaction(async (tx) => {
     const rfq = await tx.procurementRFQ.create({ data: {
       buyerTenantId: tenantId, createdById: req.user.id, title, notes: text(req.body?.notes, 3000), visibility,
-      currency: text(req.body?.currency || 'UGX', 3).toUpperCase(), deliveryAddress: text(req.body?.deliveryAddress, 500) || null,
+      currency: sourceOffer ? originListing.currency : text(req.body?.currency || 'UGX', 3).toUpperCase(), deliveryAddress: text(req.body?.deliveryAddress, 500) || null,
       closesAt,
     } });
     const createdLines = [];
-    for (const line of normalizedLines) createdLines.push(await tx.procurementRFQLine.create({ data: { ...line, rfqId: rfq.id, quantity: line.quantity.toFixed(3) } }));
+    for (const line of normalizedLines) createdLines.push(await tx.procurementRFQLine.create({ data: { ...line, rfqId: rfq.id, quantity: line.quantity.toFixed(3), referencePrice: line.referencePrice?.toFixed(2) ?? null } }));
     for (const sellerTenantId of recipients) await tx.procurementRFQRecipient.create({ data: { rfqId: rfq.id, sellerTenantId } });
     return { ...rfq, lines: createdLines };
   });
+  const notifiedSellerIds = visibility === 'open'
+    ? (await prisma.procurementProfile.findMany({ where: { discoverable: true, tenantId: { not: tenantId } }, select: { tenantId: true } })).map(({ tenantId: sellerId }) => sellerId)
+    : recipients;
+  await Promise.all(notifiedSellerIds.map((sellerId) => notifyPermissionUsers(
+    sellerId,
+    'canRespondToProcurementRFQ',
+    sourceOffer ? 'Private quote request from a marketplace offer' : 'New procurement quote request',
+    `${title} is ready for your review.`,
+    { url: '/tenant/procurement/selling/rfqs', rfqId: result.id },
+  )));
   res.status(201).json({ rfq: result });
 });
 
@@ -630,12 +683,21 @@ router.get('/rfqs', requirePermission('canViewProcurement'), async (req, res) =>
   const result = [];
   for (const row of rows) {
     if (row.visibility === 'private' && row.buyerTenantId !== tenantId) {
-      const allowed = row.recipients.some((recipient) => recipient.sellerTenantId === tenantId) && await isRelationshipActive(row.buyerTenantId, tenantId);
+      const allowed = row.recipients.some((recipient) => recipient.sellerTenantId === tenantId)
+        && (await isDirectOfferRFQ(row) || await isRelationshipActive(row.buyerTenantId, tenantId));
       if (!allowed) continue;
     }
     const myQuotes = await prisma.procurementQuote.findMany({ where: { rfqId: row.id, sellerTenantId: tenantId }, orderBy: { version: 'desc' }, take: 1, select: { id: true, status: true, version: true } });
     const quoteCount = row.buyerTenantId === tenantId ? await prisma.procurementQuote.groupBy({ by: ['sellerTenantId'], where: { rfqId: row.id, status: { not: 'superseded' } } }) : [];
-    result.push({ ...row, recipients: undefined, buyer: businesses[row.buyerTenantId], isMine: row.buyerTenantId === tenantId, myQuote: myQuotes[0] || null, quoteCount: quoteCount.length });
+    result.push({
+      ...row,
+      lines: row.buyerTenantId === tenantId ? row.lines : row.lines.map(({ productId, ...line }) => line),
+      recipients: undefined,
+      buyer: businesses[row.buyerTenantId],
+      isMine: row.buyerTenantId === tenantId,
+      myQuote: myQuotes[0] || null,
+      quoteCount: quoteCount.length,
+    });
   }
   res.json({ rfqs: result });
 });
@@ -664,7 +726,7 @@ router.post('/rfqs/:id/quotes', requireFeature('procurement.seller'), requirePer
   if (!rfq || rfq.buyerTenantId === tenantId || rfq.status !== 'open' || (rfq.closesAt && rfq.closesAt < new Date())) return res.status(404).json({ error: 'Open RFQ not found.' });
   if (rfq.visibility === 'private') {
     const recipient = await prisma.procurementRFQRecipient.findUnique({ where: { rfqId_sellerTenantId: { rfqId: rfq.id, sellerTenantId: tenantId } } });
-    if (!recipient || !(await isRelationshipActive(rfq.buyerTenantId, tenantId))) return res.status(404).json({ error: 'Open RFQ not found.' });
+    if (!recipient || (!await isDirectOfferRFQ(rfq) && !(await isRelationshipActive(rfq.buyerTenantId, tenantId)))) return res.status(404).json({ error: 'Open RFQ not found.' });
   } else {
     const profile = await prisma.procurementProfile.findFirst({ where: { tenantId, discoverable: true } });
     if (!profile) return res.status(403).json({ error: 'Complete supplier onboarding and enable discovery before responding to open RFQs.' });
@@ -693,6 +755,9 @@ router.post('/rfqs/:id/quotes', requireFeature('procurement.seller'), requirePer
     for (const line of lines) await tx.procurementQuoteLine.create({ data: { ...line, quoteId: created.id, quantity: line.quantity.toFixed(3), unitPrice: line.unitPrice.toFixed(2), taxRate: line.taxRate?.toFixed(4) ?? null } });
     return tx.procurementQuote.findUnique({ where: { id: created.id }, include: { lines: true } });
   });
+  await notifyPermissionUsers(rfq.buyerTenantId, 'canManageProcurementQuotes', 'Supplier quote received', `A supplier submitted quote version ${quote.version} for ${rfq.title}.`, {
+    url: '/tenant/procurement/buying/rfqs', rfqId: rfq.id, quoteId: quote.id,
+  });
   res.status(201).json({ quote });
 });
 
@@ -707,6 +772,9 @@ router.post('/rfqs/:id/quotes/:quoteId/select', requireFeature('procurement.buye
     await tx.procurementQuote.updateMany({ where: { rfqId: rfq.id, id: { not: quote.id }, status: 'submitted' }, data: { status: 'not_selected' } });
     await tx.procurementRFQ.update({ where: { id: rfq.id }, data: { status: 'awarded' } });
     return selected;
+  });
+  await notifyPermissionUsers(quote.sellerTenantId, 'canViewProcurement', 'Your quote was selected', `The buyer selected your quote for ${rfq.title}. A purchase order will follow after the buyer's approval.`, {
+    url: '/tenant/procurement/selling/rfqs', rfqId: rfq.id, quoteId: quote.id,
   });
   res.json({ quote: result, notice: 'Quote selected. Create a purchase order to begin fulfilment.' });
 });
@@ -779,6 +847,14 @@ router.get('/inventory-products', requireFeature('procurement.buyer'), requirePe
   res.json({ products });
 });
 
+router.get('/inventory-categories', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
+  const categories = await prisma.category.findMany({
+    where: { tenantId: tenantIdOf(req), categoryType: 'product' },
+    select: { id: true, name: true }, orderBy: { name: 'asc' },
+  });
+  res.json({ categories });
+});
+
 router.get('/request-products', requireFeature('procurement.buyer'), requirePermission('canCreateProcurementRFQ'), async (req, res) => {
   const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
   const products = await prisma.product.findMany({
@@ -805,19 +881,20 @@ router.post('/rfqs/:id/quotes/:quoteId/order', requireFeature('procurement.buyer
     include: { lines: { include: { rfqLine: true } }, rfq: true },
   });
   if (!quote) return res.status(404).json({ error: 'Selected quote not found.' });
-  if (!(await isRelationshipActive(tenantId, quote.sellerTenantId))) return res.status(409).json({ error: 'Approve the supplier relationship before issuing a purchase order.' });
+  if (!(await isDirectOfferRFQ(quote.rfq)) && !(await isRelationshipActive(tenantId, quote.sellerTenantId))) return res.status(409).json({ error: 'Approve the supplier relationship before issuing a purchase order.' });
   const existing = await prisma.procurementPurchaseOrder.findUnique({ where: { quoteId: quote.id }, include: { lines: true } });
   if (existing) return res.status(200).json({ order: existing, duplicate: true });
   const branchId = text(req.body?.branchId, 100) || null;
-  if (branchId) {
-    const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
-    if (!branch) return res.status(400).json({ error: 'Choose a branch belonging to your business.' });
-  }
+  if (!branchId) return res.status(400).json({ error: 'Choose the receiving branch before creating a purchase order.' });
+  const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
+  if (!branch) return res.status(400).json({ error: 'Choose a branch belonging to your business.' });
   const mappings = req.body?.productMappings && typeof req.body.productMappings === 'object' ? req.body.productMappings : {};
-  const productIds = [...new Set(Object.values(mappings).map((id) => text(id, 100)).filter(Boolean))];
-  const products = await prisma.product.findMany({ where: { tenantId, id: { in: productIds }, isActive: true } });
-  if (products.length !== productIds.length) return res.status(400).json({ error: 'Every mapped inventory item must be active and belong to your business.' });
-  const productById = new Map(products.map((row) => [row.id, row]));
+  const productIdForLine = (line) => (line.alternative ? text(mappings[line.id], 100) || null : line.rfqLine.productId || text(mappings[line.id], 100) || null);
+  const productIds = [...new Set(quote.lines.map(productIdForLine).filter(Boolean))];
+  const products = productIds.length ? await prisma.product.findMany({
+    where: { tenantId, id: { in: productIds }, isActive: true, OR: [{ branchId: null }, { branchId }] },
+  }) : [];
+  if (products.length !== productIds.length) return res.status(400).json({ error: 'Each selected item must be active, belong to your business, and be available to the receiving branch.' });
   const poNumber = text(req.body?.poNumber, 80) || `PO-${Date.now()}`;
   try {
     const order = await prisma.$transaction(async (tx) => {
@@ -828,16 +905,16 @@ router.post('/rfqs/:id/quotes/:quoteId/order', requireFeature('procurement.buyer
         status: 'pending_approval',
       } });
       for (const line of quote.lines) {
-        const productId = text(mappings[line.id], 100) || null;
-        const product = productId ? productById.get(productId) : null;
+        const productId = productIdForLine(line);
         await tx.procurementPurchaseOrderLine.create({ data: {
           orderId: created.id, quoteLineId: line.id, itemName: line.alternative || line.rfqLine.productName,
+          specification: line.rfqLine.specification,
           unit: line.rfqLine.unit, orderedQuantity: line.quantity, unitPrice: line.unitPrice, taxRate: line.taxRate, productId,
         } });
       }
       return tx.procurementPurchaseOrder.findUnique({ where: { id: created.id }, include: { lines: true } });
     });
-    await notifyPermissionUsers(order.sellerTenantId, 'canAcknowledgeProcurementOrder', 'Purchase order received', `${order.poNumber} is waiting for supplier acknowledgement.`, { url: '/tenant/procurement', orderId: order.id });
+    await notifyPermissionUsers(order.buyerTenantId, 'canApproveProcurementOrder', 'Purchase order needs approval', `${order.poNumber} is a draft and must be approved and sent before the supplier is notified.`, { url: '/tenant/procurement/buying/purchases', orderId: order.id });
     res.status(201).json({ order });
   } catch (error) {
     if (error.code === 'P2002') return res.status(409).json({ error: 'A purchase order already exists for this quote or PO number.' });
@@ -859,8 +936,10 @@ router.patch('/orders/:id/lines/:lineId/product', requireFeature('procurement.bu
   const tenantId = tenantIdOf(req);
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: { in: ['acknowledged', 'partially_received'] } } });
   if (!order) return res.status(404).json({ error: 'Active buyer purchase order not found.' });
+  const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false });
+  if (scope.branchId !== order.branchId) return res.status(400).json({ error: 'Choose an inventory item from the purchase order receiving branch.' });
   const productId = text(req.body?.productId, 100);
-  const product = await prisma.product.findFirst({ where: { id: productId, tenantId, isActive: true } });
+  const product = await prisma.product.findFirst({ where: { id: productId, tenantId, isActive: true, OR: [{ branchId: null }, { branchId: order.branchId }] } });
   if (!product) return res.status(400).json({ error: 'Choose an active product or service belonging to your business.' });
   const line = await prisma.procurementPurchaseOrderLine.findFirst({ where: { id: req.params.lineId, orderId: order.id } });
   if (!line) return res.status(404).json({ error: 'Order line not found.' });
@@ -898,7 +977,7 @@ router.patch('/orders/:id/acknowledge', requireFeature('procurement.seller'), re
   res.json({ order: updated });
 });
 
-router.post('/orders/:id/receipts', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
+router.post('/orders/:id/receipts', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), loadUserPermissions, async (req, res) => {
   const tenantId = tenantIdOf(req);
   const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false });
   const order = await prisma.procurementPurchaseOrder.findFirst({ where: { id: req.params.id, buyerTenantId: tenantId, status: { in: ['acknowledged', 'partially_received'] } }, include: { lines: true } });
@@ -907,23 +986,69 @@ router.post('/orders/:id/receipts', requireFeature('procurement.buyer'), require
   const submissions = Array.isArray(req.body?.lines) ? req.body.lines : [];
   if (!submissions.length) return res.status(400).json({ error: 'Enter at least one received line.' });
   const byId = new Map(order.lines.map((line) => [line.id, line]));
-  const normalized = submissions.map((row) => ({ line: byId.get(text(row?.orderLineId, 100)), quantity: positive(row?.quantity) }));
+  const normalized = submissions.map((row) => ({
+    line: byId.get(text(row?.orderLineId, 100)),
+    quantity: positive(row?.quantity),
+    newProduct: row?.newProduct && typeof row.newProduct === 'object' ? {
+      name: text(row.newProduct.name, 180),
+      price: positive(row.newProduct.sellingPrice),
+      sku: text(row.newProduct.sku, 100) || null,
+      minStock: row.newProduct.minStock === '' || row.newProduct.minStock === undefined ? 10 : Number(row.newProduct.minStock),
+      categoryId: text(row.newProduct.categoryId, 100) || null,
+    } : null,
+  }));
   if (normalized.some((row) => !row.line || !row.quantity) || new Set(normalized.map((row) => row.line.id)).size !== normalized.length) return res.status(400).json({ error: 'Receipt lines must be unique order lines with positive quantities.' });
   if (normalized.some(({ line, quantity }) => quantity + Number(line.receivedQuantity) > Number(line.orderedQuantity))) return res.status(400).json({ error: 'Received quantities cannot exceed the remaining order quantity.' });
-  if (normalized.some(({ line, quantity }) => !line.productId || !Number.isInteger(quantity))) return res.status(400).json({ error: 'Map each order line to a local product or service before receiving. This workflow currently supports whole-unit acceptance only.' });
-  const products = await prisma.product.findMany({ where: scopedWhere(scope, { id: { in: normalized.map(({ line }) => line.productId) }, isActive: true }) });
-  if (products.length !== new Set(normalized.map(({ line }) => line.productId)).size) return res.status(400).json({ error: 'Mapped products must be active and available in the receiving branch.' });
+  if (order.branchId !== scope.branchId) return res.status(400).json({ error: 'Receive goods into the branch assigned to this purchase order.' });
+  if (normalized.some(({ line, quantity }) => !Number.isInteger(quantity))) return res.status(400).json({ error: 'This inventory currently supports whole-unit receipt quantities only.' });
+  if (normalized.some(({ line, newProduct }) => !line.productId && (!newProduct?.name || !newProduct.price || !Number.isInteger(newProduct.minStock) || newProduct.minStock < 0))) return res.status(400).json({ error: 'For each new inventory item, enter a name, selling price greater than zero, and a valid reorder level.' });
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  const canCreateInventoryProduct = req.user?.role === 'owner' || permissions.includes('*') || permissions.includes('canCreateProduct') || req.userPermissions?.canCreateProduct === true;
+  if (normalized.some(({ line }) => !line.productId) && !canCreateInventoryProduct) return res.status(403).json({ error: 'You need Create Product permission to add an unlisted item. Link it to an existing inventory product instead.' });
+  const categoryIds = [...new Set(normalized.map(({ line, newProduct }) => !line.productId ? newProduct?.categoryId : null).filter(Boolean))];
+  const categories = categoryIds.length ? await prisma.category.findMany({ where: { tenantId, categoryType: 'product', id: { in: categoryIds } }, select: { id: true } }) : [];
+  if (categories.length !== categoryIds.length) return res.status(400).json({ error: 'Choose a product category belonging to your business.' });
+  const existingProductIds = [...new Set(normalized.map(({ line }) => line.productId).filter(Boolean))];
+  const products = existingProductIds.length ? await prisma.product.findMany({
+    where: { tenantId, id: { in: existingProductIds }, isActive: true, OR: [{ branchId: null }, { branchId: scope.branchId }] },
+  }) : [];
+  if (products.length !== existingProductIds.length) return res.status(400).json({ error: 'Mapped products must be active and available in the receiving branch.' });
   try {
     const receipt = await prisma.$transaction(async (tx) => {
       const created = await tx.procurementGoodsReceipt.create({ data: {
         orderId: order.id, tenantId, branchId: scope.branchId, receiptNo, receivedById: req.user.id, notes: text(req.body?.notes, 1000),
       } });
-      for (const { line, quantity } of normalized) {
+      for (const { line, quantity, newProduct } of normalized) {
+        let product = line.productId ? products.find((row) => row.id === line.productId) : null;
+        if (!product) {
+          await checkUsageLimit(tenantId, 'products', tx);
+          const name = newProduct.name.trim().replace(/\s+/g, ' ');
+          const duplicate = await tx.product.findFirst({
+            where: { tenantId, branchId: scope.branchId, name: { equals: name, mode: 'insensitive' } }, select: { id: true },
+          });
+          if (duplicate) throw Object.assign(new Error(`An inventory item named "${name}" already exists in this branch. Map the order line to it instead.`), { statusCode: 409 });
+          if (newProduct.sku) {
+            const duplicateSku = await tx.product.findFirst({ where: { tenantId, branchId: scope.branchId, sku: newProduct.sku }, select: { id: true } });
+            if (duplicateSku) throw Object.assign(new Error(`SKU "${newProduct.sku}" is already used in this branch.`), { statusCode: 409 });
+          }
+          product = await tx.product.create({ data: {
+            name, sku: newProduct.sku, itemType: 'product', price: newProduct.price,
+            cost: Number(line.unitPrice), quantity: 0, minStock: newProduct.minStock,
+            categoryId: newProduct.categoryId, isUncategorized: !newProduct.categoryId,
+            description: line.specification || null, tenantId, branchId: scope.branchId,
+            baseUnit: line.unit || 'Piece',
+          } });
+          await tx.productPriceHistory.create({ data: {
+            productId: product.id, tenantId, branchId: scope.branchId,
+            newCost: Number(line.unitPrice), newPrice: newProduct.price,
+            source: 'procurement_receipt', reference: receiptNo,
+            reason: 'Initial product created from confirmed procurement receipt', changedByUserId: req.user.id,
+          } });
+        }
         const updatedLine = await tx.procurementPurchaseOrderLine.update({
-          where: { id: line.id }, data: { receivedQuantity: { increment: quantity.toFixed(3) } },
+          where: { id: line.id }, data: { productId: product.id, receivedQuantity: { increment: quantity.toFixed(3) } },
         });
         await tx.procurementGoodsReceiptLine.create({ data: { receiptId: created.id, orderLineId: line.id, quantity: quantity.toFixed(3) } });
-        const product = products.find((row) => row.id === line.productId);
         if (String(product.itemType).toLowerCase() !== 'service') {
           const before = Number(product.quantity || 0);
           const after = before + quantity;

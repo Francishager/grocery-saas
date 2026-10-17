@@ -1855,6 +1855,11 @@ model ProcurementRFQLine {
   id                     String                 @id @default(cuid())
   rfqId                  String
   rfq                    ProcurementRFQ         @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  productId              String?
+  sourceListingId        String?
+  sourceCampaignId       String?
+  referencePrice         Decimal?               @db.Decimal(18, 2)
+  referenceCurrency      String?
   productName            String
   specification          String                 @default("")
   quantity               Decimal                @db.Decimal(18, 3)
@@ -1864,7 +1869,9 @@ model ProcurementRFQLine {
   createdAt              DateTime               @default(now())
   quoteLines             ProcurementQuoteLine[]
 
+  @@index([productId])
   @@index([rfqId])
+  @@index([sourceListingId])
   @@map("procurement_rfq_lines")
 }
 
@@ -2032,6 +2039,7 @@ model ProcurementPurchaseOrderLine {
   order            ProcurementPurchaseOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   quoteLineId      String                        @unique
   itemName         String
+  specification    String                        @default("")
   unit             String
   orderedQuantity  Decimal                       @db.Decimal(18, 3)
   unitPrice        Decimal                       @db.Decimal(18, 2)
