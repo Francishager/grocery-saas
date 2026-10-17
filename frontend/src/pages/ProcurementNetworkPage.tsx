@@ -15,6 +15,7 @@ type Listing = { id: string; name: string; description: string; category: string
 type RFQ = { id: string; title: string; notes: string; visibility: string; status: string; currency: string; isMine: boolean; lines: Array<{ id: string; productId?: string | null; productName: string; specification: string; quantity: string; unit: string; referencePrice?: string | null; referenceCurrency?: string | null; sourceCampaignId?: string | null }>; buyer?: Business; quoteCount: number; myQuote?: { id: string; status: string; version: number } | null }
 type Relationship = { id: string; status: string; direction: string; counterparty?: Business }
 type Campaign = { id: string; campaignType: 'promotion' | 'ad'; title: string; message: string; startsAt: string; endsAt?: string | null; status: string; images?: string[]; listing?: { id: string; name: string; description: string; unit: string; minimumQty: string; price: string; currency: string }; business?: Business }
+type SellerStory = { id: string; name: string; logo?: string | null; slides: Array<{ image: string; title: string; message: string; campaignType: Campaign['campaignType'] }> }
 type SellerProfileView = { profile: { tenantId: string; sellerType: string; category: string; description: string; website?: string | null; discoverable: boolean; business?: Business }; listings: Listing[]; campaigns: Campaign[] }
 type OfferRequestDraft = { listing: Pick<Listing, 'id' | 'name' | 'description' | 'unit' | 'price' | 'currency' | 'minimumQty'>; campaignId?: string; campaignTitle?: string; campaignMessage?: string; quantity: string; deliveryAddress: string; notes: string }
 
@@ -137,6 +138,8 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
   const [sellerProfileView, setSellerProfileView] = useState<SellerProfileView | null>(null)
   const [campaignImages, setCampaignImages] = useState<File[]>([])
   const [followedSellerIds, setFollowedSellerIds] = useState<Set<string>>(new Set())
+  const [activeStorySellerIndex, setActiveStorySellerIndex] = useState<number | null>(null)
+  const [activeStorySlideIndex, setActiveStorySlideIndex] = useState(0)
   const [showAllCampaigns, setShowAllCampaigns] = useState(false)
   const [marketInsight, setMarketInsight] = useState<{ title: string; message: string; listingId: string | null } | null>(null)
   const [marketInsightVisible, setMarketInsightVisible] = useState(false)
@@ -249,19 +252,54 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
     !campaignListingIds.has(item.id) && (feedAudience !== 'following' || (item.business?.id && followedSellerIds.has(item.business.id))),
   ), [visibleListings, feedAudience, followedSellerIds, campaignListingIds])
   const sellerStories = useMemo(() => {
-    const unique = new Map<string, { id: string; name: string; logo?: string | null; cover?: string; isFollowing: boolean }>()
+    const unique = new Map<string, SellerStory>()
     for (const campaign of feedCampaigns) {
       const business = campaign.business
-      if (!business?.id || unique.has(business.id)) continue
-      unique.set(business.id, { id: business.id, name: business.name || 'Supplier', logo: business.logo, cover: campaign.images?.[0], isFollowing: followedSellerIds.has(business.id) })
-    }
-    for (const listing of feedListings) {
-      const business = listing.business
-      if (!business?.id || unique.has(business.id)) continue
-      unique.set(business.id, { id: business.id, name: business.name || 'Supplier', logo: business.logo, isFollowing: followedSellerIds.has(business.id) })
+      if (!business?.id || !campaign.images?.length) continue
+      const story = unique.get(business.id) || { id: business.id, name: business.name || 'Supplier', logo: business.logo, slides: [] }
+      story.slides.push(...campaign.images.map((image) => ({ image, title: campaign.title, message: campaign.message, campaignType: campaign.campaignType })))
+      unique.set(business.id, story)
     }
     return [...unique.values()]
-  }, [feedCampaigns, feedListings, followedSellerIds])
+  }, [feedCampaigns])
+  const activeStory = activeStorySellerIndex == null ? null : sellerStories[activeStorySellerIndex] || null
+  const activeStorySlide = activeStory?.slides[activeStorySlideIndex] || null
+  const closeStory = () => { setActiveStorySellerIndex(null); setActiveStorySlideIndex(0) }
+  const moveStory = (direction: number) => {
+    if (activeStorySellerIndex == null || !activeStory) return
+    const nextSlide = activeStorySlideIndex + direction
+    if (nextSlide >= 0 && nextSlide < activeStory.slides.length) {
+      setActiveStorySlideIndex(nextSlide)
+      return
+    }
+    const nextSeller = activeStorySellerIndex + direction
+    if (nextSeller < 0) {
+      setActiveStorySlideIndex(0)
+      return
+    }
+    if (nextSeller >= sellerStories.length) {
+      closeStory()
+      return
+    }
+    setActiveStorySellerIndex(nextSeller)
+    setActiveStorySlideIndex(direction > 0 ? 0 : sellerStories[nextSeller].slides.length - 1)
+  }
+  useEffect(() => {
+    if (mode !== 'buyer' || section !== 'marketplace' || !activeStory || !activeStorySlide || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const advance = () => moveStory(1)
+    const timer = window.setTimeout(advance, 5000)
+    return () => window.clearTimeout(timer)
+  }, [mode, section, activeStory, activeStorySlide, activeStorySellerIndex, activeStorySlideIndex])
+  useEffect(() => {
+    if (!activeStory) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeStory()
+      if (event.key === 'ArrowLeft') moveStory(-1)
+      if (event.key === 'ArrowRight') moveStory(1)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeStory, activeStorySellerIndex, activeStorySlideIndex, sellerStories])
   const visibleOrders = useMemo(() => orders.filter((order) => {
     if (order.side !== mode) return false
     const query = orderSearch.trim().toLowerCase()
@@ -461,7 +499,20 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
           </div>
         </div>
         <div className="mb-4 space-y-3 border-b pb-4"><div className="grid gap-3 sm:grid-cols-[minmax(220px,1fr)_190px_190px]"><div><h2 className="text-lg font-semibold">Marketplace feed</h2><p className="text-sm text-muted-foreground">Supplier stories, offers and current pricing from opted-in businesses.</p></div><label className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search offers and suppliers" className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm" /></label><div className="grid grid-cols-2 gap-2"><select aria-label="Filter by category" value={listingCategory} onChange={(event) => setListingCategory(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="">All categories</option>{listingCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select><select aria-label="Sort offers" value={listingSort} onChange={(event) => setListingSort(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="recent">Recently updated</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option><option value="minimum-asc">Smallest minimum</option></select></div></div><div className="flex gap-1 overflow-x-auto rounded-md bg-muted/60 p-1" role="tablist" aria-label="Marketplace feed"><button type="button" role="tab" aria-selected={feedAudience === 'for-you'} onClick={() => setFeedAudience('for-you')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'for-you' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>For you</button><button type="button" role="tab" aria-selected={feedAudience === 'following'} onClick={() => setFeedAudience('following')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'following' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Following <span className="ml-1 text-xs">{followedSellerIds.size}</span></button><button type="button" role="tab" aria-selected={feedAudience === 'offers'} onClick={() => setFeedAudience('offers')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'offers' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Offers</button></div></div>
-        {sellerStories.length > 0 && <section aria-label="Seller stories" className="mb-5 border-b pb-4"><div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">Fresh from suppliers</h2><p className="text-xs text-muted-foreground">Tap a seller to see their latest offers and updates.</p></div><span className="text-xs tabular-nums text-muted-foreground">{sellerStories.length} businesses</span></div><div className="flex gap-4 overflow-x-auto pb-2">{sellerStories.map((seller) => <Link key={seller.id} to={`/tenant/procurement/buying/sellers/${encodeURIComponent(seller.id)}`} className="group flex w-[76px] shrink-0 flex-col items-center gap-1.5 text-center"><span className="grid size-[68px] place-items-center rounded-full bg-rose-500 p-[3px] transition-transform group-hover:scale-105"><span className="grid size-full place-items-center overflow-hidden rounded-full border-2 border-background bg-emerald-50 text-emerald-900">{seller.cover || seller.logo ? <img src={seller.cover || seller.logo || ''} alt="" className="size-full object-cover" loading="lazy" /> : <Building2 className="size-6" />}</span></span><span className="w-full truncate text-xs font-medium">{seller.name}</span><span className="sr-only">{seller.isFollowing ? 'Following' : 'View seller profile'}</span></Link>)}</div></section>}
+        {sellerStories.length > 0 && <section aria-label="Seller stories" className="mb-5 border-b pb-4"><div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">Supplier status</h2><p className="text-xs text-muted-foreground">Fresh campaign images from sellers in your feed.</p></div><span className="text-xs tabular-nums text-muted-foreground">{sellerStories.length} businesses</span></div><div className="flex gap-4 overflow-x-auto pb-2">{sellerStories.map((seller, index) => <div key={seller.id} className="flex w-[76px] shrink-0 flex-col items-center gap-1.5 text-center"><button type="button" aria-label={`Play ${seller.name} status, ${seller.slides.length} images`} onClick={() => { setActiveStorySellerIndex(index); setActiveStorySlideIndex(0) }} className="group grid size-[68px] place-items-center rounded-full bg-rose-500 p-[3px] transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"><span className="grid size-full place-items-center overflow-hidden rounded-full border-2 border-background bg-emerald-50 text-emerald-900">{seller.slides[0]?.image ? <img src={seller.slides[0].image} alt="" className="size-full object-cover" loading="lazy" /> : seller.logo ? <img src={seller.logo} alt="" className="size-full object-cover" loading="lazy" /> : <Building2 className="size-6" />}</span></button><Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(seller.id)}`} className="w-full truncate text-xs font-medium hover:underline">{seller.name}</Link></div>)}</div></section>}
+        {activeStory && activeStorySlide && <div role="dialog" aria-modal="true" aria-label={`${activeStory.name} supplier status`} className="fixed inset-0 z-[90] bg-black/85 sm:grid sm:place-items-center sm:p-5" onClick={closeStory}>
+          <div className="relative h-[100dvh] w-full overflow-hidden bg-neutral-950 text-white sm:h-[min(88dvh,820px)] sm:max-w-[440px] sm:rounded-md" onClick={(event) => event.stopPropagation()}>
+            <img key={`${activeStory.id}-${activeStorySlideIndex}`} src={activeStorySlide.image} alt={activeStorySlide.title} className="absolute inset-0 size-full object-contain" />
+            <div className="absolute inset-x-0 top-0 z-20 space-y-3 bg-black/45 px-3 pb-5 pt-[max(env(safe-area-inset-top),12px)]">
+              <div className="flex gap-1" aria-label={`Image ${activeStorySlideIndex + 1} of ${activeStory.slides.length}`}>{activeStory.slides.map((slide, index) => <span key={`${slide.image}-${index}`} className="h-1 flex-1 overflow-hidden rounded-full bg-white/35"><span className={`block h-full bg-white ${index < activeStorySlideIndex ? 'w-full' : index === activeStorySlideIndex ? 'w-full origin-left animate-story-progress' : 'w-0'}`} /></span>)}</div>
+              <header className="flex items-center gap-3"><div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border border-white/70 bg-emerald-100 text-emerald-900">{activeStory.logo ? <img src={activeStory.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-5" />}</div><div className="min-w-0 flex-1"><Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(activeStory.id)}`} onClick={closeStory} className="block truncate text-sm font-semibold hover:underline">{activeStory.name}</Link><p className="text-xs text-white/75">{activeStorySlide.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'}</p></div><button type="button" aria-label="Close supplier status" onClick={closeStory} className="grid size-10 place-items-center rounded-full bg-white/10 hover:bg-white/20"><X className="size-5" /></button></header>
+            </div>
+            <button type="button" aria-label="Previous status image" onClick={() => moveStory(-1)} className="absolute inset-y-20 left-0 z-10 w-1/3 cursor-pointer" />
+            <button type="button" aria-label="Next status image" onClick={() => moveStory(1)} className="absolute inset-y-20 right-0 z-10 w-1/3 cursor-pointer" />
+            <div className="absolute inset-x-0 bottom-0 z-20 bg-black/65 px-4 pb-[max(env(safe-area-inset-bottom),20px)] pt-5"><p className="text-xs font-medium text-emerald-200">{activeStorySlide.campaignType === 'ad' ? 'Sponsored offer' : 'Supplier update'}</p><h2 className="mt-1 text-lg font-semibold">{activeStorySlide.title}</h2><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-white/90">{activeStorySlide.message}</p><Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(activeStory.id)}`} onClick={closeStory} className="mt-3 inline-flex min-h-10 items-center rounded-sm border border-white/50 px-3 text-sm font-medium hover:bg-white/10">View seller and offers <ArrowRight className="ml-2 size-4" /></Link></div>
+            <span className="sr-only" aria-live="polite">Image {activeStorySlideIndex + 1} of {activeStory.slides.length}: {activeStorySlide.title}</span>
+          </div>
+        </div>}
         {feedCampaigns.length > 0 && <section aria-label="Marketplace posts" className="space-y-5">{(showAllCampaigns ? feedCampaigns : feedCampaigns.slice(0, 4)).map((campaign) => <article key={campaign.id} className="mx-auto w-full max-w-[720px] overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md">
           <header className="flex items-center gap-3 px-4 py-3"><div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{campaign.business?.logo ? <img src={campaign.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-5" />}</div><div className="min-w-0 flex-1">{campaign.business?.id ? <Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(campaign.business.id)}`} className="block truncate text-sm font-semibold hover:underline">{campaign.business.name || 'Marketplace seller'}</Link> : <p className="truncate text-sm font-semibold">{campaign.business?.name || 'Marketplace seller'}</p>}<p className="text-xs text-muted-foreground">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'} · {campaign.endsAt ? `ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Active now'}</p></div>{canFollowSellers && campaign.business?.id && <Button size="sm" variant={followedSellerIds.has(campaign.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(campaign.business!.id)}>{followedSellerIds.has(campaign.business.id) ? 'Following' : 'Follow'}</Button>}</header>
           <div className="px-4 pb-3"><h3 className="text-base font-semibold">{campaign.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{campaign.message}</p></div>
