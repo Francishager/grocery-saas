@@ -7,12 +7,14 @@ export function campaignImageDeliveryUrl(value) {
 
   const afterUpload = value.slice(markerIndex + marker.length);
   if (/^(?:f_auto\/|[^/]*f_auto)/.test(afterUpload)) return value;
-  return `${value.slice(0, markerIndex + marker.length)}f_auto/q_auto,c_limit,w_1600,h_1200/${afterUpload}`;
+  return `${value.slice(0, markerIndex + marker.length)}f_auto/q_auto/c_limit,w_1600,h_1200/${afterUpload}`;
 }
 
 export function campaignImageUrls(images) {
-  if (!Array.isArray(images)) return [];
-  return images
-    .map((image) => campaignImageDeliveryUrl(typeof image === 'string' ? image : image?.url))
+  const entries = Array.isArray(images) ? images : images ? [images] : [];
+  return entries
+    .map((image) => campaignImageDeliveryUrl(typeof image === 'string'
+      ? image
+      : image?.url || image?.secure_url || image?.secureUrl || image?.imageUrl || image?.src))
     .filter(Boolean);
 }
