@@ -9,6 +9,7 @@ import { getReceivablesAccountingConfig } from '../services/receivablesAccountin
 import { syncLinkedTransactionAccountBalance } from '../utils/accountingSync.js';
 import { ensureTenantAccountingSetup } from '../services/tenantAccountingSetupService.js';
 import { approveProcurementSupplierPayment, postProcurementSellerInvoice } from '../services/procurementSellerAccountingService.js';
+import { campaignImageDeliveryUrl, campaignImageUrls } from '../utils/campaignImages.js';
 import { createTenantNotification } from '../utils/notifications.js';
 import { createAdvisorLimiter, requestBusinessAdvice } from '../services/businessAdvisor.js';
 import multer from 'multer';
@@ -108,13 +109,12 @@ function uploadCampaignImage(file, tenantId) {
     const stream = cloudinary.v2.uploader.upload_stream({
       folder: `jibusales/marketplace/campaigns/${tenantId}`,
       resource_type: 'image',
-      transformation: [{ width: 1600, height: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
     }, (error, result) => {
       if (error) return reject(error);
       if (!result?.secure_url || !/^https:\/\//i.test(result.secure_url) || !result.public_id) {
         return reject(new Error('Image storage did not return a valid hosted image URL.'));
       }
-      resolve({ url: result.secure_url, publicId: result.public_id });
+      resolve({ url: campaignImageDeliveryUrl(result.secure_url), publicId: result.public_id });
     });
     stream.end(file.buffer);
   });
@@ -124,9 +124,6 @@ async function removeCampaignImages(images) {
     ? cloudinary.v2.uploader.destroy(image.publicId).catch(() => {})
     : Promise.resolve()));
 }
-const campaignImageUrls = (images) => Array.isArray(images) ? images
-  .map((image) => typeof image === 'string' ? image : image?.url)
-  .filter((url) => typeof url === 'string' && /^https:\/\//i.test(url)) : [];
 const publicTenantData = async (tenantIds) => {
   const ids = [...new Set(tenantIds.filter(Boolean))];
   const rows = await prisma.tenant.findMany({
