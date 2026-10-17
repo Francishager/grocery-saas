@@ -188,6 +188,7 @@ function App() {
           <Route path="procurement/buying/rfqs" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="rfqs" /></FeatureGuard>} />
           <Route path="procurement/buying/purchases" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="orders" /></FeatureGuard>} />
           <Route path="procurement/buying/suppliers" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="relationships" /></FeatureGuard>} />
+          <Route path="procurement/buying/sellers/:sellerTenantId" element={<FeatureGuard feature="procurement.buyer" permission="canViewProcurement"><ProcurementNetworkPage mode="buyer" section="seller-profile" /></FeatureGuard>} />
           <Route path="procurement/selling" element={<Navigate to="/tenant/procurement/selling/studio" replace />} />
           <Route path="procurement/selling/studio" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="marketplace" /></FeatureGuard>} />
           <Route path="procurement/selling/rfqs" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="rfqs" /></FeatureGuard>} />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type TextareaHTMLAttributes } from 'react'
-import { ArrowRight, Building2, ChevronsUpDown, CircleDollarSign, Clock3, Globe2, Handshake, LoaderCircle, Megaphone, Package, Plus, Printer, RefreshCw, Search, Send, Share2, ShieldCheck, Sparkles, Store, Tags, UserPlus, UserRoundCheck, X } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Building2, ChevronsUpDown, ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Globe2, Handshake, LoaderCircle, Megaphone, Package, Plus, Printer, RefreshCw, Search, Send, Share2, ShieldCheck, Sparkles, Store, Tags, UserPlus, UserRoundCheck, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
@@ -7,13 +8,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
-type Section = 'marketplace' | 'rfqs' | 'orders' | 'relationships' | 'profile'
+type Section = 'marketplace' | 'rfqs' | 'orders' | 'relationships' | 'profile' | 'seller-profile'
 type LineDraft = { productId: string; productName: string; specification: string; quantity: string; unit: string; acceptableAlternatives: string; custom: boolean }
 type Business = { id: string; name: string; slug: string; businessType?: string | null; logo?: string | null }
 type Listing = { id: string; name: string; description: string; category: string; unit: string; price: string; currency: string; minimumQty: string; availableQty?: string | null; leadTimeDays?: number | null; visibility: string; status?: string; updatedAt?: string; business?: Business }
 type RFQ = { id: string; title: string; notes: string; visibility: string; status: string; currency: string; isMine: boolean; lines: Array<{ id: string; productId?: string | null; productName: string; specification: string; quantity: string; unit: string; referencePrice?: string | null; referenceCurrency?: string | null; sourceCampaignId?: string | null }>; buyer?: Business; quoteCount: number; myQuote?: { id: string; status: string; version: number } | null }
 type Relationship = { id: string; status: string; direction: string; counterparty?: Business }
 type Campaign = { id: string; campaignType: 'promotion' | 'ad'; title: string; message: string; startsAt: string; endsAt?: string | null; status: string; images?: string[]; listing?: { id: string; name: string; description: string; unit: string; minimumQty: string; price: string; currency: string }; business?: Business }
+type SellerProfileView = { profile: { tenantId: string; sellerType: string; category: string; description: string; website?: string | null; discoverable: boolean; business?: Business }; listings: Listing[]; campaigns: Campaign[] }
 type OfferRequestDraft = { listing: Pick<Listing, 'id' | 'name' | 'description' | 'unit' | 'price' | 'currency' | 'minimumQty'>; campaignId?: string; campaignTitle?: string; campaignMessage?: string; quantity: string; deliveryAddress: string; notes: string }
 
 const blankLine: LineDraft = { productId: '', productName: '', specification: '', quantity: '1', unit: 'Piece', acceptableAlternatives: '', custom: false }
@@ -60,19 +62,34 @@ async function requestCampaign<T>(path: string, body: FormData): Promise<T> {
 }
 
 function CampaignImageShowcase({ images, title }: { images?: string[]; title: string }) {
-  const [frame, setFrame] = useState(0)
-  const [paused, setPaused] = useState(false)
-  const frameCount = Math.ceil((images?.length || 0) / 2)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [expanded, setExpanded] = useState(false)
+  const imageList = images || []
+  useEffect(() => setActiveIndex((current) => Math.min(current, Math.max(0, imageList.length - 1))), [imageList.length])
   useEffect(() => {
-    if (frameCount < 2 || paused || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const timer = setInterval(() => setFrame((current) => (current + 1) % frameCount), 6000)
+    if (expanded || imageList.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const timer = setInterval(() => setActiveIndex((current) => (current + 1) % imageList.length), 7000)
     return () => clearInterval(timer)
-  }, [frameCount, paused])
-  if (!images?.length) return null
-  const visibleImages = images.slice(frame * 2, frame * 2 + 2)
-  return <div className="mb-2 grid aspect-[1.9/1] grid-cols-2 gap-1 overflow-hidden bg-muted" aria-label={`Images for ${title}`} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
-    {visibleImages.map((image) => <img key={`${frame}-${image}`} src={image} alt={`${title} campaign image`} className={`size-full min-w-0 object-cover ${visibleImages.length === 1 ? 'col-span-2' : ''}`} loading="lazy" />)}
-  </div>
+  }, [imageList.length, expanded])
+  if (!imageList.length) return null
+  const move = (direction: number) => setActiveIndex((current) => (current + direction + imageList.length) % imageList.length)
+  return <>
+    <div className="relative mx-auto w-full overflow-hidden bg-neutral-950" aria-label={`Images for ${title}`}>
+      <button type="button" aria-label={`View ${title} image full screen`} onClick={() => setExpanded(true)} className="block w-full cursor-zoom-in">
+        <img src={imageList[activeIndex]} alt={`${title} image ${activeIndex + 1}`} className="mx-auto max-h-[78vh] min-h-64 w-full object-contain sm:aspect-[4/5] sm:max-h-[820px]" loading={activeIndex === 0 ? 'eager' : 'lazy'} />
+      </button>
+      {imageList.length > 1 && <>
+        <button type="button" aria-label="Previous campaign image" onClick={() => move(-1)} className="absolute left-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white hover:bg-black/75"><ChevronLeft className="size-5" /></button>
+        <button type="button" aria-label="Next campaign image" onClick={() => move(1)} className="absolute right-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white hover:bg-black/75"><ChevronRight className="size-5" /></button>
+      </>}
+    </div>
+    {expanded && <div role="dialog" aria-modal="true" aria-label={`${title} images`} className="fixed inset-0 z-[80] grid place-items-center bg-black/95 p-2 sm:p-6" onClick={() => setExpanded(false)} onKeyDown={(event) => { if (event.key === 'Escape') setExpanded(false); if (event.key === 'ArrowLeft') move(-1); if (event.key === 'ArrowRight') move(1) }} tabIndex={-1}>
+      <button type="button" aria-label="Close image viewer" onClick={() => setExpanded(false)} className="absolute right-4 top-4 z-10 grid size-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25"><X className="size-5" /></button>
+      {imageList.length > 1 && <button type="button" aria-label="Previous campaign image" onClick={(event) => { event.stopPropagation(); move(-1) }} className="absolute left-3 z-10 grid size-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:left-8"><ChevronLeft className="size-6" /></button>}
+      <img src={imageList[activeIndex]} alt={`${title} image ${activeIndex + 1}`} className="max-h-full max-w-full object-contain" onClick={(event) => event.stopPropagation()} />
+      {imageList.length > 1 && <button type="button" aria-label="Next campaign image" onClick={(event) => { event.stopPropagation(); move(1) }} className="absolute right-3 z-10 grid size-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:right-8"><ChevronRight className="size-6" /></button>}
+    </div>}
+  </>
 }
 
 function printPaymentReceipt(order: any, invoice: any, approval: any) {
@@ -96,6 +113,7 @@ function TextareaField({ label, ...props }: TextareaHTMLAttributes<HTMLTextAreaE
 }
 
 export default function ProcurementNetworkPage({ mode = 'buyer', section = 'marketplace' }: { mode?: 'buyer' | 'seller'; section?: Section }) {
+  const { sellerTenantId } = useParams<{ sellerTenantId: string }>()
   const { user, hasPermission } = useJWTAuth()
   const { canAccessFeature } = useFeatureAccess()
   const can = (permission: string) => !(mode === 'seller' && permission === 'canCreateProcurementRFQ') && (user?.role === 'owner' || hasPermission(permission))
@@ -116,6 +134,7 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
   const [listings, setListings] = useState<Listing[]>([])
   const [myListings, setMyListings] = useState<Listing[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [sellerProfileView, setSellerProfileView] = useState<SellerProfileView | null>(null)
   const [campaignImages, setCampaignImages] = useState<File[]>([])
   const [followedSellerIds, setFollowedSellerIds] = useState<Set<string>>(new Set())
   const [showAllCampaigns, setShowAllCampaigns] = useState(false)
@@ -160,7 +179,7 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [profileData, listingData, ownData, directoryData, relationshipData, rfqData, orderData, branchData, supplierData, productData, requestProductData, categoryData, businessData, sellerProductData, campaignData, ownCampaignData, followData] = await Promise.all([
+      const [profileData, listingData, ownData, directoryData, relationshipData, rfqData, orderData, branchData, supplierData, productData, requestProductData, categoryData, businessData, sellerProductData, campaignData, ownCampaignData, followData, sellerProfileData] = await Promise.all([
         mode === 'seller' ? request<{ profile: typeof profile | null }>('/profile') : Promise.resolve({ profile: null }),
         mode === 'buyer' ? request<{ listings: Listing[] }>(`/listings?search=${encodeURIComponent(search)}`) : Promise.resolve({ listings: [] }),
         mode === 'seller' ? request<{ listings: Listing[] }>('/listings/mine').catch(() => ({ listings: [] })) : Promise.resolve({ listings: [] }),
@@ -178,6 +197,9 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
         mode === 'buyer' ? request<{ campaigns: Campaign[] }>('/promotions') : Promise.resolve({ campaigns: [] }),
         mode === 'seller' ? request<{ campaigns: Campaign[] }>('/promotions/mine').catch(() => ({ campaigns: [] })) : Promise.resolve({ campaigns: [] }),
         mode === 'buyer' ? request<{ sellerTenantIds: string[] }>('/follows').catch(() => ({ sellerTenantIds: [] })) : Promise.resolve({ sellerTenantIds: [] }),
+        mode === 'buyer' && section === 'seller-profile' && sellerTenantId
+          ? request<SellerProfileView>(`/sellers/${encodeURIComponent(sellerTenantId)}/profile`)
+          : Promise.resolve(null),
       ])
       if (profileData.profile) setProfile({ sellerType: profileData.profile.sellerType || 'supplier', category: profileData.profile.category || '', description: profileData.profile.description || '', website: profileData.profile.website || '', discoverable: profileData.profile.discoverable })
       setListings(listingData.listings); setMyListings(ownData.listings); setSuppliers(directoryData.suppliers); setAllRelationships(relationshipData.relationships); setAllRFQs(rfqData.rfqs)
@@ -191,12 +213,13 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
       setSellerProducts(sellerProductData.products)
       setCampaigns(campaignData.campaigns)
       setMyCampaigns(ownCampaignData.campaigns)
+      setSellerProfileView(sellerProfileData)
       setFollowedSellerIds(new Set(followData.sellerTenantIds))
       if (!selectedBranch && branchData.branches.length === 1) setSelectedBranch(branchData.branches[0].id)
       if (!selectedSupplier && supplierData.suppliers.length === 1) setSelectedSupplier(supplierData.suppliers[0].id)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load the procurement network.') }
     finally { setLoading(false) }
-  }, [mode, search, selectedBranch, selectedSupplier])
+  }, [mode, section, sellerTenantId, search, selectedBranch, selectedSupplier])
 
   useEffect(() => { void load() }, [load])
 
@@ -218,12 +241,13 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
     if (listingSort === 'minimum-asc') return Number(a.minimumQty) - Number(b.minimumQty)
     return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
   }), [listings, listingSort])
-  const feedListings = useMemo(() => feedAudience === 'following'
-    ? visibleListings.filter((item) => item.business?.id && followedSellerIds.has(item.business.id))
-    : visibleListings, [visibleListings, feedAudience, followedSellerIds])
   const feedCampaigns = useMemo(() => feedAudience === 'offers' ? [] : feedAudience === 'following'
     ? campaigns.filter((campaign) => campaign.business?.id && followedSellerIds.has(campaign.business.id))
     : campaigns, [campaigns, feedAudience, followedSellerIds])
+  const campaignListingIds = useMemo(() => new Set(feedCampaigns.map((campaign) => campaign.listing?.id).filter(Boolean)), [feedCampaigns])
+  const feedListings = useMemo(() => visibleListings.filter((item) =>
+    !campaignListingIds.has(item.id) && (feedAudience !== 'following' || (item.business?.id && followedSellerIds.has(item.business.id))),
+  ), [visibleListings, feedAudience, followedSellerIds, campaignListingIds])
   const visibleOrders = useMemo(() => orders.filter((order) => {
     if (order.side !== mode) return false
     const query = orderSearch.trim().toLowerCase()
@@ -417,9 +441,14 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
     {section === 'marketplace' && <section className={mode === 'seller' ? 'grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_360px]' : 'mx-auto max-w-5xl space-y-6'}>
       {mode === 'buyer' ? <div className="min-w-0">
         <div className="mb-4 space-y-3 border-b pb-4"><div className="grid gap-3 sm:grid-cols-[minmax(220px,1fr)_190px_190px]"><div><h2 className="text-lg font-semibold">Marketplace feed</h2><p className="text-sm text-muted-foreground">Supplier stories, offers and current pricing from opted-in businesses.</p></div><label className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search offers and suppliers" className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm" /></label><div className="grid grid-cols-2 gap-2"><select aria-label="Filter by category" value={listingCategory} onChange={(event) => setListingCategory(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="">All categories</option>{listingCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select><select aria-label="Sort offers" value={listingSort} onChange={(event) => setListingSort(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="recent">Recently updated</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option><option value="minimum-asc">Smallest minimum</option></select></div></div><div className="flex gap-1 overflow-x-auto rounded-md bg-muted/60 p-1" role="tablist" aria-label="Marketplace feed"><button type="button" role="tab" aria-selected={feedAudience === 'for-you'} onClick={() => setFeedAudience('for-you')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'for-you' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>For you</button><button type="button" role="tab" aria-selected={feedAudience === 'following'} onClick={() => setFeedAudience('following')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'following' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Following <span className="ml-1 text-xs">{followedSellerIds.size}</span></button><button type="button" role="tab" aria-selected={feedAudience === 'offers'} onClick={() => setFeedAudience('offers')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'offers' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Offers</button></div></div>
-        {feedCampaigns.length > 0 && <section aria-label="Marketplace posts" className="space-y-4">{(showAllCampaigns ? feedCampaigns : feedCampaigns.slice(0, 4)).map((campaign) => <article key={campaign.id} className="overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md"><header className="flex items-center gap-3 px-4 py-3"><div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{campaign.business?.logo ? <img src={campaign.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-5" />}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{campaign.business?.name || 'Marketplace seller'}</p><p className="text-xs text-muted-foreground">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'} · {campaign.endsAt ? `ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Active now'}</p></div>{canFollowSellers && campaign.business?.id && <Button size="sm" variant={followedSellerIds.has(campaign.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(campaign.business!.id)}>{followedSellerIds.has(campaign.business.id) ? 'Following' : 'Follow'}</Button>}</header><div className="px-4 pb-3"><h3 className="text-base font-semibold">{campaign.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{campaign.message}</p></div><CampaignImageShowcase images={campaign.images} title={campaign.title} />{campaign.listing && <footer className="flex flex-wrap items-center gap-3 border-t px-4 py-3"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{campaign.listing.name}</p><p className="text-sm tabular-nums text-emerald-800">{campaign.listing.currency} {Number(campaign.listing.price).toLocaleString()} <span className="font-normal text-muted-foreground">/ {campaign.listing.unit}</span></p></div><Button size="sm" variant="ghost" aria-label={`Share ${campaign.listing.name}`} title="Share offer" onClick={() => void shareMarketplacePost(campaign.listing!.name, `market-listing-${campaign.listing!.id}`)}><Share2 className="size-4" /></Button>{can('canCreateProcurementRFQ') && <Button size="sm" disabled={busy} onClick={() => beginOfferRequest(campaign.listing!, campaign)}><Send className="mr-2 size-4" />Request quote</Button>}</footer>}</article>)}{feedCampaigns.length > 4 && <button type="button" className="w-full rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted" onClick={() => setShowAllCampaigns((visible) => !visible)}>{showAllCampaigns ? 'Show fewer posts' : `Load more posts (${feedCampaigns.length - 4})`}</button>}</section>}
+        {feedCampaigns.length > 0 && <section aria-label="Marketplace posts" className="space-y-5">{(showAllCampaigns ? feedCampaigns : feedCampaigns.slice(0, 4)).map((campaign) => <article key={campaign.id} className="mx-auto w-full max-w-[720px] overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md">
+          <header className="flex items-center gap-3 px-4 py-3"><div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{campaign.business?.logo ? <img src={campaign.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-5" />}</div><div className="min-w-0 flex-1">{campaign.business?.id ? <Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(campaign.business.id)}`} className="block truncate text-sm font-semibold hover:underline">{campaign.business.name || 'Marketplace seller'}</Link> : <p className="truncate text-sm font-semibold">{campaign.business?.name || 'Marketplace seller'}</p>}<p className="text-xs text-muted-foreground">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'} · {campaign.endsAt ? `ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Active now'}</p></div>{canFollowSellers && campaign.business?.id && <Button size="sm" variant={followedSellerIds.has(campaign.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(campaign.business!.id)}>{followedSellerIds.has(campaign.business.id) ? 'Following' : 'Follow'}</Button>}</header>
+          <div className="px-4 pb-3"><h3 className="text-base font-semibold">{campaign.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{campaign.message}</p></div>
+          <CampaignImageShowcase images={campaign.images} title={campaign.title} />
+          {campaign.listing && <footer className="flex flex-wrap items-center gap-3 border-t px-4 py-3"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{campaign.listing.name}</p><p className="text-sm tabular-nums text-emerald-800">{campaign.listing.currency} {Number(campaign.listing.price).toLocaleString()} <span className="font-normal text-muted-foreground">/ {campaign.listing.unit}</span></p></div><Button size="sm" variant="ghost" aria-label={`Share ${campaign.listing.name}`} title="Share offer" onClick={() => void shareMarketplacePost(campaign.listing!.name, `market-listing-${campaign.listing!.id}`)}><Share2 className="size-4" /></Button>{can('canCreateProcurementRFQ') && <Button size="sm" disabled={busy} onClick={() => beginOfferRequest(campaign.listing!, campaign)}><Send className="mr-2 size-4" />Request quote</Button>}</footer>}
+        </article>)}{feedCampaigns.length > 4 && <button type="button" className="w-full rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted" onClick={() => setShowAllCampaigns((visible) => !visible)}>{showAllCampaigns ? 'Show fewer posts' : `Load more posts (${feedCampaigns.length - 4})`}</button>}</section>}
         {feedListings.length ? <div className="grid gap-4">{feedListings.map((item) => <article id={`market-listing-${item.id}`} key={item.id} className="min-w-0 overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md">
-          <header className="flex items-center gap-3 px-4 pt-4"><div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{item.business?.logo ? <img src={item.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-4" />}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{item.business?.name || 'Marketplace seller'}</p><p className="text-xs text-muted-foreground">{item.category} · {item.unit} · Marketplace offer</p></div><Button size="icon" variant="ghost" aria-label={`Share ${item.name}`} title="Share offer" onClick={() => void shareMarketplacePost(item.name, `market-listing-${item.id}`)}><Share2 className="size-4" /></Button>{canFollowSellers && item.business?.id && <Button size="sm" variant={followedSellerIds.has(item.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(item.business!.id)}>{followedSellerIds.has(item.business.id) ? 'Following' : 'Follow'}</Button>}</header><div className="px-4 pb-4 pt-3"><h3 className="break-words text-base font-semibold">{item.name}</h3>
+          <header className="flex items-center gap-3 px-4 pt-4"><div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{item.business?.logo ? <img src={item.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-4" />}</div><div className="min-w-0 flex-1">{item.business?.id ? <Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(item.business.id)}`} className="block truncate text-sm font-semibold hover:underline">{item.business.name || 'Marketplace seller'}</Link> : <p className="truncate text-sm font-semibold">{item.business?.name || 'Marketplace seller'}</p>}<p className="text-xs text-muted-foreground">{item.category} · {item.unit} · Marketplace offer</p></div><Button size="icon" variant="ghost" aria-label={`Share ${item.name}`} title="Share offer" onClick={() => void shareMarketplacePost(item.name, `market-listing-${item.id}`)}><Share2 className="size-4" /></Button>{canFollowSellers && item.business?.id && <Button size="sm" variant={followedSellerIds.has(item.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(item.business!.id)}>{followedSellerIds.has(item.business.id) ? 'Following' : 'Follow'}</Button>}</header><div className="px-4 pb-4 pt-3"><h3 className="break-words text-base font-semibold">{item.name}</h3>
           <p className="min-h-10 break-words text-sm text-muted-foreground">{item.description || 'No additional description provided.'}</p>
           <div className="mt-4 flex flex-wrap items-end justify-between gap-3"><div><div className="text-xl font-semibold tabular-nums">{item.currency} {Number(item.price).toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {item.unit}</span></div><div className="text-xs text-muted-foreground">Minimum {Number(item.minimumQty).toLocaleString()} {item.unit}</div></div><div className="flex flex-wrap items-center gap-2">{item.availableQty && <span className="text-xs text-muted-foreground">Available: {Number(item.availableQty).toLocaleString()}</span>}{item.leadTimeDays != null && <span className="text-xs text-muted-foreground">{item.leadTimeDays} day lead time</span>}</div></div>
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-3 text-xs text-muted-foreground"><button className="underline underline-offset-2 hover:text-foreground" onClick={async () => { try { const d = await request<{history: any[]}>(`/listings/${item.id}/price-history`); setNotice(d.history.length ? d.history.map((x) => `${new Date(x.effectiveAt).toLocaleDateString()}: ${x.currency} ${x.oldPrice} → ${x.newPrice}${x.reason ? ` (${x.reason})` : ''}`).join(' · ') : 'No recorded price changes yet.') } catch (e) { setError(e instanceof Error ? e.message : 'Could not load price history.') } }}>Price history</button>{can('canCreateProcurementRFQ') && <Button className="ml-auto" size="sm" disabled={busy} onClick={() => beginOfferRequest(item)}><Send className="mr-2 size-4" />Request quote</Button>}</div></div>
@@ -473,6 +502,33 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
           {myCampaigns.length > 0 && <div className="mt-4 space-y-2"><h4 className="text-xs font-semibold">Your campaigns</h4>{myCampaigns.map((campaign) => <div key={campaign.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span className="min-w-0 truncate">{campaign.title} · {campaign.status}</span>{can('canManageMarketplacePromotions') && campaign.status !== 'cancelled' && <div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/promotions/${campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: campaign.status === 'active' ? 'paused' : 'active' }) }), campaign.status === 'active' ? 'Campaign paused.' : 'Campaign resumed.')}>{campaign.status === 'active' ? 'Pause' : 'Resume'}</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/promotions/${campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }), 'Campaign cancelled.')}>Cancel</Button></div>}</div>)}</div>}
         </div>}
       </aside>}
+    </section>}
+
+    {section === 'seller-profile' && <section className="mx-auto w-full max-w-5xl space-y-5">
+      <Link to="/tenant/procurement/buying/marketplace" className="inline-flex min-h-10 items-center gap-2 text-sm font-medium text-emerald-800 hover:underline"><ArrowLeft className="size-4" />Marketplace</Link>
+      {loading && <div className="border p-8 text-center text-sm text-muted-foreground">Loading seller profile…</div>}
+      {!loading && !sellerProfileView && <div className="border border-dashed p-8 text-center text-sm text-muted-foreground">This seller profile is unavailable or is no longer shared with your business.</div>}
+      {sellerProfileView && <>
+        <header className="border-b pb-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-900 ring-1 ring-border sm:size-20">{sellerProfileView.profile.business?.logo ? <img src={sellerProfileView.profile.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-8" />}</div>
+            <div className="min-w-0 flex-1"><h1 className="break-words text-xl font-semibold">{sellerProfileView.profile.business?.name || 'Marketplace seller'}</h1><p className="mt-1 text-sm capitalize text-muted-foreground">{sellerProfileView.profile.sellerType.replace(/_/g, ' ')} · {sellerProfileView.profile.category}</p>{sellerProfileView.profile.website && <a href={sellerProfileView.profile.website} target="_blank" rel="noreferrer" className="mt-1 inline-block break-all text-sm text-emerald-800 underline underline-offset-2">{sellerProfileView.profile.website}</a>}</div>
+            {canFollowSellers && sellerProfileView.profile.tenantId !== user?.tenantId && <Button variant={followedSellerIds.has(sellerProfileView.profile.tenantId) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(sellerProfileView.profile.tenantId)}>{followedSellerIds.has(sellerProfileView.profile.tenantId) ? <><UserRoundCheck className="mr-2 size-4" />Following</> : <><UserPlus className="mr-2 size-4" />Follow seller</>}</Button>}
+          </div>
+          <div className="mt-5 max-w-3xl"><h2 className="text-sm font-semibold">About</h2><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{sellerProfileView.profile.description || 'This seller has not added a business description yet.'}</p></div>
+        </header>
+        <section aria-label="Seller marketplace posts" className="space-y-5">
+          <h2 className="text-lg font-semibold">Posts and offers</h2>
+          {sellerProfileView.campaigns.map((campaign) => <article key={campaign.id} className="mx-auto w-full max-w-[720px] overflow-hidden rounded-md border bg-card shadow-sm">
+            <header className="px-4 py-3"><p className="text-sm font-semibold">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'}</p><p className="mt-1 text-xs text-muted-foreground">{campaign.endsAt ? `Ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Active now'}</p></header>
+            <div className="px-4 pb-3"><h3 className="text-base font-semibold">{campaign.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{campaign.message}</p></div>
+            <CampaignImageShowcase images={campaign.images} title={campaign.title} />
+            {campaign.listing && <div className="border-t px-4 py-3"><p className="font-semibold">{campaign.listing.name}</p><p className="text-sm tabular-nums text-emerald-800">{campaign.listing.currency} {Number(campaign.listing.price).toLocaleString()} / {campaign.listing.unit}</p>{can('canCreateProcurementRFQ') && <Button className="mt-3" size="sm" disabled={busy} onClick={() => beginOfferRequest(campaign.listing!)}><Send className="mr-2 size-4" />Request quote</Button>}</div>}
+          </article>)}
+          {sellerProfileView.listings.filter((listing) => !sellerProfileView.campaigns.some((campaign) => campaign.listing?.id === listing.id)).map((listing) => <article key={listing.id} className="mx-auto w-full max-w-[720px] rounded-md border bg-card p-4 shadow-sm"><p className="text-xs font-medium uppercase text-emerald-800">Marketplace offer</p><h3 className="mt-1 text-base font-semibold">{listing.name}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{listing.description || 'No additional description provided.'}</p><p className="mt-4 text-lg font-semibold tabular-nums">{listing.currency} {Number(listing.price).toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {listing.unit}</span></p><p className="text-xs text-muted-foreground">Minimum {Number(listing.minimumQty).toLocaleString()} {listing.unit}</p>{can('canCreateProcurementRFQ') && <Button className="mt-3" size="sm" disabled={busy} onClick={() => beginOfferRequest(listing)}><Send className="mr-2 size-4" />Request quote</Button>}</article>)}
+          {!sellerProfileView.campaigns.length && !sellerProfileView.listings.length && <div className="border border-dashed p-8 text-center text-sm text-muted-foreground">No active posts or offers are currently available.</div>}
+        </section>
+      </>}
     </section>}
 
     {section === 'rfqs' && <section className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_380px]">

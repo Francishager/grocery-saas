@@ -199,6 +199,57 @@ router.get('/directory', requireFeature('procurement.buyer'), requirePermission(
   res.json({ suppliers: result });
 });
 
+router.get('/sellers/:sellerTenantId/profile', requireFeature('procurement.buyer'), requirePermission('canViewProcurement'), async (req, res) => {
+  const tenantId = tenantIdOf(req);
+  const sellerTenantId = text(req.params.sellerTenantId, 100);
+  const isOwnProfile = sellerTenantId === tenantId;
+  const [profile, relationship] = await Promise.all([
+    prisma.procurementProfile.findUnique({
+      where: { tenantId: sellerTenantId },
+      select: { tenantId: true, sellerType: true, category: true, description: true, website: true, discoverable: true },
+    }),
+    isOwnProfile ? Promise.resolve(null) : prisma.procurementRelationship.findUnique({
+      where: { buyerTenantId_sellerTenantId: { buyerTenantId: tenantId, sellerTenantId } },
+      select: { status: true },
+    }),
+  ]);
+  const isConnected = relationship?.status === 'active';
+  if (!profile || (!isOwnProfile && !profile.discoverable && !isConnected)) return res.status(404).json({ error: 'Seller profile not found.' });
+
+  const visibility = [
+    ...(profile.discoverable || isOwnProfile ? [{ visibility: 'public' }] : []),
+    ...(isConnected || isOwnProfile ? [{ visibility: 'private' }] : []),
+  ];
+  const listingAccess = { sellerTenantId, status: 'active', OR: visibility };
+  const now = new Date();
+  const [businesses, listings, campaigns] = await Promise.all([
+    publicTenantData([sellerTenantId]),
+    prisma.marketplaceListing.findMany({
+      where: listingAccess,
+      orderBy: { updatedAt: 'desc' },
+      take: 100,
+      select: { id: true, name: true, description: true, category: true, unit: true, price: true, currency: true, minimumQty: true, availableQty: true, visibility: true, updatedAt: true },
+    }),
+    prisma.marketplacePromotion.findMany({
+      where: {
+        sellerTenantId,
+        status: 'active',
+        startsAt: { lte: now },
+        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+        listing: { is: listingAccess },
+      },
+      include: { listing: { select: { id: true, name: true, description: true, category: true, unit: true, price: true, currency: true, minimumQty: true } } },
+      orderBy: { startsAt: 'desc' },
+      take: 100,
+    }),
+  ]);
+  res.json({
+    profile: { ...profile, business: businesses[sellerTenantId] },
+    listings,
+    campaigns: campaigns.map((campaign) => ({ ...campaign, images: campaignImageUrls(campaign.images) })),
+  });
+});
+
 router.get('/relationships', requirePermission('canViewProcurement'), async (req, res) => {
   const tenantId = tenantIdOf(req);
   const rows = await prisma.procurementRelationship.findMany({
