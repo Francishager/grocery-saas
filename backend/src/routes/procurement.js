@@ -17,10 +17,12 @@ import cloudinary from 'cloudinary';
 const router = Router();
 const acquireMarketInsight = createAdvisorLimiter();
 cloudinary.v2.config({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, api_secret: process.env.CLOUDINARY_API_SECRET });
+const campaignImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const campaignImageExtensions = /\.(jpe?g|png|webp|heic|heif)$/i;
 const campaignImageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 4 },
-  fileFilter: (_req, file, callback) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)
+  fileFilter: (_req, file, callback) => (campaignImageMimeTypes.has(file.mimetype) || (!file.mimetype && campaignImageExtensions.test(file.originalname)))
     ? callback(null, true) : callback(new Error('UNSUPPORTED_IMAGE')),
 });
 const access = [authenticateToken, requireTenant, requireAnyFeature(['procurement.buyer', 'procurement.seller'])];
@@ -93,7 +95,7 @@ function uploadCampaignFiles(req, res, next) {
     if (!error) return next();
     const message = error.code === 'LIMIT_FILE_SIZE' ? 'Each campaign image must be 5 MB or smaller.'
       : error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE' ? 'Upload no more than four campaign images.'
-        : error.message === 'UNSUPPORTED_IMAGE' ? 'Use JPEG, PNG, or WebP campaign images.'
+        : error.message === 'UNSUPPORTED_IMAGE' ? 'Use JPEG, PNG, WebP, HEIC, or HEIF campaign images.'
         : 'Campaign images could not be accepted.';
     res.status(400).json({ error: message });
   });
@@ -107,7 +109,13 @@ function uploadCampaignImage(file, tenantId) {
       folder: `jibusales/marketplace/campaigns/${tenantId}`,
       resource_type: 'image',
       transformation: [{ width: 1600, height: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
-    }, (error, result) => error ? reject(error) : resolve({ url: result.secure_url, publicId: result.public_id }));
+    }, (error, result) => {
+      if (error) return reject(error);
+      if (!result?.secure_url || !/^https:\/\//i.test(result.secure_url) || !result.public_id) {
+        return reject(new Error('Image storage did not return a valid hosted image URL.'));
+      }
+      resolve({ url: result.secure_url, publicId: result.public_id });
+    });
     stream.end(file.buffer);
   });
 }
@@ -116,7 +124,9 @@ async function removeCampaignImages(images) {
     ? cloudinary.v2.uploader.destroy(image.publicId).catch(() => {})
     : Promise.resolve()));
 }
-const campaignImageUrls = (images) => Array.isArray(images) ? images.map((image) => image?.url).filter((url) => typeof url === 'string' && /^https:\/\//i.test(url)) : [];
+const campaignImageUrls = (images) => Array.isArray(images) ? images
+  .map((image) => typeof image === 'string' ? image : image?.url)
+  .filter((url) => typeof url === 'string' && /^https:\/\//i.test(url)) : [];
 const publicTenantData = async (tenantIds) => {
   const ids = [...new Set(tenantIds.filter(Boolean))];
   const rows = await prisma.tenant.findMany({

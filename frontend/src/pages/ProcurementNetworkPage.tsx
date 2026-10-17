@@ -335,12 +335,15 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
 
   function selectCampaignImages(files: FileList | null) {
     const selected = Array.from(files || [])
-    if (selected.length > 4) { setError('Choose up to four campaign images.'); return }
-    if (selected.some((file) => !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024)) {
-      setError('Use JPEG, PNG, or WebP images up to 5 MB each.'); return
+    const remaining = 4 - campaignImages.length
+    if (selected.length > remaining) { setError(`You can add ${remaining} more campaign image${remaining === 1 ? '' : 's'}. Remove an image to make room.`); return }
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+    const supportedExtensions = /\.(jpe?g|png|webp|heic|heif)$/i
+    if (selected.some((file) => (!supportedTypes.includes(file.type) && !(!file.type && supportedExtensions.test(file.name))) || file.size > 5 * 1024 * 1024)) {
+      setError('Use JPEG, PNG, WebP, HEIC, or HEIF images up to 5 MB each.'); return
     }
     setError('')
-    setCampaignImages(selected)
+    setCampaignImages((current) => [...current, ...selected])
   }
 
   async function openRFQ(rfq: RFQ) {
@@ -460,8 +463,8 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
             <TextareaField label="Campaign message" maxLength={1200} value={campaignForm.message} onChange={(event) => setCampaignForm({ ...campaignForm, message: event.target.value })} required />
             <Field label="Starts" type="datetime-local" value={campaignForm.startsAt} onChange={(event) => setCampaignForm({ ...campaignForm, startsAt: event.target.value })} required />
             <Field label="Ends (optional)" type="datetime-local" value={campaignForm.endsAt} onChange={(event) => setCampaignForm({ ...campaignForm, endsAt: event.target.value })} />
-            <label className="grid gap-1.5 text-sm font-medium">Campaign images (up to 4)<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { selectCampaignImages(event.target.files); event.currentTarget.value = '' }} className="min-w-0 rounded-md border bg-background px-3 py-2 text-sm font-normal file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-3 file:py-1.5" /><span className="text-xs font-normal text-muted-foreground">JPEG, PNG, or WebP · up to 5 MB each. Buyers see two images at a time; image controls and counters are hidden.</span></label>
-            {campaignImagePreviews.length > 0 && <div className="grid grid-cols-2 gap-2">{campaignImagePreviews.map(({ file, url }) => <div key={`${file.name}-${file.lastModified}`} className="overflow-hidden border"><img src={url} alt={file.name} className="aspect-[4/3] w-full object-cover" /><p className="truncate px-2 py-1 text-xs text-muted-foreground">{file.name}</p></div>)}</div>}
+            <label className="grid gap-1.5 text-sm font-medium">Campaign images ({campaignImages.length}/4)<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple disabled={campaignImages.length >= 4} onChange={(event) => { selectCampaignImages(event.target.files); event.currentTarget.value = '' }} className="min-w-0 rounded-md border bg-background px-3 py-2 text-sm font-normal file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-3 file:py-1.5 disabled:opacity-60" /><span className="text-xs font-normal text-muted-foreground">JPEG, PNG, WebP, HEIC, or HEIF · up to 5 MB each. Add images in multiple selections; buyers see two images at a time.</span></label>
+            {campaignImagePreviews.length > 0 && <div className="grid grid-cols-2 gap-2">{campaignImagePreviews.map(({ file, url }, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="relative min-w-0 overflow-hidden border"><img src={url} alt={file.name} className="aspect-[4/3] w-full object-cover" /><button type="button" aria-label={`Remove ${file.name}`} title="Remove image" onClick={() => setCampaignImages((current) => current.filter((_, currentIndex) => currentIndex !== index))} className="absolute right-1 top-1 grid size-8 place-items-center rounded-full bg-black/75 text-white hover:bg-black"><X className="size-4" /></button><p className="truncate px-2 py-1 text-xs text-muted-foreground">{file.name}</p></div>)}</div>}
             {campaignImages.length > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setCampaignImages([])}>Clear selected images</Button>}
             <p className="text-xs text-muted-foreground">This creates an in-app marketplace placement. It does not buy external ads or charge an advertising fee.</p>
             <Button type="submit" disabled={busy || !myListings.length || (campaignForm.campaignType === 'ad' ? !can('canRunMarketplaceAds') : !can('canCreateMarketplacePromotion'))}><Plus className="mr-2 size-4" />Publish campaign</Button>
