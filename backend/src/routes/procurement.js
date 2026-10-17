@@ -467,14 +467,15 @@ router.get('/promotions', requireFeature('procurement.buyer'), requirePermission
   ]);
   const connectedIds = relationships.map((row) => row.sellerTenantId);
   const discoverableIds = discoverable.map((row) => row.tenantId);
-  const allowedIds = [...new Set([...connectedIds, ...discoverableIds])].filter((id) => id !== tenantId);
+  const allowedIds = [...new Set([...connectedIds, ...discoverableIds, tenantId])];
+  const publicSellerIds = [...new Set([...discoverableIds, tenantId])];
   const now = new Date();
   const campaigns = await prisma.marketplacePromotion.findMany({
     where: {
       sellerTenantId: { in: allowedIds }, status: 'active', startsAt: { lte: now },
       OR: [{ endsAt: null }, { endsAt: { gt: now } }],
       listing: { is: { status: 'active', OR: [
-        { visibility: 'public', sellerTenantId: { in: discoverableIds } },
+        { visibility: 'public', sellerTenantId: { in: publicSellerIds } },
         ...(connectedIds.length ? [{ visibility: 'private', sellerTenantId: { in: connectedIds } }] : []),
       ] } },
     },
