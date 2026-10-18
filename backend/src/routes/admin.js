@@ -1242,6 +1242,14 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     if (!owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
     if (owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
+    const startTrial = business.startTrial === true;
+    const trialDays = startTrial ? Number(business.trialDays) : null;
+    if (startTrial && (!Number.isInteger(trialDays) || trialDays < 1 || trialDays > 3650)) {
+      return res.status(400).json({ error: "Trial duration must be a whole number between 1 and 3650 days" });
+    }
+    const provisionedAt = new Date();
+    const trialEndsAt = startTrial ? new Date(provisionedAt.getTime() + trialDays * 24 * 60 * 60 * 1000) : null;
+
     const marketplace = business.marketplaceProfile;
     const sellerType = String(marketplace?.sellerType || "").trim().toLowerCase();
     const marketplaceCategory = String(marketplace?.category || "").trim().slice(0, 100);
@@ -1264,7 +1272,19 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
 
     const { tenant } = await prisma.$transaction(async (tx) => {
       const createdTenant = await tx.tenant.create({
-        data: { name: business.name, slug, email: business.email || owner.email, phone: business.phone || owner.phone, address: business.address, businessType: business.businessType || null, status: "active", planId: business.planId, dateFormat: "DD/MM/YY" },
+        data: {
+          name: business.name,
+          slug,
+          email: business.email || owner.email,
+          phone: business.phone || null,
+          address: business.address,
+          businessType: business.businessType || null,
+          status: startTrial ? "trial" : "active",
+          planId: business.planId,
+          subscriptionStart: startTrial ? provisionedAt : null,
+          trialEndsAt,
+          dateFormat: "DD/MM/YY",
+        },
       });
 
       const user = await tx.user.create({
@@ -1310,6 +1330,9 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
           marketplaceCategory: marketplace ? marketplaceCategory : null,
           ownerEmail: owner.email,
           planId: business.planId,
+          status: startTrial ? "trial" : "active",
+          trialDays: startTrial ? trialDays : null,
+          trialEndsAt,
           slug: tenant.slug,
         }
       },
@@ -1317,22 +1340,33 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       severity: "critical",
     }).catch(() => {});
 
+    let emailSent = false;
+    let emailMessageId = null;
+    let emailError = null;
+    try {
+      const { subject, html } = getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      const delivery = await sendMail(owner.email, subject, html);
+      emailSent = true;
+      emailMessageId = delivery?.messageId || null;
+    } catch (error) {
+      emailError = error?.message || "Email delivery failed";
+      console.warn("Provision tenant: owner email send failed:", emailError);
+    }
+
     res.status(201).json({
-      message: "Tenant provisioned. Owner setup email is being sent.",
+      message: emailSent ? "Tenant provisioned and owner setup email accepted by the email provider." : "Tenant provisioned, but the owner setup email could not be sent.",
       tenantId: tenant.id,
       slug: tenant.slug,
+      status: startTrial ? "trial" : "active",
+      trialDays: startTrial ? trialDays : null,
+      trialEndsAt,
       ownerEmail: owner.email,
-      emailPending: true,
+      emailSent,
+      emailMessageId,
+      emailError,
       marketplaceProfileCreated: Boolean(marketplace),
       tempPassword,
       otp,
-    });
-
-    void Promise.resolve().then(() => {
-      const { subject, html } = getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
-      return sendMail(owner.email, subject, html);
-    }).catch((error) => {
-      console.warn("Provision tenant: owner email send failed:", error?.message || "Email failed");
     });
   } catch (err) {
     if (err?.code === "P2002") {

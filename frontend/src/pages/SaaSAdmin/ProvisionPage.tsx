@@ -14,9 +14,11 @@ interface ProvisionResult {
   message?: string
   tenantId?: string
   slug?: string
+  status?: string
+  trialEndsAt?: string | null
+  trialDays?: number | null
   ownerEmail?: string
   emailSent?: boolean
-  emailPending?: boolean
   emailError?: string | null
   tempPassword?: string
   otp?: string
@@ -42,8 +44,11 @@ const createEmptyForm = () => ({
   marketplaceSellerType: '',
   marketplaceCategory: '',
   planId: '',
+  startTrial: false,
+  trialDays: '14',
   ownerName: '',
   ownerEmail: '',
+  ownerPhone: '',
   ownerPassword: generatePassword(),
 })
 
@@ -66,10 +71,10 @@ export const ProvisionPage: React.FC = () => {
       .catch(() => {})
   }, [])
 
-  const handleChange = (field: keyof ProvisionForm, value: string) => {
+  const handleChange = (field: keyof ProvisionForm, value: string | boolean) => {
     setForm((prev) => {
       const next = { ...prev, [field]: value }
-      if (field === 'businessName' && (!prev.businessSlug || prev.businessSlug === slugify(prev.businessName))) {
+      if (field === 'businessName' && typeof value === 'string' && (!prev.businessSlug || prev.businessSlug === slugify(prev.businessName))) {
         next.businessSlug = slugify(value)
       }
       return next
@@ -143,11 +148,14 @@ export const ProvisionPage: React.FC = () => {
             phone: form.businessPhone,
             businessType: form.businessType || undefined,
             planId: form.planId || undefined,
+            startTrial: form.startTrial,
+            ...(form.startTrial ? { trialDays: Number(form.trialDays) } : {}),
             ...(form.marketplaceSellerType ? { marketplaceProfile: { sellerType: form.marketplaceSellerType, category: form.marketplaceCategory } } : {}),
           },
           owner: {
             name: form.ownerName,
             email: form.ownerEmail,
+            phone: form.ownerPhone || undefined,
             password: form.ownerPassword || undefined,
           },
         }),
@@ -173,6 +181,12 @@ export const ProvisionPage: React.FC = () => {
         </div>
         <h2 className="text-xl font-semibold">Business Provisioned!</h2>
         <p className="text-gray-500 mt-2">The business and owner account have been created successfully.</p>
+        {result?.status === 'trial' && result.trialEndsAt && (
+          <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-left text-sm text-blue-900">
+            <p className="font-medium">Trial activated for {result.trialDays} days</p>
+            <p className="mt-1">Access ends {new Date(result.trialEndsAt).toLocaleDateString('en-GB')} unless the subscription is updated.</p>
+          </div>
+        )}
         <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-left">
           <p className="text-sm font-medium text-slate-900">Owner credentials backup</p>
           <p className="mt-1 text-xs text-slate-500">The setup email is sent to the owner. Keep this one-time backup secure and share it only with them.</p>
@@ -199,18 +213,14 @@ export const ProvisionPage: React.FC = () => {
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-5 w-5 text-yellow-700" />
               <div>
-                <p className="font-medium text-yellow-900">Owner email was not delivered.</p>
+                <p className="font-medium text-yellow-900">Owner setup email could not be sent.</p>
                 <p className="mt-1 text-sm text-yellow-800">{result.emailError || result.message}</p>
               </div>
             </div>
           </div>
-        ) : result?.emailPending ? (
-          <p className="mt-3 text-sm text-slate-600">
-            Owner setup email is being sent to {result?.ownerEmail || 'the owner'}. Credentials are available above.
-          </p>
         ) : (
           <p className="mt-3 text-sm text-green-700">
-            Owner setup email sent to {result?.ownerEmail || 'the owner'}.
+            The email provider accepted the setup email for {result?.ownerEmail || 'the owner'}. Inbox delivery can take a few minutes; check spam or junk if it does not appear. Credentials are available above.
           </p>
         )}
         <button
@@ -288,6 +298,36 @@ export const ProvisionPage: React.FC = () => {
               {plans.map((p) => <option key={p.id} value={p.id}>{p.name} - {p.price} {p.currency}/{p.billingCycle}</option>)}
             </select>
           </div>
+          <div className="rounded-md border p-4">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={form.startTrial}
+                onChange={(e) => handleChange('startTrial', e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300"
+              />
+              <span>
+                <span className="block text-sm font-medium">Start this business on a trial</span>
+                <span className="mt-1 block text-sm text-gray-500">The selected plan applies during the trial. Login access is automatically blocked when the trial expires unless the subscription is updated.</span>
+              </span>
+            </label>
+            {form.startTrial && (
+              <div className="mt-4 max-w-xs">
+                <label htmlFor="trial-days" className="mb-1 block text-sm font-medium">Trial duration (days) *</label>
+                <input
+                  id="trial-days"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  step={1}
+                  required
+                  value={form.trialDays}
+                  onChange={(e) => handleChange('trialDays', e.target.value)}
+                  className="w-full rounded-lg border px-3 py-2"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="bg-white rounded-lg border p-6 space-y-4">
@@ -295,6 +335,7 @@ export const ProvisionPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>
             <div><label className="block text-sm font-medium mb-1">Owner Email *</label><input required type="email" value={form.ownerEmail} onChange={(e) => handleChange('ownerEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="john@freshmart.com" /></div>
+            <div><label className="block text-sm font-medium mb-1">Owner Phone</label><input type="tel" value={form.ownerPhone} onChange={(e) => handleChange('ownerPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" autoComplete="tel" /></div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium mb-1">Temporary Password</label>
               <div className="flex flex-col gap-2 sm:flex-row">
