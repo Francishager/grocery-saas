@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast'
 
 export default function UserProfilePage() {
   const { user, updateUser } = useJWTAuth()
+  const isBusinessOwner = user?.role === 'owner'
   const { language, languages, setLanguage, t } = useLanguage()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -55,9 +56,7 @@ export default function UserProfilePage() {
     setSaving(true)
     try {
       const result = await authApi.updateProfile({
-        fname: form.fname,
-        lname: form.lname,
-        phone: form.phone,
+        ...(!isBusinessOwner ? { fname: form.fname, lname: form.lname, phone: form.phone } : {}),
       })
       if (result.user) {
         updateUser({
@@ -143,25 +142,27 @@ export default function UserProfilePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>First Name</Label>
-              <Input value={form.fname} onChange={(e) => setForm(f => ({ ...f, fname: e.target.value }))} placeholder="First name" />
+              <Input value={form.fname} disabled={isBusinessOwner} onChange={(e) => setForm(f => ({ ...f, fname: e.target.value }))} placeholder="First name" />
             </div>
             <div className="space-y-2">
               <Label>Last Name</Label>
-              <Input value={form.lname} onChange={(e) => setForm(f => ({ ...f, lname: e.target.value }))} placeholder="Last name" />
+              <Input value={form.lname} disabled={isBusinessOwner} onChange={(e) => setForm(f => ({ ...f, lname: e.target.value }))} placeholder="Last name" />
             </div>
           </div>
           <div className="space-y-2">
             <Label>Email</Label>
             <Input value={form.email} disabled className="bg-muted" />
-            <p className="text-xs text-muted-foreground">Email cannot be changed</p>
+            <p className="text-xs text-muted-foreground">{isBusinessOwner ? 'Owner account details are maintained by JibuSales Admin.' : 'Email cannot be changed'}</p>
           </div>
           <div className="space-y-2">
             <Label>Phone</Label>
-            <Input value={form.phone} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+256..." type="tel" />
+            <Input value={form.phone} disabled={isBusinessOwner} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+256..." type="tel" />
           </div>
-          <Button onClick={handleSaveProfile} disabled={saving}>
-            {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><Save className="h-4 w-4 mr-2" />Save Changes</>}
-          </Button>
+          {!isBusinessOwner && (
+            <Button onClick={handleSaveProfile} disabled={saving}>
+              {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><Save className="h-4 w-4 mr-2" />Save Changes</>}
+            </Button>
+          )}
         </CardContent>
       </Card>
 

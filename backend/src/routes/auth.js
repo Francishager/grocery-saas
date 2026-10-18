@@ -291,9 +291,10 @@ router.put("/profile", authenticateToken, async (req, res) => {
   try {
     const { fname, lname, phone, avatar, preferredLanguage } = req.body;
     const data = {};
-    if (fname !== undefined) data.fname = fname;
-    if (lname !== undefined) data.lname = lname;
-    if (phone !== undefined) data.phone = phone || null;
+    const isBusinessOwner = req.user?.role === "owner";
+    if (!isBusinessOwner && fname !== undefined) data.fname = fname;
+    if (!isBusinessOwner && lname !== undefined) data.lname = lname;
+    if (!isBusinessOwner && phone !== undefined) data.phone = phone || null;
     if (avatar !== undefined) data.avatar = avatar || null;
     if (preferredLanguage !== undefined) {
       if (!supportedLanguages.has(String(preferredLanguage))) {
