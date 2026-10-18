@@ -12,24 +12,41 @@ const ALLOWED_FEATURE_VIEWS = new Set([
   'Data Importer', 'Refer & Earn', 'Other',
 ]);
 
-// Page views record feature usage only; no record identifiers, business data, or request payloads.
+// Usage events store aggregate engagement metrics only, never page content or typed input.
 router.post("/feature-view", authenticateToken, async (req, res) => {
   try {
     const tenantId = req.user?.tenantId;
     const feature = String(req.body?.feature || '').trim().slice(0, 80);
+    const kind = String(req.body?.kind || 'view');
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
     if (!ALLOWED_FEATURE_VIEWS.has(feature) && !/^Report:[a-zA-Z0-9_-]{1,64}$/.test(feature)) {
       return res.status(400).json({ error: "Invalid feature view" });
     }
+    if (!['view', 'engagement'].includes(kind)) return res.status(400).json({ error: "Invalid usage event" });
+
+    const activeMs = Number(req.body?.activeMs || 0);
+    const interactionCount = Number(req.body?.interactionCount || 0);
+    const maxScrollDepth = Number(req.body?.maxScrollDepth || 0);
+    if (!Number.isInteger(activeMs) || activeMs < 0 || activeMs > 60_000
+      || !Number.isInteger(interactionCount) || interactionCount < 0 || interactionCount > 10_000
+      || !Number.isFinite(maxScrollDepth) || maxScrollDepth < 0 || maxScrollDepth > 100) {
+      return res.status(400).json({ error: "Invalid engagement metrics" });
+    }
+
+    const actor = req.user.email ? null : await prisma.user.findFirst({
+      where: { id: req.user.id, tenantId },
+      select: { email: true },
+    });
 
     await prisma.auditLog.create({
       data: {
         tenantId,
         userId: req.user.id,
-        userEmail: req.user.email || "",
+        userEmail: req.user.email || actor?.email || "",
         ip: req.ip || req.connection?.remoteAddress || null,
-        action: "view",
+        action: kind,
         model: feature,
+        changes: { kind, activeMs, interactionCount, maxScrollDepth: Math.round(maxScrollDepth) },
         statusCode: 200,
         severity: "info",
       },

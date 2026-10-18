@@ -22,15 +22,22 @@ function parsePositiveInt(value, fallback, max) {
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
 }
 
-function toPlatformAuditEntry(log, tenantNames) {
+function toPlatformAuditEntry(log, tenantNames, userEmails) {
   const tenantId = log.tenantId === 'platform' ? log.targetTenantId : log.tenantId;
   const isPlatformAction = log.tenantId === 'platform';
+  const metrics = log.changes && typeof log.changes === 'object' ? log.changes : {};
   return {
     id: log.id,
     tenantId,
     tenantName: tenantNames.get(tenantId) || (isPlatformAction ? 'Platform' : 'Business unavailable'),
-    actor: log.userEmail || (isPlatformAction ? 'Platform administrator' : 'Email not captured'),
+    actor: log.userEmail || userEmails.get(log.userId) || (isPlatformAction ? 'Platform administrator' : 'Email unavailable'),
     ip: log.ip || null,
+    engagement: ['view', 'engagement'].includes(log.action) ? {
+      activeMs: Number(metrics.activeMs) || 0,
+      interactionCount: Number(metrics.interactionCount) || 0,
+      maxScrollDepth: Number(metrics.maxScrollDepth) || 0,
+      kind: metrics.kind || log.action,
+    } : null,
     action: log.action,
     model: log.model,
     statusCode: log.statusCode,
@@ -60,19 +67,23 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
       if (to && !Number.isNaN(to.getTime())) where.createdAt.lte = to;
     }
     if (search) {
-      const matchedTenants = await prisma.tenant.findMany({
-        where: { OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { slug: { contains: search, mode: 'insensitive' } },
-        ] },
-        select: { id: true },
-        take: 100,
-      });
+      const [matchedTenants, matchedUsers] = await Promise.all([
+        prisma.tenant.findMany({
+          where: { OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { slug: { contains: search, mode: 'insensitive' } },
+          ] },
+          select: { id: true },
+          take: 100,
+        }),
+        prisma.user.findMany({ where: { email: { contains: search, mode: 'insensitive' } }, select: { id: true }, take: 100 }),
+      ]);
       const searchClause = { OR: [
         { action: { contains: search, mode: 'insensitive' } },
         { model: { contains: search, mode: 'insensitive' } },
         { userEmail: { contains: search, mode: 'insensitive' } },
         { ip: { contains: search, mode: 'insensitive' } },
+        { userId: { in: matchedUsers.map(item => item.id) } },
         { tenantId: { in: matchedTenants.map(item => item.id) } },
         { targetTenantId: { in: matchedTenants.map(item => item.id) } },
       ] };
@@ -85,7 +96,7 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
-        select: { id: true, tenantId: true, targetTenantId: true, userEmail: true, ip: true, action: true, model: true, statusCode: true, severity: true, createdAt: true },
+        select: { id: true, tenantId: true, targetTenantId: true, userId: true, userEmail: true, ip: true, action: true, model: true, changes: true, statusCode: true, severity: true, createdAt: true },
       }),
       prisma.auditLog.count({ where }),
     ]);
@@ -94,9 +105,14 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
       ? await prisma.tenant.findMany({ where: { id: { in: relatedTenantIds } }, select: { id: true, name: true } })
       : [];
     const tenantNames = new Map(tenants.map(tenant => [tenant.id, tenant.name]));
+    const missingEmailUserIds = [...new Set(logs.filter(log => !log.userEmail && log.userId && !log.userId.startsWith('system')).map(log => log.userId))];
+    const usersWithEmail = missingEmailUserIds.length
+      ? await prisma.user.findMany({ where: { id: { in: missingEmailUserIds } }, select: { id: true, email: true } })
+      : [];
+    const userEmails = new Map(usersWithEmail.filter(user => user.email).map(user => [user.id, user.email]));
 
     res.json({
-      logs: logs.map(log => toPlatformAuditEntry(log, tenantNames)),
+      logs: logs.map(log => toPlatformAuditEntry(log, tenantNames, userEmails)),
       pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
       refreshedAt: new Date().toISOString(),
     });
@@ -115,7 +131,7 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
       where,
       orderBy: { createdAt: 'desc' },
       take: 20000,
-      select: { tenantId: true, userId: true, model: true, action: true, createdAt: true },
+      select: { tenantId: true, userId: true, model: true, action: true, changes: true, createdAt: true },
     });
     const usageSummary = summarizePlatformAudit(logs);
     res.json({

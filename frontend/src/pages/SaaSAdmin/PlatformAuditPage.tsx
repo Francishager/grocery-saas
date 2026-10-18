@@ -9,6 +9,7 @@ interface AuditLog {
   tenantName: string
   actor: string
   ip: string | null
+  engagement: { activeMs: number; interactionCount: number; maxScrollDepth: number; kind: string } | null
   action: string
   model: string
   statusCode: number
@@ -19,8 +20,8 @@ interface AuditLog {
 interface Pagination { page: number; limit: number; total: number; pages: number }
 interface AuditInsights {
   totalEvents: number
-  byFeature: Array<{ feature: string; count: number }>
-  byHour: Array<{ hour: number; count: number }>
+  byFeature: Array<{ feature: string; count: number; activeMs: number; interactionCount: number; maxScrollDepth: number }>
+  byHour: Array<{ hour: number; count: number; pageViews: number; activeMs: number; interactionCount: number }>
   featureRankingRule: string
   truncated?: boolean
   refreshedAt: string
@@ -39,6 +40,7 @@ export const PlatformAuditPage: React.FC = () => {
   const [page, setPage] = useState(1)
   const [insightDays, setInsightDays] = useState(30)
   const [selectedHour, setSelectedHour] = useState<number | null>(null)
+  const [hourMetric, setHourMetric] = useState<'activeMs' | 'interactionCount' | 'pageViews' | 'count'>('activeMs')
   const [filters, setFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
   const [appliedFilters, setAppliedFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
 
@@ -94,18 +96,31 @@ export const PlatformAuditPage: React.FC = () => {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   }).format(new Date(value))
   const actionLabel = (action: string) => ({
-    create: 'Created', update: 'Updated', delete: 'Deleted', view: 'Viewed',
+    create: 'Created', update: 'Updated', delete: 'Deleted', view: 'Opened page', engagement: 'Active use',
     create_sensitive: 'Created (sensitive)', update_sensitive: 'Updated (sensitive)', delete_sensitive: 'Deleted (sensitive)',
     login: 'Signed in', login_failed: 'Sign-in failed', login_requires_reset: 'Password reset required', login_blocked_subscription: 'Sign-in blocked · subscription', login_blocked_schedule: 'Sign-in blocked · schedule',
   }[action] || action.replaceAll('_', ' '))
   const mostUsed = insights?.byFeature?.[0]
-  const busiestHour = insights?.byHour?.reduce((best, item) => item.count > (best?.count || 0) ? item : best, { hour: 0, count: 0 })
+  const hourValue = (item: AuditInsights['byHour'][number]) => item[hourMetric]
+  const busiestHour = insights?.byHour?.reduce((best, item) => hourValue(item) > (best ? hourValue(best) : 0) ? item : best, null as AuditInsights['byHour'][number] | null)
   const selectedHourData = selectedHour == null ? null : insights?.byHour?.find(item => item.hour === selectedHour) || null
-  const peakHourCount = busiestHour?.count || 0
-  const peakHours = insights?.byHour?.filter(item => item.count === peakHourCount && peakHourCount > 0) || []
-  const maxFeatureCount = Math.max(1, ...(insights?.byFeature || []).map(item => item.count))
-  const maxHourCount = Math.max(1, ...(insights?.byHour || []).map(item => item.count))
+  const peakHourCount = busiestHour ? hourValue(busiestHour) : 0
+  const peakHours = insights?.byHour?.filter(item => hourValue(item) === peakHourCount && peakHourCount > 0) || []
+  const hasFeatureTime = Boolean(insights?.byFeature?.some(item => item.activeMs > 0))
+  const hasFeatureInteractions = Boolean(insights?.byFeature?.some(item => item.interactionCount > 0))
+  const featureMetric = hasFeatureTime ? 'activeMs' : hasFeatureInteractions ? 'interactionCount' : 'count'
+  const featureValue = (item: AuditInsights['byFeature'][number]) => item[featureMetric]
+  const maxFeatureValue = Math.max(1, ...(insights?.byFeature || []).map(featureValue))
+  const maxHourValue = Math.max(1, ...(insights?.byHour || []).map(hourValue))
   const hourLabel = (hour: number) => `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`
+  const formatDuration = (milliseconds: number) => {
+    const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1000)
+    if (totalSeconds >= 3600) return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`
+    if (totalSeconds >= 60) return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`
+    return `${totalSeconds}s`
+  }
+  const hourMetricLabel = { activeMs: 'Engaged time', interactionCount: 'Interactions', pageViews: 'Page opens', count: 'Audit events' }[hourMetric]
+  const formatHourValue = (item: AuditInsights['byHour'][number]) => hourMetric === 'activeMs' ? formatDuration(item.activeMs) : `${hourValue(item).toLocaleString()} ${hourMetric === 'interactionCount' ? 'interactions' : hourMetric === 'pageViews' ? 'page opens' : 'events'}`
 
   return (
     <div className="space-y-5">
@@ -139,36 +154,37 @@ export const PlatformAuditPage: React.FC = () => {
         <div className="rounded-md border bg-white p-4">
           <div className="flex items-center gap-2 text-xs text-gray-500"><Eye size={15} /> Most-used feature · {insightDays} days</div>
           <div className="mt-2 text-lg font-semibold">{mostUsed?.feature || 'No usage yet'}</div>
-          {mostUsed && <div className="text-xs text-gray-500">{mostUsed.count.toLocaleString()} qualified user-days · Dashboard excluded</div>}
+          {mostUsed && <div className="text-xs text-gray-500">{formatDuration(mostUsed.activeMs)} active · {mostUsed.interactionCount.toLocaleString()} interactions</div>}
         </div>
         <button type="button" disabled={!peakHourCount} onClick={() => { if (!busiestHour || !peakHourCount) return; setSelectedHour(busiestHour.hour); document.getElementById('platform-usage-by-hour')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }} className="rounded-md border bg-white p-4 text-left transition-colors hover:bg-teal-50 disabled:cursor-default disabled:hover:bg-white">
-          <div className="flex items-center gap-2 text-xs text-gray-500"><Clock3 size={15} /> Busiest hour · Kampala · {insightDays} days</div>
-          <div className="mt-2 text-lg font-semibold">{peakHours.length > 1 ? `${peakHours.length} tied peak hours` : peakHourCount ? hourLabel(busiestHour!.hour) : 'No usage yet'}</div>
-          {peakHourCount > 0 && <div className="text-xs text-gray-500">{peakHourCount.toLocaleString()} recorded events{peakHours.length > 1 ? ` in each peak hour (${peakHours.map(item => hourLabel(item.hour).slice(0, 5)).join(', ')})` : ''}</div>}
+          <div className="flex items-center gap-2 text-xs text-gray-500"><Clock3 size={15} /> Busiest hour · {hourMetricLabel} · Kampala · {insightDays} days</div>
+          <div className="mt-2 text-lg font-semibold">{peakHours.length > 1 ? `${peakHours.length} tied peak hours` : peakHourCount ? hourLabel(busiestHour!.hour) : 'No tracked activity yet'}</div>
+          {peakHourCount > 0 && <div className="text-xs text-gray-500">{formatHourValue(busiestHour!)}{peakHours.length > 1 ? ` in each peak hour (${peakHours.map(item => hourLabel(item.hour).slice(0, 5)).join(', ')})` : ''}</div>}
           {peakHourCount > 0 && <div className="mt-1 text-[11px] text-teal-800">Open this hour in the chart</div>}
         </button>
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-label="Feature usage analysis">
-        <div id="platform-usage-by-hour" className="rounded-md border bg-white p-4">
+        <div className="rounded-md border bg-white p-4">
           <h2 className="text-sm font-semibold">Most-used features</h2>
-          <p className="mb-3 mt-1 text-xs text-gray-500">{insights?.featureRankingRule || 'Dashboard is excluded; repeat views by the same user count once per business-day.'}</p>
+          <p className="mb-3 mt-1 text-xs text-gray-500">{insights?.featureRankingRule || 'All features, including Dashboard, rank by active time; interactions and distinct business-user-days break ties.'}</p>
           {!insights?.byFeature?.length ? <p className="text-sm text-gray-500">No activity recorded yet.</p> : <div className="space-y-3">
             {insights.byFeature.slice(0, 8).map(item => <div key={item.feature}>
-              <div className="mb-1 flex justify-between gap-3 text-xs"><span className="truncate">{item.feature}</span><span className="tabular-nums text-gray-500">{item.count.toLocaleString()}</span></div>
-              <div className="h-2 overflow-hidden rounded bg-gray-100"><div className="h-full bg-teal-600" style={{ width: `${Math.max(3, item.count / maxFeatureCount * 100)}%` }} /></div>
+              <div className="mb-1 flex justify-between gap-3 text-xs"><span className="truncate">{item.feature}</span><span className="tabular-nums text-gray-500">{featureMetric === 'activeMs' ? formatDuration(item.activeMs) : featureMetric === 'interactionCount' ? `${item.interactionCount} interactions` : `${item.count} active days`}</span></div>
+              <div className="h-2 overflow-hidden rounded bg-gray-100"><div className="h-full bg-teal-600" style={{ width: `${Math.max(3, featureValue(item) / maxFeatureValue * 100)}%` }} /></div>
+              {item.activeMs > 0 && <div className="mt-1 text-[11px] text-gray-500">{item.interactionCount.toLocaleString()} interactions · deepest scroll {item.maxScrollDepth}%</div>}
             </div>)}
           </div>}
         </div>
-        <div className="rounded-md border bg-white p-4">
-          <div className="mb-1 flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Usage by hour · Kampala</h2><p className="mt-1 text-xs text-gray-500">Select a column to inspect that hour · {insightDays}-day window</p></div>{insights?.truncated && <span className="text-xs text-amber-700">Showing a capped sample</span>}</div>
+        <div id="platform-usage-by-hour" className="rounded-md border bg-white p-4">
+          <div className="mb-1 flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Usage by hour · Kampala</h2><p className="mt-1 text-xs text-gray-500">Select a column to inspect that hour · {insightDays}-day window</p></div><div className="flex items-center gap-2"><label htmlFor="audit-hour-metric" className="text-xs text-gray-500">Measure</label><select id="audit-hour-metric" value={hourMetric} onChange={event => { setHourMetric(event.target.value as typeof hourMetric); setSelectedHour(null) }} className="h-8 rounded-md border bg-white px-2 text-xs"><option value="activeMs">Engaged time</option><option value="interactionCount">Interactions</option><option value="pageViews">Page opens</option><option value="count">Audit events</option></select>{insights?.truncated && <span className="text-xs text-amber-700">Showing a capped sample</span>}</div></div>
           <div className="flex h-32 items-end gap-1" aria-label="Interactive activity counts by hour in Kampala time">
-            {(insights?.byHour || Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }))).map(item => <button key={item.hour} type="button" aria-label={`${hourLabel(item.hour)}: ${item.count} events`} aria-pressed={selectedHour === item.hour} className="flex h-full min-w-0 flex-1 items-end rounded-t-sm px-px outline-none hover:bg-teal-50 focus-visible:ring-2 focus-visible:ring-teal-700" title={`${hourLabel(item.hour)} · ${item.count.toLocaleString()} events`} onClick={() => setSelectedHour(selectedHour === item.hour ? null : item.hour)}>
-              <span className={`w-full rounded-t-sm transition-colors ${selectedHour === item.hour ? 'bg-amber-500' : item.count === peakHourCount && peakHourCount > 0 ? 'bg-teal-800' : 'bg-teal-600/80'}`} style={{ height: `${item.count ? Math.max(5, item.count / maxHourCount * 100) : 2}%` }} />
+            {(insights?.byHour || Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, pageViews: 0, activeMs: 0, interactionCount: 0 }))).map(item => <button key={item.hour} type="button" aria-label={`${hourLabel(item.hour)}: ${formatHourValue(item)}`} aria-pressed={selectedHour === item.hour} className="flex h-full min-w-0 flex-1 items-end rounded-t-sm px-px outline-none hover:bg-teal-50 focus-visible:ring-2 focus-visible:ring-teal-700" title={`${hourLabel(item.hour)} · ${formatHourValue(item)}`} onClick={() => setSelectedHour(selectedHour === item.hour ? null : item.hour)}>
+              <span className={`w-full rounded-t-sm transition-colors ${selectedHour === item.hour ? 'bg-amber-500' : hourValue(item) === peakHourCount && peakHourCount > 0 ? 'bg-teal-800' : 'bg-teal-600/80'}`} style={{ height: `${hourValue(item) ? Math.max(5, hourValue(item) / maxHourValue * 100) : 2}%` }} />
             </button>)}
           </div>
           <div className="mt-1 flex justify-between text-[10px] text-gray-500"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span></div>
-          <div aria-live="polite" className="mt-3 border-t pt-3 text-sm">{selectedHourData ? <><span className="font-semibold">{hourLabel(selectedHourData.hour)}</span><span className="ml-2 tabular-nums text-gray-600">{selectedHourData.count.toLocaleString()} recorded events</span>{selectedHourData.count === peakHourCount && peakHourCount > 0 && <span className="ml-2 text-xs font-medium text-teal-800">Peak for this window</span>}</> : <span className="text-xs text-gray-500">{peakHourCount ? `Peak: ${hourLabel(busiestHour!.hour)} · Select another hour to compare.` : 'No activity in this period.'}</span>}</div>
+          <div aria-live="polite" className="mt-3 border-t pt-3 text-sm">{selectedHourData ? <><span className="font-semibold">{hourLabel(selectedHourData.hour)}</span><span className="ml-2 tabular-nums text-gray-600">{formatHourValue(selectedHourData)}</span>{hourValue(selectedHourData) === peakHourCount && peakHourCount > 0 && <span className="ml-2 text-xs font-medium text-teal-800">Peak for this window</span>}</> : <span className="text-xs text-gray-500">{peakHourCount ? `Peak: ${hourLabel(busiestHour!.hour)} · ${hourMetricLabel.toLowerCase()}` : 'No tracked activity in this period for this measure.'}</span>}</div>
         </div>
       </section>
 
@@ -182,7 +198,7 @@ export const PlatformAuditPage: React.FC = () => {
           </label>
           <label className="text-xs font-medium text-gray-500">Action
             <select value={filters.action} onChange={e => setFilters(p => ({ ...p, action: e.target.value }))} className="mt-1 w-full rounded-md border px-3 py-2 text-sm text-gray-900">
-              <option value="">All actions</option><option value="create">Create</option><option value="update">Update</option><option value="delete">Delete</option><option value="view">Feature view</option><option value="login">Sign-in events</option>
+              <option value="">All actions</option><option value="create">Create</option><option value="update">Update</option><option value="delete">Delete</option><option value="view">Feature view</option><option value="engagement">Active use</option><option value="login">Sign-in events</option>
             </select>
           </label>
           <label className="text-xs font-medium text-gray-500">Model / feature
@@ -198,17 +214,18 @@ export const PlatformAuditPage: React.FC = () => {
       <section className="overflow-hidden rounded-md border bg-white" aria-label="Live activity feed">
         {loading ? <div className="flex items-center justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-blue-600" /></div> : error ? <div className="p-8 text-center text-sm text-red-700">{error}</div> : <>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1050px]">
+            <table className="w-full min-w-[1200px]">
               <thead className="border-b bg-gray-50 text-left">
-                <tr><th className="px-4 py-3 text-xs font-medium text-gray-500">Business</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Action</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Model / feature</th><th className="px-4 py-3 text-xs font-medium text-gray-500">User email</th><th className="px-4 py-3 text-xs font-medium text-gray-500">IP address</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Outcome</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Date & time</th></tr>
+                <tr><th className="px-4 py-3 text-xs font-medium text-gray-500">Business</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Action</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Model / feature</th><th className="px-4 py-3 text-xs font-medium text-gray-500">User email</th><th className="px-4 py-3 text-xs font-medium text-gray-500">IP address</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Engagement</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Outcome</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Date & time</th></tr>
               </thead>
               <tbody className="divide-y">
-                {!logs.length ? <tr><td colSpan={7} className="py-8 text-center text-sm text-gray-500">No activity found for these filters</td></tr> : logs.map(log => <tr key={log.id} className="hover:bg-gray-50">
+                {!logs.length ? <tr><td colSpan={8} className="py-8 text-center text-sm text-gray-500">No activity found for these filters</td></tr> : logs.map(log => <tr key={log.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">{log.tenantId ? <button onClick={() => navigate(`/saas/businesses/${log.tenantId}`)} className="text-left text-sm text-blue-700 hover:underline">{log.tenantName}</button> : <span className="text-sm">{log.tenantName}</span>}</td>
                   <td className="px-4 py-3"><span className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">{actionLabel(log.action)}</span></td>
                   <td className="px-4 py-3 text-sm text-gray-700">{log.model || 'Other'}</td>
                   <td className="max-w-[220px] break-all px-4 py-3 text-sm text-gray-700">{log.actor || 'Email not captured'}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-700">{log.ip || 'IP not captured'}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600">{log.engagement ? <span>{formatDuration(log.engagement.activeMs)} active · {log.engagement.interactionCount.toLocaleString()} interactions · {log.engagement.maxScrollDepth}% scroll</span> : '—'}</td>
                   <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 text-xs ${log.statusCode >= 400 ? 'text-red-700' : 'text-emerald-700'}`}><ShieldCheck size={13} />{log.statusCode >= 400 ? `Failed (${log.statusCode})` : 'Success'}</span></td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-gray-500">{fmtDateTime(log.createdAt)}</td>
                 </tr>)}

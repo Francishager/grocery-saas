@@ -388,17 +388,68 @@ export function TenantLayout() {
     }
 
     const eventKey = `jibusales_feature_view_${tenantId}_${user.id}_${feature}`
-    const now = Date.now()
+    let recordPageView = true
     try {
       const previous = Number(sessionStorage.getItem(eventKey) || 0)
-      if (now - previous < 5 * 60 * 1000) return
-      sessionStorage.setItem(eventKey, String(now))
+      recordPageView = Date.now() - previous >= 5 * 60 * 1000
+      if (recordPageView) sessionStorage.setItem(eventKey, String(Date.now()))
     } catch { /* telemetry should never block navigation */ }
 
-    void apiFetch('/api/audit/feature-view', {
-      method: 'POST',
-      body: JSON.stringify({ feature }),
-    }).catch(() => {})
+    const report = (kind: 'view' | 'engagement', metrics: { activeMs: number; interactionCount: number; maxScrollDepth: number }) => {
+      void apiFetch('/api/audit/feature-view', {
+        method: 'POST',
+        body: JSON.stringify({ feature, kind, ...metrics }),
+      }).catch(() => {})
+    }
+    let lastActivityAt = Date.now()
+    let lastTickAt = lastActivityAt
+    let lastInteractionEventAt = 0
+    let interactionCount = 0
+    let activeMs = 0
+    let maxScrollDepth = 0
+    const currentScrollDepth = () => {
+      const root = document.documentElement
+      return Math.max(0, Math.min(100, Math.round((window.scrollY / Math.max(1, root.scrollHeight - window.innerHeight)) * 100)))
+    }
+    const markActivity = () => {
+      const now = Date.now()
+      lastActivityAt = now
+      if (now - lastInteractionEventAt >= 300) {
+        interactionCount += 1
+        lastInteractionEventAt = now
+      }
+      maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth())
+    }
+    const flushEngagement = () => {
+      const now = Date.now()
+      const activeUntil = lastActivityAt + 60_000
+      if (document.visibilityState === 'visible') activeMs += Math.max(0, Math.min(now, activeUntil) - lastTickAt)
+      lastTickAt = now
+      maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth())
+      if (activeMs > 0 || interactionCount > 0 || maxScrollDepth > 0) {
+        report('engagement', { activeMs: Math.min(activeMs, 60_000), interactionCount, maxScrollDepth })
+        activeMs = 0
+        interactionCount = 0
+        maxScrollDepth = currentScrollDepth()
+      }
+    }
+    if (recordPageView) report('view', { activeMs: 0, interactionCount: 0, maxScrollDepth: 0 })
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'touchstart', 'wheel', 'scroll', 'keydown']
+    activityEvents.forEach(eventName => window.addEventListener(eventName, markActivity, { passive: true }))
+    const timer = window.setInterval(flushEngagement, 15_000)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') flushEngagement()
+      else { lastActivityAt = Date.now(); lastTickAt = lastActivityAt }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pagehide', flushEngagement)
+    return () => {
+      window.clearInterval(timer)
+      activityEvents.forEach(eventName => window.removeEventListener(eventName, markActivity))
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pagehide', flushEngagement)
+      flushEngagement()
+    }
   }, [tenantId, user?.id, location.pathname, location.search])
 
   const toggleReports = () => {
