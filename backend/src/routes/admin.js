@@ -1,6 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { normalizeSubscriptionPaymentAmount } from "../utils/subscriptionPayments.js";
 import prisma from "../db.js";
@@ -16,6 +16,50 @@ import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatf
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
+
+router.post("/email/test", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  const recipient = String(req.user?.email || "").trim();
+  if (!recipient) return res.status(400).json({ error: "The signed-in SaaS admin account has no email address." });
+  try {
+    await sendMail(
+      recipient,
+      "JibuSales email delivery test",
+      "<p>Your configured JibuSales email transport successfully delivered this test message.</p>"
+    );
+    return res.json({ message: `Test email accepted for delivery to ${recipient}.` });
+  } catch (error) {
+    const detail = [error?.code, error?.responseCode, error?.message].filter(Boolean).join(" | ");
+    console.error("SaaS admin email test failed:", detail || "Unknown email transport error");
+    return res.status(502).json({ error: "Email test failed.", detail: detail || "Check backend mail transport logs." });
+  }
+});
+
+router.post("/email/password-reset", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const admin = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, email: true, fname: true } });
+    if (!admin?.email) return res.status(400).json({ error: "Your SaaS admin account has no email address." });
+
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await prisma.user.update({ where: { id: admin.id }, data: { otpCode: otp, otpExpires } });
+    try {
+      await sendMail(
+        admin.email,
+        "JibuSales admin password reset code",
+        `<p>Hello ${admin.fname || "Admin"},</p><p>Your password reset code is <b>${otp}</b>.</p><p>This code expires in 15 minutes.</p>`
+      );
+    } catch (error) {
+      await prisma.user.update({ where: { id: admin.id }, data: { otpCode: null, otpExpires: null } }).catch(() => {});
+      throw error;
+    }
+
+    return res.json({ message: `Reset code sent to ${admin.email}.` });
+  } catch (error) {
+    const detail = [error?.code, error?.responseCode, error?.message].filter(Boolean).join(" | ");
+    console.error("SaaS admin password reset email failed:", detail || "Unknown email transport error");
+    return res.status(502).json({ error: "Password reset email could not be sent.", detail: detail || "Check the backend mail transport logs." });
+  }
+});
 
 
 // Helper: generate 6-digit OTP
@@ -468,10 +512,24 @@ router.get("/owners", authenticateToken, requirePlatformAdmin, async (req, res) 
 router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { password } = req.body;
-    if (!password || password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await prisma.user.update({ where: { id }, data: { password: hashed } });
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, email: true, fname: true, tenantId: true } });
+    if (!user) return res.status(404).json({ error: "Business owner not found." });
+    if (!user.email) return res.status(400).json({ error: "This business owner has no email address." });
+
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await prisma.user.update({ where: { id }, data: { otpCode: otp, otpExpires } });
+    try {
+      const resetUrl = `${frontendOrigin()}/forgot-password?email=${encodeURIComponent(user.email)}`;
+      await sendMail(
+        user.email,
+        "Password reset code",
+        `<p>Hello ${user.fname || ""},</p><p>A JibuSales administrator requested a password reset for your account.</p><p>Your one-time reset code is <b>${otp}</b>. It expires in 15 minutes.</p><p>Open <a href="${resetUrl}">the password reset page</a> and enter this code. If you did not expect this, contact your business administrator.</p>`
+      );
+    } catch (mailError) {
+      await prisma.user.update({ where: { id }, data: { otpCode: null, otpExpires: null } }).catch(() => {});
+      throw mailError;
+    }
 
     // Audit log: password reset - track which tenant's owner was reset
     auditLog({
@@ -482,15 +540,16 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
       action: "reset_sensitive",
       model: "User",
       recordId: id,
-      changes: { data: { action: "password_reset", targetTenant: user?.tenantId } },
+      changes: { data: { action: "password_reset_code_sent", targetTenant: user.tenantId } },
       ip: req.ip || req.connection?.remoteAddress,
       severity: "critical",
     }).catch(() => {});
 
-    res.json({ message: "Password reset successfully" });
+    res.json({ message: `Password reset code sent to ${user.email}.` });
   } catch (err) {
-    console.error("Reset password error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const detail = [err?.code, err?.responseCode, err?.message].filter(Boolean).join(" | ");
+    console.error("Business owner password reset email failed:", detail || "Unknown email transport error");
+    res.status(502).json({ error: "Password reset email could not be sent.", detail: detail || "Check the backend mail transport logs." });
   }
 });
 

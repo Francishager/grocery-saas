@@ -1,11 +1,13 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, KeyRound } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, KeyRound, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
+import { apiFetch } from '@/lib/api'
+import { appNotify } from '@/lib/appFeedback'
 
 const navItems: Array<{ to: string; label: string; icon: typeof LayoutDashboard; permission: string; permissions?: string[] }> = [
   { to: '/saas/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'view_platform_analytics' },
@@ -29,7 +31,21 @@ export function SaaSAdminLayout() {
   const { user, logout } = useJWTAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const [testingEmail, setTestingEmail] = useState(false)
   const handleLogout = () => { logout(); navigate('/saas/login') }
+  const handleTestEmail = async () => {
+    setTestingEmail(true)
+    try {
+      const response = await apiFetch('/api/admin/email/test', { method: 'POST' })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error([result.error, result.detail].filter(Boolean).join(' '))
+      appNotify(result.message || 'Test email accepted for delivery.')
+    } catch (error) {
+      appNotify(error instanceof Error ? error.message : 'Email test failed. Check the backend mail logs.')
+    } finally {
+      setTestingEmail(false)
+    }
+  }
   const visibleNavItems = user?.role === 'platform_staff'
     ? navItems.filter(item => (item.permissions || [item.permission]).every(permission => user.permissions?.includes(permission)))
     : navItems
@@ -112,6 +128,16 @@ export function SaaSAdminLayout() {
                 >
                   <KeyRound className="mr-2 h-4 w-4" />
                   Reset password
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800"
+                  onClick={handleTestEmail}
+                  disabled={testingEmail}
+                >
+                  {testingEmail ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                  {testingEmail ? 'Testing email...' : 'Send test email'}
                 </Button>
                 <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800" onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />

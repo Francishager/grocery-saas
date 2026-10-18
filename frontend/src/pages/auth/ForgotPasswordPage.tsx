@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle, Copy, KeyRound, Loader2, Package } from 'lucide-react'
-import { authApi } from '@/lib/api'
+import { apiFetch, authApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,6 +22,7 @@ export default function ForgotPasswordPage() {
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const { toast } = useToast()
   const { isAuthenticated, logout } = useJWTAuth()
+  const isSaaSAdminReset = loginPath === '/saas/login' && isAuthenticated
 
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -30,7 +31,14 @@ export default function ForgotPasswordPage() {
     setDeliveryError(null)
 
     try {
-      const result = await authApi.requestReset(email)
+      let result: { message?: string; emailSent?: boolean; emailError?: string; otp?: string; error?: string; detail?: string }
+      if (isSaaSAdminReset) {
+        const response = await apiFetch('/api/admin/email/password-reset', { method: 'POST' })
+        result = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error([result.error, result.detail].filter(Boolean).join(' '))
+      } else {
+        result = await authApi.requestReset(email)
+      }
       setFallbackOtp(result.otp || null)
       setOtp(result.otp || '')
       setDeliveryError(result.emailSent === false ? result.emailError || result.message : null)
@@ -131,7 +139,7 @@ export default function ForgotPasswordPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  disabled={loading}
+                  disabled={loading || isSaaSAdminReset}
                 />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>

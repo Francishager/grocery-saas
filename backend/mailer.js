@@ -29,9 +29,9 @@ function getSmtpTransport(config) {
       port: config.smtpPort,
       secure: config.smtpPort === 465,
       requireTLS: config.smtpPort === 587,
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 20000,
+      connectionTimeout: 7000,
+      greetingTimeout: 7000,
+      socketTimeout: 12000,
       auth: { user: config.smtpUser, pass: config.smtpPass },
     });
     smtpTransportKey = key;
