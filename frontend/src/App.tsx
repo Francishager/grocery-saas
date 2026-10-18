@@ -125,9 +125,7 @@ function App() {
           </PublicRoute>
         } />
         <Route path="/forgot-password" element={
-          <PublicRoute>
-            <ForgotPasswordPage />
-          </PublicRoute>
+          <ForgotPasswordPage />
         } />
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
         <Route path="/accept-invitation/:token" element={<AcceptInvitation />} />

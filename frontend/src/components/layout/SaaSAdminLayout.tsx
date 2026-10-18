@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, KeyRound } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -104,6 +104,15 @@ export function SaaSAdminLayout() {
                 </div>
               </div>
               <div className="border-t border-slate-700 pt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800"
+                  onClick={() => navigate(`/forgot-password?email=${encodeURIComponent(user?.email || '')}&returnTo=%2Fsaas%2Flogin`)}
+                >
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  Reset password
+                </Button>
                 <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800" onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout

@@ -7,9 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
 
 export default function ForgotPasswordPage() {
   const [searchParams] = useSearchParams()
+  const loginPath = searchParams.get('returnTo') === '/saas/login' ? '/saas/login' : '/login'
   const [email, setEmail] = useState(searchParams.get('email') || '')
   const [otp, setOtp] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -19,6 +21,7 @@ export default function ForgotPasswordPage() {
   const [fallbackOtp, setFallbackOtp] = useState<string | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const { toast } = useToast()
+  const { isAuthenticated, logout } = useJWTAuth()
 
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -61,6 +64,7 @@ export default function ForgotPasswordPage() {
     setLoading(true)
     try {
       await authApi.resetPassword({ email, otp, newPassword })
+      if (isAuthenticated) await logout()
       setStep('done')
     } catch (error: any) {
       toast({
@@ -89,7 +93,7 @@ export default function ForgotPasswordPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link to="/login">
+            <Link to={loginPath}>
               <Button className="w-full">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Login
@@ -212,7 +216,7 @@ export default function ForgotPasswordPage() {
             </form>
           )}
           <div className="mt-4 text-center">
-            <Link to="/login" className="text-sm text-primary hover:underline">
+            <Link to={loginPath} className="text-sm text-primary hover:underline">
               Back to login
             </Link>
           </div>

@@ -1234,17 +1234,6 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       return { tenant: createdTenant, user };
     });
 
-    let emailSent = false;
-    let emailError = null;
-    try {
-      const { subject, html } = getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
-      await sendMail(owner.email, subject, html);
-      emailSent = true;
-    } catch (e) {
-      emailError = e?.message || "Email failed";
-      console.warn("Provision tenant: email send failed:", emailError);
-    }
-
     // Audit log: tenant provisioning (critical SaaS admin operation)
     auditLog({
       tenantId: "platform",
@@ -1270,15 +1259,21 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     }).catch(() => {});
 
     res.status(201).json({
-      message: emailSent ? "Tenant provisioned and owner email sent" : "Tenant provisioned, but owner email failed",
+      message: "Tenant provisioned. Owner setup email is being sent.",
       tenantId: tenant.id,
       slug: tenant.slug,
       ownerEmail: owner.email,
-      emailSent,
-      emailError,
+      emailPending: true,
       marketplaceProfileCreated: Boolean(marketplace),
       tempPassword,
       otp,
+    });
+
+    void Promise.resolve().then(() => {
+      const { subject, html } = getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      return sendMail(owner.email, subject, html);
+    }).catch((error) => {
+      console.warn("Provision tenant: owner email send failed:", error?.message || "Email failed");
     });
   } catch (err) {
     if (err?.code === "P2002") {

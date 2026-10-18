@@ -16,6 +16,7 @@ interface ProvisionResult {
   slug?: string
   ownerEmail?: string
   emailSent?: boolean
+  emailPending?: boolean
   emailError?: string | null
   tempPassword?: string
   otp?: string
@@ -202,6 +203,10 @@ export const ProvisionPage: React.FC = () => {
               </div>
             </div>
           </div>
+        ) : result?.emailPending ? (
+          <p className="mt-3 text-sm text-slate-600">
+            Owner setup email is being sent to {result?.ownerEmail || 'the owner'}. Credentials are available above.
+          </p>
         ) : (
           <p className="mt-3 text-sm text-green-700">
             Owner setup email sent to {result?.ownerEmail || 'the owner'}.

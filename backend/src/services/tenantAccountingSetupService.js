@@ -26,12 +26,7 @@ function isPostable(account) {
   return Boolean(account?.isActive) && !account.parentId && !Number(account._count?.children || 0) && !linkedCashAccountId(account) && String(account.subType || '').toLowerCase() !== 'category'
 }
 
-async function provisionAccount(client, tenantId, role) {
-  const accounts = await client.account.findMany({
-    where: { tenantId },
-    include: { _count: { select: { children: true } } },
-    orderBy: { code: 'asc' },
-  })
+async function provisionAccount(client, tenantId, role, accounts) {
   const marker = `${SYSTEM_ACCOUNT_MARKER} ${role.key}`
   const managed = accounts.find((account) => String(account.description || '').includes(marker))
   if (managed) {
@@ -52,7 +47,7 @@ async function provisionAccount(client, tenantId, role) {
   let code = `SYS-${role.code}`
   let suffix = 1
   while (accounts.some((account) => account.code === code)) code = `SYS-${role.code}-${suffix++}`
-  return client.account.create({
+  const created = await client.account.create({
     data: {
       tenantId,
       code,
@@ -65,6 +60,8 @@ async function provisionAccount(client, tenantId, role) {
     },
     include: { _count: { select: { children: true } } },
   })
+  accounts.push(created)
+  return created
 }
 
 async function ensureWithClient(client, { tenantId, userId, enableNewSetups }) {
@@ -73,6 +70,11 @@ async function ensureWithClient(client, { tenantId, userId, enableNewSetups }) {
     getReceivablesAccountingConfig(client, tenantId),
     getPayablesAccountingConfig(client, tenantId),
   ])
+  const accounts = await client.account.findMany({
+    where: { tenantId },
+    include: { _count: { select: { children: true } } },
+    orderBy: { code: 'asc' },
+  })
   const accountsByRole = new Map()
   for (const role of SYSTEM_ACCOUNT_ROLES) {
     const existingId = receivablesExisting?.[role.key] || payablesExisting?.[role.key]
@@ -88,7 +90,7 @@ async function ensureWithClient(client, { tenantId, userId, enableNewSetups }) {
     ...payablesRoles.filter((role) => !payablesExisting?.[role.key]).map((role) => role.key),
   ])
   for (const role of SYSTEM_ACCOUNT_ROLES) {
-    if (rolesToProvision.has(role.key) && !accountsByRole.has(role.key)) accountsByRole.set(role.key, await provisionAccount(client, tenantId, role))
+    if (rolesToProvision.has(role.key) && !accountsByRole.has(role.key)) accountsByRole.set(role.key, await provisionAccount(client, tenantId, role, accounts))
   }
 
   if (!receivablesExisting || receivablesRoles.some((role) => !receivablesExisting[role.key]) || (enableNewSetups && !receivablesExisting.isEnabled)) {
