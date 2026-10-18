@@ -174,7 +174,8 @@ export const ProvisionPage: React.FC = () => {
         <h2 className="text-xl font-semibold">Business Provisioned!</h2>
         <p className="text-gray-500 mt-2">The business and owner account have been created successfully.</p>
         <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-left">
-          <p className="text-sm font-medium text-slate-900">Owner credentials</p>
+          <p className="text-sm font-medium text-slate-900">Owner credentials backup</p>
+          <p className="mt-1 text-xs text-slate-500">The setup email is sent to the owner. Keep this one-time backup secure and share it only with them.</p>
           <div className="mt-3 space-y-1 text-sm text-slate-700">
             {result?.tenantId && <p><span className="font-medium">Business ID:</span> {result.tenantId}</p>}
             {result?.ownerEmail && <p><span className="font-medium">Owner email:</span> {result.ownerEmail}</p>}

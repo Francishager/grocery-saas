@@ -1055,11 +1055,19 @@ GitHub Actions workflows handle automated deployment on push to main branch.
 | `CLOUDINARY_CLOUD_NAME` | No | Cloudinary cloud name |
 | `CLOUDINARY_API_KEY` | No | Cloudinary API key |
 | `CLOUDINARY_API_SECRET` | No | Cloudinary API secret |
-| `RESEND_API_KEY` | No | Resend email API key |
-| `SMTP_HOST` | No | SMTP host for Nodemailer |
-| `SMTP_PORT` | No | SMTP port |
-| `SMTP_USER` | No | SMTP username |
-| `SMTP_PASS` | No | SMTP password |
+| `SMTP_HOST` | No | SMTP host; defaults to `smtp.gmail.com` when `SMTP_USER` is a Gmail address |
+| `SMTP_PORT` | No | SMTP port (defaults to 587; use 465 for implicit TLS) |
+| `SMTP_USER` | No | SMTP username; for Gmail, use the full address |
+| `SMTP_PASS` | No | SMTP password or Gmail app password (spaces are ignored for Gmail) |
+| `EMAIL_FROM` | No | Sender address; defaults to `SMTP_USER` for ordinary SMTP. Required for GMass SMTP (use the connected Gmail address). |
+| `GMASS_SMTP_HOST` | No | GMass SMTP host (for example, `smtp.gmass.co`); overrides `SMTP_HOST` |
+| `GMASS_SMTP_PORT` | No | GMass SMTP port (587 recommended; 465 uses implicit TLS) |
+| `GMASS_SMTP_USER` | No | GMass SMTP username; overrides `SMTP_USER` |
+| `GMASS_SMTP_PASS` | No | GMass SMTP password; store as a deployment secret, never in source control |
+| `GMASS_SMTP_FROM` | No | Connected sender address (for example, the verified Gmail address); overrides `SMTP_FROM` |
+| `SMTP_FROM` | No | Sender address when `EMAIL_FROM` is not set |
+| `RESEND_API_KEY` | No | Explicit fallback email provider when SMTP is not configured |
+| `RESEND_FROM` | No | Sender address when using Resend without `EMAIL_FROM` (defaults to `onboarding@resend.dev`) |
 
 ### Frontend
 
