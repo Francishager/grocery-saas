@@ -76,8 +76,8 @@ const AcceptInvitation: React.FC = () => {
 
     if (!formData.password) {
       errors.password = 'Password is required'
-    } else if (formData.password.length < 8) {
-      errors.password = 'Password must be at least 8 characters'
+    } else if (formData.password.length < 12) {
+      errors.password = 'Password must be at least 12 characters'
     }
 
     if (formData.password !== formData.confirmPassword) {

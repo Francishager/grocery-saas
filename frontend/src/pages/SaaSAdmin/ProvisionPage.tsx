@@ -125,7 +125,7 @@ export const ProvisionPage: React.FC = () => {
     if (!form.planId) { setError('Subscription plan is required'); return }
     if (!form.ownerName.trim()) { setError('Owner name is required'); return }
     if (!form.ownerEmail.trim()) { setError('Owner email is required'); return }
-    if (!form.ownerPassword || form.ownerPassword.length < 6) { setError('Password must be at least 6 characters'); return }
+    if (!form.ownerPassword || form.ownerPassword.length < 12) { setError('Password must be at least 12 characters'); return }
     setLoading(true)
     setError(null)
     setSuccess(false)
@@ -293,7 +293,7 @@ export const ProvisionPage: React.FC = () => {
               <label className="block text-sm font-medium mb-1">Temporary Password</label>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative flex-1">
-                  <input type={showPassword ? 'text' : 'password'} minLength={6} value={form.ownerPassword} onChange={(e) => handleChange('ownerPassword', e.target.value)} className="w-full rounded-lg border px-3 py-2 pr-10" placeholder="Auto-generated if empty" />
+                  <input type={showPassword ? 'text' : 'password'} minLength={12} value={form.ownerPassword} onChange={(e) => handleChange('ownerPassword', e.target.value)} className="w-full rounded-lg border px-3 py-2 pr-10" placeholder="Auto-generated if empty" />
                   <button type="button" onClick={() => setShowPassword((prev) => !prev)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100">
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>

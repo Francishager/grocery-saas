@@ -124,11 +124,11 @@ export default function StaffPage() {
     if (!form.name.trim()) { toast({ variant: 'destructive', title: 'Name is required' }); return }
     if (!form.email.trim()) { toast({ variant: 'destructive', title: 'Email is required' }); return }
     if (!form.branchId) { toast({ variant: 'destructive', title: 'Branch is required' }); return }
-    if (!editingId && form.password.trim().length < 6) {
+    if (!editingId && form.password.trim().length < 12) {
       toast({
         variant: 'destructive',
         title: 'Password required',
-        description: 'Use at least 6 characters for new staff.',
+        description: 'Use at least 12 characters for new staff.',
       })
       return
     }

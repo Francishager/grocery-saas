@@ -41,7 +41,7 @@ export const commonValidations: FieldValidation = {
   ],
   password: [
     { required: true, message: 'Password is required' },
-    { minLength: 8, message: 'Password must be at least 8 characters' },
+    { minLength: 12, message: 'Password must be at least 12 characters' },
     { pattern: patterns.password, message: 'Password must contain uppercase, lowercase, and number' },
   ],
   confirmPassword: [

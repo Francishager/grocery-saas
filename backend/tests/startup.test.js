@@ -43,7 +43,7 @@ test('backend loads every router and serves the Railway healthcheck without a da
       NODE_ENV: 'test',
       DOTENV_CONFIG_PATH: path.join(tmpdir(), 'jibusales-startup-test-no-env'),
       DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/test?connect_timeout=1',
-      JWT_SECRET: 'startup-test-only',
+      JWT_SECRET: 'startup-test-secret-at-least-32-bytes-long',
       HOST: '127.0.0.1',
       PORT: String(port),
     },

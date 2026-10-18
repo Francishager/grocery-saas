@@ -85,7 +85,7 @@ export const defaultUserPreferences = {
 
 // Password requirements
 export const passwordRequirements = {
-  minLength: 8,
+  minLength: 12,
   requireUppercase: true,
   requireLowercase: true,
   requireNumber: true,

@@ -114,8 +114,8 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
     const normalizedEmail = String(email || "").trim().toLowerCase();
     if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
     if (!normalizedEmail) return res.status(400).json({ error: "Email is required" });
-    if (!password || String(password).length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (!password || String(password).length < 12) {
+      return res.status(400).json({ error: "Password must be at least 12 characters" });
     }
     if (!staffRoles.has(role)) return res.status(400).json({ error: "Invalid staff role" });
     if (!branchId) return res.status(400).json({ error: "Branch is required" });
@@ -233,8 +233,8 @@ router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async
     if (phone !== undefined) data.phone = phone || null;
     if (isActive !== undefined) data.isActive = Boolean(isActive);
     if (password !== undefined) {
-      if (!password || String(password).length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      if (!password || String(password).length < 12) {
+        return res.status(400).json({ error: "Password must be at least 12 characters" });
       }
       data.password = await bcrypt.hash(String(password), 12);
     }

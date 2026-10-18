@@ -6,8 +6,7 @@ import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
 import { workingHoursAccessPayload } from '../src/utils/workingHours.js';
 import { shouldSuspendForSubscriptionPayment } from '../src/utils/subscriptionPricing.js';
 import { getSubscriptionPaymentProgress } from '../src/utils/subscriptionPayments.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+import { getJwtSecret } from '../src/utils/jwtSecret.js';
 
 // Platform admin roles
 const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
@@ -117,7 +116,7 @@ export const authenticateToken = async (req, res, next) => {
 
   let decoded;
   try {
-    decoded = jwt.verify(token, JWT_SECRET);
+    decoded = jwt.verify(token, getJwtSecret());
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Token expired', code: 'TOKEN_EXPIRED' });
@@ -302,7 +301,7 @@ export const optionalAuth = (req, res, next) => {
     return next();
   }
   
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, getJwtSecret(), (err, decoded) => {
     if (!err) {
       req.user = decoded;
     }

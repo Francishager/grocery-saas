@@ -7,7 +7,8 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const jwt = require('jsonwebtoken');
 const { Prisma } = require('@prisma/client');
-const secret = process.env.JWT_SECRET || 'your-secret-key';
+const secret = 'working-hours-api-test-secret-at-least-32-bytes-long';
+process.env.JWT_SECRET = secret;
 const dataUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const schedule = (start = '08:00', end = '18:00') => ({ enabled: true,
   days: Array.from({ length: 7 }, (_, day) => ({ day, enabled: day !== 0, allDay: false, start, end })) });
@@ -37,6 +38,9 @@ const fixtures = {
   'branchAccess.js': dataUrl('export const tenantIdFromUser = user => user.tenantId;'),
   'usageLimits.js': dataUrl('export const checkUsageLimit = async () => ({ allowed: true });'),
   'mailer.js': dataUrl('export const sendMail = async () => {};'),
+  'audit.js': dataUrl('export const auditLog = async () => {}; export const logTenantActivity = async () => {};'),
+  'trashService.js': dataUrl('export const moveToTrash = async () => {}; export const trashedRecordIds = async () => []; export const assertOutsideTrash = async () => {};'),
+  'node:crypto': dataUrl('export const randomInt = (min, max) => min + 1;'),
   cloudinary: dataUrl('export default { v2: { config() {} } };'),
 };
 async function isolatedModule(relative) {
@@ -52,7 +56,7 @@ async function isolatedModule(relative) {
 }
 const auth = await isolatedModule('../middleware/auth.js');
 globalThis.workingHoursTestAuth = auth;
-fixtures['auth.js'] = dataUrl(`export const { authenticateToken, requirePermission, tenantAccountAccessPayload } = globalThis.workingHoursTestAuth;`);
+fixtures['auth.js'] = dataUrl(`export const { authenticateToken, requirePermission, enforceTenantSubscriptionAccess, tenantAccountAccessPayload } = globalThis.workingHoursTestAuth;`);
 const authRouter = (await isolatedModule('../src/routes/auth.js')).default;
 const staffRouter = (await isolatedModule('../src/routes/staff.js')).default;
 const settingsRouter = (await isolatedModule('../src/routes/settings.js')).default;

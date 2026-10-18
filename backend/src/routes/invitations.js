@@ -6,12 +6,14 @@ import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.j
 import { permissionsForUser } from "../utils/permissions.js";
 import { sendMail } from "../../mailer.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
+import { getJwtSecret } from "../utils/jwtSecret.js";
+import { createRateLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+const invitationAttemptLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 12, keyGenerator: (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown' });
 
 function generateOTP() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(crypto.randomInt(100000, 1000000));
 }
 
 function generateTempPassword(len = 12) {
@@ -53,11 +55,11 @@ function invitationPublicFields(inv, plan = null) {
 function createTokens(user) {
   const accessToken = jwt.sign(
     { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
-    JWT_SECRET,
-    { expiresIn: "24h" }
+    getJwtSecret(),
+    { expiresIn: "15m" }
   );
-  const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
-  return { accessToken, refreshToken, expiresIn: 86400, tokenType: "Bearer" };
+  const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, getJwtSecret(), { expiresIn: "7d" });
+  return { accessToken, refreshToken, expiresIn: 900, tokenType: "Bearer" };
 }
 
 // List invitations
@@ -203,10 +205,11 @@ router.post("/:id/resend", authenticateToken, requirePlatformAdmin, async (req, 
 });
 
 // Accept invitation (public - token based)
-router.post("/accept", async (req, res) => {
+router.post("/accept", invitationAttemptLimiter, async (req, res) => {
   try {
     const { token, otp, password, name, fname, lname, phone, businessName } = req.body;
     if (!token || !otp || !password) return res.status(400).json({ error: "token, otp and password required" });
+    if (String(password).length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
     const inv = await prisma.invitation.findUnique({ where: { token } });
     if (!inv) return res.status(404).json({ error: "Invalid invitation token" });
@@ -264,7 +267,7 @@ router.post("/accept", async (req, res) => {
 });
 
 // Validate token (public) - frontend compatible alias
-router.get("/token/:token", async (req, res) => {
+router.get("/token/:token", invitationAttemptLimiter, async (req, res) => {
   try {
     const inv = await prisma.invitation.findUnique({ where: { token: req.params.token } });
     if (!inv) return res.status(404).json({ error: "Invalid token" });
@@ -278,7 +281,7 @@ router.get("/token/:token", async (req, res) => {
 });
 
 // Validate token (public) - original endpoint
-router.get("/validate/:token", async (req, res) => {
+router.get("/validate/:token", invitationAttemptLimiter, async (req, res) => {
   try {
     const inv = await prisma.invitation.findUnique({ where: { token: req.params.token } });
     if (!inv) return res.status(404).json({ error: "Invalid token" });

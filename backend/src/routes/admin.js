@@ -469,7 +469,7 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
   try {
     const { id } = req.params;
     const { password } = req.body;
-    if (!password || password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (!password || password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
     const hashed = await bcrypt.hash(password, 12);
     const user = await prisma.user.update({ where: { id }, data: { password: hashed } });
 
@@ -525,7 +525,7 @@ router.post("/platform-staff", authenticateToken, requirePlatformAdmin, async (r
     }
     const normalizedEmail = String(email || "").trim().toLowerCase();
     if (!name?.trim() || !normalizedEmail || !password) return res.status(400).json({ error: "Name, email, and password are required" });
-    if (String(password).length < 10) return res.status(400).json({ error: "Password must be at least 10 characters" });
+    if (String(password).length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
     if (!platformPermissions.length) return res.status(400).json({ error: "Assign at least one SaaS platform task" });
     if (await prisma.user.findUnique({ where: { email: normalizedEmail } })) return res.status(409).json({ error: "User already exists" });
     const parsed = splitName(name);
@@ -1181,7 +1181,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     if (!business?.planId) return res.status(400).json({ error: "Subscription plan is required" });
     if (!owner?.email?.trim()) return res.status(400).json({ error: "Owner email is required" });
     if (!owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
-    if (owner?.password && owner.password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
     const marketplace = business.marketplaceProfile;
     const sellerType = String(marketplace?.sellerType || "").trim().toLowerCase();

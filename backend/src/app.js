@@ -89,14 +89,14 @@ const PORT = process.env.PORT || 3000;
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // Validate env
-const missingEnvVars = ["DATABASE_URL", "JWT_SECRET"].filter(
+const missingEnvVars = ["DATABASE_URL"].filter(
   (k) => !process.env[k] || String(process.env[k]).trim() === ""
 );
-if (missingEnvVars.length) {
-  console.warn("⚠️ Missing env vars:", missingEnvVars.join(", "));
-} else {
-  console.log("✅ All required env vars set.");
+if (missingEnvVars.length) console.warn("⚠️ Missing environment variables:", missingEnvVars.join(", "));
+if (!process.env.JWT_SECRET || Buffer.byteLength(process.env.JWT_SECRET, 'utf8') < 32) {
+  throw new Error('JWT_SECRET must contain at least 32 bytes. Generate a new random secret and configure it before starting the API.');
 }
+console.log("✅ JWT signing secret is configured.");
 
 // Start HTTP server immediately so Railway health checks pass.
 // Retry DB connection in background — don't crash the container
@@ -136,40 +136,43 @@ async function connectWithRetry() {
 connectWithRetry();
 
 // CORS
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN || "")
-  .split(",")
+const configuredOrigins = [process.env.ALLOWED_ORIGINS, process.env.FRONTEND_ORIGIN]
+  .filter(Boolean)
+  .flatMap((value) => value.split(","))
   .map((s) => s.trim())
   .filter(Boolean);
+const allowedOrigins = new Set([
+  "https://jibusales.jibusales00.workers.dev",
+  "https://grocery-saas.grocerysaas.workers.dev",
+  ...configuredOrigins,
+]);
 
-// Always allow production frontend as fallback
-const productionFrontend = "https://grocery-saas.grocerysaas.workers.dev";
+// Security headers for API responses; the frontend document needs its own CSP at the edge.
+app.use((req, res, next) => {
+  res.set("X-Frame-Options", "DENY");
+  res.set("X-Content-Type-Options", "nosniff");
+  res.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  res.set("X-Permitted-Cross-Domain-Policies", "none");
+  if (process.env.NODE_ENV === 'production') res.set("Strict-Transport-Security", "max-age=31536000");
+  next();
+});
 
 app.use(
   cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      if (origin.includes("localhost")) return cb(null, true);
-      if (origin === productionFrontend) return cb(null, true);
-      if (!allowedOrigins.length) return cb(null, true);
+      if (allowedOrigins.has(origin)) return cb(null, true);
+      if (process.env.NODE_ENV !== 'production' && /^https?:\/\/localhost(?::\d+)?$/.test(origin)) return cb(null, true);
       cb(new Error("CORS: Origin not allowed"), false);
     },
-    credentials: true,
   })
 );
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '1mb', extended: true, parameterLimit: 1000 }));
 
 // Audit logging middleware (captures all mutating requests)
 app.use("/api", auditMiddleware());
-
-// Security headers
-app.use((req, res, next) => {
-  res.set("X-Frame-Options", "DENY");
-  res.set("X-Content-Type-Options", "nosniff");
-  res.set("Referrer-Policy", "no-referrer");
-  next();
-});
 
 // Health check
 app.get("/", (req, res) => {

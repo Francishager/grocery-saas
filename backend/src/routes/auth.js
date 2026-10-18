@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomInt } from 'node:crypto';
 import multer from "multer";
 import cloudinary from "cloudinary";
 import prisma from "../db.js";
@@ -10,9 +11,17 @@ import { resolveEffectivePermissions } from "../utils/permissions.js";
 import { getTenantFeatures } from "../../middleware/featureCheck.js";
 import { workingHoursAccessPayload, staffWorkingHoursAccess } from "../utils/workingHours.js";
 import { auditLog } from "../utils/audit.js";
+import { getJwtSecret } from "../utils/jwtSecret.js";
+import { createRateLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const ipKey = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
+const identityKey = (req) => String(req.body?.email || '').trim().toLowerCase().slice(0, 254) || ipKey(req);
+const loginIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyGenerator: ipKey });
+const loginIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyGenerator: identityKey });
+const refreshLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyGenerator: ipKey });
+const resetIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyGenerator: ipKey });
+const resetIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 4, keyGenerator: identityKey });
 
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -67,7 +76,7 @@ function userPayload(user, userPerm, tenantFeatures = null) {
 }
 
 // Login
-router.post("/login", async (req, res) => {
+router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -124,73 +133,38 @@ router.post("/login", async (req, res) => {
 
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
-      JWT_SECRET,
-      { expiresIn: "24h" }
+      getJwtSecret(),
+      { expiresIn: "15m" }
     );
-    const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
+    const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, getJwtSecret(), { expiresIn: "7d" });
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
     await logAuthenticationEvent(req, "login", user);
 
     res.json({
       user: userPayload(user, userPerm, tenantFeatures),
-      tokens: { accessToken, refreshToken, expiresIn: 86400, tokenType: "Bearer" },
+      tokens: { accessToken, refreshToken, expiresIn: 900, tokenType: "Bearer" },
     });
   } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Internal server error", detail: err.message });
+    console.error("Login error:", err.message);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
 // Register
-router.post("/register", async (req, res) => {
-  try {
-    const { email, password, fname, lname, phone, tenantId, role } = req.body;
-    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
-
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return res.status(409).json({ error: "User already exists" });
-
-    if (tenantId) {
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { id: true, status: true, trialEndsAt: true },
-      });
-      if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-      const tenantBlock = tenantAccountAccessPayload(tenant, { role: role || "attendant" });
-      if (tenantBlock) return res.status(403).json(tenantBlock);
-    }
-
-    const hashed = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { email, password: hashed, fname, lname, phone, tenantId, role: role || "attendant" },
-    });
-
-    const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId },
-      JWT_SECRET,
-      { expiresIn: "24h" }
-    );
-
-    res.status(201).json({
-      user: { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId },
-      token: { accessToken, expiresIn: 86400 },
-    });
-  } catch (err) {
-    console.error("Register error:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.post("/register", createRateLimiter({ windowMs: 60 * 60 * 1000, max: 5, keyGenerator: ipKey }), (_req, res) => {
+  res.status(410).json({ error: "Open registration is disabled. Create an account using a valid JibuSales invitation." });
 });
 
 // Refresh access token using refresh token
-router.post("/refresh", async (req, res) => {
+router.post("/refresh", refreshLimiter, async (req, res) => {
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) return res.status(401).json({ message: "Refresh token required" });
 
     let decoded;
     try {
-      decoded = jwt.verify(refreshToken, JWT_SECRET);
+      decoded = jwt.verify(refreshToken, getJwtSecret());
     } catch (err) {
       return res.status(401).json({ message: "Invalid or expired refresh token" });
     }
@@ -224,14 +198,14 @@ router.post("/refresh", async (req, res) => {
 
     const accessToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
-      JWT_SECRET,
-      { expiresIn: "24h" }
+      getJwtSecret(),
+      { expiresIn: "15m" }
     );
-    const newRefreshToken = jwt.sign({ id: user.id, type: "refresh" }, JWT_SECRET, { expiresIn: "7d" });
+    const newRefreshToken = jwt.sign({ id: user.id, type: "refresh" }, getJwtSecret(), { expiresIn: "7d" });
 
     res.json({
       user: userPayload(user, userPerm, tenantFeatures),
-      tokens: { accessToken, refreshToken: newRefreshToken, expiresIn: 86400, tokenType: "Bearer" },
+      tokens: { accessToken, refreshToken: newRefreshToken, expiresIn: 900, tokenType: "Bearer" },
     });
   } catch (err) {
     console.error("Refresh token error:", err);
@@ -261,37 +235,28 @@ router.get("/me", authenticateToken, async (req, res) => {
 });
 
 // Request password reset (OTP)
-router.post("/request-reset", async (req, res) => {
+router.post("/request-reset", resetIpLimiter, resetIdentityLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email required" });
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await prisma.user.findUnique({ where: { email: String(email).trim().toLowerCase() } });
+    if (!user) return res.json({ message: "If an account exists for that email, a reset code will be sent." });
 
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
     await prisma.user.update({ where: { id: user.id }, data: { otpCode: otp, otpExpires } });
 
-    let emailSent = false;
-    let emailError = null;
     try {
       await sendMail(
         user.email,
         "Password reset code",
-        `<p>Hello ${user.fname || ""},</p><p>Your password reset code is <b>${otp}</b>.</p><p>This code expires in 24 hours.</p>`
+        `<p>Hello ${user.fname || ""},</p><p>Your password reset code is <b>${otp}</b>.</p><p>This code expires in 15 minutes.</p>`
       );
-      emailSent = true;
     } catch (err) {
-      emailError = err?.message || "Email failed";
-      console.warn("Password reset email failed:", emailError);
+      console.warn("Password reset email failed:", err?.message || "Email failed");
     }
 
-    res.json({
-      message: emailSent ? "Reset code sent" : "Reset code generated, but email failed",
-      emailSent,
-      emailError,
-      otp: emailSent ? undefined : otp,
-    });
+    res.json({ message: "If an account exists for that email, a reset code will be sent." });
   } catch (err) {
     console.error("Request reset error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -299,17 +264,17 @@ router.post("/request-reset", async (req, res) => {
 });
 
 // Reset password with OTP
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", resetIpLimiter, resetIdentityLimiter, async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     if (!email || !otp || !newPassword) return res.status(400).json({ error: "email, otp, newPassword required" });
-    if (String(newPassword).length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (String(newPassword).length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(404).json({ error: "User not found" });
-    if (!user.otpCode || !user.otpExpires) return res.status(400).json({ error: "No OTP requested" });
+    const user = await prisma.user.findUnique({ where: { email: String(email).trim().toLowerCase() } });
+    if (!user) return res.status(400).json({ error: "Invalid or expired reset code" });
+    if (!user.otpCode || !user.otpExpires) return res.status(400).json({ error: "Invalid or expired reset code" });
     if (String(user.otpCode) !== String(otp) || new Date(user.otpExpires) < new Date()) {
-      return res.status(400).json({ error: "Invalid or expired OTP" });
+      return res.status(400).json({ error: "Invalid or expired reset code" });
     }
 
     const hashed = await bcrypt.hash(newPassword, 12);
@@ -359,7 +324,7 @@ router.put("/change-password", authenticateToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) return res.status(400).json({ error: "Current and new password required" });
-    if (String(newPassword).length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+    if (String(newPassword).length < 12) return res.status(400).json({ error: "New password must be at least 12 characters" });
 
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user) return res.status(404).json({ error: "User not found" });

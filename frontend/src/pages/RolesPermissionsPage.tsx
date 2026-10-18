@@ -516,8 +516,8 @@ export default function RolesPermissionsPage() {
       toast({ variant: 'destructive', title: 'Email is required' })
       return
     }
-    if (!form.password || form.password.length < 6) {
-      toast({ variant: 'destructive', title: 'Password required', description: 'Use at least 6 characters.' })
+    if (!form.password || form.password.length < 12) {
+      toast({ variant: 'destructive', title: 'Password required', description: 'Use at least 12 characters.' })
       return
     }
     if (!form.branchId) {
@@ -660,7 +660,7 @@ export default function RolesPermissionsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label>Full Name</Label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="John Doe" required /></div>
               <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="john@example.com" required /></div>
-              <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Min 6 chars" required minLength={6} /></div>
+              <div className="space-y-2"><Label>Password</Label><Input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Min 12 chars" required minLength={12} /></div>
               <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+256..." /></div>
               <div className="space-y-2">
                 <Label>Role</Label>

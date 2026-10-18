@@ -80,8 +80,8 @@ export default function UserProfilePage() {
       toast({ variant: 'destructive', title: 'Passwords do not match' })
       return
     }
-    if (passwordForm.newPassword.length < 6) {
-      toast({ variant: 'destructive', title: 'Password too short', description: 'Minimum 6 characters' })
+    if (passwordForm.newPassword.length < 12) {
+      toast({ variant: 'destructive', title: 'Password too short', description: 'Minimum 12 characters' })
       return
     }
 
@@ -187,7 +187,7 @@ export default function UserProfilePage() {
           </div>
           <div className="space-y-2">
             <Label>New Password</Label>
-            <Input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="Min 6 characters" />
+            <Input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="Min 12 characters" minLength={12} />
           </div>
           <div className="space-y-2">
             <Label>Confirm New Password</Label>

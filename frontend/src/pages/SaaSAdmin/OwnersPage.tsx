@@ -32,8 +32,8 @@ export const OwnersPage: React.FC = () => {
   useEffect(() => { fetchOwners() }, [])
 
   const handleResetPassword = async (id: string) => {
-    const newPass = await appPrompt('Enter new password for this owner (min 6 chars):', 'password')
-    if (!newPass || newPass.length < 6) { appNotify('Password must be at least 6 characters'); return }
+    const newPass = await appPrompt('Enter new password for this owner (min 12 characters):', 'password')
+    if (!newPass || newPass.length < 12) { appNotify('Password must be at least 12 characters'); return }
     setResetting(id)
     try {
       const res = await apiFetch(`/api/admin/owners/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password: newPass }) })

@@ -49,8 +49,8 @@ export default function ForgotPasswordPage() {
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (newPassword.length < 6) {
-      toast({ variant: 'destructive', title: 'Password too short', description: 'Use at least 6 characters.' })
+    if (newPassword.length < 12) {
+      toast({ variant: 'destructive', title: 'Password too short', description: 'Use at least 12 characters.' })
       return
     }
     if (newPassword !== confirmPassword) {
@@ -183,7 +183,7 @@ export default function ForgotPasswordPage() {
                 <Input
                   id="new-password"
                   type="password"
-                  minLength={6}
+                  minLength={12}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
@@ -195,7 +195,7 @@ export default function ForgotPasswordPage() {
                 <Input
                   id="confirm-password"
                   type="password"
-                  minLength={6}
+                  minLength={12}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
