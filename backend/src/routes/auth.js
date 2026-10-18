@@ -37,7 +37,7 @@ function logAuthenticationEvent(req, action, user = null, statusCode = 200) {
     tenantId: user?.tenantId || "platform",
     targetTenantId: user?.tenantId || null,
     userId: user?.id || "unknown",
-    userEmail: "",
+    userEmail: user?.email || String(req.body?.email || '').trim().toLowerCase().slice(0, 254),
     action,
     model: "Authentication",
     statusCode,

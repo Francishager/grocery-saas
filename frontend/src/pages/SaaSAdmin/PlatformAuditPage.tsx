@@ -7,7 +7,8 @@ interface AuditLog {
   id: string
   tenantId: string | null
   tenantName: string
-  actor: string
+  actor?: string
+  userEmail?: string
   ip: string | null
   engagement: { activeMs: number; interactionCount: number; maxScrollDepth: number; kind: string } | null
   action: string
@@ -42,7 +43,6 @@ export const PlatformAuditPage: React.FC = () => {
   const [page, setPage] = useState(1)
   const [insightDays, setInsightDays] = useState(30)
   const [selectedHour, setSelectedHour] = useState<number | null>(null)
-  const [hourMetric, setHourMetric] = useState<'activeMs' | 'interactionCount' | 'pageViews' | 'count'>('activeMs')
   const [filters, setFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
   const [appliedFilters, setAppliedFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
 
@@ -103,7 +103,7 @@ export const PlatformAuditPage: React.FC = () => {
     login: 'Signed in', login_failed: 'Sign-in failed', login_requires_reset: 'Password reset required', login_blocked_subscription: 'Sign-in blocked · subscription', login_blocked_schedule: 'Sign-in blocked · schedule',
   }[action] || action.replaceAll('_', ' '))
   const mostUsed = insights?.byFeature?.[0]
-  const hourValue = (item: AuditInsights['byHour'][number]) => item[hourMetric]
+  const hourValue = (item: AuditInsights['byHour'][number]) => item.pageViews
   const busiestHour = insights?.byHour?.reduce((best, item) => hourValue(item) > (best ? hourValue(best) : 0) ? item : best, null as AuditInsights['byHour'][number] | null)
   const selectedHourData = selectedHour == null ? null : insights?.byHour?.find(item => item.hour === selectedHour) || null
   const peakHourCount = busiestHour ? hourValue(busiestHour) : 0
@@ -116,12 +116,14 @@ export const PlatformAuditPage: React.FC = () => {
   const hourLabel = (hour: number) => `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`
   const formatDuration = (milliseconds: number) => {
     const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1000)
+    if (milliseconds === 0) return 'Not measured'
+    if (totalSeconds === 0) return '<1s'
     if (totalSeconds >= 3600) return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`
     if (totalSeconds >= 60) return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`
     return `${totalSeconds}s`
   }
-  const hourMetricLabel = { activeMs: 'Engaged time', interactionCount: 'Interactions', pageViews: 'Page opens', count: 'Audit events' }[hourMetric]
-  const formatHourValue = (item: AuditInsights['byHour'][number]) => hourMetric === 'activeMs' ? formatDuration(item.activeMs) : `${hourValue(item).toLocaleString()} ${hourMetric === 'interactionCount' ? 'interactions' : hourMetric === 'pageViews' ? 'page opens' : 'events'}`
+  const hourMetricLabel = 'Page opens'
+  const formatHourValue = (item: AuditInsights['byHour'][number]) => `${hourValue(item).toLocaleString()} page opens`
 
   return (
     <div className="space-y-5">
@@ -187,7 +189,7 @@ export const PlatformAuditPage: React.FC = () => {
           </div>}
         </div>
         <div id="platform-usage-by-hour" className="rounded-md border bg-white p-4">
-          <div className="mb-1 flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Usage by hour · Kampala</h2><p className="mt-1 text-xs text-gray-500">Select a column to inspect that hour · {insightDays}-day window</p></div><div className="flex items-center gap-2"><label htmlFor="audit-hour-metric" className="text-xs text-gray-500">Measure</label><select id="audit-hour-metric" value={hourMetric} onChange={event => { setHourMetric(event.target.value as typeof hourMetric); setSelectedHour(null) }} className="h-8 rounded-md border bg-white px-2 text-xs"><option value="activeMs">Engaged time</option><option value="interactionCount">Interactions</option><option value="pageViews">Page opens</option><option value="count">Audit events</option></select>{insights?.truncated && <span className="text-xs text-amber-700">Showing a capped sample</span>}</div></div>
+          <div className="mb-1 flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Usage by hour · Kampala</h2><p className="mt-1 text-xs text-gray-500">Page opens · automatically refreshes every 15 seconds · {insightDays}-day window</p></div>{insights?.truncated && <span className="text-xs text-amber-700">Showing a capped sample</span>}</div>
           <div className="flex h-32 items-end gap-1" aria-label="Interactive activity counts by hour in Kampala time">
             {(insights?.byHour || Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, pageViews: 0, activeMs: 0, interactionCount: 0, topPages: [] }))).map(item => <button key={item.hour} type="button" aria-label={`${hourLabel(item.hour)}: ${formatHourValue(item)}`} aria-pressed={selectedHour === item.hour} className="flex h-full min-w-0 flex-1 items-end rounded-t-sm px-px outline-none hover:bg-teal-50 focus-visible:ring-2 focus-visible:ring-teal-700" title={`${hourLabel(item.hour)} · ${formatHourValue(item)}`} onClick={() => setSelectedHour(selectedHour === item.hour ? null : item.hour)}>
               <span className={`w-full rounded-t-sm transition-colors ${selectedHour === item.hour ? 'bg-amber-500' : hourValue(item) === peakHourCount && peakHourCount > 0 ? 'bg-teal-800' : 'bg-teal-600/80'}`} style={{ height: `${hourValue(item) ? Math.max(5, hourValue(item) / maxHourValue * 100) : 2}%` }} />
@@ -235,7 +237,7 @@ export const PlatformAuditPage: React.FC = () => {
                   <td className="px-4 py-3">{log.tenantId ? <button onClick={() => navigate(`/saas/businesses/${log.tenantId}`)} className="text-left text-sm text-blue-700 hover:underline">{log.tenantName}</button> : <span className="text-sm">{log.tenantName}</span>}</td>
                   <td className="px-4 py-3"><span className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">{actionLabel(log.action)}</span></td>
                   <td className="px-4 py-3 text-sm text-gray-700">{log.model || 'Other'}</td>
-                  <td className="max-w-[220px] break-all px-4 py-3 text-sm text-gray-700">{log.actor || 'Email not captured'}</td>
+                  <td className="max-w-[220px] break-all px-4 py-3 text-sm text-gray-700">{log.userEmail || log.actor || (log.action === 'login_failed' ? 'Unidentified sign-in attempt' : 'Email not captured')}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-700">{log.ip || 'IP not captured'}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">{log.engagement ? <span>{formatDuration(log.engagement.activeMs)} active · {log.engagement.interactionCount.toLocaleString()} interactions · {log.engagement.maxScrollDepth}% scroll</span> : '—'}</td>
                   <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 text-xs ${log.statusCode >= 400 ? 'text-red-700' : 'text-emerald-700'}`}><ShieldCheck size={13} />{log.statusCode >= 400 ? `Failed (${log.statusCode})` : 'Success'}</span></td>

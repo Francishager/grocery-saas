@@ -398,11 +398,14 @@ export function TenantLayout() {
     const report = (kind: 'view' | 'engagement', metrics: { activeMs: number; interactionCount: number; maxScrollDepth: number }) => {
       void apiFetch('/api/audit/feature-view', {
         method: 'POST',
+        keepalive: true,
         body: JSON.stringify({ feature, kind, ...metrics }),
       }).catch(() => {})
     }
+    const idleTimeoutMs = 60_000
     let lastActivityAt = Date.now()
     let lastTickAt = lastActivityAt
+    let wasVisible = document.visibilityState === 'visible'
     let lastInteractionEventAt = 0
     let interactionCount = 0
     let activeMs = 0
@@ -411,8 +414,13 @@ export function TenantLayout() {
       const root = document.documentElement
       return Math.max(0, Math.min(100, Math.round((window.scrollY / Math.max(1, root.scrollHeight - window.innerHeight)) * 100)))
     }
+    const accumulateActiveTime = (now: number) => {
+      if (wasVisible) activeMs += Math.max(0, Math.min(now, lastActivityAt + idleTimeoutMs) - lastTickAt)
+      lastTickAt = now
+    }
     const markActivity = () => {
       const now = Date.now()
+      accumulateActiveTime(now)
       lastActivityAt = now
       if (now - lastInteractionEventAt >= 300) {
         interactionCount += 1
@@ -422,9 +430,7 @@ export function TenantLayout() {
     }
     const flushEngagement = () => {
       const now = Date.now()
-      const activeUntil = lastActivityAt + 60_000
-      if (document.visibilityState === 'visible') activeMs += Math.max(0, Math.min(now, activeUntil) - lastTickAt)
-      lastTickAt = now
+      accumulateActiveTime(now)
       maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth())
       if (activeMs > 0 || interactionCount > 0 || maxScrollDepth > 0) {
         report('engagement', { activeMs: Math.min(activeMs, 60_000), interactionCount, maxScrollDepth })
@@ -438,8 +444,16 @@ export function TenantLayout() {
     activityEvents.forEach(eventName => window.addEventListener(eventName, markActivity, { passive: true }))
     const timer = window.setInterval(flushEngagement, 15_000)
     const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') flushEngagement()
-      else { lastActivityAt = Date.now(); lastTickAt = lastActivityAt }
+      const now = Date.now()
+      if (document.visibilityState === 'hidden') {
+        accumulateActiveTime(now)
+        wasVisible = false
+        flushEngagement()
+      } else {
+        wasVisible = true
+        lastActivityAt = now
+        lastTickAt = now
+      }
     }
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('pagehide', flushEngagement)
