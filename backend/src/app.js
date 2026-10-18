@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import prisma from "./db.js";
+import { verifyMailTransport } from "../mailer.js";
 
 import authRoutes from "./routes/auth.js";
 import purchaseRoutes from "./routes/purchases.js";
@@ -105,6 +106,9 @@ const HOST = process.env.HOST || "0.0.0.0";
 console.log(`🔧 Starting server on PORT=${PORT} HOST=${HOST}`);
 const server = app.listen(Number(PORT), HOST, () => {
   console.log(`✅ Backend running on http://${HOST}:${PORT}`);
+  void verifyMailTransport()
+    .then((status) => console.log("✅ Email transport verified", status))
+    .catch((error) => console.error("❌ Email transport verification failed:", error?.message || error));
 });
 
 server.on("error", (error) => {
