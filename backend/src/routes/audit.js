@@ -26,7 +26,8 @@ router.post("/feature-view", authenticateToken, async (req, res) => {
       data: {
         tenantId,
         userId: req.user.id,
-        userEmail: "",
+        userEmail: req.user.email || "",
+        ip: req.ip || req.connection?.remoteAddress || null,
         action: "view",
         model: feature,
         statusCode: 200,

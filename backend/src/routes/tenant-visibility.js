@@ -2,6 +2,7 @@ import express from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import hrFeatureService from "../services/hrFeatureService.js";
+import { summarizePlatformAudit } from "../utils/platformAuditInsights.js";
 
 const router = express.Router();
 
@@ -28,7 +29,8 @@ function toPlatformAuditEntry(log, tenantNames) {
     id: log.id,
     tenantId,
     tenantName: tenantNames.get(tenantId) || (isPlatformAction ? 'Platform' : 'Business unavailable'),
-    actor: isPlatformAction ? (log.userEmail || 'Platform administrator') : 'Business user',
+    actor: log.userEmail || (isPlatformAction ? 'Platform administrator' : 'Email not captured'),
+    ip: log.ip || null,
     action: log.action,
     model: log.model,
     statusCode: log.statusCode,
@@ -69,6 +71,8 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
       const searchClause = { OR: [
         { action: { contains: search, mode: 'insensitive' } },
         { model: { contains: search, mode: 'insensitive' } },
+        { userEmail: { contains: search, mode: 'insensitive' } },
+        { ip: { contains: search, mode: 'insensitive' } },
         { tenantId: { in: matchedTenants.map(item => item.id) } },
         { targetTenantId: { in: matchedTenants.map(item => item.id) } },
       ] };
@@ -81,7 +85,7 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
-        select: { id: true, tenantId: true, targetTenantId: true, userEmail: true, action: true, model: true, statusCode: true, severity: true, createdAt: true },
+        select: { id: true, tenantId: true, targetTenantId: true, userEmail: true, ip: true, action: true, model: true, statusCode: true, severity: true, createdAt: true },
       }),
       prisma.auditLog.count({ where }),
     ]);
@@ -111,29 +115,14 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
       where,
       orderBy: { createdAt: 'desc' },
       take: 20000,
-      select: { model: true, action: true, createdAt: true },
+      select: { tenantId: true, userId: true, model: true, action: true, createdAt: true },
     });
-    const byFeature = new Map();
-    const byAction = new Map();
-    const byHour = Array.from({ length: 24 }, () => 0);
-    const byDay = new Map();
-    for (const log of logs) {
-      const feature = String(log.model || 'Other');
-      if (log.action === 'view') byFeature.set(feature, (byFeature.get(feature) || 0) + 1);
-      byAction.set(log.action, (byAction.get(log.action) || 0) + 1);
-      const kampalaTime = new Date(log.createdAt.getTime() + 3 * 60 * 60 * 1000);
-      byHour[kampalaTime.getUTCHours()] += 1;
-      const day = kampalaTime.toISOString().slice(0, 10);
-      byDay.set(day, (byDay.get(day) || 0) + 1);
-    }
+    const usageSummary = summarizePlatformAudit(logs);
     res.json({
       days,
       totalEvents: logs.length,
       truncated: logs.length === 20000,
-      byFeature: [...byFeature].map(([feature, count]) => ({ feature, count })).sort((a, b) => b.count - a.count).slice(0, 12),
-      byAction: [...byAction].map(([action, count]) => ({ action, count })).sort((a, b) => b.count - a.count),
-      byHour: byHour.map((count, hour) => ({ hour, count })),
-      byDay: [...byDay].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date)),
+      ...usageSummary,
       refreshedAt: new Date().toISOString(),
     });
   } catch (error) {
