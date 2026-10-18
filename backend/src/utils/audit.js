@@ -18,12 +18,17 @@ import prisma from "../db.js";
 export async function auditLog(opts) {
   try {
     const severity = opts.severity || (opts.statusCode && opts.statusCode >= 400 ? "warning" : "info");
+    let userEmail = opts.userEmail || "";
+    if (!userEmail && opts.userId && !String(opts.userId).startsWith('system')) {
+      const actor = await prisma.user.findUnique({ where: { id: opts.userId }, select: { email: true } });
+      userEmail = actor?.email || "";
+    }
     await prisma.auditLog.create({
       data: {
         tenantId: opts.tenantId || "platform",
         targetTenantId: opts.targetTenantId || null,
         userId: opts.userId || "system",
-        userEmail: opts.userEmail || "",
+        userEmail,
         action: opts.action,
         model: opts.model,
         recordId: opts.recordId || null,

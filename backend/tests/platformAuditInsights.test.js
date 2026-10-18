@@ -31,3 +31,20 @@ test('hourly activity uses Kampala local time and returns all 24 hours', () => {
   assert.equal(summary.byHour[0].activeMs, 15_000);
   assert.equal(summary.byHour[0].interactionCount, 3);
 });
+
+test('peak-hour pages and feature rankings are grouped by business', () => {
+  const summary = summarizePlatformAudit([
+    { tenantId: 'shop-a', userId: 'user-a', model: 'Sales', action: 'view', createdAt: new Date('2026-10-17T21:15:00Z') },
+    { tenantId: 'shop-a', userId: 'user-a', model: 'Inventory', action: 'view', createdAt: new Date('2026-10-17T21:20:00Z') },
+    { tenantId: 'shop-a', userId: 'user-a', model: 'Sales', action: 'engagement', changes: { activeMs: 40_000, interactionCount: 5 }, createdAt: new Date('2026-10-17T21:25:00Z') },
+    { tenantId: 'shop-b', userId: 'user-b', model: 'Reports', action: 'view', createdAt: new Date('2026-10-17T21:30:00Z') },
+  ]);
+
+  assert.deepEqual(summary.byHour[0].topPages, [
+    { page: 'Inventory', views: 1 }, { page: 'Reports', views: 1 }, { page: 'Sales', views: 1 },
+  ]);
+  const shopA = summary.byBusiness.find(item => item.tenantId === 'shop-a');
+  assert.equal(shopA.features[0].feature, 'Sales');
+  assert.equal(shopA.features[0].activeMs, 40_000);
+  assert(summary.byBusiness.some(item => item.tenantId === 'shop-b' && item.features[0].feature === 'Reports'));
+});

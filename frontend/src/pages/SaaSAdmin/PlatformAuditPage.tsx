@@ -21,7 +21,9 @@ interface Pagination { page: number; limit: number; total: number; pages: number
 interface AuditInsights {
   totalEvents: number
   byFeature: Array<{ feature: string; count: number; activeMs: number; interactionCount: number; maxScrollDepth: number }>
-  byHour: Array<{ hour: number; count: number; pageViews: number; activeMs: number; interactionCount: number }>
+  byHour: Array<{ hour: number; count: number; pageViews: number; activeMs: number; interactionCount: number; topPages: Array<{ page: string; views: number }> }>
+  byPage: Array<{ page: string; views: number }>
+  byBusiness: Array<{ tenantId: string; tenantName: string; activeMs: number; interactionCount: number; features: Array<{ feature: string; count: number; activeMs: number; interactionCount: number; maxScrollDepth: number }> }>
   featureRankingRule: string
   truncated?: boolean
   refreshedAt: string
@@ -106,11 +108,10 @@ export const PlatformAuditPage: React.FC = () => {
   const selectedHourData = selectedHour == null ? null : insights?.byHour?.find(item => item.hour === selectedHour) || null
   const peakHourCount = busiestHour ? hourValue(busiestHour) : 0
   const peakHours = insights?.byHour?.filter(item => hourValue(item) === peakHourCount && peakHourCount > 0) || []
+  const displayedHour = selectedHourData || busiestHour
   const hasFeatureTime = Boolean(insights?.byFeature?.some(item => item.activeMs > 0))
   const hasFeatureInteractions = Boolean(insights?.byFeature?.some(item => item.interactionCount > 0))
   const featureMetric = hasFeatureTime ? 'activeMs' : hasFeatureInteractions ? 'interactionCount' : 'count'
-  const featureValue = (item: AuditInsights['byFeature'][number]) => item[featureMetric]
-  const maxFeatureValue = Math.max(1, ...(insights?.byFeature || []).map(featureValue))
   const maxHourValue = Math.max(1, ...(insights?.byHour || []).map(hourValue))
   const hourLabel = (hour: number) => `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`
   const formatDuration = (milliseconds: number) => {
@@ -160,6 +161,7 @@ export const PlatformAuditPage: React.FC = () => {
           <div className="flex items-center gap-2 text-xs text-gray-500"><Clock3 size={15} /> Busiest hour · {hourMetricLabel} · Kampala · {insightDays} days</div>
           <div className="mt-2 text-lg font-semibold">{peakHours.length > 1 ? `${peakHours.length} tied peak hours` : peakHourCount ? hourLabel(busiestHour!.hour) : 'No tracked activity yet'}</div>
           {peakHourCount > 0 && <div className="text-xs text-gray-500">{formatHourValue(busiestHour!)}{peakHours.length > 1 ? ` in each peak hour (${peakHours.map(item => hourLabel(item.hour).slice(0, 5)).join(', ')})` : ''}</div>}
+          {busiestHour?.topPages?.length ? <div className="mt-2 space-y-1 text-xs text-gray-600">{busiestHour.topPages.slice(0, 3).map(item => <div key={item.page} className="flex justify-between gap-3"><span className="truncate">{item.page}</span><span className="shrink-0 tabular-nums">{item.views} opens</span></div>)}</div> : null}
           {peakHourCount > 0 && <div className="mt-1 text-[11px] text-teal-800">Open this hour in the chart</div>}
         </button>
       </section>
@@ -168,23 +170,33 @@ export const PlatformAuditPage: React.FC = () => {
         <div className="rounded-md border bg-white p-4">
           <h2 className="text-sm font-semibold">Most-used features</h2>
           <p className="mb-3 mt-1 text-xs text-gray-500">{insights?.featureRankingRule || 'All features, including Dashboard, rank by active time; interactions and distinct business-user-days break ties.'}</p>
-          {!insights?.byFeature?.length ? <p className="text-sm text-gray-500">No activity recorded yet.</p> : <div className="space-y-3">
-            {insights.byFeature.slice(0, 8).map(item => <div key={item.feature}>
-              <div className="mb-1 flex justify-between gap-3 text-xs"><span className="truncate">{item.feature}</span><span className="tabular-nums text-gray-500">{featureMetric === 'activeMs' ? formatDuration(item.activeMs) : featureMetric === 'interactionCount' ? `${item.interactionCount} interactions` : `${item.count} active days`}</span></div>
-              <div className="h-2 overflow-hidden rounded bg-gray-100"><div className="h-full bg-teal-600" style={{ width: `${Math.max(3, featureValue(item) / maxFeatureValue * 100)}%` }} /></div>
-              {item.activeMs > 0 && <div className="mt-1 text-[11px] text-gray-500">{item.interactionCount.toLocaleString()} interactions · deepest scroll {item.maxScrollDepth}%</div>}
-            </div>)}
+          {!insights?.byBusiness?.length ? <p className="text-sm text-gray-500">No business feature activity recorded yet.</p> : <div className="max-h-[420px] space-y-4 overflow-y-auto pr-1">
+            {insights.byBusiness.map(business => {
+              const maxBusinessFeature = Math.max(1, ...business.features.map(item => featureMetric === 'activeMs' ? item.activeMs : featureMetric === 'interactionCount' ? item.interactionCount : item.count))
+              return <div key={business.tenantId} className="border-b pb-3 last:border-0 last:pb-0">
+                <div className="mb-2 flex items-center justify-between gap-3"><button type="button" onClick={() => navigate(`/saas/businesses/${business.tenantId}`)} className="truncate text-left text-sm font-medium text-blue-700 hover:underline">{business.tenantName}</button><span className="shrink-0 text-[11px] text-gray-500">{formatDuration(business.activeMs)} active</span></div>
+                <div className="space-y-2">{business.features.map(item => {
+                  const value = featureMetric === 'activeMs' ? item.activeMs : featureMetric === 'interactionCount' ? item.interactionCount : item.count
+                  return <div key={`${business.tenantId}-${item.feature}`}>
+                    <div className="mb-1 flex justify-between gap-3 text-xs"><span className="truncate">{item.feature}</span><span className="tabular-nums text-gray-500">{featureMetric === 'activeMs' ? formatDuration(item.activeMs) : featureMetric === 'interactionCount' ? `${item.interactionCount} interactions` : `${item.count} active days`}</span></div>
+                    <div className="h-1.5 overflow-hidden rounded bg-gray-100"><div className="h-full bg-teal-600" style={{ width: `${Math.max(3, value / maxBusinessFeature * 100)}%` }} /></div>
+                  </div>
+                })}</div>
+              </div>
+            })}
           </div>}
         </div>
         <div id="platform-usage-by-hour" className="rounded-md border bg-white p-4">
           <div className="mb-1 flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Usage by hour · Kampala</h2><p className="mt-1 text-xs text-gray-500">Select a column to inspect that hour · {insightDays}-day window</p></div><div className="flex items-center gap-2"><label htmlFor="audit-hour-metric" className="text-xs text-gray-500">Measure</label><select id="audit-hour-metric" value={hourMetric} onChange={event => { setHourMetric(event.target.value as typeof hourMetric); setSelectedHour(null) }} className="h-8 rounded-md border bg-white px-2 text-xs"><option value="activeMs">Engaged time</option><option value="interactionCount">Interactions</option><option value="pageViews">Page opens</option><option value="count">Audit events</option></select>{insights?.truncated && <span className="text-xs text-amber-700">Showing a capped sample</span>}</div></div>
           <div className="flex h-32 items-end gap-1" aria-label="Interactive activity counts by hour in Kampala time">
-            {(insights?.byHour || Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, pageViews: 0, activeMs: 0, interactionCount: 0 }))).map(item => <button key={item.hour} type="button" aria-label={`${hourLabel(item.hour)}: ${formatHourValue(item)}`} aria-pressed={selectedHour === item.hour} className="flex h-full min-w-0 flex-1 items-end rounded-t-sm px-px outline-none hover:bg-teal-50 focus-visible:ring-2 focus-visible:ring-teal-700" title={`${hourLabel(item.hour)} · ${formatHourValue(item)}`} onClick={() => setSelectedHour(selectedHour === item.hour ? null : item.hour)}>
+            {(insights?.byHour || Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, pageViews: 0, activeMs: 0, interactionCount: 0, topPages: [] }))).map(item => <button key={item.hour} type="button" aria-label={`${hourLabel(item.hour)}: ${formatHourValue(item)}`} aria-pressed={selectedHour === item.hour} className="flex h-full min-w-0 flex-1 items-end rounded-t-sm px-px outline-none hover:bg-teal-50 focus-visible:ring-2 focus-visible:ring-teal-700" title={`${hourLabel(item.hour)} · ${formatHourValue(item)}`} onClick={() => setSelectedHour(selectedHour === item.hour ? null : item.hour)}>
               <span className={`w-full rounded-t-sm transition-colors ${selectedHour === item.hour ? 'bg-amber-500' : hourValue(item) === peakHourCount && peakHourCount > 0 ? 'bg-teal-800' : 'bg-teal-600/80'}`} style={{ height: `${hourValue(item) ? Math.max(5, hourValue(item) / maxHourValue * 100) : 2}%` }} />
             </button>)}
           </div>
           <div className="mt-1 flex justify-between text-[10px] text-gray-500"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span></div>
-          <div aria-live="polite" className="mt-3 border-t pt-3 text-sm">{selectedHourData ? <><span className="font-semibold">{hourLabel(selectedHourData.hour)}</span><span className="ml-2 tabular-nums text-gray-600">{formatHourValue(selectedHourData)}</span>{hourValue(selectedHourData) === peakHourCount && peakHourCount > 0 && <span className="ml-2 text-xs font-medium text-teal-800">Peak for this window</span>}</> : <span className="text-xs text-gray-500">{peakHourCount ? `Peak: ${hourLabel(busiestHour!.hour)} · ${hourMetricLabel.toLowerCase()}` : 'No tracked activity in this period for this measure.'}</span>}</div>
+          <div aria-live="polite" className="mt-3 border-t pt-3 text-sm">{displayedHour ? <><div><span className="font-semibold">{hourLabel(displayedHour.hour)}</span><span className="ml-2 tabular-nums text-gray-600">{formatHourValue(displayedHour)}</span>{hourValue(displayedHour) === peakHourCount && peakHourCount > 0 && <span className="ml-2 text-xs font-medium text-teal-800">Peak for this window</span>}</div>
+            {displayedHour.topPages.length ? <div className="mt-2"><p className="text-xs font-medium text-gray-600">Pages opened in this hour</p><div className="mt-1 flex flex-wrap gap-2">{displayedHour.topPages.map(item => <span key={item.page} className="rounded border bg-gray-50 px-2 py-1 text-xs text-gray-700">{item.page} <span className="ml-1 font-semibold tabular-nums">{item.views}</span></span>)}</div></div> : <p className="mt-1 text-xs text-gray-500">No page opens recorded in this hour.</p>}
+          </> : <span className="text-xs text-gray-500">No tracked activity in this period for this measure.</span>}</div>
         </div>
       </section>
 

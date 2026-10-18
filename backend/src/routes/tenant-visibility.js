@@ -134,6 +134,12 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
       select: { tenantId: true, userId: true, model: true, action: true, changes: true, createdAt: true },
     });
     const usageSummary = summarizePlatformAudit(logs);
+    const usageTenantIds = usageSummary.byBusiness.map(item => item.tenantId);
+    const usageTenants = usageTenantIds.length
+      ? await prisma.tenant.findMany({ where: { id: { in: usageTenantIds } }, select: { id: true, name: true } })
+      : [];
+    const usageTenantNames = new Map(usageTenants.map(tenant => [tenant.id, tenant.name]));
+    usageSummary.byBusiness = usageSummary.byBusiness.map(item => ({ ...item, tenantName: usageTenantNames.get(item.tenantId) || 'Business unavailable' }));
     res.json({
       days,
       totalEvents: logs.length,

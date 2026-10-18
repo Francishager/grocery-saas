@@ -131,7 +131,7 @@ export const authenticateToken = async (req, res, next) => {
     // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
     const currentUser = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, role: true, tenantId: true, isActive: true, workingHours: true },
+      select: { id: true, email: true, role: true, tenantId: true, isActive: true, workingHours: true },
     });
     if (!currentUser?.isActive) return res.status(401).json({ message: 'User not found or inactive', code: 'USER_INACTIVE' });
     decoded = { ...decoded, ...currentUser };
