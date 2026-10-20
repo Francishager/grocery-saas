@@ -77,6 +77,11 @@ const isTenantBillingRequest = (req) => {
     (path.endsWith('/me/billing-reminder') || path.endsWith('/me/billing-reminder/status'));
 };
 
+const isTrialBillingStatusRead = (req) => {
+  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  return String(req.method || '').toUpperCase() === 'GET' && path.endsWith('/me/billing-reminder');
+};
+
 export const enforceTenantSubscriptionAccess = async (tenant, user = {}) => {
   const existingBlock = tenantAccountAccessPayload(tenant, user);
   if (existingBlock) {
@@ -167,7 +172,11 @@ export const authenticateToken = async (req, res, next) => {
         });
       }
       const tenantBlock = await enforceTenantSubscriptionAccess(tenant, decoded);
-      if (tenantBlock && !(tenantBlock.code === 'SUBSCRIPTION_PAYMENT_REQUIRED' && isTenantBillingRequest(req))) {
+      const allowedBillingAccess = tenantBlock && (
+        (tenantBlock.code === 'SUBSCRIPTION_PAYMENT_REQUIRED' && isTenantBillingRequest(req)) ||
+        (tenantBlock.code === 'TRIAL_EXPIRED' && isTrialBillingStatusRead(req))
+      );
+      if (tenantBlock && !allowedBillingAccess) {
         return res.status(403).json(tenantBlock);
       }
       const hoursBlock = workingHoursAccessPayload(currentUser, tenant);

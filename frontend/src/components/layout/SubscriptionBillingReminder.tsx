@@ -16,6 +16,8 @@ type BillingReminder = {
   dueDate?: string | null
   trialEndsAt?: string | null
   isTrialActive?: boolean
+  isTrialEndingSoon?: boolean
+  trialReminderDays?: number | null
   isPartiallyPaid?: boolean
   isDueSoon?: boolean
   isGracePeriodActive?: boolean
@@ -50,7 +52,7 @@ export function SubscriptionBillingReminder() {
   const authenticated = Boolean(tokens?.accessToken)
 
   useEffect(() => {
-    if (!tenantId || !authenticated || !canPay) {
+    if (!tenantId || !authenticated) {
       setReminder(null)
       setOpen(false)
       return
@@ -65,7 +67,7 @@ export function SubscriptionBillingReminder() {
         const data = await response.json() as BillingReminder
         if (!active) return
         const needsAttention = Boolean(
-          data.isTrialActive || (data.paymentStatus !== 'paid' && (
+          data.isTrialEndingSoon || (canPay && data.paymentStatus !== 'paid' && (
             data.isPartiallyPaid || data.isDueSoon || data.isGracePeriodActive || data.isOverdue
           ))
         )
@@ -91,7 +93,7 @@ export function SubscriptionBillingReminder() {
   if (!reminder) return null
 
   const title = reminder.isTrialActive
-    ? 'Your business trial is active'
+    ? 'Your business trial is ending soon'
     : reminder.isPartiallyPaid
       ? 'Subscription payment is incomplete'
       : reminder.isOverdue
@@ -102,7 +104,7 @@ export function SubscriptionBillingReminder() {
   const paidAmount = formatAmount(reminder.paidToDate, reminder.currency || 'UGX')
   const totalAmount = formatAmount(reminder.subscriptionAmount, reminder.currency || 'UGX')
   const description = reminder.isTrialActive
-    ? `Your ${reminder.planName || 'business'} trial${date ? ` ends on ${date}` : ''}. Review the invoice and payment options before the trial ends.`
+    ? `Your ${reminder.planName || 'business'} trial ends in ${reminder.daysRemaining} day${reminder.daysRemaining === 1 ? '' : 's'}${date ? `, on ${date}` : ''}. Contact JibuSales to discuss upgrading; no payment is required during the trial.`
     : reminder.isPartiallyPaid
       ? `${paidAmount || 'A partial amount'} has been received${totalAmount ? ` against ${totalAmount}` : ''}. ${amountDue || 'The remaining balance'} is still due${date ? ` by ${date}` : ''}.`
       : reminder.isOverdue
@@ -119,7 +121,7 @@ export function SubscriptionBillingReminder() {
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        {amountDue && (
+        {!reminder.isTrialActive && amountDue && (
           <div className="rounded-md border bg-muted/40 px-4 py-3">
             <p className="text-xs text-muted-foreground">Amount due</p>
             <p className="mt-1 text-xl font-semibold tabular-nums">{amountDue}</p>
@@ -127,10 +129,13 @@ export function SubscriptionBillingReminder() {
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Later</Button>
-          <Button onClick={() => { setOpen(false); navigate('/tenant/settings') }}>
+          {reminder.isTrialActive ? <>
+            <Button variant="outline" asChild><a href="mailto:sales@jibusales.com?subject=JibuSales%20trial%20upgrade%20request">Email JibuSales</a></Button>
+            <Button asChild><a href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account." target="_blank" rel="noreferrer">WhatsApp JibuSales</a></Button>
+          </> : <Button onClick={() => { setOpen(false); navigate('/tenant/settings') }}>
             <CreditCard className="mr-2 h-4 w-4" />
-            {reminder.isTrialActive ? 'Review invoice' : 'Review and pay'}
-          </Button>
+            Review and pay
+          </Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

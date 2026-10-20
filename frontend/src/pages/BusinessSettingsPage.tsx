@@ -36,6 +36,10 @@ export default function BusinessSettingsPage() {
   useEffect(() => { loadSettings() }, [online, canViewBusinessSettings])
   useEffect(() => { if (online) void loadBilling() }, [online])
   useEffect(() => {
+    setBillingPhone(user?.phone || '')
+    setBillingEmail(user?.email || '')
+  }, [user?.phone, user?.email])
+  useEffect(() => {
     const reference = new URLSearchParams(window.location.search).get('billingRef')
     if (!reference || !online) return
     let cancelled = false
@@ -96,6 +100,10 @@ export default function BusinessSettingsPage() {
   }
 
   const startSubscriptionPayment = async () => {
+    if (!billingPhone.trim() || !billingEmail.trim()) {
+      toast({ variant: 'destructive', title: 'Payer details required', description: 'Enter both a phone number and email address for Pesapal checkout.' })
+      return
+    }
     setBillingBusy(true)
     try {
       const result = await subscriptionBillingApi.startPayment({
@@ -305,11 +313,19 @@ export default function BusinessSettingsPage() {
       {settings && online && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Receipt className="h-5 w-5" />Subscription invoices & receipts</CardTitle>
-            <p className="text-sm text-muted-foreground">Review your subscription charges, pay upcoming periods, and print payment documents.</p>
+            <CardTitle className="flex items-center gap-2"><Receipt className="h-5 w-5" />{billing?.isTrial ? 'Business trial' : 'Subscription invoices & receipts'}</CardTitle>
+            <p className="text-sm text-muted-foreground">{billing?.isTrial ? 'Track your trial period and explore upgrade options before it ends.' : 'Review your subscription charges, pay upcoming periods, and print payment documents.'}</p>
           </CardHeader>
           <CardContent className="space-y-6">
-            {billingLoading && !billing ? <p className="text-sm text-muted-foreground">Loading billing history...</p> : billing ? <>
+            {billingLoading && !billing ? <p className="text-sm text-muted-foreground">Loading billing history...</p> : billing?.isTrial ? <div className={`rounded-lg border p-5 ${billing.isTrialActive ? 'border-blue-200 bg-blue-50/70 text-blue-950' : 'border-amber-300 bg-amber-50 text-amber-950'}`}>
+              <p className="text-sm font-semibold">{billing.isTrialActive ? `Trial active · ${billing.daysRemaining} day${billing.daysRemaining === 1 ? '' : 's'} remaining` : 'Trial ended'}</p>
+              <p className="mt-1 text-sm">{billing.isTrialActive ? `Your ${billing.planName} trial ends ${billing.trialEndsAt ? `on ${new Date(billing.trialEndsAt).toLocaleDateString('en-GB')}` : 'soon'}.` : 'Your trial period has ended. Contact JibuSales to discuss activating a subscription.'}</p>
+              {billing.isTrialActive && <p className="mt-2 text-xs text-muted-foreground">No payment is requested during the trial.</p>}
+              {(billing.isTrialEndingSoon || billing.isTrialExpired) && <div className="mt-4 flex flex-wrap gap-2">
+                <a className="inline-flex items-center rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800" href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account." target="_blank" rel="noreferrer">WhatsApp JibuSales</a>
+                <a className="inline-flex items-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted" href="mailto:sales@jibusales.com?subject=JibuSales%20trial%20upgrade%20request">Email JibuSales</a>
+              </div>}
+            </div> : billing ? <>
               <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-3">
                 <div><p className="text-xs text-muted-foreground">Business</p><p className="font-semibold">{billing.name}</p></div>
                 <div><p className="text-xs text-muted-foreground">Plan & cycle</p><p className="font-semibold">{billing.planName} · {billing.billingCycle}</p></div>
@@ -341,9 +357,9 @@ export default function BusinessSettingsPage() {
                   </div>}
                   {canPaySubscriptionInvoice && (partialBalanceDue || billingPeriods !== '') && <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
                     <div className="space-y-1"><Label>Payment method</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingMethod} onChange={event => setBillingMethod(event.target.value as 'mobile_money' | 'card')}><option value="mobile_money">Mobile money</option><option value="card">Card</option></select></div>
-                    {billingMethod === 'mobile_money' && <div className="space-y-1"><Label>Mobile number</Label><Input value={billingPhone} onChange={event => setBillingPhone(event.target.value)} placeholder="Payment phone number" /></div>}
-                    <div className="space-y-1"><Label>Email for payment receipt</Label><Input type="email" value={billingEmail} onChange={event => setBillingEmail(event.target.value)} placeholder="name@example.com" /></div>
-                    <div className="sm:col-span-2"><Button className={`w-full sm:w-auto ${partialBalanceDue ? 'animate-pulse bg-red-600 text-white hover:bg-red-700 motion-reduce:animate-none' : ''}`} onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || (!billingPhone.trim() && !billingEmail.trim())}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />{partialBalanceDue ? 'Pay remaining balance' : 'Pay'} {billingMoney(invoiceTotal)}</>}</Button></div>
+                    <div className="space-y-1"><Label htmlFor="subscription-payer-phone">Payer phone number</Label><Input id="subscription-payer-phone" type="tel" required value={billingPhone} onChange={event => setBillingPhone(event.target.value)} placeholder="+256700000000" /></div>
+                    <div className="space-y-1"><Label htmlFor="subscription-payer-email">Payer email</Label><Input id="subscription-payer-email" type="email" required value={billingEmail} onChange={event => setBillingEmail(event.target.value)} placeholder="name@example.com" /></div>
+                    <div className="sm:col-span-2"><Button className={`w-full sm:w-auto ${partialBalanceDue ? 'animate-pulse bg-red-600 text-white hover:bg-red-700 motion-reduce:animate-none' : ''}`} onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || !billingPhone.trim() || !billingEmail.trim()}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />{partialBalanceDue ? 'Pay remaining balance' : 'Pay'} {billingMoney(invoiceTotal)}</>}</Button></div>
                   </div>}
                   {canPaySubscriptionInvoice && !partialBalanceDue && billingPeriods === '' && <p className="border-t pt-4 text-sm text-muted-foreground">Choose periods to see payment options.</p>}
                   {!canPaySubscriptionInvoice && <p className="text-sm text-muted-foreground">Your account can view and print billing records but cannot start subscription payments.</p>}

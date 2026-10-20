@@ -18,7 +18,7 @@ export default function DashboardPage() {
   const { hasFeature } = useFeatureAccess()
   const [billingReminder, setBillingReminder] = useState<any>(null)
   const [showBillingPrompt, setShowBillingPrompt] = useState(false)
-  const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: '', email: '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
+  const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: user?.phone || '', email: user?.email || '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
   const { toast } = useToast()
@@ -27,6 +27,14 @@ export default function DashboardPage() {
   const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
   const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
     loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey)
+
+  useEffect(() => {
+    setBillingForm(current => ({
+      ...current,
+      phoneNumber: user?.phone || current.phoneNumber,
+      email: user?.email || current.email,
+    }))
+  }, [user?.phone, user?.email])
 
   useEffect(() => {
     if (hasPermission('canViewDashboard') && hasFeature('dashboard')) {
@@ -100,8 +108,8 @@ export default function DashboardPage() {
   }
 
   const confirmBillingPrompt = async () => {
-    if (billingForm.gateway === 'pesapal' && !billingForm.phoneNumber.trim() && !billingForm.email.trim()) {
-      toast({ variant: 'destructive', title: 'Payer contact required', description: 'Enter a phone number or email for Pesapal checkout.' })
+    if (billingForm.gateway === 'pesapal' && (!billingForm.phoneNumber.trim() || !billingForm.email.trim())) {
+      toast({ variant: 'destructive', title: 'Payer details required', description: 'Enter both a phone number and email address for Pesapal checkout.' })
       return
     }
     if (billingForm.gateway === 'relworx' && !billingForm.phoneNumber.trim()) {
@@ -256,7 +264,7 @@ export default function DashboardPage() {
       </div>
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
 
-      {billingReminder && (billingReminder.isTrialActive || (billingReminder.paymentStatus !== 'paid' && (billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue))) && (
+      {billingReminder && !billingReminder.isTrial && billingReminder.paymentStatus !== 'paid' && (billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
         <div className={`rounded-xl border p-4 ${billingReminder.isOverdue ? 'border-red-300 bg-red-50 text-red-900' : billingReminder.isTrialActive ? 'border-blue-200 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -273,7 +281,10 @@ export default function DashboardPage() {
                   : `Your subscription renews in ${billingReminder.daysRemaining} day${billingReminder.daysRemaining === 1 ? '' : 's'}. Please pay ${billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'your due amount'} before the due date.`}
               </p>
             </div>
-            <button onClick={() => setShowBillingPrompt(true)} className={`rounded-md px-3 py-2 text-sm font-medium text-white ${billingReminder.isOverdue ? 'bg-red-600 hover:bg-red-700' : billingReminder.isTrialActive ? 'bg-blue-700 hover:bg-blue-800' : 'bg-amber-600 hover:bg-amber-700'}`}>{billingReminder.isTrialActive ? 'View plans' : 'Pay now'}</button>
+            {billingReminder.isTrial ? <div className="flex flex-wrap gap-2">
+              <a href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account." target="_blank" rel="noreferrer" className="whitespace-nowrap rounded-md bg-green-700 px-3 py-2 text-sm font-medium text-white hover:bg-green-800">WhatsApp JibuSales</a>
+              <a href="mailto:jibusales00@gmail.com?subject=JibuSales%20trial%20upgrade%20request" className="whitespace-nowrap rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">Email</a>
+            </div> : <button onClick={() => setShowBillingPrompt(true)} className={`rounded-md px-3 py-2 text-sm font-medium text-white ${billingReminder.isOverdue ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}>Pay now</button>}
           </div>
         </div>
       )}
@@ -563,7 +574,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {showBillingPrompt && billingReminder && (
+      {showBillingPrompt && billingReminder && !billingReminder.isTrial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
@@ -612,12 +623,32 @@ export default function DashboardPage() {
                         <option value="relworx">Relworx Mobile Money</option>
                       </select>
                     </div>
-                    <p className="text-sm text-gray-500">Click below to open the PesaPal payment page to complete your subscription payment.</p>
+                    <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                      <p className="font-medium">Amount due</p>
+                      <p>{billingReminder.amountDue ? formatCurrency(billingReminder.amountDue) : 'Your subscription amount'}</p>
+                      <p className="mt-1 text-xs">The amount is calculated from your subscription invoice and sent securely to Pesapal.</p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Payment method</label>
+                      <select value={billingForm.paymentMethod} onChange={event => setBillingForm({ ...billingForm, paymentMethod: event.target.value })} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="mobile_money">Mobile Money</option>
+                        <option value="card">Card</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Payer phone number</label>
+                      <input type="tel" required value={billingForm.phoneNumber} onChange={event => setBillingForm({ ...billingForm, phoneNumber: event.target.value })} placeholder="+256700000000" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Payer email</label>
+                      <input type="email" required value={billingForm.email} onChange={event => setBillingForm({ ...billingForm, email: event.target.value })} placeholder="name@example.com" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+                    </div>
                     <button
-                      onClick={() => window.open('/tenant/payment', '_blank')}
-                      className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                      onClick={confirmBillingPrompt}
+                      disabled={!billingForm.phoneNumber.trim() || !billingForm.email.trim()}
+                      className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Make Payment via PesaPal
+                      Continue to Pesapal checkout
                     </button>
                   </div>
                 ) : (

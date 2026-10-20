@@ -148,6 +148,8 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
     const reminder = calculateBillingReminder({
       status: tenant.status,
       subscriptionEnd: tenant.subscriptionEnd,
+      subscriptionStart: tenant.subscriptionStart,
+      createdAt: tenant.createdAt,
       trialEndsAt: tenant.trialEndsAt,
       gracePeriodDays: tenant.gracePeriodDays,
       reminderDaysBeforeDue: tenant.reminderDaysBeforeDue,
@@ -259,6 +261,9 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
     if (!tenant) {
       return res.status(404).json({ error: "Tenant not found" });
     }
+    if (String(tenant.status).toLowerCase() === 'trial') {
+      return res.status(409).json({ error: "Subscription checkout is unavailable during a trial. Contact JibuSales to upgrade your plan.", code: "TRIAL_UPGRADE_REQUIRED" });
+    }
 
     const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
     const paymentProgress = await getSubscriptionPaymentProgress(prisma, tenant.id);
@@ -283,7 +288,9 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
       if (!["mobile_money", "card"].includes(method)) return res.status(400).json({ error: "Pesapal supports mobile money and card checkout here" });
       const payerPhone = String(phoneNumber || req.user?.phone || "").trim();
       const payerEmail = String(email || req.user?.email || "").trim();
-      if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter a phone number or email for Pesapal checkout" });
+      if (!payerPhone || !payerEmail) return res.status(400).json({ error: "A phone number and email are both required for Pesapal checkout" });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payerEmail)) return res.status(400).json({ error: "Enter a valid payer email address" });
+      if (payerPhone.replace(/\D/g, "").length < 7 || payerPhone.replace(/\D/g, "").length > 15) return res.status(400).json({ error: "Enter a valid payer phone number with country code" });
       const names = String(tenant.name || "Business").trim().split(/\s+/);
       const isBalanceOnlyPayment = Boolean(paymentProgress?.hasOutstandingBalance);
       const billedTotal = isBalanceOnlyPayment ? paymentProgress.periodTotal : amountDue;

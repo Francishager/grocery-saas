@@ -67,6 +67,7 @@ export function calculateBillingReminder(tenant = {}) {
   const now = tenant.now ? new Date(tenant.now) : new Date();
   const subscriptionEnd = tenant.subscriptionEnd ? new Date(tenant.subscriptionEnd) : null;
   const trialEndsAt = tenant.trialEndsAt ? new Date(tenant.trialEndsAt) : null;
+  const trialStartedAt = tenant.trialStartedAt || tenant.subscriptionStart || tenant.createdAt ? new Date(tenant.trialStartedAt || tenant.subscriptionStart || tenant.createdAt) : null;
   const isTrial = String(tenant.status || '').toLowerCase() === 'trial';
   const dueDate = isTrial && trialEndsAt && !Number.isNaN(trialEndsAt.getTime())
     ? trialEndsAt
@@ -97,6 +98,14 @@ export function calculateBillingReminder(tenant = {}) {
   const isDueSoon = daysRemaining <= reminderDaysBeforeDue && daysRemaining >= 0;
   const isGracePeriodActive = !isTrial && now > dueDate && now < gracePeriodEndsAt;
   const isOverdue = isTrial ? now >= dueDate : now >= gracePeriodEndsAt;
+  const trialDaysTotal = isTrial && trialStartedAt && !Number.isNaN(trialStartedAt.getTime())
+    ? Math.max(1, Math.ceil((dueDate.getTime() - trialStartedAt.getTime()) / (24 * 60 * 60 * 1000)))
+    : null;
+  const trialReminderDays = isTrial
+    ? Math.min(7, Math.max(1, Number.isFinite(trialDaysTotal) ? Math.ceil(trialDaysTotal / 3) : 7), Math.max(1, reminderDaysBeforeDue))
+    : null;
+  const isTrialActive = isTrial && !isOverdue;
+  const isTrialEndingSoon = isTrialActive && daysRemaining <= trialReminderDays;
 
   return {
     isDueSoon,
@@ -104,7 +113,10 @@ export function calculateBillingReminder(tenant = {}) {
     isOverdue,
     isTrial,
     isTrialExpired: isTrial && isOverdue,
-    isTrialActive: isTrial && !isOverdue,
+    isTrialActive,
+    isTrialEndingSoon,
+    trialDaysTotal,
+    trialReminderDays,
     daysRemaining,
     gracePeriodEndsAt: gracePeriodEndsAt.toISOString(),
     reminderDaysBeforeDue,

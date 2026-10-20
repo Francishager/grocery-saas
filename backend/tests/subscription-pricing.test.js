@@ -50,6 +50,30 @@ test('trial countdown ignores paid subscription end and expires without a grace 
   assert.equal(expired.isGracePeriodActive, false);
 });
 
+test('trial upgrade reminder window scales with configured trial length and stays quiet early', () => {
+  const now = new Date('2026-10-10T12:00:00.000Z');
+  const endingSoon = calculateBillingReminder({
+    status: 'trial',
+    subscriptionStart: '2026-10-01T12:00:00.000Z',
+    trialEndsAt: '2026-10-15T12:00:00.000Z',
+    reminderDaysBeforeDue: 10,
+    now,
+  });
+  assert.equal(endingSoon.trialDaysTotal, 14);
+  assert.equal(endingSoon.trialReminderDays, 5);
+  assert.equal(endingSoon.isTrialEndingSoon, true);
+
+  const notYet = calculateBillingReminder({
+    status: 'trial',
+    subscriptionStart: '2026-10-01T12:00:00.000Z',
+    trialEndsAt: '2026-10-15T12:00:00.000Z',
+    reminderDaysBeforeDue: 10,
+    now: new Date('2026-10-09T12:00:00.000Z'),
+  });
+  assert.equal(notYet.daysRemaining, 6);
+  assert.equal(notYet.isTrialEndingSoon, false);
+});
+
 test('unpaid active subscriptions suspend only after the configured grace period', () => {
   const tenant = {
     status: 'active',
