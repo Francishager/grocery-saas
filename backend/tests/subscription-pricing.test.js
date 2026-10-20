@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveSubscriptionCharge, calculateBillingReminder, calculateSubscriptionPaymentProgress, shouldSuspendForSubscriptionPayment } from '../src/utils/subscriptionPricing.js';
+import { resolveSubscriptionCharge, calculateBillingReminder, calculateSubscriptionPaymentProgress, shouldSuspendForSubscriptionPayment, calculateAnnualPartialPaymentReminderWindow } from '../src/utils/subscriptionPricing.js';
 import { addSubscriptionPeriods } from '../src/utils/subscriptionPayments.js';
 
 test('calculateBillingReminder marks billing as due soon and tracks the grace period window', () => {
@@ -91,6 +91,14 @@ test('subscription payment progress treats partial receipts as outstanding until
     amountDue: 100000, paidAmount: 40000, remainingAmount: 60000, isPaid: false, isPartiallyPaid: true,
   });
   assert.equal(calculateSubscriptionPaymentProgress(100000, 100000).isPaid, true);
+});
+
+test('annual partial payment reminder window spans the last ten and first ten Kampala calendar days', () => {
+  assert.equal(calculateAnnualPartialPaymentReminderWindow(new Date('2026-10-22T12:00:00.000Z')).isInWindow, true);
+  assert.equal(calculateAnnualPartialPaymentReminderWindow(new Date('2026-11-10T12:00:00.000Z')).isInWindow, true);
+  assert.equal(calculateAnnualPartialPaymentReminderWindow(new Date('2026-11-11T12:00:00.000Z')).isInWindow, false);
+  assert.equal(calculateAnnualPartialPaymentReminderWindow(new Date('2026-10-21T12:00:00.000Z')).isInWindow, false);
+  assert.equal(calculateAnnualPartialPaymentReminderWindow(new Date('2026-11-10T12:00:00.000Z')).cycleKey, '2026-10');
 });
 
 test('resolveSubscriptionCharge prefers tenant override values over plan defaults', () => {

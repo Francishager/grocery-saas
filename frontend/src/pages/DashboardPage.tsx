@@ -59,7 +59,7 @@ export default function DashboardPage() {
       if (!res.ok) return
       const data = await res.json()
       setBillingReminder(data)
-      setShowBillingPrompt(Boolean(!data?.isTrial && data?.paymentStatus !== 'paid' && (data?.isDueSoon || data?.isGracePeriodActive || data?.isOverdue)))
+      setShowBillingPrompt(Boolean(!data?.isTrial && !data?.isAnnualPartialPayment && data?.paymentStatus !== 'paid' && (data?.isDueSoon || data?.isGracePeriodActive || data?.isOverdue)))
     } catch {
       setBillingReminder(null)
     }
@@ -274,7 +274,7 @@ export default function DashboardPage() {
       </div>
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
 
-      {billingReminder && !billingReminder.isTrial && billingReminder.paymentStatus !== 'paid' && (billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
+      {billingReminder && !billingReminder.isTrial && billingReminder.paymentStatus !== 'paid' && (!billingReminder.isAnnualPartialPayment || billingReminder.isAnnualPartialReminderWindow) && (billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
         <div className={`rounded-xl border p-4 ${billingReminder.isOverdue ? 'border-red-300 bg-red-50 text-red-900' : billingReminder.isTrialActive ? 'border-blue-200 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-center justify-between gap-4">
             <div>

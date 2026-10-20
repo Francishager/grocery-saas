@@ -143,3 +143,19 @@ export function calculateSubscriptionPaymentProgress(amountDue, paidAmount) {
     isPartiallyPaid: paid > 0 && remaining > 0.01,
   };
 }
+
+export function calculateAnnualPartialPaymentReminderWindow(now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(date.getTime())) return { isInWindow: false, cycleKey: null };
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const year = Number(parts.find(part => part.type === 'year')?.value);
+  const month = Number(parts.find(part => part.type === 'month')?.value);
+  const day = Number(parts.find(part => part.type === 'day')?.value);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const isInWindow = day <= 10 || day >= lastDay - 9;
+  const cycleDate = day <= 10 ? new Date(Date.UTC(year, month - 2, 1)) : new Date(Date.UTC(year, month - 1, 1));
+  const cycleKey = `${cycleDate.getUTCFullYear()}-${String(cycleDate.getUTCMonth() + 1).padStart(2, '0')}`;
+  return { isInWindow, cycleKey };
+}

@@ -20,6 +20,9 @@ type BillingReminder = {
   isTrialEndingSoon?: boolean
   trialReminderDays?: number | null
   isPartiallyPaid?: boolean
+  isAnnualPartialPayment?: boolean
+  isAnnualPartialReminderWindow?: boolean
+  partialPaymentReminderCycleKey?: string | null
   isDueSoon?: boolean
   isGracePeriodActive?: boolean
   isOverdue?: boolean
@@ -68,13 +71,25 @@ export function SubscriptionBillingReminder() {
         const data = await response.json() as BillingReminder
         if (!active) return
         const needsAttention = Boolean(
-          data.isTrialEndingSoon || (canPay && data.paymentStatus !== 'paid' && (
+          data.isTrialEndingSoon || (canPay && data.paymentStatus !== 'paid' &&
+          (!data.isAnnualPartialPayment || data.isAnnualPartialReminderWindow) && (
             data.isPartiallyPaid || data.isDueSoon || data.isGracePeriodActive || data.isOverdue
           ))
         )
         setReminder(needsAttention ? data : null)
         const shouldAutoOpen = previousNeedsAttention === null || (!previousNeedsAttention && needsAttention)
-        setOpen(current => shouldAutoOpen ? needsAttention : current && needsAttention)
+        if (needsAttention && data.isAnnualPartialPayment && data.partialPaymentReminderCycleKey) {
+          const seenKey = `annual-partial-billing-reminder:${tenantId}:${user?.id}:${data.partialPaymentReminderCycleKey}`
+          let alreadyShown = false
+          try { alreadyShown = localStorage.getItem(seenKey) === 'shown' } catch { /* session can continue without persistent reminder state */ }
+          const shouldOpen = shouldAutoOpen && !alreadyShown
+          setOpen(current => shouldOpen ? true : current && needsAttention)
+          if (shouldOpen) {
+            try { localStorage.setItem(seenKey, 'shown') } catch { /* modal remains dismissible for this session */ }
+          }
+        } else {
+          setOpen(current => shouldAutoOpen ? needsAttention : current && needsAttention)
+        }
         previousNeedsAttention = needsAttention
       } catch { /* retain the last confirmed billing state while offline */ }
     }

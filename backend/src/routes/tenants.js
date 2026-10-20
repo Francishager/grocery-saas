@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
-import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/subscriptionPricing.js";
+import { resolveSubscriptionCharge, calculateBillingReminder, calculateAnnualPartialPaymentReminderWindow } from "../utils/subscriptionPricing.js";
 import { buildBillingPaymentRequest, getBillingGatewaySummary, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 import { getPesapalCallbackUrl, getPesapalTransactionStatus, normalizePesapalStatus, submitPesapalOrder } from "../services/pesapal.js";
@@ -157,6 +157,8 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
 
     const paymentProgress = await getSubscriptionPaymentProgress(prisma, tenant.id);
     const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+    const partialReminderWindow = calculateAnnualPartialPaymentReminderWindow();
+    const isAnnualPartialPayment = charge.billingCycle === 'yearly' && Boolean(paymentProgress?.progress.isPartiallyPaid);
     const amountDue = paymentProgress?.progress.remainingAmount ?? charge.total;
     const payments = await prisma.subscriptionPayment.findMany({
       where: { tenantId: tenant.id },
@@ -171,6 +173,9 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
       currency: resolveSubscriptionCharge(tenant.plan || {}, tenant).currency,
       planName: tenant.plan?.name || 'Subscription',
       billingCycle: charge.billingCycle,
+      isAnnualPartialPayment,
+      isAnnualPartialReminderWindow: isAnnualPartialPayment && partialReminderWindow.isInWindow,
+      partialPaymentReminderCycleKey: isAnnualPartialPayment ? partialReminderWindow.cycleKey : null,
       chargeMode: charge.chargeMode,
       planPrice: charge.planCharge,
       serviceFee: charge.serviceFee,
