@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/card";
 import { CreditCard, Lock } from "lucide-react";
 import { useJWTAuth } from "@/contexts/JWTAuthContext";
+import { SupportContactLinks } from "@/components/SupportContactLinks";
 
 export default function PaymentPage() {
   const { user } = useJWTAuth();
@@ -38,22 +39,7 @@ export default function PaymentPage() {
                 No payment is requested during a trial. Contact JibuSales
                 Support Team to discuss upgrading when you are ready.
               </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                <a
-                  href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account."
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800"
-                >
-                  WhatsApp JibuSales Support Team
-                </a>
-                <a
-                  href="mailto:jibusales00@gmail.com?subject=JibuSales%20trial%20upgrade%20request"
-                  className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
-                >
-                  Email JibuSales Support Team
-                </a>
-              </div>
+              <SupportContactLinks className="justify-center" message="Hello JibuSales Support Team, I would like to discuss upgrading my business account." />
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center gap-4 py-12 text-center">

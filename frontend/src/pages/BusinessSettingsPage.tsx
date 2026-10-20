@@ -12,6 +12,7 @@ import { getLocalSettings } from '@/db/hybrid'
 import { db } from '@/db/index'
 import WorkingHoursEditor, { defaultWorkingHours } from '@/components/WorkingHoursEditor'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 export default function BusinessSettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -22,6 +23,7 @@ export default function BusinessSettingsPage() {
   const [billing, setBilling] = useState<any>(null)
   const [billingLoading, setBillingLoading] = useState(false)
   const [billingBusy, setBillingBusy] = useState(false)
+  const [billingError, setBillingError] = useState('')
   const [billingPeriods, setBillingPeriods] = useState<number | ''>('')
   const [billingMethod, setBillingMethod] = useState<'mobile_money' | 'card'>('mobile_money')
   const [billingPhone, setBillingPhone] = useState('')
@@ -100,8 +102,9 @@ export default function BusinessSettingsPage() {
   }
 
   const startSubscriptionPayment = async () => {
+    setBillingError('')
     if (!billingPhone.trim() || !billingEmail.trim()) {
-      toast({ variant: 'destructive', title: 'Payer details required', description: 'Enter both a phone number and email address for Pesapal checkout.' })
+      setBillingError('Enter both a phone number and email address to continue to Pesapal.')
       return
     }
     setBillingBusy(true)
@@ -112,9 +115,13 @@ export default function BusinessSettingsPage() {
         phoneNumber: billingPhone,
         email: billingEmail,
       })
-      if (result.payment?.checkoutUrl) window.location.assign(result.payment.checkoutUrl)
-      else toast({ title: 'Payment request created', description: 'Check your payment device to approve the request.' })
+      const checkoutUrl = result.payment?.checkoutUrl || result.checkoutUrl
+      if (!checkoutUrl || !/^https:\/\//i.test(checkoutUrl)) {
+        throw new Error('Pesapal did not return a secure checkout link. No payment was started; please retry or contact the JibuSales Support Team.')
+      }
+      window.location.replace(checkoutUrl)
     } catch (error: any) {
+      setBillingError(error?.message || 'Could not start payment. Contact the JibuSales Support Team for help.')
       toast({ variant: 'destructive', title: 'Could not start payment', description: error?.message })
     } finally { setBillingBusy(false) }
   }
@@ -319,12 +326,9 @@ export default function BusinessSettingsPage() {
           <CardContent className="space-y-6">
             {billingLoading && !billing ? <p className="text-sm text-muted-foreground">Loading billing history...</p> : billing?.isTrial ? <div className={`rounded-lg border p-5 ${billing.isTrialActive ? 'border-blue-200 bg-blue-50/70 text-blue-950' : 'border-amber-300 bg-amber-50 text-amber-950'}`}>
               <p className="text-sm font-semibold">{billing.isTrialActive ? `Trial active · ${billing.daysRemaining} day${billing.daysRemaining === 1 ? '' : 's'} remaining` : 'Trial ended'}</p>
-              <p className="mt-1 text-sm">{billing.isTrialActive ? `Your ${billing.planName} trial ends ${billing.trialEndsAt ? `on ${new Date(billing.trialEndsAt).toLocaleDateString('en-GB')}` : 'soon'}.` : 'Your trial period has ended. Contact JibuSales to discuss activating a subscription.'}</p>
+              <p className="mt-1 text-sm">{billing.isTrialActive ? `Your ${billing.planName} trial ends ${billing.trialEndsAt ? `on ${new Date(billing.trialEndsAt).toLocaleDateString('en-GB')}` : 'soon'}.` : 'Your trial period has ended. Contact the JibuSales Support Team to discuss activating a subscription.'}</p>
               {billing.isTrialActive && <p className="mt-2 text-xs text-muted-foreground">No payment is requested during the trial.</p>}
-              {(billing.isTrialEndingSoon || billing.isTrialExpired) && <div className="mt-4 flex flex-wrap gap-2">
-                <a className="inline-flex items-center rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800" href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account." target="_blank" rel="noreferrer">WhatsApp JibuSales</a>
-                <a className="inline-flex items-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted" href="mailto:sales@jibusales.com?subject=JibuSales%20trial%20upgrade%20request">Email JibuSales</a>
-              </div>}
+              {(billing.isTrialEndingSoon || billing.isTrialExpired) && <SupportContactLinks className="mt-4" message="Hello JibuSales Support Team, I would like to discuss activating or upgrading my business account." />}
             </div> : billing ? <>
               <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-3">
                 <div><p className="text-xs text-muted-foreground">Business</p><p className="font-semibold">{billing.name}</p></div>
@@ -359,7 +363,13 @@ export default function BusinessSettingsPage() {
                     <div className="space-y-1"><Label>Payment method</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={billingMethod} onChange={event => setBillingMethod(event.target.value as 'mobile_money' | 'card')}><option value="mobile_money">Mobile money</option><option value="card">Card</option></select></div>
                     <div className="space-y-1"><Label htmlFor="subscription-payer-phone">Payer phone number</Label><Input id="subscription-payer-phone" type="tel" required value={billingPhone} onChange={event => setBillingPhone(event.target.value)} placeholder="+256700000000" /></div>
                     <div className="space-y-1"><Label htmlFor="subscription-payer-email">Payer email</Label><Input id="subscription-payer-email" type="email" required value={billingEmail} onChange={event => setBillingEmail(event.target.value)} placeholder="name@example.com" /></div>
-                    <div className="sm:col-span-2"><Button className={`w-full sm:w-auto ${partialBalanceDue ? 'animate-pulse bg-red-600 text-white hover:bg-red-700 motion-reduce:animate-none' : ''}`} onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || !billingPhone.trim() || !billingEmail.trim()}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />{partialBalanceDue ? 'Pay remaining balance' : 'Pay'} {billingMoney(invoiceTotal)}</>}</Button></div>
+                    <div className="sm:col-span-2">
+                      <Button className={`w-full sm:w-auto ${partialBalanceDue ? 'animate-pulse bg-red-600 text-white hover:bg-red-700 motion-reduce:animate-none' : ''}`} onClick={startSubscriptionPayment} disabled={billingBusy || billingLoading || !billingPhone.trim() || !billingEmail.trim()}>{billingBusy ? 'Opening checkout...' : <><CreditCard className="mr-2 h-4 w-4" />{partialBalanceDue ? 'Pay remaining balance' : 'Pay'} {billingMoney(invoiceTotal)}</>}</Button>
+                      {billingError && <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">
+                        <p>{billingError} The JibuSales Support Team can help you complete payment.</p>
+                        <SupportContactLinks compact className="mt-2" message="Hello JibuSales Support Team, I need help with my subscription payment." />
+                      </div>}
+                    </div>
                   </div>}
                   {canPaySubscriptionInvoice && !partialBalanceDue && billingPeriods === '' && <p className="border-t pt-4 text-sm text-muted-foreground">Choose periods to see payment options.</p>}
                   {!canPaySubscriptionInvoice && <p className="text-sm text-muted-foreground">Your account can view and print billing records but cannot start subscription payments.</p>}

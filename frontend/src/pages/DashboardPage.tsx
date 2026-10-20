@@ -10,6 +10,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 import { useOnlineStatus } from '@/db/hooks'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
@@ -132,8 +133,17 @@ export default function DashboardPage() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data?.error || 'Unable to confirm payment prompt')
 
-      if (data?.payment?.checkoutUrl) {
-        window.location.assign(data.payment.checkoutUrl)
+      const checkoutUrl = data?.payment?.checkoutUrl || data?.checkoutUrl
+      if (billingForm.gateway === 'pesapal') {
+        if (!checkoutUrl || !/^https:\/\//i.test(checkoutUrl)) {
+          throw new Error('Pesapal did not return a secure checkout link. No payment status polling was started; please retry or contact the JibuSales Support Team.')
+        }
+        window.location.replace(checkoutUrl)
+        return
+      }
+
+      if (checkoutUrl) {
+        window.location.replace(checkoutUrl)
         return
       }
 
@@ -282,8 +292,7 @@ export default function DashboardPage() {
               </p>
             </div>
             {billingReminder.isTrial ? <div className="flex flex-wrap gap-2">
-              <a href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account." target="_blank" rel="noreferrer" className="whitespace-nowrap rounded-md bg-green-700 px-3 py-2 text-sm font-medium text-white hover:bg-green-800">WhatsApp JibuSales</a>
-              <a href="mailto:jibusales00@gmail.com?subject=JibuSales%20trial%20upgrade%20request" className="whitespace-nowrap rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">Email</a>
+              <SupportContactLinks compact message="Hello JibuSales Support Team, I would like to discuss upgrading my business account." />
             </div> : <button onClick={() => setShowBillingPrompt(true)} className={`rounded-md px-3 py-2 text-sm font-medium text-white ${billingReminder.isOverdue ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}>Pay now</button>}
           </div>
         </div>
@@ -586,8 +595,8 @@ export default function DashboardPage() {
               <div className="space-y-4 text-center">
                 <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
                 <div>
-                  <p className="text-lg font-semibold text-slate-900">Waiting for payment approval</p>
-                  <p className="text-sm text-slate-600">Waiting for the payment provider to confirm your subscription payment.</p>
+                  <p className="text-lg font-semibold text-slate-900">{billingForm.gateway === 'pesapal' ? 'Opening Pesapal checkout' : 'Waiting for payment approval'}</p>
+                  <p className="text-sm text-slate-600">{billingForm.gateway === 'pesapal' ? 'Connecting you to Pesapal to complete your payment.' : 'Waiting for the payment provider to confirm your subscription payment.'}</p>
                 </div>
               </div>
             ) : billingPaymentState === 'success' ? (
@@ -604,8 +613,9 @@ export default function DashboardPage() {
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-xl text-red-600">!</div>
                 <div>
                   <p className="text-lg font-semibold text-slate-900">Payment failed</p>
-                  <p className="text-sm text-slate-600">The request was not approved or timed out. Please try again.</p>
+                  <p className="text-sm text-slate-600">The checkout could not be opened or payment was not confirmed. Please retry or contact the JibuSales Support Team.</p>
                 </div>
+                <SupportContactLinks compact message="Hello JibuSales Support Team, I need help with my subscription payment." className="justify-center" />
                 <button onClick={() => setBillingPaymentState('idle')} className="w-full rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Try again</button>
               </div>
             ) : (

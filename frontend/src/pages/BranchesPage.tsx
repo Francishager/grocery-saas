@@ -13,6 +13,7 @@ import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 interface Branch {
   id: string
@@ -170,7 +171,7 @@ export default function BranchesPage() {
       toast({
         variant: 'destructive',
         title: 'Branch limit reached',
-        description: `You have reached the maximum of ${branchLimit} branches. Contact JibuSales Admin to increase the limit.`,
+        description: `You have reached the maximum of ${branchLimit} branches. Contact the JibuSales Support Team to request an increase.`,
       })
       return
     }
@@ -317,7 +318,10 @@ export default function BranchesPage() {
             />
           </div>
           {branchUsagePct >= 100 && (
-            <p className="mt-2 text-xs text-red-700">Branch limit reached. Contact JibuSales Admin to increase the limit.</p>
+            <>
+              <p className="mt-2 text-xs text-red-700">Branch limit reached. Contact the JibuSales Support Team to request an increase.</p>
+              <SupportContactLinks compact className="mt-2" message="Hello JibuSales Support Team, our business has reached its branch limit. Please advise us about increasing it." />
+            </>
           )}
           {branchUsagePct >= 80 && branchUsagePct < 100 && (
             <p className="mt-2 text-xs text-yellow-700">Approaching branch limit. You can create {branchLimit - stats.total} more branch(es).</p>

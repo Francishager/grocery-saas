@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { apiFetch } from '@/lib/api'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 type BillingReminder = {
   currency?: string
@@ -104,7 +105,7 @@ export function SubscriptionBillingReminder() {
   const paidAmount = formatAmount(reminder.paidToDate, reminder.currency || 'UGX')
   const totalAmount = formatAmount(reminder.subscriptionAmount, reminder.currency || 'UGX')
   const description = reminder.isTrialActive
-    ? `Your ${reminder.planName || 'business'} trial ends in ${reminder.daysRemaining} day${reminder.daysRemaining === 1 ? '' : 's'}${date ? `, on ${date}` : ''}. Contact JibuSales to discuss upgrading; no payment is required during the trial.`
+    ? `Your ${reminder.planName || 'business'} trial ends in ${reminder.daysRemaining} day${reminder.daysRemaining === 1 ? '' : 's'}${date ? `, on ${date}` : ''}. Contact the JibuSales Support Team to discuss upgrading; no payment is required during the trial.`
     : reminder.isPartiallyPaid
       ? `${paidAmount || 'A partial amount'} has been received${totalAmount ? ` against ${totalAmount}` : ''}. ${amountDue || 'The remaining balance'} is still due${date ? ` by ${date}` : ''}.`
       : reminder.isOverdue
@@ -129,10 +130,7 @@ export function SubscriptionBillingReminder() {
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Later</Button>
-          {reminder.isTrialActive ? <>
-            <Button variant="outline" asChild><a href="mailto:sales@jibusales.com?subject=JibuSales%20trial%20upgrade%20request">Email JibuSales</a></Button>
-            <Button asChild><a href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20upgrading%20my%20business%20account." target="_blank" rel="noreferrer">WhatsApp JibuSales</a></Button>
-          </> : <Button onClick={() => { setOpen(false); navigate('/tenant/settings') }}>
+          {reminder.isTrialActive ? <SupportContactLinks compact message="Hello JibuSales Support Team, I would like to discuss upgrading my business account." /> : <Button onClick={() => { setOpen(false); navigate('/tenant/settings') }}>
             <CreditCard className="mr-2 h-4 w-4" />
             Review and pay
           </Button>}

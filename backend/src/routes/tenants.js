@@ -333,6 +333,7 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
         message: "Pesapal checkout is ready",
         status: "PENDING",
         amountDue,
+        checkoutUrl: payment.checkoutUrl,
         payment: { id: payment.id, reference: payment.merchantReference, status: payment.status, checkoutUrl: payment.checkoutUrl },
         gateway: { provider: "pesapal", mode: String(process.env.PESAPAL_ENV || "sandbox").toLowerCase() },
       });

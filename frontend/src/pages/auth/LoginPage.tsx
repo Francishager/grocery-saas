@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
 import { loginGreeting } from '@/lib/loginGreeting'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 const carouselImages = [
   { src: '/img/Tracking-Time-in-Sales.png', caption: 'Track sales and profit in real-time' },
@@ -179,6 +180,10 @@ export default function LoginPage() {
               <Link to="/forgot-password" className="text-sm text-blue-600 hover:underline">
                 Forgot password?
               </Link>
+            </div>
+            <div className="border-t pt-4">
+              <p className="mb-2 text-center text-xs text-muted-foreground">Need help with your business account?</p>
+              <SupportContactLinks compact className="justify-center" message="Hello JibuSales Support Team, I need help accessing my business account." />
             </div>
           </form>
         </div>

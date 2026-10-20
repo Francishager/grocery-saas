@@ -10,6 +10,7 @@ import AdvisorMarkdown from '@/components/AdvisorMarkdown'
 import AdvisorReplyActions from '@/components/AdvisorReplyActions'
 import AdvisorCreativeStudio from '@/components/AdvisorCreativeStudio'
 import { copyText } from '@/lib/advisorVisuals'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 type Collection = { id: string; name: string; kind: 'project' | 'folder'; parentId: string | null; instructions: string }
 type Chat = { id: string; title: string; collectionId: string | null; updatedAt: string; locked?: boolean }
@@ -222,7 +223,7 @@ export default function BusinessAdvisorPage() {
         <Button variant="outline" size="sm" disabled={pending} onClick={newChat}><Plus className="mr-1 h-4 w-4" />New chat</Button></div>
     </header>
     {!online && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor needs an internet connection.</p>}
-    {configured === false && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor is not configured yet. Contact JibuSales Admin.</p>}
+    {configured === false && <div role="alert" className="space-y-2 py-2 text-sm text-amber-700"><p>AI Advisor is not configured yet. Contact the JibuSales Support Team for help.</p><SupportContactLinks compact message="Hello JibuSales Support Team, AI Advisor is not configured for my business. Please help." /></div>}
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <aside aria-label="Saved conversations" className={`${sidebar ? 'flex' : 'hidden'} ${sidebarMinimized ? 'md:hidden' : 'md:flex'} max-h-[30dvh] shrink-0 flex-col gap-3 overflow-y-auto border-b py-3 md:max-h-none md:w-64 md:border-b-0 md:border-r md:pr-3 xl:w-72`}>
         <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Projects & folders</h2><div className="flex gap-1">

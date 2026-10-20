@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 interface UsageData {
   count: number
@@ -61,7 +62,8 @@ export function UsageLimitBanner({ resource, label, currentCount }: UsageLimitBa
         <div className="h-2 bg-white rounded-full overflow-hidden">
           <div className="h-full bg-red-500" style={{ width: '100%' }} />
         </div>
-        <p className="mt-2 text-xs text-red-700">{displayLabel} limit reached. Contact JibuSales Admin to increase the limit.</p>
+        <p className="mt-2 text-xs text-red-700">{displayLabel} limit reached. Contact the JibuSales Support Team to request an increase.</p>
+        <SupportContactLinks compact className="mt-2" message={`Hello JibuSales Support Team, our business has reached its ${displayLabel.toLowerCase()} limit. Please advise us about increasing it.`} />
       </div>
     )
   }

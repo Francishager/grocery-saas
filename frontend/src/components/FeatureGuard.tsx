@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFeatureAccess } from "@/services/featureAccessService";
 import { useJWTAuth } from "@/contexts/JWTAuthContext";
+import { SupportContactLinks } from "@/components/SupportContactLinks";
 
 interface FeatureGuardProps {
   feature: string | string[];
@@ -109,30 +110,11 @@ export function UpgradePlan({ feature }: { feature: string | string[] }) {
               <ArrowUpRight className="mr-2 h-4 w-4" />
               Upgrade Plan
             </Button>
-            <Button asChild className="w-full bg-green-700 hover:bg-green-800">
-              <a
-                href="https://wa.me/256788216271?text=Hello%20JibuSales%2C%20I%20would%20like%20to%20discuss%20my%20business%20subscription."
-                target="_blank"
-                rel="noreferrer"
-              >
-                <MessageSquare className="mr-2 h-4 w-4" />
-                WhatsApp JibuSales Support Team
-              </a>
-            </Button>
-            <Button variant="outline" className="w-full" asChild>
-              <a href="mailto:jibusales00@gmail.coms?subject=JibuSales%20sales%20enquiry">
-                Email JibuSales Support Team
-              </a>
-            </Button>
+            <SupportContactLinks className="flex-col [&>a]:w-full" message={`Hello JibuSales Support Team, I would like help accessing ${featureLabel} for my business.`} />
             <Button
               variant="ghost"
               className="w-full"
-              onClick={() =>
-                window.open(
-                  "mailto:jibusales00@gmail.com?subject=Custom%20Plan%20Request",
-                  "_blank",
-                )
-              }
+              onClick={() => window.open(`https://wa.me/256788216271?text=${encodeURIComponent("Hello JibuSales Support Team, I would like to request a custom plan for my business.")}`, "_blank", "noopener,noreferrer")}
             >
               <FileText className="mr-2 h-4 w-4" />
               Request Custom Plan
