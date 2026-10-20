@@ -300,7 +300,7 @@ model Tenant {
   gracePeriodDays         Int?                  @default(0)
   reminderDaysBeforeDue   Int?                  @default(10)
   paymentReminderSentAt   DateTime?
-  paymentReminderStatus   String?               @default("not_started") // not_started, due_soon, grace_period, paid
+  paymentReminderStatus   String?               @default("not_started") // not_started, due_soon, grace_period, paid, subscription_overdue, admin_suspended
 
   // =====================
   // MODULE DEFAULTS (based on businessType, overridable by feature control)
@@ -425,10 +425,27 @@ model SubscriptionPayment {
   cancelledById        String?
   cancelledByEmail     String?
   cancellationReason   String?
+  refunds              SubscriptionPaymentRefund[]
   createdAt            DateTime  @default(now())
 
   @@index([tenantId, paidAt])
   @@map("subscription_payments")
+}
+
+model SubscriptionPaymentRefund {
+  id               String             @id @default(cuid())
+  paymentId        String
+  payment          SubscriptionPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount           Decimal            @db.Decimal(18, 2)
+  currency         String
+  reason           String
+  refundedAt       DateTime           @default(now())
+  recordedById     String?
+  recordedByEmail  String?
+  createdAt        DateTime           @default(now())
+
+  @@index([paymentId, refundedAt])
+  @@map("subscription_payment_refunds")
 }
 
 // Users - can be SaaS Admin or tenant users

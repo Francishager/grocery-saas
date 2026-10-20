@@ -8,7 +8,7 @@ import { resolveSubscriptionCharge, calculateBillingReminder } from "../utils/su
 import { buildBillingPaymentRequest, getBillingGatewaySummary, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 import { getPesapalCallbackUrl, getPesapalTransactionStatus, normalizePesapalStatus, submitPesapalOrder } from "../services/pesapal.js";
-import { getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { extendSettledSubscriptionTerm, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
@@ -56,7 +56,7 @@ async function startPesapalSubscriptionPayment({ tenant, amount, currency, payme
       data: {
         billingPaymentMethod: paymentMethod,
         billingPaymentReference: merchantReference,
-        paymentReminderStatus: "due_soon",
+        paymentReminderStatus: tenant.status === 'suspended' && tenant.paymentReminderStatus === 'admin_suspended' ? 'admin_suspended' : 'due_soon',
         paymentReminderSentAt: new Date(),
       },
     });
@@ -160,7 +160,7 @@ router.get("/me/billing-reminder", authenticateToken, async (req, res) => {
       where: { tenantId: tenant.id },
       orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
       take: 100,
-      select: { id: true, amount: true, currency: true, paymentMethod: true, reference: true, merchantReference: true, status: true, provider: true, paidAt: true, createdAt: true, notes: true },
+      select: { id: true, amount: true, currency: true, paymentMethod: true, reference: true, merchantReference: true, status: true, provider: true, paidAt: true, createdAt: true, notes: true, refunds: { select: { id: true, amount: true, reason: true, refundedAt: true } } },
     });
 
     res.json({
@@ -351,23 +351,63 @@ router.post("/me/billing-reminder", authenticateToken, requirePermission("canPay
       tenantId: tenant.id,
       tenantName: tenant.name,
     });
-
-    const updatedTenant = await prisma.tenant.update({
-      where: { id: tenantId },
-      data: {
-        billingPaymentMethod: paymentMethod || "mobile_money",
-        billingPaymentReference: paymentResult.reference || `${provider}:${phoneNumber}`,
-        paymentReminderStatus: paymentResult.status === "COMPLETED" ? "paid" : "due_soon",
-        paymentReminderSentAt: new Date(),
-      },
+    const paymentStatus = normalizeRelworxStatus(paymentResult.status).toLowerCase();
+    const merchantReference = String(paymentResult.reference || paymentRequest.reference);
+    const invoice = {
+      planName: tenant.plan?.name || 'Subscription',
+      periodCount,
+      periodUnit: charge.billingCycle,
+      currency: charge.currency,
+      invoiceKey: paymentProgress?.hasOutstandingBalance
+        ? paymentProgress.invoiceKey || `subscription-${tenant.id}-${paymentProgress.periodStart.toISOString()}`
+        : `subscription-${tenant.id}-${paymentProgress?.periodStart?.toISOString() || new Date().toISOString()}`,
+      billedTotal: paymentProgress?.hasOutstandingBalance ? paymentProgress.periodTotal : amountDue,
+      priorPaidAmount: paymentProgress?.hasOutstandingBalance && !paymentProgress.invoiceSnapshot ? paymentProgress.progress.paidAmount : Number(paymentProgress?.invoiceSnapshot?.priorPaidAmount || 0),
+      total: amountDue,
+      issuedAt: new Date().toISOString(),
+    };
+    const payment = await prisma.$transaction(async tx => {
+      const receipt = await tx.subscriptionPayment.create({
+        data: {
+          tenantId: tenant.id,
+          amount: normalizeSubscriptionPaymentAmount(String(paymentResult.amount ?? amountDue)),
+          currency: String(paymentResult.currency || charge.currency).toUpperCase(),
+          paymentMethod: String(paymentMethod || 'mobile_money').toLowerCase(),
+          provider: paymentResult.provider || 'relworx',
+          merchantReference,
+          gatewayTrackingId: paymentResult.paymentId || null,
+          payerPhone: paymentResult.msisdn || phoneNumber,
+          recordedById: req.user?.id || null,
+          recordedByEmail: req.user?.email || null,
+          status: paymentStatus,
+          ...(paymentStatus === 'completed' ? { paidAt: new Date() } : {}),
+          notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`,
+        },
+      });
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: {
+          billingPaymentMethod: paymentMethod || 'mobile_money',
+          billingPaymentReference: merchantReference,
+          paymentReminderStatus: paymentStatus === 'completed' ? 'paid' : 'due_soon',
+          paymentReminderSentAt: new Date(),
+        },
+      });
+      if (paymentStatus === 'completed') {
+        await extendSettledSubscriptionTerm(tx, tenantId, new Date());
+      }
+      const progress = await refreshSubscriptionPaymentStatus(tx, tenantId, new Date());
+      return { receipt, progress };
     });
 
     res.json({
       message: paymentResult.message || "Mobile money payment prompt confirmed",
       provider: paymentResult.networkProvider || provider,
       phoneNumber: paymentResult.msisdn || phoneNumber,
-      status: updatedTenant.paymentReminderStatus,
+      status: paymentResult.status,
       amountDue,
+      paymentRecord: { id: payment.receipt.id, reference: merchantReference, status: payment.receipt.status },
+      progress: payment.progress,
       payment: paymentResult,
       gateway: {
         configured: paymentResult.configured,
@@ -446,6 +486,38 @@ router.post("/billing-reminder/relworx/webhook", async (req, res) => {
       return res.status(400).json({ error: "Missing payment reference in webhook payload" });
     }
 
+    const subscriptionPayment = await prisma.subscriptionPayment.findFirst({
+      where: { provider: 'relworx', merchantReference: String(reference) },
+    });
+    if (subscriptionPayment) {
+      const nextStatus = requestStatus === 'COMPLETED' ? 'completed' : requestStatus === 'FAILED' ? 'failed' : 'pending';
+      const updated = await prisma.$transaction(async tx => {
+        const current = await tx.subscriptionPayment.findUnique({ where: { id: subscriptionPayment.id } });
+        if (!current || ['completed', 'failed', 'reversed', 'cancelled'].includes(current.status)) return current;
+        const changed = await tx.subscriptionPayment.updateMany({
+          where: { id: current.id, status: current.status },
+          data: {
+            status: nextStatus,
+            ...(nextStatus === 'completed' ? { paidAt: new Date() } : {}),
+            ...(payload.payment_method ? { gatewayPaymentMethod: String(payload.payment_method).slice(0, 40) } : {}),
+            ...(payload.confirmation_code ? { reference: String(payload.confirmation_code).slice(0, 200) } : {}),
+          },
+        });
+        if (changed.count !== 1) return tx.subscriptionPayment.findUnique({ where: { id: current.id } });
+        await tx.tenant.update({
+          where: { id: current.tenantId },
+          data: {
+            paymentReminderStatus: nextStatus === 'completed' ? 'paid' : 'due_soon',
+            paymentReminderSentAt: new Date(),
+          },
+        });
+        if (nextStatus === 'completed') await extendSettledSubscriptionTerm(tx, current.tenantId, new Date());
+        await refreshSubscriptionPaymentStatus(tx, current.tenantId, new Date());
+        return tx.subscriptionPayment.findUnique({ where: { id: current.id } });
+      });
+      return res.status(200).json({ received: true, matched: true, tenantId: updated?.tenantId, status: updated?.status, reference });
+    }
+
     const tenant = await prisma.tenant.findFirst({
       where: {
         billingPaymentReference: {
@@ -504,7 +576,7 @@ router.post("/:id/activate", authenticateToken, requirePlatformAdmin, async (req
   try {
     const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: "Tenant not found" });
-    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "active" } });
+    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "active", paymentReminderStatus: null } });
     res.json({ message: "Tenant activated", tenant });
   } catch (err) {
     console.error("Activate tenant error:", err);
@@ -517,7 +589,7 @@ router.post("/:id/suspend", authenticateToken, requirePlatformAdmin, async (req,
   try {
     const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: "Tenant not found" });
-    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "suspended" } });
+    const tenant = await prisma.tenant.update({ where: { id: req.params.id }, data: { status: "suspended", paymentReminderStatus: "admin_suspended" } });
     const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });
     res.json({ message: blockPayload?.message || "Tenant suspended", code: blockPayload?.code, tenant });
   } catch (err) {
@@ -584,6 +656,7 @@ router.put("/:id", authenticateToken, requirePlatformAdmin, async (req, res) => 
         return res.status(400).json({ error: "Invalid tenant status" });
       }
       data.status = status;
+      data.paymentReminderStatus = status === "suspended" ? "admin_suspended" : null;
       if (status === 'trial') {
         const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { trialEndsAt: true } });
         if (!existing) return res.status(404).json({ error: "Tenant not found" });

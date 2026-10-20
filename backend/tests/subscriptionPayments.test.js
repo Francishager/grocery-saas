@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cancelManualSubscriptionPayment, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, syncPesapalSubscriptionPayment } from '../src/utils/subscriptionPayments.js';
+import { cancelManualSubscriptionPayment, extendSettledSubscriptionTerm, getRefundableSubscriptionPaymentAmount, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, recordSubscriptionPaymentRefund, syncPesapalSubscriptionPayment } from '../src/utils/subscriptionPayments.js';
 import { normalizePesapalStatus } from '../src/services/pesapal.js';
 
 test('subscription receipt amounts normalize to cents without floating point arithmetic', () => {
@@ -34,7 +34,7 @@ test('partial subscription payments remain due while the subscription term is ac
         return { _sum: { amount: 40000 } };
       },
       count: async () => 1,
-      findMany: async () => [],
+      findMany: async () => [{ id: 'legacy-payment', amount: 40000, notes: null, paidAt: new Date('2026-10-10T00:00:00.000Z'), createdAt: new Date('2026-10-10T00:00:00.000Z'), refunds: [] }],
     },
   };
 
@@ -194,6 +194,94 @@ test('tenant override is not assumed paid from active dates or a legacy paid fla
   assert.equal(result.hasOutstandingBalance, true);
 });
 
+test('a fully settled invoice extends an expired subscription once and clears payment suspension', async () => {
+  const invoice = { invoiceKey: 'invoice-settled', billedTotal: 100, total: 100, periodCount: 1, periodUnit: 'monthly' };
+  const receipt = { id: 'receipt-1', amount: 100, notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-19T12:00:00.000Z'), createdAt: new Date('2026-10-19T12:00:00.000Z') };
+  const tenant = {
+    id: 'tenant-paid', status: 'suspended', paymentReminderStatus: 'subscription_overdue',
+    plan: { price: 100, billingCycle: 'monthly', currency: 'UGX' }, billingChargeMode: 'plan',
+    createdAt: new Date('2026-08-20T00:00:00.000Z'), subscriptionStart: new Date('2026-08-20T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-09-20T00:00:00.000Z'),
+  };
+  const tenantUpdates = [];
+  const receiptUpdates = [];
+  const tx = {
+    tenant: {
+      findUnique: async () => tenant,
+      update: async ({ data }) => { Object.assign(tenant, data); tenantUpdates.push(data); return tenant; },
+    },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 100 } }),
+      count: async () => 1,
+      findMany: async () => [receipt],
+      update: async ({ data }) => { Object.assign(receipt, data); receiptUpdates.push(data); return receipt; },
+    },
+  };
+
+  const result = await extendSettledSubscriptionTerm(tx, tenant.id, new Date('2026-10-20T12:00:00.000Z'));
+  assert.equal(result.termExtended, true);
+  assert.equal(tenant.status, 'active');
+  assert.equal(tenant.paymentReminderStatus, 'paid');
+  assert.equal(tenant.subscriptionEnd.toISOString(), '2026-11-20T12:00:00.000Z');
+  assert.equal(receiptUpdates.length, 1);
+  assert.equal(JSON.parse(receipt.notes.slice('JIBUSALES_INVOICE:'.length)).coverageEnd, tenant.subscriptionEnd.toISOString());
+});
+
+test('partial subscription payment does not extend the term or reactivate a suspended tenant', async () => {
+  const invoice = { invoiceKey: 'invoice-partial', billedTotal: 100, total: 40, periodCount: 1, periodUnit: 'monthly' };
+  const tenant = {
+    id: 'tenant-partial', status: 'suspended', paymentReminderStatus: 'subscription_overdue',
+    plan: { price: 100, billingCycle: 'monthly', currency: 'UGX' }, billingChargeMode: 'plan',
+    createdAt: new Date('2026-08-20T00:00:00.000Z'), subscriptionStart: new Date('2026-08-20T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-09-20T00:00:00.000Z'),
+  };
+  let tenantUpdateCount = 0;
+  const tx = {
+    tenant: { findUnique: async () => tenant, update: async () => { tenantUpdateCount += 1; } },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 40 } }),
+      count: async () => 1,
+      findMany: async () => [{ id: 'partial-1', amount: 40, notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-19T12:00:00.000Z'), createdAt: new Date('2026-10-19T12:00:00.000Z') }],
+    },
+  };
+
+  const result = await extendSettledSubscriptionTerm(tx, tenant.id, new Date('2026-10-20T12:00:00.000Z'));
+  assert.equal(result.termExtended, false);
+  assert.equal(result.progress.isPartiallyPaid, true);
+  assert.equal(tenant.status, 'suspended');
+  assert.equal(tenant.subscriptionEnd.toISOString(), '2026-09-20T00:00:00.000Z');
+  assert.equal(tenantUpdateCount, 0);
+});
+
+test('settling payment does not undo an explicit SaaS Admin suspension', async () => {
+  const invoice = { invoiceKey: 'invoice-admin-suspended', billedTotal: 100, total: 100, periodCount: 1, periodUnit: 'monthly' };
+  const receipt = { id: 'receipt-admin-suspended', amount: 100, notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-19T12:00:00.000Z'), createdAt: new Date('2026-10-19T12:00:00.000Z') };
+  const tenant = {
+    id: 'tenant-admin-suspended', status: 'suspended', paymentReminderStatus: 'admin_suspended',
+    plan: { price: 100, billingCycle: 'monthly', currency: 'UGX' }, billingChargeMode: 'plan',
+    createdAt: new Date('2026-08-20T00:00:00.000Z'), subscriptionStart: new Date('2026-08-20T00:00:00.000Z'),
+    subscriptionEnd: new Date('2026-09-20T00:00:00.000Z'),
+  };
+  const tx = {
+    tenant: {
+      findUnique: async () => tenant,
+      update: async ({ data }) => { Object.assign(tenant, data); return tenant; },
+    },
+    subscriptionPayment: {
+      aggregate: async () => ({ _sum: { amount: 100 } }),
+      count: async () => 1,
+      findMany: async () => [receipt],
+      update: async ({ data }) => { Object.assign(receipt, data); return receipt; },
+    },
+  };
+
+  const result = await extendSettledSubscriptionTerm(tx, tenant.id, new Date('2026-10-20T12:00:00.000Z'));
+  assert.equal(result.termExtended, true);
+  assert.equal(tenant.subscriptionEnd.toISOString(), '2026-11-20T12:00:00.000Z');
+  assert.equal(tenant.status, 'suspended');
+  assert.equal(tenant.paymentReminderStatus, 'admin_suspended');
+});
+
 test('Pesapal statuses only settle successful verified payments', () => {
   assert.equal(normalizePesapalStatus({ payment_status_description: 'COMPLETED', status_code: 1 }), 'completed');
   assert.equal(normalizePesapalStatus({ payment_status_description: 'FAILED', status_code: 2 }), 'failed');
@@ -247,6 +335,68 @@ test('admin cannot cancel Pesapal transactions through manual receipt cancellati
     paymentId: 'pesapal-1', adminId: 'admin-1', reason: 'duplicate',
   });
   assert.equal(result.error, 'not_manual');
+});
+
+test('only invoice overpayment is refundable, not the amount needed to settle the invoice', async () => {
+  const invoice = { invoiceKey: 'refund-invoice', billedTotal: 100, total: 100, periodCount: 1 };
+  const rows = [
+    { id: 'receipt-a', tenantId: 'tenant-refund', amount: 70, currency: 'UGX', status: 'completed', provider: 'manual', notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-10T00:00:00.000Z'), createdAt: new Date('2026-10-10T00:00:00.000Z'), refunds: [] },
+    { id: 'receipt-b', tenantId: 'tenant-refund', amount: 60, currency: 'UGX', status: 'completed', provider: 'manual', notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-11T00:00:00.000Z'), createdAt: new Date('2026-10-11T00:00:00.000Z'), refunds: [] },
+  ];
+  const tenant = { id: 'tenant-refund', plan: { price: 100, billingCycle: 'monthly', currency: 'UGX' }, billingChargeMode: 'plan', createdAt: new Date('2026-10-01T00:00:00.000Z'), subscriptionStart: new Date('2026-10-01T00:00:00.000Z'), subscriptionEnd: new Date('2026-11-01T00:00:00.000Z') };
+  const tx = {
+    subscriptionPayment: {
+      findUnique: async () => rows[1],
+      findMany: async () => rows,
+      count: async () => rows.length,
+      aggregate: async () => ({ _sum: { amount: 130 } }),
+      update: async () => {},
+    },
+    tenant: { findUnique: async () => tenant, update: async () => tenant },
+  };
+  const availability = await getRefundableSubscriptionPaymentAmount(tx, 'receipt-b');
+  assert.equal(availability.refundableAmount, 30);
+  assert.equal(availability.billedTotal, 100);
+  let refundInsertCount = 0;
+  const rejected = await recordSubscriptionPaymentRefund({
+    $transaction: callback => callback({
+      ...tx,
+      subscriptionPaymentRefund: { create: async () => { refundInsertCount += 1; } },
+    }),
+  }, { paymentId: 'receipt-b', amount: '31.00', reason: 'Too much', adminId: 'admin-1' });
+  assert.equal(rejected.error, 'exceeds_overpayment');
+  assert.equal(rejected.refundableAmount, 30);
+  assert.equal(refundInsertCount, 0);
+});
+
+test('recorded refund is audited and reduces net subscription payment progress', async () => {
+  const invoice = { invoiceKey: 'refund-invoice', billedTotal: 100, total: 100, periodCount: 1 };
+  const rows = [
+    { id: 'receipt-a', tenantId: 'tenant-refund', amount: 70, currency: 'UGX', status: 'completed', provider: 'manual', notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-10T00:00:00.000Z'), createdAt: new Date('2026-10-10T00:00:00.000Z'), refunds: [] },
+    { id: 'receipt-b', tenantId: 'tenant-refund', amount: 60, currency: 'UGX', status: 'completed', provider: 'manual', notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`, paidAt: new Date('2026-10-11T00:00:00.000Z'), createdAt: new Date('2026-10-11T00:00:00.000Z'), refunds: [] },
+  ];
+  const tenant = { id: 'tenant-refund', paymentReminderStatus: 'paid', plan: { price: 100, billingCycle: 'monthly', currency: 'UGX' }, billingChargeMode: 'plan', createdAt: new Date('2026-10-01T00:00:00.000Z'), subscriptionStart: new Date('2026-10-01T00:00:00.000Z'), subscriptionEnd: new Date('2026-11-01T00:00:00.000Z') };
+  const created = [];
+  const tx = {
+    subscriptionPayment: {
+      findUnique: async () => rows[1],
+      findMany: async () => rows,
+      count: async () => rows.length,
+    },
+    subscriptionPaymentRefund: {
+      create: async ({ data }) => { created.push(data); rows[1].refunds.push({ amount: Number(data.amount) }); return { id: 'refund-1', ...data, amount: Number(data.amount) }; },
+    },
+    tenant: { findUnique: async () => tenant, update: async () => tenant },
+  };
+  const result = await recordSubscriptionPaymentRefund({ $transaction: callback => callback(tx) }, {
+    paymentId: 'receipt-b', amount: '20.00', reason: 'Excess returned by bank transfer', adminId: 'admin-1', adminEmail: 'admin@example.com',
+  });
+  assert.equal(result.refund.id, 'refund-1');
+  assert.equal(created[0].recordedByEmail, 'admin@example.com');
+  assert.equal(result.refundableAmount, 10);
+  const progress = await getSubscriptionPaymentProgress(tx, tenant.id, new Date('2026-10-20T00:00:00.000Z'));
+  assert.equal(progress.progress.paidAmount, 110);
+  assert.equal(progress.progress.remainingAmount, 0);
 });
 
 test('Pesapal settlement rejects a mismatched provider tracking ID', async () => {

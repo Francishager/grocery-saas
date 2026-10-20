@@ -71,9 +71,23 @@ export const tenantAccountAccessPayload = (tenant, user = {}) => {
   };
 };
 
+const isTenantBillingRequest = (req) => {
+  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  return ['GET', 'POST'].includes(String(req.method || '').toUpperCase()) &&
+    (path.endsWith('/me/billing-reminder') || path.endsWith('/me/billing-reminder/status'));
+};
+
 export const enforceTenantSubscriptionAccess = async (tenant, user = {}) => {
   const existingBlock = tenantAccountAccessPayload(tenant, user);
-  if (existingBlock || !tenant?.subscriptionEnd || isPlatformAdminUser(user)) return existingBlock;
+  if (existingBlock) {
+    const subscriptionExpired = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) <= new Date();
+    if (tenant.status === 'suspended' && tenant.paymentReminderStatus !== 'admin_suspended' && subscriptionExpired) {
+      const billing = await getSubscriptionPaymentProgress(prisma, tenant.id);
+      if (billing?.hasOutstandingBalance) return { ...existingBlock, code: 'SUBSCRIPTION_PAYMENT_REQUIRED' };
+    }
+    return existingBlock;
+  }
+  if (!tenant?.subscriptionEnd || isPlatformAdminUser(user)) return null;
   if (!shouldSuspendForSubscriptionPayment(tenant, true)) return null;
 
   const billing = await getSubscriptionPaymentProgress(prisma, tenant.id);
@@ -82,15 +96,18 @@ export const enforceTenantSubscriptionAccess = async (tenant, user = {}) => {
 
   const suspended = await prisma.tenant.updateMany({
     where: { id: tenant.id, status: 'active', subscriptionEnd: tenant.subscriptionEnd },
-    data: { status: 'suspended' },
+    data: { status: 'suspended', paymentReminderStatus: 'subscription_overdue' },
   });
-  if (suspended.count === 1) return tenantAccountAccessPayload({ ...tenant, status: 'suspended' }, user);
+  if (suspended.count === 1) return { ...tenantAccountAccessPayload({ ...tenant, status: 'suspended' }, user), code: 'SUBSCRIPTION_PAYMENT_REQUIRED' };
 
   const latestTenant = await prisma.tenant.findUnique({
     where: { id: tenant.id },
-    select: { id: true, name: true, status: true, trialEndsAt: true, subscriptionEnd: true, gracePeriodDays: true },
+    select: { id: true, name: true, status: true, trialEndsAt: true, subscriptionEnd: true, gracePeriodDays: true, paymentReminderStatus: true },
   });
-  return tenantAccountAccessPayload(latestTenant, user);
+  const latestBlock = tenantAccountAccessPayload(latestTenant, user);
+  return latestTenant?.status === 'suspended' && latestTenant.paymentReminderStatus === 'subscription_overdue'
+    ? { ...latestBlock, code: 'SUBSCRIPTION_PAYMENT_REQUIRED' }
+    : latestBlock;
 };
 
 export const canUseCashTransactions = (user, hasAssignedCashAccount) => {
@@ -140,7 +157,7 @@ export const authenticateToken = async (req, res, next) => {
     if (tenantId) {
       tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { id: true, name: true, slug: true, status: true, trialEndsAt: true, subscriptionEnd: true, gracePeriodDays: true, timezone: true, workingHours: true },
+        select: { id: true, name: true, slug: true, status: true, trialEndsAt: true, subscriptionEnd: true, gracePeriodDays: true, paymentReminderStatus: true, timezone: true, workingHours: true },
       });
       if (!tenant && !isPlatformAdminUser(decoded)) {
         return res.status(403).json({
@@ -150,7 +167,9 @@ export const authenticateToken = async (req, res, next) => {
         });
       }
       const tenantBlock = await enforceTenantSubscriptionAccess(tenant, decoded);
-      if (tenantBlock) return res.status(403).json(tenantBlock);
+      if (tenantBlock && !(tenantBlock.code === 'SUBSCRIPTION_PAYMENT_REQUIRED' && isTenantBillingRequest(req))) {
+        return res.status(403).json(tenantBlock);
+      }
       const hoursBlock = workingHoursAccessPayload(currentUser, tenant);
       if (hoursBlock) return res.status(403).json(hoursBlock);
     }

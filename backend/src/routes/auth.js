@@ -104,12 +104,13 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
     }
 
     const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
-    if (tenantBlock) {
+    const subscriptionPaymentAccess = tenantBlock?.code === 'SUBSCRIPTION_PAYMENT_REQUIRED';
+    if (tenantBlock && !subscriptionPaymentAccess) {
       await logAuthenticationEvent(req, "login_blocked_subscription", user, 403);
       return res.status(403).json(tenantBlock);
     }
     const hoursBlock = workingHoursAccessPayload(user, user.tenant);
-    if (hoursBlock) {
+    if (hoursBlock && !subscriptionPaymentAccess) {
       await logAuthenticationEvent(req, "login_blocked_schedule", user, 403);
       return res.status(403).json(hoursBlock);
     }
@@ -186,9 +187,10 @@ router.post("/refresh", refreshLimiter, async (req, res) => {
     }
 
     const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
-    if (tenantBlock) return res.status(403).json(tenantBlock);
+    const subscriptionPaymentAccess = tenantBlock?.code === 'SUBSCRIPTION_PAYMENT_REQUIRED';
+    if (tenantBlock && !subscriptionPaymentAccess) return res.status(403).json(tenantBlock);
     const hoursBlock = workingHoursAccessPayload(user, user.tenant);
-    if (hoursBlock) return res.status(403).json(hoursBlock);
+    if (hoursBlock && !subscriptionPaymentAccess) return res.status(403).json(hoursBlock);
 
     const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
     const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();

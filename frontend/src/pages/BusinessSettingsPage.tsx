@@ -44,6 +44,7 @@ export default function BusinessSettingsPage() {
         const result = await subscriptionBillingApi.getPaymentStatus(reference)
         if (cancelled) return
         if (result.status === 'COMPLETED') {
+          window.dispatchEvent(new Event('subscription-payment-updated'))
           toast({ title: 'Payment confirmed', description: 'Your receipt is now available below.' })
           await loadBilling()
           window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`)
@@ -358,7 +359,7 @@ export default function BusinessSettingsPage() {
                         : [{ label: 'Subscription payment received', amount: Number(payment.amount) }]
                       const date = payment.paidAt || payment.createdAt
                       return <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
-                        <div className="min-w-0"><p className="font-medium">{billingMoney(payment.amount, payment.currency)} <span className="ml-1 text-xs font-normal capitalize text-muted-foreground">{payment.status}</span></p><p className="break-all text-xs text-muted-foreground">{date ? new Date(date).toLocaleDateString('en-GB') : 'Date pending'} · {payment.paymentMethod || payment.provider || 'Payment'}{payment.reference ? ` · ${payment.reference}` : ''}</p>{payment.invoice?.periodCount && <p className="text-xs text-muted-foreground">Covers {payment.invoice.periodCount} {payment.invoice.periodUnit === 'yearly' ? 'year(s)' : 'month(s)'}</p>}</div>
+                        <div className="min-w-0"><p className="font-medium">{billingMoney(payment.amount, payment.currency)} <span className="ml-1 text-xs font-normal capitalize text-muted-foreground">{payment.status}</span></p><p className="break-all text-xs text-muted-foreground">{date ? new Date(date).toLocaleDateString('en-GB') : 'Date pending'} · {payment.paymentMethod || payment.provider || 'Payment'}{payment.reference ? ` · ${payment.reference}` : ''}</p>{payment.invoice?.periodCount && <p className="text-xs text-muted-foreground">Covers {payment.invoice.periodCount} {payment.invoice.periodUnit === 'yearly' ? 'year(s)' : 'month(s)'}</p>}{payment.refunds?.map((refund: any) => <p key={refund.id} className="mt-1 text-xs text-red-700">Refunded {billingMoney(Number(refund.amount), payment.currency)} · {refund.reason}</p>)}</div>
                         <Button variant="outline" size="sm" disabled={payment.status !== 'completed'} onClick={() => printBillingDocument('Subscription Receipt', payment.reference || payment.merchantReference || payment.id, date ? new Date(date).toLocaleDateString('en-GB') : '', invoiceItems, Number(payment.amount), 'PAID')}><Printer className="mr-2 h-4 w-4" />Receipt</Button>
                       </div>
                     })}

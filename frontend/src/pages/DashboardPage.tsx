@@ -70,6 +70,7 @@ export default function DashboardPage() {
         setBillingPaymentState('success')
         setShowBillingPrompt(false)
         setBillingPollRef(null)
+        window.dispatchEvent(new Event('subscription-payment-updated'))
         await loadBillingReminder()
         toast({ title: 'Payment completed', description: 'Your subscription payment has been confirmed.' })
         return
@@ -138,6 +139,7 @@ export default function DashboardPage() {
         setBillingPaymentState('success')
         setShowBillingPrompt(false)
         setBillingPollRef(null)
+        window.dispatchEvent(new Event('subscription-payment-updated'))
         await loadBillingReminder()
         toast({ title: 'Payment completed', description: `${billingForm.networkProvider} payment confirmed successfully.` })
         return
@@ -254,7 +256,7 @@ export default function DashboardPage() {
       </div>
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
 
-      {billingReminder && (billingReminder.isTrialActive || billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
+      {billingReminder && (billingReminder.isTrialActive || (billingReminder.paymentStatus !== 'paid' && (billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue))) && (
         <div className={`rounded-xl border p-4 ${billingReminder.isOverdue ? 'border-red-300 bg-red-50 text-red-900' : billingReminder.isTrialActive ? 'border-blue-200 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-center justify-between gap-4">
             <div>

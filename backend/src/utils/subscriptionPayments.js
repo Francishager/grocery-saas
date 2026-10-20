@@ -64,16 +64,12 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
     status: 'completed',
     paidAt: { not: null, gte: periodStart, lte: asOf },
   };
-  const [aggregate, ledgerCount, receipts] = await Promise.all([
-    tx.subscriptionPayment.aggregate({
-      where: paymentWhere,
-      _sum: { amount: true },
-    }),
+  const [ledgerCount, receipts] = await Promise.all([
     tx.subscriptionPayment.count({ where: { tenantId } }),
     tx.subscriptionPayment.findMany({
       where: { tenantId, status: 'completed', paidAt: { not: null, lte: asOf } },
       orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true, amount: true, notes: true, paidAt: true, createdAt: true },
+      select: { id: true, amount: true, notes: true, paidAt: true, createdAt: true, refunds: { select: { amount: true } } },
     }),
   ]);
   const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
@@ -91,7 +87,7 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
       hasCurrentPayment: false,
       firstPaidAt: receipt.paidAt,
     };
-    group.paidAmount += Number(receipt.amount || 0);
+    group.paidAmount += Math.max(0, Number(receipt.amount || 0) - (receipt.refunds || []).reduce((sum, refund) => sum + Number(refund.amount || 0), 0));
     group.hasCurrentPayment ||= new Date(receipt.paidAt) >= periodStart;
     if (new Date(receipt.paidAt) < new Date(group.firstPaidAt)) group.firstPaidAt = receipt.paidAt;
     invoiceGroups.set(invoiceKey, group);
@@ -108,11 +104,14 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
   const legacyBalanceTotal = charge.chargeMode === 'service' ? charge.price : charge.total;
   const periodTotal = trackedInvoice?.billedTotal || legacyBalanceTotal;
   const coveredByActiveTerm = tenant.subscriptionEnd && new Date(tenant.subscriptionEnd) > asOf;
-  const recordedThisPeriod = Number(aggregate._sum.amount || 0) > 0;
+  const recordedThisPeriod = receipts.some(receipt => new Date(receipt.paidAt) >= periodStart && Number(receipt.amount || 0) > 0);
   const legacyReceiptsThisPeriod = receipts
     .filter(receipt => new Date(receipt.paidAt) >= periodStart && !readBillingInvoice(receipt.notes))
-    .reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
-  const trackedPaidAmount = trackedInvoice?.paidAmount ?? (isServiceOnlyOverride ? legacyReceiptsThisPeriod : aggregate._sum.amount);
+    .reduce((sum, receipt) => sum + Math.max(0, Number(receipt.amount || 0) - (receipt.refunds || []).reduce((refundSum, refund) => refundSum + Number(refund.amount || 0), 0)), 0);
+  const netReceiptsThisPeriod = receipts
+    .filter(receipt => new Date(receipt.paidAt) >= periodStart)
+    .reduce((sum, receipt) => sum + Math.max(0, Number(receipt.amount || 0) - (receipt.refunds || []).reduce((refundSum, refund) => refundSum + Number(refund.amount || 0), 0)), 0);
+  const trackedPaidAmount = trackedInvoice?.paidAmount ?? (isServiceOnlyOverride ? legacyReceiptsThisPeriod : netReceiptsThisPeriod);
   const hasOpenHistoricalInvoice = openInvoices.length > 0;
   const canAssumeOverridePaid = !charge.hasCustomPricing;
   const progress = (!hasOpenHistoricalInvoice && coveredByActiveTerm && !recordedThisPeriod && canAssumeOverridePaid) || (ledgerCount === 0 && tenant.paymentReminderStatus === 'paid' && canAssumeOverridePaid)
@@ -122,18 +121,110 @@ export async function getSubscriptionPaymentProgress(tx, tenantId, asOf = new Da
   return { tenant, progress, hasOutstandingBalance, invoiceSnapshot, periodStart, periodTotal, invoiceKey: trackedInvoice?.invoiceKey || null };
 }
 
+export async function getRefundableSubscriptionPaymentAmount(tx, paymentId) {
+  const payment = await tx.subscriptionPayment.findUnique({
+    where: { id: paymentId },
+    include: { refunds: { select: { amount: true } } },
+  });
+  if (!payment || payment.status !== 'completed') return { error: 'not_refundable' };
+  const invoice = readBillingInvoice(payment.notes);
+  const billedTotal = Number(invoice?.billedTotal ?? invoice?.total);
+  const invoiceKey = invoice?.invoiceKey;
+  if (!invoiceKey || !Number.isFinite(billedTotal) || billedTotal <= 0) return { error: 'invoice_unavailable' };
+
+  const payments = await tx.subscriptionPayment.findMany({
+    where: { tenantId: payment.tenantId, status: 'completed' },
+    select: { id: true, amount: true, notes: true, refunds: { select: { amount: true } } },
+  });
+  const invoicePayments = payments.filter(item => readBillingInvoice(item.notes)?.invoiceKey === invoiceKey);
+  const netPaid = invoicePayments.reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0) - (item.refunds || []).reduce((refundSum, refund) => refundSum + Number(refund.amount || 0), 0)), 0);
+  const paymentNet = Math.max(0, Number(payment.amount || 0) - (payment.refunds || []).reduce((sum, refund) => sum + Number(refund.amount || 0), 0));
+  return { payment, invoiceKey, billedTotal, refundableAmount: Math.min(paymentNet, Math.max(0, netPaid - billedTotal)) };
+}
+
+export async function recordSubscriptionPaymentRefund(prisma, { paymentId, amount, reason, adminId, adminEmail }) {
+  return prisma.$transaction(async tx => {
+    const refundable = await getRefundableSubscriptionPaymentAmount(tx, paymentId);
+    if (refundable.error) return refundable;
+    const refundAmount = Number(amount);
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) return { error: 'invalid_amount' };
+    if (refundAmount - refundable.refundableAmount > 0.001) {
+      return { error: 'exceeds_overpayment', refundableAmount: refundable.refundableAmount };
+    }
+    const refund = await tx.subscriptionPaymentRefund.create({
+      data: {
+        paymentId,
+        amount: amount,
+        currency: refundable.payment.currency,
+        reason,
+        refundedAt: new Date(),
+        recordedById: adminId || null,
+        recordedByEmail: adminEmail || null,
+      },
+    });
+    await refreshSubscriptionPaymentStatus(tx, refundable.payment.tenantId, new Date());
+    return { payment: refundable.payment, refund, refundableAmount: refundable.refundableAmount - refundAmount };
+  }, { isolationLevel: 'Serializable' });
+}
+
 export async function refreshSubscriptionPaymentStatus(tx, tenantId, asOf = new Date()) {
   const result = await getSubscriptionPaymentProgress(tx, tenantId, asOf);
   if (!result) return null;
   const { progress } = result;
+  const isAdminSuspended = result.tenant.status === 'suspended' && result.tenant.paymentReminderStatus === 'admin_suspended';
   await tx.tenant.update({
     where: { id: tenantId },
     data: {
-      paymentReminderStatus: progress.isPaid ? 'paid' : 'due_soon',
+      paymentReminderStatus: isAdminSuspended ? 'admin_suspended' : progress.isPaid ? 'paid' : 'due_soon',
       paymentReminderSentAt: asOf,
     },
   });
   return progress;
+}
+
+export async function extendSettledSubscriptionTerm(tx, tenantId, asOf = new Date()) {
+  const result = await getSubscriptionPaymentProgress(tx, tenantId, asOf);
+  const invoice = result?.invoiceSnapshot;
+  const periodCount = Number(invoice?.periodCount);
+  if (!result?.progress.isPaid || !invoice || !Number.isInteger(periodCount) || periodCount < 1 || periodCount > 60) {
+    return { ...result, termExtended: false };
+  }
+
+  if (invoice.coverageEnd) return { ...result, termExtended: false, subscriptionEnd: invoice.coverageEnd };
+
+  const tenant = result.tenant;
+  const isAdminSuspended = tenant.status === 'suspended' && tenant.paymentReminderStatus === 'admin_suspended';
+  const currentEnd = tenant.subscriptionEnd ? new Date(tenant.subscriptionEnd) : null;
+  const coverageStart = currentEnd && currentEnd > asOf ? currentEnd : asOf;
+  const cycle = String(tenant.customBillingCycle || tenant.plan?.billingCycle || invoice.periodUnit || 'monthly').toLowerCase();
+  const subscriptionEnd = addSubscriptionPeriods(coverageStart, periodCount, cycle);
+
+  const receipts = await tx.subscriptionPayment.findMany({
+    where: { tenantId, status: 'completed' },
+    select: { id: true, notes: true },
+  });
+  for (const receipt of receipts) {
+    const receiptInvoice = readBillingInvoice(receipt.notes);
+    if (receiptInvoice?.invoiceKey === invoice.invoiceKey) {
+      const receiptInvoiceWithCoverage = { ...receiptInvoice, coverageStart: coverageStart.toISOString(), coverageEnd: subscriptionEnd.toISOString() };
+      await tx.subscriptionPayment.update({
+        where: { id: receipt.id },
+        data: { notes: `JIBUSALES_INVOICE:${JSON.stringify(receiptInvoiceWithCoverage)}` },
+      });
+    }
+  }
+
+  await tx.tenant.update({
+    where: { id: tenantId },
+    data: {
+      ...(tenant.subscriptionStart ? {} : { subscriptionStart: asOf }),
+      subscriptionEnd,
+      ...(tenant.status === 'suspended' && !isAdminSuspended ? { status: 'active' } : {}),
+      paymentReminderStatus: isAdminSuspended ? 'admin_suspended' : 'paid',
+    },
+  });
+
+  return { ...result, termExtended: true, subscriptionEnd };
 }
 
 export async function syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus) {
@@ -178,24 +269,14 @@ export async function syncPesapalSubscriptionPayment(prisma, payment, gatewaySta
     if (transitioned.count !== 1) return tx.subscriptionPayment.findUnique({ where: { id: current.id } });
     const updated = await tx.subscriptionPayment.findUnique({ where: { id: current.id } });
     if (status === 'completed') {
-      const invoice = readBillingInvoice(current.notes);
-      let subscriptionEnd = undefined;
-      if (invoice?.periodCount) {
-        const tenant = await tx.tenant.findUnique({ where: { id: current.tenantId }, select: { subscriptionEnd: true, plan: { select: { billingCycle: true } }, customBillingCycle: true } });
-        const cycle = String(tenant?.customBillingCycle || tenant?.plan?.billingCycle || invoice.periodUnit || 'monthly').toLowerCase();
-        const coverageStart = tenant?.subscriptionEnd && tenant.subscriptionEnd > new Date() ? tenant.subscriptionEnd : new Date();
-        subscriptionEnd = addSubscriptionPeriods(coverageStart, invoice.periodCount, cycle);
-        const updatedInvoice = { ...invoice, coverageStart: coverageStart.toISOString(), coverageEnd: subscriptionEnd.toISOString() };
-        await tx.subscriptionPayment.update({ where: { id: current.id }, data: { notes: `JIBUSALES_INVOICE:${JSON.stringify(updatedInvoice)}` } });
-      }
       await tx.tenant.update({
         where: { id: current.tenantId },
         data: {
           billingPaymentMethod: updated.paymentMethod,
           billingPaymentReference: current.merchantReference,
-          ...(subscriptionEnd ? { subscriptionEnd, status: 'active' } : {}),
         },
       });
+      await extendSettledSubscriptionTerm(tx, current.tenantId, new Date());
     }
     if (status === 'completed' || status === 'reversed' || status === 'failed') {
       await refreshSubscriptionPaymentStatus(tx, current.tenantId, new Date());
@@ -206,10 +287,11 @@ export async function syncPesapalSubscriptionPayment(prisma, payment, gatewaySta
 
 export async function cancelManualSubscriptionPayment(prisma, { paymentId, adminId, adminEmail, reason }) {
   return prisma.$transaction(async (tx) => {
-    const payment = await tx.subscriptionPayment.findUnique({ where: { id: paymentId } });
+    const payment = await tx.subscriptionPayment.findUnique({ where: { id: paymentId }, include: { refunds: { select: { id: true } } } });
     if (!payment) return { error: 'not_found' };
     if (payment.provider !== 'manual' && (payment.provider || payment.gatewayTrackingId || payment.merchantReference)) return { error: 'not_manual' };
     if (payment.status !== 'completed') return { error: 'not_completed' };
+    if (payment.refunds?.length) return { error: 'has_refunds' };
 
     const cancelledAt = new Date();
     const update = await tx.subscriptionPayment.updateMany({

@@ -3,7 +3,7 @@ import { appNotify } from '@/lib/appFeedback'
 import React, { useState, useEffect, useMemo } from 'react'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar, Banknote, Receipt, ChevronLeft, ChevronRight, Ban } from 'lucide-react'
+import { CreditCard, Search, Loader2, RefreshCw, X, ArrowRightLeft, Calendar, Banknote, Receipt, ChevronLeft, ChevronRight, Ban, RotateCcw } from 'lucide-react'
 
 interface Subscription {
   id: string; status: string; startDate: string; endDate: string | null; trialEndsAt: string | null
@@ -33,6 +33,8 @@ interface SubscriptionPayment {
   cancelledAt?: string | null
   cancelledByEmail?: string | null
   cancellationReason?: string | null
+  refunds?: Array<{ id: string; amount: string; reason: string; refundedAt: string; recordedByEmail?: string | null }>
+  refundableAmount?: number
   createdAt?: string
   tenant?: { id: string; name: string; slug: string; status: string }
 }
@@ -78,11 +80,18 @@ export const SubscriptionsPage: React.FC = () => {
   const [paymentToCancel, setPaymentToCancel] = useState<SubscriptionPayment | null>(null)
   const [paymentCancelReason, setPaymentCancelReason] = useState('')
   const [paymentCancelling, setPaymentCancelling] = useState(false)
+  const [paymentToRefund, setPaymentToRefund] = useState<SubscriptionPayment | null>(null)
+  const [refundAmount, setRefundAmount] = useState('')
+  const [refundReason, setRefundReason] = useState('')
+  const [refundableAmount, setRefundableAmount] = useState(0)
+  const [refundLoading, setRefundLoading] = useState(false)
+  const [refundSaving, setRefundSaving] = useState(false)
   const [paymentsLoading, setPaymentsLoading] = useState(false)
   const [paymentSaving, setPaymentSaving] = useState(false)
   const [ipnRegistering, setIpnRegistering] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentEntryMode, setPaymentEntryMode] = useState<'record' | 'checkout'>('record')
   const [paymentPhone, setPaymentPhone] = useState('')
   const [paymentEmail, setPaymentEmail] = useState('')
   const [paymentPayerName, setPaymentPayerName] = useState('')
@@ -177,6 +186,7 @@ export const SubscriptionsPage: React.FC = () => {
     setPaymentProgress(null)
     setPaymentAmount('')
     setPaymentMethod('cash')
+    setPaymentEntryMode('record')
     setPaymentPhone('')
     setPaymentEmail('')
     setPaymentPayerName('')
@@ -217,7 +227,7 @@ export const SubscriptionsPage: React.FC = () => {
     try {
       const res = await apiFetch('/api/admin/subscriptions/' + selected.id + '/payments', {
         method: 'POST',
-        body: JSON.stringify({ amount: paymentAmount, paymentMethod, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate, phone: paymentPhone, email: paymentEmail, payerName: paymentPayerName }),
+        body: JSON.stringify({ amount: paymentAmount, paymentMethod, paymentMode: paymentEntryMode, reference: paymentReference, notes: paymentNotes, paidAt: paymentDate, phone: paymentPhone, email: paymentEmail, payerName: paymentPayerName }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -282,6 +292,47 @@ export const SubscriptionsPage: React.FC = () => {
       appNotify(error?.message || 'Could not cancel payment receipt')
     } finally {
       setPaymentCancelling(false)
+    }
+  }
+
+  const openRefundDialog = async (payment: SubscriptionPayment) => {
+    setPaymentToRefund(payment)
+    setRefundAmount('')
+    setRefundReason('')
+    setRefundableAmount(0)
+    setRefundLoading(true)
+    try {
+      const response = await apiFetch(`/api/admin/subscription-payments/${payment.id}/refundable`, {})
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.error || 'Could not calculate the invoice overpayment')
+      setRefundableAmount(Number(data.refundableAmount) || 0)
+    } catch (error: any) {
+      appNotify(error?.message || 'Could not calculate refundable overpayment')
+      setPaymentToRefund(null)
+    } finally {
+      setRefundLoading(false)
+    }
+  }
+
+  const handleRefundPayment = async () => {
+    if (!paymentToRefund || !refundReason.trim() || !Number.isFinite(Number(refundAmount)) || Number(refundAmount) <= 0) return
+    setRefundSaving(true)
+    try {
+      const response = await apiFetch(`/api/admin/subscription-payments/${paymentToRefund.id}/refund`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: refundAmount, reason: refundReason.trim() }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.error || 'Could not record refund')
+      setPaymentToRefund(null)
+      await fetchPaymentLedger()
+      if (selected) await fetchPayments(selected.id)
+      await fetchData()
+      appNotify('Refund recorded against the invoice overpayment')
+    } catch (error: any) {
+      appNotify(error?.message || 'Could not record refund')
+    } finally {
+      setRefundSaving(false)
     }
   }
 
@@ -401,13 +452,12 @@ export const SubscriptionsPage: React.FC = () => {
                     <td className="max-w-48 break-all px-4 py-3 text-xs text-gray-600">{payment.reference || payment.merchantReference || '-'}</td>
                     <td className="px-4 py-3 text-xs text-gray-600"><div>{payment.recordedByEmail || 'System / gateway'}</div>{payment.cancelledByEmail && <div className="mt-1 text-red-700">Cancelled by {payment.cancelledByEmail}</div>}{payment.cancellationReason && <div className="mt-0.5 max-w-56 text-red-700">{payment.cancellationReason}</div>}</td>
                     <td className="px-4 py-3 text-xs text-gray-600">{fmtDate(payment.paidAt || payment.createdAt || null)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold">{fmt(Number(payment.amount), payment.currency)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold">{fmt(Number(payment.amount), payment.currency)}{payment.refunds?.length ? <div className="mt-1 text-xs font-normal text-red-700">Refunded {fmt(payment.refunds.reduce((sum, refund) => sum + Number(refund.amount), 0), payment.currency)}</div> : null}</td>
                     <td className="px-4 py-3 text-right">
-                      {payment.status === 'completed' && (!payment.provider || payment.provider === 'manual') ? (
-                        <button type="button" onClick={() => { setPaymentToCancel(payment); setPaymentCancelReason('') }} className="rounded-md p-1.5 text-red-700 hover:bg-red-50" title="Cancel duplicate/manual receipt" aria-label={`Cancel payment for ${payment.tenant?.name || 'business'}`}>
-                          <Ban size={16} />
-                        </button>
-                      ) : payment.status === 'cancelled' ? <span className="text-xs text-gray-500">Cancelled</span> : <span className="text-xs text-gray-400">-</span>}
+                      {payment.status === 'completed' ? <div className="flex justify-end gap-1">
+                        <button type="button" onClick={() => void openRefundDialog(payment)} className="rounded-md p-1.5 text-amber-800 hover:bg-amber-50" title="Record refund of invoice overpayment" aria-label={`Record overpayment refund for ${payment.tenant?.name || 'business'}`}><RotateCcw size={16} /></button>
+                        {(!payment.provider || payment.provider === 'manual') && !payment.refunds?.length && <button type="button" onClick={() => { setPaymentToCancel(payment); setPaymentCancelReason('') }} className="rounded-md p-1.5 text-red-700 hover:bg-red-50" title="Cancel duplicate/manual receipt" aria-label={`Cancel payment for ${payment.tenant?.name || 'business'}`}><Ban size={16} /></button>}
+                      </div> : payment.status === 'cancelled' ? <span className="text-xs text-gray-500">Cancelled</span> : <span className="text-xs text-gray-400">-</span>}
                     </td>
                   </tr>
                 ))}
@@ -502,6 +552,32 @@ export const SubscriptionsPage: React.FC = () => {
         </div>
       )}
 
+      {paymentToRefund && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="refund-payment-title">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div><h2 id="refund-payment-title" className="text-base font-semibold">Record excess payment refund</h2><p className="mt-1 text-sm text-gray-600">Return the funds outside JibuSales first. This records the completed refund and updates the invoice balance; it does not transfer money.</p></div>
+              <button type="button" onClick={() => setPaymentToRefund(null)} className="rounded-md p-1 text-gray-500 hover:bg-gray-100" aria-label="Close refund dialog"><X size={18} /></button>
+            </div>
+            <div className="mb-3 rounded-md bg-gray-50 p-3 text-sm">
+              <div className="font-medium">{paymentToRefund.tenant?.name || 'Business'}</div>
+              <div className="text-gray-600">Receipt {fmt(Number(paymentToRefund.amount), paymentToRefund.currency)} · {paymentToRefund.reference || paymentToRefund.merchantReference || 'No reference'}</div>
+              <div className="mt-1 font-medium text-amber-800">Refundable overpayment: {refundLoading ? 'Calculating...' : fmt(refundableAmount, paymentToRefund.currency)}</div>
+            </div>
+            <label htmlFor="subscription-refund-amount" className="mb-1 block text-sm font-medium">Amount actually refunded</label>
+            <input id="subscription-refund-amount" type="number" min="0.01" max={refundableAmount} step="0.01" inputMode="decimal" value={refundAmount} onChange={event => setRefundAmount(event.target.value)} className="mb-3 w-full rounded-md border px-3 py-2 text-sm" />
+            <label htmlFor="subscription-refund-reason" className="mb-1 block text-sm font-medium">Reason</label>
+            <textarea id="subscription-refund-reason" value={refundReason} onChange={event => setRefundReason(event.target.value)} maxLength={500} rows={3} className="w-full rounded-md border px-3 py-2 text-sm" placeholder="For example: excess amount returned by bank transfer" />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setPaymentToRefund(null)} disabled={refundSaving} className="rounded-md border px-3 py-2 text-sm">Close</button>
+              <button type="button" onClick={() => void handleRefundPayment()} disabled={refundSaving || refundLoading || refundableAmount <= 0 || !refundAmount || Number(refundAmount) > refundableAmount || !refundReason.trim()} className="inline-flex items-center gap-2 rounded-md bg-amber-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                {refundSaving && <Loader2 size={15} className="animate-spin" />}Record refund
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -527,38 +603,38 @@ export const SubscriptionsPage: React.FC = () => {
                 {ipnRegistering ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Register Pesapal notifications
               </button>
-              <p className="mb-3 text-xs text-gray-500">Record money already received, or send the business to Pesapal checkout. This tenant-specific amount never changes the shared plan price.</p>
-              {['mobile_money', 'card'].includes(paymentMethod) ? (
+              <div className="mb-3 grid grid-cols-2 gap-1 rounded-md border bg-gray-50 p-1">
+                <button type="button" onClick={() => setPaymentEntryMode('record')} className={`rounded px-2 py-2 text-xs font-medium ${paymentEntryMode === 'record' ? 'bg-white text-emerald-800 shadow-sm' : 'text-gray-600 hover:bg-white/70'}`}>Record payment received</button>
+                <button type="button" onClick={() => { setPaymentEntryMode('checkout'); if (!['mobile_money', 'card'].includes(paymentMethod)) setPaymentMethod('mobile_money') }} className={`rounded px-2 py-2 text-xs font-medium ${paymentEntryMode === 'checkout' ? 'bg-white text-emerald-800 shadow-sm' : 'text-gray-600 hover:bg-white/70'}`}>Request PesaPal payment</button>
+              </div>
+              <p className="mb-3 text-xs text-gray-500">Record a payment already received through any method, or send a fresh mobile-money/card request through PesaPal. This tenant-specific amount never changes the shared plan price.</p>
+              <div className="mb-3">
+                <label className="mb-1 block text-xs font-medium text-gray-500">{paymentEntryMode === 'record' ? 'Amount received' : 'Amount to request'} ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
+                <input type="number" min="0.01" step="0.01" inputMode="decimal" required value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              </div>
+              {paymentEntryMode === 'checkout' ? (
                 <div className="space-y-3">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
                     <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
-                      <option value="cash">Cash</option>
                       <option value="mobile_money">Mobile money via Pesapal</option>
-                      <option value="bank_transfer">Bank transfer</option>
                       <option value="card">Card via Pesapal</option>
-                      <option value="other">Other</option>
                     </select>
                   </div>
-                  <p className="text-xs text-gray-500">Click below to open the PesaPal payment page to complete the payment.</p>
-                  <button type="button" onClick={() => window.open('/saas/payment', '_blank')} className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800">
-                    <CreditCard size={16} />
-                    Make Payment via PesaPal
-                  </button>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div><label className="mb-1 block text-xs font-medium text-gray-500">Payer phone</label><input value={paymentPhone} onChange={e => setPaymentPhone(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                    <div><label className="mb-1 block text-xs font-medium text-gray-500">Payer email</label><input type="email" value={paymentEmail} onChange={e => setPaymentEmail(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" /></div>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-500">Amount received ({selected.customCurrency || selected.plan?.currency || 'UGX'})</label>
-                    <input type="number" min="0.01" step="0.01" inputMode="decimal" required value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                  </div>
-                  <div>
                     <label className="mb-1 block text-xs font-medium text-gray-500">Payment method</label>
                     <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm">
                       <option value="cash">Cash</option>
-                      <option value="mobile_money">Mobile money via Pesapal</option>
+                      <option value="mobile_money">Mobile money (received)</option>
                       <option value="bank_transfer">Bank transfer</option>
-                      <option value="card">Card via Pesapal</option>
+                      <option value="card">Card (received)</option>
                       <option value="other">Other</option>
                     </select>
                   </div>
@@ -580,12 +656,12 @@ export const SubscriptionsPage: React.FC = () => {
                   </div>
                 </div>
               )}
-              {!['mobile_money', 'card'].includes(paymentMethod) && (
+              {paymentEntryMode === 'record' ? (
                 <button type="button" onClick={handleRecordPayment} disabled={paymentSaving || !paymentAmount || Number(paymentAmount) <= 0} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
                   {paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
                   Record payment received
                 </button>
-              )}
+              ) : <button type="button" onClick={handleRecordPayment} disabled={paymentSaving || !paymentAmount || Number(paymentAmount) <= 0 || (!paymentPhone.trim() && !paymentEmail.trim())} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">{paymentSaving ? <Loader2 size={16} className="animate-spin" /> : <CreditCard size={16} />}Start PesaPal checkout</button>}
               <div className="mt-4 border-t pt-3">
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Payment history</h4>
                 {paymentsLoading ? <div className="py-3 text-center text-xs text-gray-500">Loading payments...</div> : payments.length === 0 ? <div className="py-3 text-center text-xs text-gray-500">No payments recorded</div> : (
@@ -596,6 +672,7 @@ export const SubscriptionsPage: React.FC = () => {
                           <div className="font-medium">{payment.paymentMethod.replace('_', ' ')} · {payment.status || 'completed'}{payment.reference ? ' · ' + payment.reference : payment.merchantReference ? ' · ' + payment.merchantReference : ''}</div>
                           <div className="mt-0.5 text-gray-500">{payment.paidAt ? fmtDate(payment.paidAt) : 'Payment date pending'}{payment.recordedByEmail ? ' · recorded by ' + payment.recordedByEmail : ''}</div>
                           {payment.notes && <div className="mt-1 break-words text-gray-500">{payment.notes}</div>}
+                          {payment.refunds?.map(refund => <div key={refund.id} className="mt-1 text-red-700">Refund {fmt(Number(refund.amount), payment.currency)} · {fmtDate(refund.refundedAt)} · {refund.reason}</div>)}
                         </div>
                         <strong className="whitespace-nowrap">{fmt(Number(payment.amount), payment.currency)}</strong>
                       </div>

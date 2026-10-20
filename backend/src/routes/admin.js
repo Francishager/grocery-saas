@@ -2,7 +2,6 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes, randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { normalizeSubscriptionPaymentAmount } from "../utils/subscriptionPayments.js";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
 import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js";
@@ -10,7 +9,7 @@ import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
 import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
-import { cancelManualSubscriptionPayment, getSubscriptionPaymentProgress, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { cancelManualSubscriptionPayment, extendSettledSubscriptionTerm, getRefundableSubscriptionPaymentAmount, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, recordSubscriptionPaymentRefund, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
 
@@ -146,7 +145,7 @@ async function changeTenantStatus(req, res, forcedStatus = null) {
 
     const tenant = await prisma.tenant.update({
       where: { id: req.params.id },
-      data: { status },
+      data: { status, paymentReminderStatus: status === 'suspended' ? 'admin_suspended' : null },
       include: { plan: true },
     });
     const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });
@@ -215,7 +214,10 @@ async function updateSubscription(req, res) {
     const planUpdateData = {};
 
     if (targetPlanId) data.planId = targetPlanId;
-    if (normalizedStatus) data.status = normalizedStatus;
+    if (normalizedStatus) {
+      data.status = normalizedStatus;
+      data.paymentReminderStatus = normalizedStatus === 'suspended' ? 'admin_suspended' : null;
+    }
     if (subscriptionStart !== undefined) data.subscriptionStart = subscriptionStart ? new Date(subscriptionStart) : null;
     if (subscriptionEnd !== undefined) data.subscriptionEnd = subscriptionEnd ? new Date(subscriptionEnd) : null;
     if (trialEndsAt !== undefined) data.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
@@ -839,7 +841,7 @@ router.get("/subscription-payments", authenticateToken, requirePlatformAdmin, as
     const [payments, total] = await Promise.all([
       prisma.subscriptionPayment.findMany({
         where,
-        include: { tenant: { select: { id: true, name: true, slug: true, status: true } } },
+        include: { tenant: { select: { id: true, name: true, slug: true, status: true } }, refunds: true },
         orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
         skip: (page - 1) * limit,
         take: limit,
@@ -859,6 +861,56 @@ router.get("/subscription-payments", authenticateToken, requirePlatformAdmin, as
   }
 });
 
+router.get("/subscription-payments/:paymentId/refundable", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const result = await getRefundableSubscriptionPaymentAmount(prisma, req.params.paymentId);
+    if (result.error === "not_refundable") return res.status(409).json({ error: "Only completed payments can be refunded" });
+    if (result.error === "invoice_unavailable") return res.status(409).json({ error: "This legacy payment has no invoice allocation, so an excess refund cannot be safely calculated" });
+    res.json({ refundableAmount: result.refundableAmount, currency: result.payment.currency, invoiceTotal: result.billedTotal });
+  } catch (err) {
+    console.error("Subscription payment refund availability error:", err);
+    res.status(500).json({ error: "Failed to calculate refundable overpayment" });
+  }
+});
+
+router.post("/subscription-payments/:paymentId/refund", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    let amount;
+    try { amount = normalizeSubscriptionPaymentAmount(req.body?.amount); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ error: "Enter a reason for the refund" });
+    const result = await recordSubscriptionPaymentRefund(prisma, {
+      paymentId: req.params.paymentId,
+      amount,
+      reason,
+      adminId: req.user?.id,
+      adminEmail: req.user?.email,
+    });
+    if (result.error === "not_refundable") return res.status(409).json({ error: "Only completed payments can be refunded" });
+    if (result.error === "invoice_unavailable") return res.status(409).json({ error: "This legacy payment has no invoice allocation, so an excess refund cannot be safely calculated" });
+    if (result.error === "invalid_amount") return res.status(400).json({ error: "Refund amount must be greater than zero" });
+    if (result.error === "exceeds_overpayment") return res.status(409).json({ error: `Refund exceeds the available invoice overpayment of ${result.refundableAmount.toFixed(2)} ${result.payment.currency}` });
+
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: result.payment.tenantId,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "subscription_payment_refunded",
+      model: "SubscriptionPaymentRefund",
+      recordId: result.refund.id,
+      changes: { paymentId: result.payment.id, amount: result.refund.amount.toString(), currency: result.refund.currency, reason },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "warning",
+    }).catch(() => {});
+    res.status(201).json({ message: "Refund recorded", refund: { ...result.refund, amount: result.refund.amount.toString() }, refundableAmount: result.refundableAmount });
+  } catch (err) {
+    console.error("Subscription payment refund error:", err);
+    res.status(500).json({ error: "Failed to record subscription payment refund" });
+  }
+});
+
 router.post("/subscription-payments/:paymentId/cancel", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const reason = String(req.body?.reason || "").trim().slice(0, 500);
@@ -871,6 +923,7 @@ router.post("/subscription-payments/:paymentId/cancel", authenticateToken, requi
     });
     if (result.error === "not_found") return res.status(404).json({ error: "Payment record not found" });
     if (result.error === "not_manual") return res.status(409).json({ error: "Gateway payments cannot be cancelled here. Confirm the provider transaction and use the provider refund process if money was charged." });
+    if (result.error === "has_refunds") return res.status(409).json({ error: "A receipt with recorded refunds cannot be cancelled. Use a separately audited correction." });
     if (result.error === "not_completed" || result.error === "already_changed") return res.status(409).json({ error: "This payment is no longer an active received receipt" });
 
     auditLog({
@@ -919,6 +972,7 @@ router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmi
     if (!tenant) return res.status(404).json({ error: "Business not found" });
     const payments = await prisma.subscriptionPayment.findMany({
       where: { tenantId: tenant.id },
+      include: { refunds: true },
       orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
     });
     for (const payment of payments) {
@@ -933,6 +987,7 @@ router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmi
     }
     const refreshedPayments = await prisma.subscriptionPayment.findMany({
       where: { tenantId: tenant.id },
+      include: { refunds: true },
       orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
     });
     const progress = await getSubscriptionPaymentProgress(prisma, tenant.id);
@@ -957,6 +1012,9 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
     if (!SUBSCRIPTION_PAYMENT_METHODS.has(method)) {
       return res.status(400).json({ error: "Choose a supported payment method" });
     }
+    const paymentMode = String(req.body?.paymentMode || (["mobile_money", "card"].includes(method) ? "checkout" : "record")).trim().toLowerCase();
+    if (!["record", "checkout"].includes(paymentMode)) return res.status(400).json({ error: "Choose whether to record a received payment or start checkout" });
+    if (paymentMode === "checkout" && !["mobile_money", "card"].includes(method)) return res.status(400).json({ error: "Pesapal checkout supports mobile money or card" });
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true, owner: { select: { fname: true, lname: true, email: true, phone: true } } } });
     if (!tenant) return res.status(404).json({ error: "Business not found" });
     const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
@@ -965,7 +1023,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
     const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 2000) || null : null;
     const cleanPayerName = typeof payerName === "string" ? payerName.trim().slice(0, 160) || null : null;
 
-    if (["mobile_money", "card"].includes(method)) {
+    if (paymentMode === "checkout") {
       const payerPhone = String(phone || tenant.owner?.phone || "").trim();
       const payerEmail = String(email || tenant.owner?.email || tenant.email || "").trim();
       if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter the payer phone number or email for Pesapal checkout" });
@@ -1025,7 +1083,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           lastName: tenant.owner?.lname || "Business",
         });
         const payment = await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { gatewayTrackingId: order.trackingId, checkoutUrl: order.checkoutUrl } });
-        await prisma.tenant.update({ where: { id: tenant.id }, data: { billingPaymentMethod: method, billingPaymentReference: merchantReference, billingNotes: cleanNotes ?? tenant.billingNotes, paymentReminderStatus: "due_soon", paymentReminderSentAt: new Date() } });
+        await prisma.tenant.update({ where: { id: tenant.id }, data: { billingPaymentMethod: method, billingPaymentReference: merchantReference, billingNotes: cleanNotes ?? tenant.billingNotes, paymentReminderStatus: tenant.status === 'suspended' && tenant.paymentReminderStatus === 'admin_suspended' ? 'admin_suspended' : 'due_soon', paymentReminderSentAt: new Date() } });
         return res.status(201).json({ message: "Pesapal checkout is ready", payment: { ...payment, amount: payment.amount.toString() }, checkoutUrl: payment.checkoutUrl, status: "pending" });
       } catch (error) {
         await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { status: "failed", notes: String(error?.message || "Pesapal order setup failed").slice(0, 2000) } });
@@ -1086,8 +1144,9 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
           billingNotes: cleanNotes ?? tenant.billingNotes,
         },
       });
+      const settledTerm = await extendSettledSubscriptionTerm(tx, tenant.id, new Date());
       const progress = await refreshSubscriptionPaymentStatus(tx, tenant.id, new Date());
-      return { receipt, progress };
+      return { receipt, progress, subscriptionEnd: settledTerm?.subscriptionEnd || null };
     });
 
     auditLog({
@@ -1103,7 +1162,7 @@ router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdm
       severity: "info",
     }).catch(() => {});
 
-    res.status(201).json({ message: "Subscription payment recorded", payment: { ...payment.receipt, amount: payment.receipt.amount.toString() }, progress: payment.progress });
+    res.status(201).json({ message: "Subscription payment recorded", payment: { ...payment.receipt, amount: payment.receipt.amount.toString() }, progress: payment.progress, subscriptionEnd: payment.subscriptionEnd });
   } catch (err) {
     console.error("Subscription payment record error:", err);
     res.status(500).json({ error: "Failed to record subscription payment" });

@@ -20,6 +20,7 @@ type BillingReminder = {
   isDueSoon?: boolean
   isGracePeriodActive?: boolean
   isOverdue?: boolean
+  paymentStatus?: string
 }
 
 function formatAmount(value: unknown, currency: string) {
@@ -56,23 +57,35 @@ export function SubscriptionBillingReminder() {
     }
 
     let active = true
-    apiFetch('/api/tenants/me/billing-reminder')
-      .then(async response => {
-        if (!response.ok) return null
-        return response.json() as Promise<BillingReminder>
-      })
-      .then(data => {
-        if (!active || !data) return
+    let previousNeedsAttention: boolean | null = null
+    const refresh = async () => {
+      try {
+        const response = await apiFetch('/api/tenants/me/billing-reminder')
+        if (!response.ok) return
+        const data = await response.json() as BillingReminder
+        if (!active) return
         const needsAttention = Boolean(
-          data.isTrialActive || data.isPartiallyPaid || data.isDueSoon ||
-          data.isGracePeriodActive || data.isOverdue
+          data.isTrialActive || (data.paymentStatus !== 'paid' && (
+            data.isPartiallyPaid || data.isDueSoon || data.isGracePeriodActive || data.isOverdue
+          ))
         )
         setReminder(needsAttention ? data : null)
-        setOpen(needsAttention)
-      })
-      .catch(() => {})
+        const shouldAutoOpen = previousNeedsAttention === null || (!previousNeedsAttention && needsAttention)
+        setOpen(current => shouldAutoOpen ? needsAttention : current && needsAttention)
+        previousNeedsAttention = needsAttention
+      } catch { /* retain the last confirmed billing state while offline */ }
+    }
+    void refresh()
+    const interval = window.setInterval(() => void refresh(), 30000)
+    window.addEventListener('focus', refresh)
+    window.addEventListener('subscription-payment-updated', refresh)
 
-    return () => { active = false }
+    return () => {
+      active = false
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('subscription-payment-updated', refresh)
+    }
   }, [tenantId, authenticated, canPay])
 
   if (!reminder) return null
