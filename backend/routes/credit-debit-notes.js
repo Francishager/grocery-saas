@@ -920,6 +920,14 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
     if (!existing) return res.status(404).json({ error: 'Credit note not found' })
     if (existing.status === 'cancelled') return res.status(400).json({ error: 'Cannot edit a cancelled credit note' })
 
+    if (req.body.amount !== undefined || req.body.reason !== undefined) {
+      const appliedCredit = await prisma.customerCreditApplication.aggregate({
+        where: { tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: existing.id },
+        _sum: { amount: true },
+      })
+      if (Number(appliedCredit._sum.amount || 0) > 0) return res.status(409).json({ error: 'This credit note has already been applied to a later sale, so its amount and reason are locked to protect the customer balance.' })
+    }
+
     const accountingConfig = await getReceivablesAccountingConfig(prisma, tenantId)
     if (accountingConfig?.isEnabled && (req.body.amount !== undefined || req.body.reason !== undefined)) {
       return res.status(409).json({ error: 'This credit note is accounted for. Cancel it with the reversal workflow and issue a corrected note so the audit trail stays intact.' })
@@ -944,6 +952,14 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
     if (notes !== undefined) updates.notes = notes
 
     const note = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM credit_notes WHERE id = ${existing.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      if (updates.amount !== undefined || updates.reason !== undefined) {
+        const lockedApplications = await tx.customerCreditApplication.aggregate({
+          where: { tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: existing.id },
+          _sum: { amount: true },
+        })
+        if (Number(lockedApplications._sum.amount || 0) > 0) throw httpError(409, 'This credit note has already been applied to a later sale, so its amount and reason are locked to protect the customer balance.')
+      }
       const existingAffectsStock = CREDIT_STOCK_REASONS.has(normalizeReason(existing.reason))
       const nextAffectsStock = CREDIT_STOCK_REASONS.has(normalizedReason)
       if (existingAffectsStock !== nextAffectsStock) {
@@ -976,8 +992,19 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
     const existing = await prisma.creditNote.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
     if (!existing) return res.status(404).json({ error: 'Credit note not found' })
     if (existing.status === 'cancelled') return res.status(400).json({ error: 'Credit note is already cancelled' })
+    const appliedCredit = await prisma.customerCreditApplication.aggregate({
+      where: { tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: existing.id },
+      _sum: { amount: true },
+    })
+    if (Number(appliedCredit._sum.amount || 0) > 0) return res.status(409).json({ error: 'This credit note has already been applied to a later sale and cannot be cancelled without first reversing the related sale settlement.' })
 
     const note = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM credit_notes WHERE id = ${existing.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const lockedApplications = await tx.customerCreditApplication.aggregate({
+        where: { tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: existing.id },
+        _sum: { amount: true },
+      })
+      if (Number(lockedApplications._sum.amount || 0) > 0) throw httpError(409, 'This credit note has already been applied to a later sale and cannot be cancelled without first reversing the related sale settlement.')
       await reverseCreditNoteStockReturn(tx, existing.tenantId, existing.noteNo)
       await reverseCreditNotePaidRefund(tx, scope, existing, req.user.id)
       await reverseReceivablesJournal(tx, { tenantId: scope.tenantId, sourceType: 'RECEIVABLE_CREDIT_NOTE', sourceId: existing.id, userId: req.user.id, reason: `Credit note ${existing.noteNo} cancelled` })

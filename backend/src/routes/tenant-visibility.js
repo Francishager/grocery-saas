@@ -22,7 +22,7 @@ function parsePositiveInt(value, fallback, max) {
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
 }
 
-function toPlatformAuditEntry(log, tenantNames, userEmails) {
+function toPlatformAuditEntry(log, tenantNames, userEmails, branchNames) {
   const tenantId = log.tenantId === 'platform' ? log.targetTenantId : log.tenantId;
   const isPlatformAction = log.tenantId === 'platform';
   const metrics = log.changes && typeof log.changes === 'object' ? log.changes : {};
@@ -31,6 +31,9 @@ function toPlatformAuditEntry(log, tenantNames, userEmails) {
     tenantId,
     tenantName: tenantNames.get(tenantId) || (isPlatformAction ? 'Platform' : 'Business unavailable'),
     actor: log.userEmail || userEmails.get(log.userId) || (isPlatformAction ? 'Platform administrator' : 'Email unavailable'),
+    subjectEmail: log.subjectEmail || null,
+    branchId: log.branchId || null,
+    branchName: log.branchName || branchNames.get(log.branchId) || null,
     ip: log.ip || null,
     engagement: ['view', 'engagement'].includes(log.action) ? {
       activeMs: Number(metrics.activeMs) || 0,
@@ -67,7 +70,7 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
       if (to && !Number.isNaN(to.getTime())) where.createdAt.lte = to;
     }
     if (search) {
-      const [matchedTenants, matchedUsers] = await Promise.all([
+      const [matchedTenants, matchedUsers, matchedBranches] = await Promise.all([
         prisma.tenant.findMany({
           where: { OR: [
             { name: { contains: search, mode: 'insensitive' } },
@@ -77,11 +80,15 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
           take: 100,
         }),
         prisma.user.findMany({ where: { email: { contains: search, mode: 'insensitive' } }, select: { id: true }, take: 100 }),
+        prisma.branch.findMany({ where: { name: { contains: search, mode: 'insensitive' } }, select: { id: true }, take: 100 }),
       ]);
       const searchClause = { OR: [
         { action: { contains: search, mode: 'insensitive' } },
         { model: { contains: search, mode: 'insensitive' } },
         { userEmail: { contains: search, mode: 'insensitive' } },
+        { subjectEmail: { contains: search, mode: 'insensitive' } },
+        { branchName: { contains: search, mode: 'insensitive' } },
+        { branchId: { in: matchedBranches.map(item => item.id) } },
         { ip: { contains: search, mode: 'insensitive' } },
         { userId: { in: matchedUsers.map(item => item.id) } },
         { tenantId: { in: matchedTenants.map(item => item.id) } },
@@ -96,15 +103,20 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
-        select: { id: true, tenantId: true, targetTenantId: true, userId: true, userEmail: true, ip: true, action: true, model: true, changes: true, statusCode: true, severity: true, createdAt: true },
+        select: { id: true, tenantId: true, targetTenantId: true, userId: true, userEmail: true, subjectUserId: true, subjectEmail: true, branchId: true, branchName: true, ip: true, action: true, model: true, changes: true, statusCode: true, severity: true, createdAt: true },
       }),
       prisma.auditLog.count({ where }),
     ]);
     const relatedTenantIds = [...new Set(logs.flatMap(log => [log.tenantId === 'platform' ? log.targetTenantId : log.tenantId].filter(Boolean)))];
+    const relatedBranchIds = [...new Set(logs.map(log => log.branchId).filter(Boolean))];
     const tenants = relatedTenantIds.length
       ? await prisma.tenant.findMany({ where: { id: { in: relatedTenantIds } }, select: { id: true, name: true } })
       : [];
+    const branches = relatedBranchIds.length
+      ? await prisma.branch.findMany({ where: { id: { in: relatedBranchIds } }, select: { id: true, name: true } })
+      : [];
     const tenantNames = new Map(tenants.map(tenant => [tenant.id, tenant.name]));
+    const branchNames = new Map(branches.map(branch => [branch.id, branch.name]));
     const missingEmailUserIds = [...new Set(logs.filter(log => !log.userEmail && log.userId && !log.userId.startsWith('system')).map(log => log.userId))];
     const usersWithEmail = missingEmailUserIds.length
       ? await prisma.user.findMany({ where: { id: { in: missingEmailUserIds } }, select: { id: true, email: true } })
@@ -112,7 +124,7 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
     const userEmails = new Map(usersWithEmail.filter(user => user.email).map(user => [user.id, user.email]));
 
     res.json({
-      logs: logs.map(log => toPlatformAuditEntry(log, tenantNames, userEmails)),
+      logs: logs.map(log => toPlatformAuditEntry(log, tenantNames, userEmails, branchNames)),
       pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
       refreshedAt: new Date().toISOString(),
     });

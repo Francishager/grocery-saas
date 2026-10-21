@@ -550,6 +550,7 @@ export function TenantLayout() {
     return true
   })
   const visibleNavItems = navItems.filter((item) => {
+    if (item.feature === 'dashboard') return canAccessFeature('dashboard')
     if (item.isProcurement) return visibleProcurementBuyerItems.length > 0 || visibleProcurementSellerItems.length > 0
     // Special handling for Communication: only show if the exact 'communication' feature is enabled
     // (not when only sub-features like 'communication.notifications' are enabled)

@@ -25,7 +25,10 @@ function fixture() {
     customer: { findFirst: async () => customer, updateMany: update([customer]) },
     saleRecord: { findMany: async () => [sale], updateMany: update([sale]) },
     creditNote: { findMany: async () => notes.filter((note) => note.status !== 'cancelled'), updateMany: update(notes) },
-    customerPayment: { ...zero, findMany: async () => [] }, customerWithdrawal: zero, saleReturn: zero,
+    customerPayment: { ...zero, findMany: async () => [] },
+    customerPaymentAllocation: { findMany: async () => [], groupBy: async () => [] },
+    customerCreditApplication: { findMany: async () => [] },
+    customerWithdrawal: zero, saleReturn: { ...zero, findMany: async () => [] },
     auditLog: { create: async ({ data }) => { audits.push(data); } },
   };
   const plan = async () => {

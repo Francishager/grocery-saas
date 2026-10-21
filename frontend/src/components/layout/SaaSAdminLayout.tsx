@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, KeyRound, LoaderCircle } from 'lucide-react'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, Fuel, KeyRound, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -24,6 +24,7 @@ const navItems: Array<{ to: string; label: string; icon: typeof LayoutDashboard;
   { to: '/saas/user-guide', label: 'User Guide', icon: BookOpen, permission: 'view_platform_content' },
   { to: '/saas/manufacturing-guide', label: 'Manufacturing Guide', icon: Factory, permission: 'view_platform_content' },
   { to: '/saas/procurement-guide', label: 'Procurement Guide', icon: Store, permission: 'view_platform_content' },
+  { to: '/saas/fuel-station-guide', label: 'Fuel Station Guide', icon: Fuel, permission: 'view_platform_content' },
 ]
 
 export function SaaSAdminLayout() {

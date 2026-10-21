@@ -168,6 +168,47 @@ export function receiptCollectionLines(config, { transactionAccountId, amount, r
   return lines
 }
 
+export function customerCreditApplicationLines(config, { amount, reference }) {
+  const value = money(amount)
+  return [
+    { accountId: config.customerAdvancesAccountId, debit: value, credit: 0, description: `Apply customer advance ${reference || ''}`.trim() },
+    { accountId: config.receivableAccountId, debit: 0, credit: value, description: `Apply customer credit to receivable ${reference || ''}`.trim() },
+  ]
+}
+
+export async function postCustomerCreditApplicationJournal(client, { tenantId, branchId = null, userId, application, reference }) {
+  const config = await getReceivablesAccountingConfig(client, tenantId)
+  if (!config?.isEnabled) return { posted: false, disabled: true }
+  const receiptEntry = await client.journalEntry.findFirst({
+    where: { tenantId, sourceType: 'CUSTOMER_RECEIPT', sourceId: application.sourceId, status: 'posted' },
+    include: { lines: true },
+  })
+  if (!receiptEntry) throw Object.assign(new Error('This customer credit comes from a receipt without a posted advances-account entry. Reconcile the original receipt before applying it.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_SOURCE_MISSING' })
+  const advancesCredit = money(receiptEntry.lines.filter((line) => line.accountId === config.customerAdvancesAccountId)
+    .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0))
+  const previousApplications = await client.customerCreditApplication.findMany({
+    where: { tenantId, sourceType: 'payment', sourceId: application.sourceId, id: { not: application.id } },
+    select: { id: true },
+  })
+  const previousApplicationEntries = previousApplications.length ? await client.journalEntry.findMany({
+    where: { tenantId, sourceType: 'CUSTOMER_CREDIT_APPLICATION', sourceId: { in: previousApplications.map((row) => row.id) }, status: 'posted' },
+    include: { lines: true },
+  }) : []
+  const alreadyApplied = money(previousApplicationEntries.reduce((sum, entry) => sum + entry.lines
+    .filter((line) => line.accountId === config.customerAdvancesAccountId)
+    .reduce((entrySum, line) => entrySum + money(line.debit) - money(line.credit), 0), 0))
+  if (money(advancesCredit - alreadyApplied) + 0.01 < money(application.amount)) {
+    throw Object.assign(new Error('The original receipt does not have enough unapplied customer-advance balance in the general ledger. Reconcile the receipt before using this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_BALANCE_INSUFFICIENT' })
+  }
+  return postReceivablesJournal(client, {
+    tenantId, branchId, userId,
+    sourceType: 'CUSTOMER_CREDIT_APPLICATION', sourceId: application.id,
+    date: application.createdAt, reference,
+    description: `Customer credit applied to ${reference || 'receivable sale'}`,
+    lines: customerCreditApplicationLines(config, { amount: application.amount, reference }),
+  })
+}
+
 export function customerOpeningBalanceLines(config, amount, description = 'Customer opening balance') {
   const value = money(amount)
   if (value < 0) throw Object.assign(new Error('Customer opening balance cannot be negative.'), { statusCode: 400 })

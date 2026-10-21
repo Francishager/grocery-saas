@@ -5,6 +5,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { permissionsForUser } from "../utils/permissions.js";
 import { sendMail } from "../../mailer.js";
+import { auditLog } from "../utils/audit.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 import { getJwtSecret } from "../utils/jwtSecret.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
@@ -246,6 +247,19 @@ router.post("/accept", invitationAttemptLimiter, async (req, res) => {
         tenantId,
         role: "owner",
       },
+    });
+    await auditLog({
+      tenantId: tenantId || "platform",
+      targetTenantId: tenantId || null,
+      userId: "system:invitation-acceptance",
+      userEmail: "JibuSales invitation service",
+      subjectUserId: user.id,
+      subjectEmail: user.email,
+      action: "user_account_created",
+      model: "User",
+      recordId: user.id,
+      changes: { role: user.role, source: "invitation" },
+      ip: req.headers?.["cf-connecting-ip"] || req.ip || req.socket?.remoteAddress,
     });
     if (tenantId) await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
 

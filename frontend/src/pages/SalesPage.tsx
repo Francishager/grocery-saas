@@ -353,6 +353,7 @@ export default function SalesPage() {
   const cartTax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
   const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
+  const hasValidAmountPaid = amountPaid !== '' && Number.isFinite(Number(amountPaid)) && Number(amountPaid) > 0
   const matchedCustomer = useMemo(() => {
     const name = customerName.trim().toLowerCase()
     if (!name) return null
@@ -1181,9 +1182,10 @@ export default function SalesPage() {
                           value={amountPaid}
                           onChange={(e) => setAmountPaid(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
                           className="w-32 h-8 text-sm text-right"
-                          placeholder="0"
+                          placeholder="Enter amount"
                         />
                       </div>
+                      {!hasValidAmountPaid && <p className="text-xs text-muted-foreground">Enter the amount received to enable checkout.</p>}
                       {amountPaid !== '' && amountPaid > 0 && (
                         <div className="flex justify-between text-sm">
                           <span className={changeDue > 0 ? 'font-medium text-green-600' : 'font-medium text-muted-foreground'}>
@@ -1267,7 +1269,7 @@ export default function SalesPage() {
                     <Button
                       className="w-full"
                       onClick={handleCheckout}
-                      disabled={processing || (
+                      disabled={processing || !hasValidAmountPaid || cartTotal <= 0 || (
                         paymentMode === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
                         paymentMode === 'card' ? !transactionId.trim() :
                         false

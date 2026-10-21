@@ -38,6 +38,7 @@ function logAuthenticationEvent(req, action, user = null, statusCode = 200) {
     targetTenantId: user?.tenantId || null,
     userId: user?.id || "unknown",
     userEmail: user?.email || String(req.body?.email || '').trim().toLowerCase().slice(0, 254),
+    branchId: primaryBranchId(user),
     action,
     model: "Authentication",
     statusCode,
@@ -133,7 +134,7 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
     const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
     const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, branchId: primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
       getJwtSecret(),
       { expiresIn: "15m" }
     );
@@ -199,7 +200,7 @@ router.post("/refresh", refreshLimiter, async (req, res) => {
     const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
 
     const accessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, branchId: primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
       getJwtSecret(),
       { expiresIn: "15m" }
     );

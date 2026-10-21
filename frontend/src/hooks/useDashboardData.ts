@@ -3,7 +3,39 @@ import { dashboardApi, type DashboardKpis, type SalesChartData, type ProfitLossD
 import { getLocalDashboardKpis, getLocalDashboardCharts } from '@/db/hybrid'
 import { getSyncStatus, onSyncStatusChange } from '@/db/sync'
 
-export function useDashboardData(enabled: boolean, online: boolean, scopeKey: string) {
+export interface DashboardDataAccess {
+  sales: boolean
+  finance: boolean
+  expenses: boolean
+  inventory: boolean
+  customers: boolean
+  receivables: boolean
+  tax: boolean
+}
+
+function maskKpis(value: DashboardKpis, access: DashboardDataAccess): DashboardKpis {
+  return {
+    ...value,
+    revenue: access.sales ? value.revenue : null,
+    revenueChange: access.sales ? value.revenueChange : null,
+    salesCount: access.sales ? value.salesCount : null,
+    taxCollected: access.tax ? value.taxCollected : null,
+    totalDiscount: access.sales ? value.totalDiscount : null,
+    purchases: null,
+    expenses: access.expenses ? value.expenses : null,
+    cogs: access.finance ? value.cogs : null,
+    grossProfit: access.finance ? value.grossProfit : null,
+    netProfit: access.finance ? value.netProfit : null,
+    productCount: access.inventory ? value.productCount : null,
+    lowStockCount: access.inventory ? value.lowStockCount : null,
+    expiringCount: access.inventory ? value.expiringCount : null,
+    customerCount: access.customers ? value.customerCount : null,
+    receivablesOutstanding: access.receivables ? value.receivablesOutstanding : null,
+    receivablesCount: access.receivables ? value.receivablesCount : null,
+  }
+}
+
+export function useDashboardData(enabled: boolean, online: boolean, scopeKey: string, access: DashboardDataAccess) {
   const [kpis, setKpis] = useState<DashboardKpis | null>(null)
   const [salesChart, setSalesChart] = useState<SalesChartData | null>(null)
   const [profitLoss, setProfitLoss] = useState<ProfitLossData | null>(null)
@@ -31,11 +63,15 @@ export function useDashboardData(enabled: boolean, online: boolean, scopeKey: st
       try {
         const [localKpis, charts] = await Promise.all([getLocalDashboardKpis(), getLocalDashboardCharts()])
         if (!current()) return
-        setKpis(localKpis)
-        setSalesChart(charts.salesChart)
-        setProfitLoss(charts.profitLoss)
-        setTopProducts(charts.topProducts)
-        setPaymentMethods(charts.paymentMethods)
+        setKpis(maskKpis(localKpis, access))
+        setSalesChart({
+          labels: charts.salesChart.labels,
+          revenue: access.sales ? charts.salesChart.revenue : [],
+          expenses: access.expenses ? charts.salesChart.expenses : [],
+        })
+        setProfitLoss(access.finance ? charts.profitLoss : null)
+        setTopProducts(access.sales && access.inventory ? charts.topProducts : [])
+        setPaymentMethods(access.sales ? charts.paymentMethods : [])
         setDailyPerf(null)
         setIsOfflineData(true)
       } catch {
@@ -49,7 +85,7 @@ export function useDashboardData(enabled: boolean, online: boolean, scopeKey: st
     // Each response updates only its own section. A failed chart must not replace verified balances.
     const kpiRequest = dashboardApi.getKpis(controller.signal).then((value) => {
       if (!current()) return
-      setKpis(value)
+      setKpis(maskKpis(value, access))
       setIsOfflineData(false)
     }).catch(() => {
       if (current()) setError('Could not refresh dashboard totals. Please retry.')
@@ -63,14 +99,14 @@ export function useDashboardData(enabled: boolean, online: boolean, scopeKey: st
     })
     await Promise.allSettled([
       kpiRequest,
-      section(dashboardApi.getSalesChart(controller.signal), setSalesChart),
-      section(dashboardApi.getProfitLoss(controller.signal), setProfitLoss),
-      section(dashboardApi.getTopProducts(controller.signal), setTopProducts),
-      section(dashboardApi.getPaymentMethods(controller.signal), setPaymentMethods),
-      section(dashboardApi.getDailyPerformance(controller.signal), setDailyPerf),
+      ...(access.sales || access.expenses ? [section(dashboardApi.getSalesChart(controller.signal), setSalesChart)] : []),
+      ...(access.finance ? [section(dashboardApi.getProfitLoss(controller.signal), setProfitLoss)] : []),
+      ...(access.sales && access.inventory ? [section(dashboardApi.getTopProducts(controller.signal), setTopProducts)] : []),
+      ...(access.sales ? [section(dashboardApi.getPaymentMethods(controller.signal), setPaymentMethods)] : []),
+      ...(access.sales || access.finance ? [section(dashboardApi.getDailyPerformance(controller.signal), setDailyPerf)] : []),
     ])
     if (current()) setRefreshing(false)
-  }, [enabled, online, scopeKey])
+  }, [enabled, online, scopeKey, access.sales, access.finance, access.expenses, access.inventory, access.customers, access.receivables, access.tax])
 
   useEffect(() => {
     setKpis(null)

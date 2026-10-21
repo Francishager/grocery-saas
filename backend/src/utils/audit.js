@@ -7,6 +7,10 @@ import prisma from "../db.js";
  * @param {string} [opts.targetTenantId] - which tenant was affected by this operation (for cross-tenant operations)
  * @param {string} opts.userId
  * @param {string} opts.userEmail
+ * @param {string} [opts.subjectUserId] - affected user, when different from the actor
+ * @param {string} [opts.subjectEmail]
+ * @param {string} [opts.branchId]
+ * @param {string} [opts.branchName]
  * @param {string} opts.action - create | update | delete | login | checkout | bulk_import | suspend | enable | disable | reset | etc.
  * @param {string} opts.model - Product | Sale | Purchase | User | Plan | Tenant | Feature | etc.
  * @param {string} [opts.recordId]
@@ -29,6 +33,10 @@ export async function auditLog(opts) {
         targetTenantId: opts.targetTenantId || null,
         userId: opts.userId || "system",
         userEmail,
+        subjectUserId: opts.subjectUserId || null,
+        subjectEmail: opts.subjectEmail || null,
+        branchId: opts.branchId || null,
+        branchName: opts.branchName || null,
         action: opts.action,
         model: opts.model,
         recordId: opts.recordId || null,
@@ -126,6 +134,7 @@ export function auditMiddleware() {
             : null,
           userId: req.user?.id || "unknown",
           userEmail: req.user?.email || "",
+          branchId: req.body?.branchId || req.body?.branch_id || req.params?.branchId || req.query?.branchId || req.user?.branchId || null,
           action: isSensitiveOperation ? action + "_sensitive" : action,
           model,
           recordId,

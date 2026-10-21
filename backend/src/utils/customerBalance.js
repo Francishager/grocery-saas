@@ -57,14 +57,24 @@ const groupSumMap = (groups, field) => new Map(
   groups.map((group) => [group.customerId, toMoney(group._sum?.[field])])
 );
 
-function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations = []) {
+function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations = [], creditApplications = []) {
   const saleCustomerById = new Map(sales.map((sale) => [sale.id, sale.customerId]));
   const legacyPaymentsBySale = new Map();
   const explicitPaymentsBySale = new Map();
   const unlinkedPaymentsByCustomer = new Map();
-  const explicitUnlinkedPaymentsByCustomer = new Map();
   const allocationsBySale = new Map();
+  const allocationsByPayment = new Map();
   const customerAccountAllocationsByCustomer = new Map();
+  const paymentById = new Map(payments.map((payment) => [payment.id, payment]));
+  const appliedBySale = new Map();
+  const appliedByPayment = new Map();
+
+  for (const application of creditApplications) {
+    if (application.saleId) appliedBySale.set(application.saleId,
+      roundMoney(toMoney(appliedBySale.get(application.saleId)) + toMoney(application.amount)));
+    if (application.sourceType === 'payment') appliedByPayment.set(application.sourceId,
+      roundMoney(toMoney(appliedByPayment.get(application.sourceId)) + toMoney(application.amount)));
+  }
 
   for (const payment of payments) {
     const amount = toMoney(payment.amount ?? payment._sum?.amount);
@@ -72,16 +82,15 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
     if (payment.saleId && saleCustomerById.get(payment.saleId) === payment.customerId) {
       const target = explicit ? explicitPaymentsBySale : legacyPaymentsBySale;
       target.set(payment.saleId, roundMoney(toMoney(target.get(payment.saleId)) + amount));
-    } else if (explicit) {
-      explicitUnlinkedPaymentsByCustomer.set(payment.customerId,
-        roundMoney(toMoney(explicitUnlinkedPaymentsByCustomer.get(payment.customerId)) + amount));
-    } else {
+    } else if (!explicit) {
       unlinkedPaymentsByCustomer.set(payment.customerId,
         roundMoney(toMoney(unlinkedPaymentsByCustomer.get(payment.customerId)) + amount));
     }
   }
 
   for (const allocation of allocations) {
+    allocationsByPayment.set(allocation.paymentId,
+      roundMoney(toMoney(allocationsByPayment.get(allocation.paymentId)) + toMoney(allocation.amount ?? allocation._sum?.amount)));
     if (allocation.targetType === 'customer_account') {
       customerAccountAllocationsByCustomer.set(allocation.customerId,
         roundMoney(toMoney(customerAccountAllocationsByCustomer.get(allocation.customerId)) + toMoney(allocation.amount ?? allocation._sum?.amount)));
@@ -92,12 +101,26 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
       roundMoney(toMoney(allocationsBySale.get(allocation.saleId)) + toMoney(allocation.amount ?? allocation._sum?.amount)));
   }
 
+  for (const [paymentId, amount] of appliedByPayment) {
+    const payment = paymentById.get(paymentId);
+    if (!payment) continue;
+    if (payment.allocationMode === 'explicit') {
+      customerAccountAllocationsByCustomer.set(payment.customerId,
+        roundMoney(Math.max(0, toMoney(customerAccountAllocationsByCustomer.get(payment.customerId)) - amount)));
+    } else if (!payment.saleId) {
+      unlinkedPaymentsByCustomer.set(payment.customerId,
+        roundMoney(Math.max(0, toMoney(unlinkedPaymentsByCustomer.get(payment.customerId)) - amount)));
+    }
+  }
+
   const salesByCustomer = new Map();
   const salePaymentsByCustomer = new Map();
   const unappliedCustomerReceiptsByCustomer = new Map();
-  for (const [customerId, amount] of explicitUnlinkedPaymentsByCustomer) {
-    unappliedCustomerReceiptsByCustomer.set(customerId,
-      roundMoney(Math.max(0, amount - toMoney(customerAccountAllocationsByCustomer.get(customerId)))));
+  for (const payment of payments) {
+    if (payment.allocationMode !== 'explicit' || payment.saleId) continue;
+    const amount = Math.max(0, toMoney(payment.amount) - toMoney(allocationsByPayment.get(payment.id)) - toMoney(appliedByPayment.get(payment.id)));
+    if (amount > 0) unappliedCustomerReceiptsByCustomer.set(payment.customerId,
+      roundMoney(toMoney(unappliedCustomerReceiptsByCustomer.get(payment.customerId)) + amount));
   }
   const paymentReconciliationIssuesByCustomer = new Map();
   for (const sale of sales) {
@@ -106,7 +129,7 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
     const recordedPaid = Math.max(0, toMoney(sale.amountPaid));
     const linkedLegacyPaid = Math.max(0, toMoney(legacyPaymentsBySale.get(sale.id)));
     const explicitReceiptTotal = Math.max(0, toMoney(explicitPaymentsBySale.get(sale.id)));
-    const allocatedPaid = Math.max(0, toMoney(allocationsBySale.get(sale.id)));
+    const allocatedPaid = Math.max(0, toMoney(allocationsBySale.get(sale.id)) + toMoney(appliedBySale.get(sale.id)));
     const explicitMode = sale.legacyPaidAmountAtCutover != null || allocatedPaid > 0 || explicitReceiptTotal > 0;
     const paidOnce = explicitMode
       ? Math.max(0, toMoney(sale.legacyPaidAmountAtCutover) + allocatedPaid)
@@ -147,26 +170,34 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
   };
 }
 
-async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = []) {
+async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = [], creditApplications = []) {
   const ids = [...new Set(customerIds.filter(Boolean))];
   if (!scope?.tenantId || !ids.length) return new Map();
 
-  const notes = await client.creditNote.findMany({
-    where: { tenantId: scope.tenantId, customerId: { in: ids }, status: { not: "cancelled" } },
-    select: {
-      customerId: true,
-      saleId: true,
-      amount: true,
-      createdAt: true,
-      sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  const [notes, applications] = await Promise.all([
+    client.creditNote.findMany({
+      where: { tenantId: scope.tenantId, customerId: { in: ids }, status: { not: "cancelled" } },
+      select: {
+        id: true, customerId: true, saleId: true, amount: true, createdAt: true,
+        sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    client.customerCreditApplication.findMany({
+      where: { tenantId: scope.tenantId, customerId: { in: ids }, sourceType: 'credit_note' },
+      select: { sourceId: true, amount: true },
+    }),
+  ]);
 
   const totalsByCustomer = new Map();
+  const appliedByNote = new Map();
+  applications.forEach((application) => {
+    appliedByNote.set(application.sourceId, roundMoney(toMoney(appliedByNote.get(application.sourceId)) + toMoney(application.amount)));
+  });
   for (const note of effectiveCreditNoteRows(notes)) {
-    if (note.effectiveAmount <= 0) continue;
-    totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + note.effectiveAmount));
+    const remaining = roundMoney(Math.max(0, note.effectiveAmount - toMoney(appliedByNote.get(note.id))));
+    if (remaining <= 0) continue;
+    totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + remaining));
   }
 
   return totalsByCustomer;
@@ -180,20 +211,18 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   if (!customerIds.length) return new Map();
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId: { in: customerIds } };
-  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns] = await Promise.all([
+  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
       select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
     }),
-    client.customerPayment.groupBy({
-      by: ["customerId", "saleId", "allocationMode"],
+    client.customerPayment.findMany({
       where: tenantCustomerWhere,
-      _sum: { amount: true },
+      select: { id: true, customerId: true, saleId: true, allocationMode: true, amount: true },
     }),
-    client.customerPaymentAllocation.groupBy({
-      by: ["customerId", "saleId", "targetType"],
+    client.customerPaymentAllocation.findMany({
       where: { tenantId: scope.tenantId, customerId: { in: customerIds } },
-      _sum: { amount: true },
+      select: { id: true, paymentId: true, customerId: true, saleId: true, targetType: true, amount: true },
     }),
     client.customerWithdrawal.groupBy({
       by: ["customerId"],
@@ -202,18 +231,27 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
     }),
     getEffectiveCreditNoteTotalMap(client, scope, customerIds),
 
-    client.saleReturn.groupBy({
-      by: ["customerId"],
+    client.saleReturn.findMany({
       where: { ...tenantCustomerWhere, status: "completed", refundMethod: "credit" },
-      _sum: { total: true },
+      select: { id: true, customerId: true, total: true },
+    }),
+    client.customerCreditApplication.findMany({
+      where: { tenantId: scope.tenantId, customerId: { in: customerIds } },
+      select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
-    summarizeSaleAndCustomerPayments(sales, payments, allocations);
+    summarizeSaleAndCustomerPayments(sales, payments, allocations, creditApplications);
   const withdrawalsMap = groupSumMap(withdrawals, "amount");
   const creditNotesMap = creditNotes;
-  const creditReturnsMap = groupSumMap(creditReturns, "total");
+  const appliedByReturn = new Map();
+  creditApplications.filter((application) => application.sourceType === 'sale_return').forEach((application) => {
+    appliedByReturn.set(application.sourceId, roundMoney(toMoney(appliedByReturn.get(application.sourceId)) + toMoney(application.amount)));
+  });
+  const creditReturnsMap = new Map();
+  creditReturns.forEach((row) => creditReturnsMap.set(row.customerId,
+    roundMoney(toMoney(creditReturnsMap.get(row.customerId)) + Math.max(0, toMoney(row.total) - toMoney(appliedByReturn.get(row.id))))));
 
   return new Map(customerList.map((customer) => {
     const openingBalance = Math.max(0, toMoney(customer.openingBalance));
@@ -263,20 +301,18 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   if (!customer) return null;
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId };
-  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns] = await Promise.all([
+  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
       select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
     }),
-    client.customerPayment.groupBy({
-      by: ["customerId", "saleId", "allocationMode"],
+    client.customerPayment.findMany({
       where: tenantCustomerWhere,
-      _sum: { amount: true },
+      select: { id: true, customerId: true, saleId: true, allocationMode: true, amount: true },
     }),
-    client.customerPaymentAllocation.groupBy({
-      by: ["customerId", "saleId", "targetType"],
+    client.customerPaymentAllocation.findMany({
       where: { tenantId: scope.tenantId, customerId },
-      _sum: { amount: true },
+      select: { id: true, paymentId: true, customerId: true, saleId: true, targetType: true, amount: true },
     }),
     client.customerWithdrawal.aggregate({
       where: tenantCustomerWhere,
@@ -284,14 +320,18 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
     }),
     getEffectiveCreditNoteTotalMap(client, scope, [customerId]),
 
-    client.saleReturn.aggregate({
+    client.saleReturn.findMany({
       where: { ...tenantCustomerWhere, status: "completed", refundMethod: "credit" },
-      _sum: { total: true },
+      select: { id: true, total: true },
+    }),
+    client.customerCreditApplication.findMany({
+      where: { tenantId: scope.tenantId, customerId },
+      select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
-    summarizeSaleAndCustomerPayments(sales, payments, allocations);
+    summarizeSaleAndCustomerPayments(sales, payments, allocations, creditApplications);
   const openingBalance = Math.max(0, toMoney(customer.openingBalance));
   const receivableSales = salesByCustomer.get(customerId) || 0;
   const salePayments = salePaymentsByCustomer.get(customerId) || 0;
@@ -300,7 +340,9 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0) + customerAccountAllocations);
   const customerWithdrawals = toMoney(withdrawals._sum.amount);
   const creditNoteTotal = toMoney(creditNotes.get(customerId));
-  const creditReturnTotal = toMoney(creditReturns._sum.total);
+  const appliedByReturn = creditApplications.filter((application) => application.sourceType === 'sale_return')
+    .reduce((sum, application) => sum + toMoney(application.amount), 0);
+  const creditReturnTotal = roundMoney(creditReturns.reduce((sum, row) => sum + toMoney(row.total), 0) - appliedByReturn);
 
   return {
     customerId,

@@ -7,6 +7,7 @@ import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
 import { validateWorkingHours, workingHoursAdmin } from "../utils/workingHours.js";
+import { auditLog } from "../utils/audit.js";
 import {
   ALL_PERMISSION_KEYS as PERM_KEYS,
   PERMISSION_CATEGORIES,
@@ -184,6 +185,22 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
           cashAccount: { select: { id: true, name: true, type: true } },
         },
       });
+    });
+
+    const assignedBranch = user.branches?.find((item) => item.isPrimary)?.branch || user.branches?.[0]?.branch;
+    await auditLog({
+      tenantId,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      subjectUserId: user.id,
+      subjectEmail: user.email,
+      branchId,
+      branchName: assignedBranch?.name || null,
+      action: "staff_account_created",
+      model: "User",
+      recordId: user.id,
+      changes: { role: user.role, branchId, branchName: assignedBranch?.name || null },
+      ip: req.ip || req.connection?.remoteAddress,
     });
 
     res.status(201).json({ message: "Staff created", staff: staffResponse(user), password: String(password) });

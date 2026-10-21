@@ -700,6 +700,17 @@ async function ensureTenantCategories(tenantId) {
   await ensureTenantCategoryCatalog(prisma, tenantId);
 }
 
+async function categorySharingScope(tenantId) {
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { businessType: true } });
+  const businessType = String(tenant?.businessType || '').trim().toLowerCase();
+  return {
+    businessType: businessType || null,
+    where: businessType
+      ? { OR: [{ tenantId }, { businessType: { equals: businessType, mode: 'insensitive' } }] }
+      : { tenantId },
+  };
+}
+
 // List products
 router.get("/", authenticateToken, async (req, res) => {
   try {
@@ -854,10 +865,16 @@ router.get("/categories", authenticateToken, async (req, res) => {
       return res.status(400).json({ error: "Invalid category type" });
     }
     await ensureTenantCategories(tenantId);
-    const where = { tenantId };
+    const sharing = await categorySharingScope(tenantId);
+    const where = sharing.where;
     if (type) where.categoryType = String(type);
     const categories = await prisma.category.findMany({ where, orderBy: { name: "asc" } });
-    res.json(categories);
+    categories.sort((a, b) => Number(b.tenantId === tenantId) - Number(a.tenantId === tenantId));
+    const uniqueCategories = [...new Map(categories.map(category => [
+      `${category.categoryType}:${categoryNameKey(category.name)}`,
+      category,
+    ])).values()];
+    res.json(uniqueCategories);
   } catch (err) {
     console.error("List categories error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -880,14 +897,15 @@ router.post("/categories", authenticateToken, (req, res, next) => {
     const categoryType = ["service", "rental"].includes(req.body?.categoryType) ? req.body.categoryType : "product";
     const nameSlug = categorySlug(name);
     if (!nameSlug) return res.status(400).json({ error: "Category name must contain letters or numbers" });
-    const existing = await prisma.category.findMany({ where: { tenantId, categoryType } });
+    const sharing = await categorySharingScope(tenantId);
+    const existing = await prisma.category.findMany({ where: { ...sharing.where, categoryType } });
     const match = existing.find(category => categoryNameKey(category.name) === categoryNameKey(name));
     if (match) return res.status(200).json({ message: "Category already available", category: match });
     const nameHash = createHash('sha256').update(categoryNameKey(name)).digest('hex').slice(0, 12);
     const slug = `custom-${categoryType}-${nameSlug}-${nameHash}`;
     const category = await prisma.category.upsert({
       where: { tenantId_slug: { tenantId, slug } },
-      create: { name, slug, tenantId, categoryType }, update: {},
+      create: { name, slug, tenantId, businessType: sharing.businessType, categoryType }, update: {},
     });
     res.status(201).json({ message: "Category created", category });
   } catch (err) {
@@ -1005,8 +1023,9 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
 
     let categoryForSku = null;
     if (categoryId) {
+      const sharing = await categorySharingScope(scope.tenantId);
       categoryForSku = await prisma.category.findFirst({
-        where: { id: categoryId, tenantId: scope.tenantId },
+        where: { id: categoryId, ...sharing.where },
         select: { id: true, name: true, slug: true, categoryType: true },
       });
       if (!categoryForSku) {
@@ -1041,8 +1060,9 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     }
 
     if (categoryId) {
+      const sharing = await categorySharingScope(scope.tenantId);
       const category = await prisma.category.findFirst({
-        where: { id: categoryId, tenantId: scope.tenantId },
+        where: { id: categoryId, ...sharing.where },
         select: { id: true },
       });
       if (!category) return res.status(400).json({ error: "Category not found" });
@@ -1160,17 +1180,19 @@ router.put("/:id", authenticateToken, async (req, res) => {
       if (!duplicateCheck.ok) return res.status(409).json({ error: duplicateCheck.error });
       data.name = duplicateCheck.name;
 
-      const categoryForSku = categoryId
-        ? await prisma.category.findFirst({
-            where: { id: categoryId, tenantId: existing.tenantId },
+      let categoryForSku = null;
+      if (categoryId) {
+        const sharing = await categorySharingScope(existing.tenantId);
+        categoryForSku = await prisma.category.findFirst({
+          where: { id: categoryId, ...sharing.where },
             select: { id: true, name: true, slug: true },
-          })
-        : existing.categoryId
-          ? await prisma.category.findFirst({
-              where: { id: existing.categoryId, tenantId: existing.tenantId },
-              select: { id: true, name: true, slug: true },
-            })
-          : null;
+        });
+      } else if (existing.categoryId) {
+        categoryForSku = await prisma.category.findFirst({
+          where: { id: existing.categoryId, tenantId: existing.tenantId },
+          select: { id: true, name: true, slug: true },
+        });
+      }
 
       data.sku = await resolveUniqueSku(prisma, existing.tenantId, existing.branchId || scope.branchId, duplicateCheck.name, existing.itemType || 'product', categoryForSku, existing.id);
     }
@@ -1199,8 +1221,9 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     if (categoryId !== undefined) {
       if (categoryId) {
+        const sharing = await categorySharingScope(existing.tenantId);
         const category = await prisma.category.findFirst({
-          where: { id: categoryId, tenantId: existing.tenantId },
+          where: { id: categoryId, ...sharing.where },
           select: { id: true, categoryType: true },
         });
         if (!category) return res.status(400).json({ error: "Category not found" });
@@ -1492,8 +1515,9 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
 
     await ensureTenantCategories(scope.tenantId);
     // Category names may exist independently for products and services.
+    const sharing = await categorySharingScope(scope.tenantId);
     const existingCategories = await prisma.category.findMany({
-      where: { tenantId: scope.tenantId },
+      where: sharing.where,
       select: { id: true, name: true, categoryType: true },
     });
     const categoryMap = new Map(existingCategories.map(c => [`${c.categoryType}:${categoryNameKey(c.name)}`, c.id]));

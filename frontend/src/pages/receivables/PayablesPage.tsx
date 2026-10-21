@@ -67,6 +67,12 @@ interface SupplierPurchase {
   paymentStatus: 'paid' | 'partial' | 'unpaid' | 'overdue'
   dueDate?: string
   notes?: string
+  fuelDelivery?: {
+    invoiceNo?: string | null
+    litres: number
+    unitCost: number
+    tank?: { name: string; fuelType: string }
+  } | null
   items: Array<{
     product: {
       id: string
@@ -1080,9 +1086,20 @@ export default function PayablesPage() {
                 </div>
 
                 <div>
-                  <h4 className="mb-2 text-sm font-semibold">Items</h4>
+                  <h4 className="mb-2 text-sm font-semibold">{selectedPurchaseDetail.fuelDelivery ? 'Fuel Delivery' : 'Items'}</h4>
                   <div className="space-y-2">
-                    {selectedPurchaseDetail.items?.length ? (
+                    {selectedPurchaseDetail.fuelDelivery ? (
+                      <div className="rounded-md border p-3 text-sm">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-medium">{selectedPurchaseDetail.fuelDelivery.tank?.fuelType || 'Fuel'} · {selectedPurchaseDetail.fuelDelivery.tank?.name || 'Tank'}</p>
+                            <p className="text-xs text-muted-foreground">Supplier invoice {selectedPurchaseDetail.fuelDelivery.invoiceNo || selectedPurchaseDetail.refNo}</p>
+                          </div>
+                          <p className="font-semibold">{formatCurrency(Number(selectedPurchaseDetail.total || 0))}</p>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{Number(selectedPurchaseDetail.fuelDelivery.litres).toLocaleString()} L × {formatCurrency(Number(selectedPurchaseDetail.fuelDelivery.unitCost || 0))} per litre</p>
+                      </div>
+                    ) : selectedPurchaseDetail.items?.length ? (
                       selectedPurchaseDetail.items.map((item, index) => (
                         <div key={`${item.product?.id || index}-${index}`} className="rounded-md border p-3 text-sm">
                           <div className="flex items-start justify-between gap-4">

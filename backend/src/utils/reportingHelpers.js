@@ -38,6 +38,15 @@ export function buildSupplierStatementData(supplier, purchases = [], payments = 
       total: Number(purchase?.total || 0),
       balance: Number(purchase?.balance || 0),
       createdAt: purchase?.createdAt,
+      description: purchase?.fuelDelivery
+        ? `${Number(purchase.fuelDelivery.litres || 0)} L ${purchase.fuelDelivery.tank?.fuelType || 'fuel'} - ${purchase.fuelDelivery.tank?.name || 'tank'}`
+        : `${purchase?.items?.length || 0} item${purchase?.items?.length === 1 ? '' : 's'}`,
+      fuelDelivery: purchase?.fuelDelivery ? {
+        invoiceNo: purchase.fuelDelivery.invoiceNo,
+        litres: Number(purchase.fuelDelivery.litres || 0),
+        unitCost: Number(purchase.fuelDelivery.unitCost || 0),
+        tank: purchase.fuelDelivery.tank,
+      } : null,
     })),
     payments: normalizedPayments.map((payment) => ({
       id: payment?.id,

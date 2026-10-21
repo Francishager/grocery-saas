@@ -87,6 +87,7 @@ import ReferralDashboard from '@/pages/SaaSAdmin/ReferralDashboard'
 import UserGuidePage from '@/pages/SaaSAdmin/UserGuidePage'
 import ManufacturingGuidePage from '@/pages/SaaSAdmin/ManufacturingGuidePage'
 import ProcurementGuidePage from '@/pages/SaaSAdmin/ProcurementGuidePage'
+import FuelStationGuidePage from '@/pages/SaaSAdmin/FuelStationGuidePage'
 import PlatformStaffPage from '@/pages/SaaSAdmin/PlatformStaffPage'
  
 // Public Route — redirects logged-in users to their dashboard
@@ -157,6 +158,7 @@ function App() {
           <Route path="user-guide" element={<UserGuidePage />} />
           <Route path="manufacturing-guide" element={<ManufacturingGuidePage />} />
           <Route path="procurement-guide" element={<ProcurementGuidePage />} />
+          <Route path="fuel-station-guide" element={<FuelStationGuidePage />} />
           <Route path="payment" element={<PaymentPage />} />
         </Route>
  

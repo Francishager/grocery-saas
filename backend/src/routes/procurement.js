@@ -914,11 +914,20 @@ router.get('/inventory-products', requireFeature('procurement.buyer'), requirePe
 });
 
 router.get('/inventory-categories', requireFeature('procurement.buyer'), requirePermission('canReceiveProcurementGoods'), async (req, res) => {
+  const tenantId = tenantIdOf(req);
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { businessType: true } });
+  const businessType = String(tenant?.businessType || '').trim();
   const categories = await prisma.category.findMany({
-    where: { tenantId: tenantIdOf(req), categoryType: 'product' },
+    where: {
+      categoryType: 'product',
+      ...(businessType
+        ? { OR: [{ tenantId }, { businessType: { equals: businessType, mode: 'insensitive' } }] }
+        : { tenantId }),
+    },
     select: { id: true, name: true }, orderBy: { name: 'asc' },
   });
-  res.json({ categories });
+  const uniqueCategories = [...new Map(categories.map(category => [category.name.trim().toLowerCase(), category])).values()];
+  res.json({ categories: uniqueCategories });
 });
 
 router.get('/request-products', requireFeature('procurement.buyer'), requirePermission('canCreateProcurementRFQ'), async (req, res) => {

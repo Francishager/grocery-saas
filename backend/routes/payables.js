@@ -150,7 +150,7 @@ router.get('/suppliers/:id/statement', authenticateToken, requirePermission('can
       prisma.supplier.findFirst({ where: scopedWhere(scope, { id }) }),
       prisma.supplierPurchase.findMany({
         where: scopedWhere(scope, { supplierId: id }),
-        include: { supplier: true, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
+        include: { supplier: true, fuelDelivery: { include: { tank: { select: { name: true, fuelType: true } } } }, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
         orderBy: { createdAt: 'desc' }
       }),
       prisma.supplierPayment.findMany({
@@ -438,7 +438,8 @@ router.get('/purchases', authenticateToken, requirePermission('canViewPayable'),
             include: {
               product: { select: { id: true, name: true, sku: true } }
             }
-          }
+          },
+          fuelDelivery: { include: { tank: { select: { name: true, fuelType: true } } } }
         },
         orderBy: { createdAt: 'desc' }
       }),

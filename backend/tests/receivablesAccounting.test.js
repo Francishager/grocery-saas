@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   cashSaleRecognitionLines,
   creditNoteRecognitionLines,
+  customerCreditApplicationLines,
   customerRefundLines,
   posReturnRecognitionLines,
   receiptCollectionLines,
@@ -63,6 +64,15 @@ test('receipt splits applied receivable and unapplied customer advance without c
   assertBalanced(lines)
   assert.equal(lines.find((line) => line.accountId === 'ar').credit, 100)
   assert.equal(lines.find((line) => line.accountId === 'advances').credit, 20)
+})
+
+test('applying a customer advance clears the liability into receivables without touching cash', () => {
+  const lines = customerCreditApplicationLines(config, { amount: 75, reference: 'SALE-1' })
+  assertBalanced(lines)
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => ({ accountId, debit, credit })), [
+    { accountId: 'advances', debit: 75, credit: 0 },
+    { accountId: 'ar', debit: 0, credit: 75 },
+  ])
 })
 
 test('customer opening balance is recognized as receivable against opening equity', async () => {

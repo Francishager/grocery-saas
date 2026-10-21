@@ -5,7 +5,7 @@ import {
   getCustomerReceivableBalanceMap,
 } from '../src/utils/customerBalance.js';
 
-function makeClient({ customer, sales, payments = [], allocations = [] }) {
+function makeClient({ customer, sales, payments = [], allocations = [], creditNotes = [], creditApplications = [], returns = [] }) {
   return {
     customer: {
       findFirst: async () => customer,
@@ -14,6 +14,7 @@ function makeClient({ customer, sales, payments = [], allocations = [] }) {
       findMany: async () => sales,
     },
     customerPayment: {
+      findMany: async () => payments.map((payment, index) => ({ id: payment.id || `payment-${index}`, allocationMode: 'legacy', ...payment })),
       groupBy: async () => {
         const grouped = new Map();
         for (const payment of payments) {
@@ -26,6 +27,7 @@ function makeClient({ customer, sales, payments = [], allocations = [] }) {
       },
     },
     customerPaymentAllocation: {
+      findMany: async () => allocations.map((allocation, index) => ({ id: `allocation-${index}`, paymentId: allocation.paymentId || `payment-${index}`, ...allocation, targetType: allocation.targetType || 'sale' })),
       groupBy: async () => allocations.map((allocation) => ({
         customerId: allocation.customerId,
         saleId: allocation.saleId,
@@ -38,9 +40,13 @@ function makeClient({ customer, sales, payments = [], allocations = [] }) {
       aggregate: async () => ({ _sum: { amount: 0 } }),
     },
     creditNote: {
-      findMany: async () => [],
+      findMany: async () => creditNotes,
+    },
+    customerCreditApplication: {
+      findMany: async () => creditApplications,
     },
     saleReturn: {
+      findMany: async () => returns,
       groupBy: async () => [],
       aggregate: async () => ({ _sum: { total: 0 } }),
     },
@@ -193,5 +199,40 @@ test('explicit customer-account allocation reduces the customer account separate
   assert.equal(result.balance, 20);
   assert.equal(result.components.salePayments, 0);
   assert.equal(result.components.customerAccountAllocations, 80);
+  assert.equal(result.components.unappliedCustomerReceipts, 0);
+});
+
+test('credit-note balance applied to a new sale reallocates credit without changing total customer balance', async () => {
+  const oldSale = sale({ id: 'old-sale', total: 50, subtotal: 50, amountPaid: 50, legacyPaidAmountAtCutover: 0 });
+  const data = makeClient({
+    customer,
+    sales: [oldSale, sale({ id: 'new-sale', total: 50, subtotal: 50, amountPaid: 50, legacyPaidAmountAtCutover: 0 })],
+    payments: [{ id: 'old-payment', customerId: customer.id, saleId: 'old-sale', amount: 50, allocationMode: 'explicit' }],
+    allocations: [{ id: 'old-allocation', customerId: customer.id, paymentId: 'old-payment', saleId: 'old-sale', amount: 50 }],
+    creditNotes: [{ id: 'note-1', customerId: customer.id, saleId: 'old-sale', amount: 50, createdAt: new Date(), sale: oldSale }],
+    creditApplications: [{ customerId: customer.id, saleId: 'new-sale', sourceType: 'credit_note', sourceId: 'note-1', amount: 50 }],
+  });
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
+
+  assert.equal(result.balance, 0);
+  assert.equal(result.components.salePayments, 100);
+  assert.equal(result.components.creditNotes, 0);
+});
+
+test('existing customer advance applied to a sale is not counted as cash twice', async () => {
+  const data = makeClient({
+    customer,
+    sales: [sale({ id: 'new-sale', total: 30, subtotal: 30, amountPaid: 30, legacyPaidAmountAtCutover: 0 })],
+    payments: [{ id: 'advance-payment', customerId: customer.id, saleId: null, amount: 30, allocationMode: 'explicit' }],
+    allocations: [{ customerId: customer.id, paymentId: 'advance-payment', saleId: null, targetType: 'customer_account', amount: 30 }],
+    creditApplications: [{ customerId: customer.id, saleId: 'new-sale', sourceType: 'payment', sourceId: 'advance-payment', amount: 30 }],
+  });
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
+
+  assert.equal(result.balance, 0);
+  assert.equal(result.components.salePayments, 30);
+  assert.equal(result.components.customerAccountAllocations, 0);
   assert.equal(result.components.unappliedCustomerReceipts, 0);
 });

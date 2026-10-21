@@ -806,7 +806,9 @@ export default function ReceivablesPage() {
       const createdSale = await response.json()
       toast({
         title: 'Success',
-        description: 'Sale recorded successfully. Print or download the invoice from the details window.'
+        description: createdSale.creditApplied > 0
+          ? `${formatCurrency(createdSale.creditApplied)} of existing customer credit was applied without moving cash. Print or download the invoice from the details window.`
+          : 'Sale recorded successfully. Print or download the invoice from the details window.'
       })
       setShowSaleModal(false)
       setSelectedSaleDetail(createdSale)
@@ -1294,7 +1296,8 @@ export default function ReceivablesPage() {
             <div class="amount-row"><span>Tax</span><strong>${formatCurrency(Number(sale?.tax || 0))}</strong></div>
             <div class="amount-row"><span>Discount</span><strong>${formatCurrency(Number(sale?.discount || 0))}</strong></div>
             <div class="amount-row" style="font-size: 18px; margin-top: 12px;"><span>Total</span><strong>${formatCurrency(Number(sale?.total || 0))}</strong></div>
-            <div class="amount-row"><span>Amount Paid</span><strong>${formatCurrency(Number(sale?.amountPaid || 0))}</strong></div>
+            ${Number(sale?.creditApplications?.length || 0) > 0 ? `<div class="amount-row"><span>Customer Credit Applied</span><strong>${formatCurrency(sale.creditApplications.reduce((sum, row) => sum + Number(row.amount || 0), 0))}</strong></div>` : ''}
+            <div class="amount-row"><span>Amount Settled</span><strong>${formatCurrency(Number(sale?.amountPaid || 0))}</strong></div>
             <div class="amount-row"><span>Balance</span><strong>${formatCurrency(Number(sale?.balance || 0))}</strong></div>
           </div>
 
@@ -1528,6 +1531,9 @@ export default function ReceivablesPage() {
   const saleCustomerHasMore = saleCustomerTotal > loadedSaleCustomerCount
   const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
   const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
+  const saleCustomerCreditAvailable = Math.max(0, -Number(selectedSaleCustomer?.balance || 0))
+  const saleCreditAppliedPreview = Math.min(saleBalanceAfterPayment, saleCustomerCreditAvailable)
+  const saleBalanceAfterCredit = Math.max(0, saleBalanceAfterPayment - saleCreditAppliedPreview)
   const selectedWithdrawalAccount = cashAccounts.find((account) => String(account.id) === String(selectedCashAccountId))
   const withdrawalValue = parseAmount(withdrawalAmount)
   const withdrawalAccountBalance = Number(selectedWithdrawalAccount?.balance || 0)
@@ -2044,12 +2050,17 @@ export default function ReceivablesPage() {
                           {selectedSaleCustomer.phone && <span className="text-xs text-muted-foreground">{selectedSaleCustomer.phone}</span>}
                         </span>
                         <span className="shrink-0 text-right">
-                          <span className="block font-semibold text-red-600">{formatCurrency(selectedSaleCustomer.balance || 0)}</span>
+                          <span className={`block font-semibold ${Number(selectedSaleCustomer.balance || 0) < 0 ? 'text-emerald-700' : Number(selectedSaleCustomer.balance || 0) > 0 ? 'text-red-600' : ''}`}>{formatCurrency(selectedSaleCustomer.balance || 0)}</span>
                           <span className="text-xs text-muted-foreground">Current balance</span>
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>
                       <p className="mt-1 text-xs text-muted-foreground">Opening balance: {formatCurrency(selectedSaleCustomer.openingBalance || 0)}</p>
+                      {saleCustomerCreditAvailable > 0 && saleBalanceAfterPayment > 0 && (
+                        <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                          {formatCurrency(saleCreditAppliedPreview)} customer credit will be applied automatically. Remaining on this invoice: {formatCurrency(saleBalanceAfterCredit)}. No cash withdrawal or receipt will be recorded.
+                        </p>
+                      )}
                       {saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
                         <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
                           Set a credit limit for this customer before recording a credit sale.
@@ -2207,6 +2218,18 @@ export default function ReceivablesPage() {
                   <span>Balance after payment</span>
                   <span>{formatCurrency(saleBalanceAfterPayment)}</span>
                 </div>
+                {saleCreditAppliedPreview > 0 && (
+                  <>
+                    <div className="flex justify-between text-emerald-700">
+                      <span>Customer credit applied</span>
+                      <span>-{formatCurrency(saleCreditAppliedPreview)}</span>
+                    </div>
+                    <div className="flex justify-between font-medium">
+                      <span>Remaining invoice balance</span>
+                      <span>{formatCurrency(saleBalanceAfterCredit)}</span>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="flex gap-2 justify-end">
@@ -2635,7 +2658,10 @@ export default function ReceivablesPage() {
                   <DetailRow label="Tax" value={formatCurrency(Number(selectedSaleDetail.tax || 0))} />
                   <DetailRow label="Discount" value={formatCurrency(Number(selectedSaleDetail.discount || 0))} />
                   <DetailRow label="Total" value={formatCurrency(Number(selectedSaleDetail.total || 0))} />
-                  <DetailRow label="Amount Paid" value={formatCurrency(Number(selectedSaleDetail.amountPaid || 0))} />
+                  <DetailRow label="Amount Settled" value={formatCurrency(Number(selectedSaleDetail.amountPaid || 0))} />
+                  {Array.isArray(selectedSaleDetail.creditApplications) && selectedSaleDetail.creditApplications.length > 0 && (
+                    <DetailRow label="Customer Credit Applied" value={formatCurrency(selectedSaleDetail.creditApplications.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0))} />
+                  )}
                   <DetailRow label="Balance" value={formatCurrency(Number(selectedSaleDetail.balance || 0))} />
                   <DetailRow
                     label="Due Date"

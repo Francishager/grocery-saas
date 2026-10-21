@@ -2887,7 +2887,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
       if (!customer) return res.status(404).json({ error: "Customer not found" });
     }
 
-    const [sales, payments, withdrawals, creditNotes, saleReturns, openingCustomers] = await Promise.all([
+    const [sales, payments, withdrawals, creditNotes, saleReturns, creditApplications, openingCustomers] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedSaleWhere(req, s, custFilter),
         orderBy: { createdAt: "asc" },
@@ -2912,6 +2912,11 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         where: scopedWhere(s, { ...custFilter, ...df(req), ...saleUserFilter, status: "completed" }),
         orderBy: { createdAt: "asc" },
         select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true, customer: { select: { id: true, name: true } } },
+      }),
+      prisma.customerCreditApplication.findMany({
+        where: scopedWhere(s, { ...custFilter, ...df(req) }),
+        orderBy: { createdAt: "asc" },
+        select: { id: true, sourceType: true, amount: true, createdAt: true, sale: { select: { receiptNo: true } }, customer: { select: { name: true } } },
       }),
       prisma.customer.findMany({
         where: scopedWhere(s, customerOpeningFilter),
@@ -3026,6 +3031,18 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         debit: 0,
         credit: sr.total,
         balance: 0,
+      });
+    }
+    for (const application of creditApplications) {
+      entries.push({
+        date: application.createdAt,
+        refNo: application.sale?.receiptNo || application.id.slice(-6),
+        description: `Customer Credit Applied — ${application.customer?.name || 'N/A'} (${application.sourceType.replace('_', ' ')})`,
+        debit: 0,
+        credit: 0,
+        amount: application.amount,
+        balance: 0,
+        paymentMethod: 'customer_credit',
       });
     }
 
@@ -3599,7 +3616,7 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
       prisma.supplier.findFirst({ where: scopedWhere(s, { id: supplierId }) }),
       prisma.supplierPurchase.findMany({
         where: scopedWhere(s, { supplierId, ...df(req) }),
-        include: { supplier: true, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
+        include: { supplier: true, fuelDelivery: { include: { tank: { select: { name: true, fuelType: true } } } }, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
         orderBy: { createdAt: "desc" }
       }),
       prisma.supplierPayment.findMany({
@@ -3643,7 +3660,7 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
         id: purchase.id,
         date: purchase.createdAt,
         type: "Purchase",
-        description: "Purchase Bill",
+        description: purchase.fuelDelivery ? `Fuel delivery: ${purchase.fuelDelivery.litres} L ${purchase.fuelDelivery.tank.fuelType} - ${purchase.fuelDelivery.tank.name}` : "Purchase Bill",
         debit: 0,
         credit: Number(purchase.total || 0),
         reference: purchase.refNo || purchase.id.slice(-6),
@@ -4960,6 +4977,8 @@ router.get("/fuel/sales-summary", authenticateToken, async (req, res) => {
     const carWashIncome = shifts.reduce((a, x) => a + (x.carWashIncome || 0), 0);
     const expenses = shifts.reduce((a, x) => a + (x.expenses || 0), 0);
     const netAmount = shifts.reduce((a, x) => a + (x.netAmount || 0), 0);
+    const reconciliationVariance = shifts.reduce((a, x) => a + (x.reconciliationVariance || 0), 0);
+    const shiftsAwaitingReview = shifts.filter(x => x.status === 'review_required').length;
     res.json({
       data: {
         shiftCount: shifts.length,
@@ -4972,6 +4991,8 @@ router.get("/fuel/sales-summary", authenticateToken, async (req, res) => {
         carWashIncome,
         expenses,
         netAmount,
+        reconciliationVariance,
+        shiftsAwaitingReview,
       },
     });
   } catch (err) { handleBranchError(res, err); }
@@ -5065,6 +5086,11 @@ router.get("/fuel/shift-summary", authenticateToken, async (req, res) => {
       mobileSales: sh.mobileSales,
       creditSales: sh.creditSales,
       totalSales: sh.totalSales,
+      expectedFuelSales: sh.expectedFuelSales,
+      actualTenderTotal: sh.actualTenderTotal,
+      reportedSalesTotal: sh.reportedSalesTotal,
+      reconciliationVariance: sh.reconciliationVariance,
+      varianceReason: sh.varianceReason,
       expenses: sh.expenses,
       netAmount: sh.netAmount,
       status: sh.status,

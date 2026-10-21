@@ -2,12 +2,21 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { outstandingCustomerSummary } from '../utils/customerBalance.js';
-import { authenticateToken, requirePermission } from "../../middleware/auth.js";
+import { authenticateToken, requireAnyPermission, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
 import { expenseDateWhere, loadJournalExpenseRows } from '../utils/reportAccounting.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
+function hasPermission(req, permission) {
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  return permissions.includes("*") || permissions.includes(permission);
+}
+
+function hasSalesVisibility(req) {
+  return hasPermission(req, "canViewSale") || hasPermission(req, "canViewSalesReport");
+}
+
 router.use((req, res, next) => {
   res.set('Cache-Control', 'private, no-store');
   next();
@@ -108,7 +117,8 @@ function mergePaymentMethods(groups) {
 }
 
 // Dashboard KPIs
-router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+router.get("/kpis", authenticateToken, async (req, res) => {
+  if (!req.user?.tenantId) return res.status(403).json({ error: "Business account required" });
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -171,24 +181,32 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
     const grossProfit = revenueThisMonth - cogs;
     const netProfit = grossProfit - totalExpenses;
 
+    const canViewSales = hasSalesVisibility(req);
+    const canViewFinance = hasPermission(req, "canViewFinancialReport");
+    const canViewExpenses = hasPermission(req, "canViewExpense");
+    const canViewInventory = hasPermission(req, "canViewProduct");
+    const canViewCustomers = hasPermission(req, "canViewCustomer");
+    const canViewReceivables = hasPermission(req, "canViewReceivable");
+    const canViewPurchases = hasPermission(req, "canViewPurchase") || hasPermission(req, "canViewPayable");
+
     res.json({
-      revenue: revenueThisMonth,
-      revenueChange: Number(revenueChange),
-      salesCount: aggregateCount(salesThisMonth) + aggregateCount(saleRecordsThisMonth),
-      taxCollected: aggregateTotal(salesThisMonth, "tax") + aggregateTotal(saleRecordsThisMonth, "tax"),
-      totalDiscount: aggregateTotal(salesThisMonth, "discount") + aggregateTotal(saleRecordsThisMonth, "discount"),
-      purchases: totalPurchases,
-      expenses: totalExpenses,
-      operatingExpenses: totalExpenses,
-      cogs,
-      grossProfit,
-      netProfit,
-      productCount: products,
-      lowStockCount: lowStockProducts,
-      expiringCount: expiringProducts,
-      customerCount: customers,
-      receivablesOutstanding: receivables._sum.balance || 0,
-      receivablesCount: receivables._count,
+      revenue: canViewSales ? revenueThisMonth : null,
+      revenueChange: canViewSales ? Number(revenueChange) : null,
+      salesCount: canViewSales ? aggregateCount(salesThisMonth) + aggregateCount(saleRecordsThisMonth) : null,
+      taxCollected: hasPermission(req, "canViewTax") ? aggregateTotal(salesThisMonth, "tax") + aggregateTotal(saleRecordsThisMonth, "tax") : null,
+      totalDiscount: canViewSales ? aggregateTotal(salesThisMonth, "discount") + aggregateTotal(saleRecordsThisMonth, "discount") : null,
+      purchases: canViewPurchases ? totalPurchases : null,
+      expenses: canViewExpenses ? totalExpenses : null,
+      operatingExpenses: canViewExpenses ? totalExpenses : null,
+      cogs: canViewFinance ? cogs : null,
+      grossProfit: canViewFinance ? grossProfit : null,
+      netProfit: canViewFinance ? netProfit : null,
+      productCount: canViewInventory ? products : null,
+      lowStockCount: canViewInventory ? lowStockProducts : null,
+      expiringCount: canViewInventory ? expiringProducts : null,
+      customerCount: canViewCustomers ? customers : null,
+      receivablesOutstanding: canViewReceivables ? receivables._sum.balance || 0 : null,
+      receivablesCount: canViewReceivables ? receivables._count : null,
     });
   } catch (err) {
     console.error("Dashboard KPIs error:", err);
@@ -197,7 +215,7 @@ router.get("/kpis", authenticateToken, requirePermission("canViewDashboard"), as
 });
 
 // Sales chart data (last 12 months)
-router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+router.get("/sales-chart", authenticateToken, requireAnyPermission(["canViewSale", "canViewSalesReport", "canViewExpense"]), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -222,14 +240,14 @@ router.get("/sales-chart", authenticateToken, requirePermission("canViewDashboar
       expenses.push(aggregateTotal(expAgg, "amount") + Number(journalExp || 0));
     }
 
-    res.json({ labels, revenue, expenses });
+    res.json({ labels, revenue: hasSalesVisibility(req) ? revenue : null, expenses: hasPermission(req, "canViewExpense") ? expenses : null });
   } catch (err) {
     handleBranchError(res, err);
   }
 });
 
 // Profit & Loss summary (last 6 months)
-router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+router.get("/profit-loss", authenticateToken, requirePermission("canViewFinancialReport"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -271,7 +289,7 @@ router.get("/profit-loss", authenticateToken, requirePermission("canViewDashboar
 });
 
 // Daily performance within current month
-router.get("/daily-performance", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+router.get("/daily-performance", authenticateToken, requireAnyPermission(["canViewSale", "canViewSalesReport", "canViewFinancialReport"]), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -337,12 +355,22 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
     const worstDay = data.reduce((worst, d) => d.salesCount > 0 && (worst.day === 0 || d.revenue < worst.revenue) ? d : worst, { day: 0, revenue: 0 });
     const avgRevenue = data.reduce((sum, d) => sum + d.revenue, 0) / now.getDate();
 
+    const canViewSales = hasSalesVisibility(req);
+    const canViewFinancials = hasPermission(req, "canViewFinancialReport");
+    const canViewExpenses = hasPermission(req, "canViewExpense");
     res.json({
-      data,
+      data: data.map((entry) => ({
+        ...entry,
+        revenue: canViewSales ? entry.revenue : null,
+        salesCount: canViewSales ? entry.salesCount : null,
+        cogs: canViewFinancials ? entry.cogs : null,
+        expenses: canViewExpenses ? entry.expenses : null,
+        profit: canViewFinancials ? entry.profit : null,
+      })),
       summary: {
-        bestDay: bestDay.day ? { day: bestDay.day, revenue: bestDay.revenue } : null,
-        worstDay: worstDay.day ? { day: worstDay.day, revenue: worstDay.revenue } : null,
-        avgDailyRevenue: Math.round(avgRevenue * 100) / 100,
+        bestDay: canViewSales && bestDay.day ? { day: bestDay.day, revenue: bestDay.revenue } : null,
+        worstDay: canViewSales && worstDay.day ? { day: worstDay.day, revenue: worstDay.revenue } : null,
+        avgDailyRevenue: canViewSales ? Math.round(avgRevenue * 100) / 100 : null,
         daysElapsed: now.getDate(),
         daysInMonth,
       },
@@ -354,7 +382,8 @@ router.get("/daily-performance", authenticateToken, requirePermission("canViewDa
 });
 
 // Top selling products
-router.get("/top-products", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+router.get("/top-products", authenticateToken, requireAnyPermission(["canViewSale", "canViewSalesReport"]), async (req, res, next) => {
+  if (!hasPermission(req, "canViewProduct")) return res.status(403).json({ message: "Permission denied", required: "canViewProduct" });
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();
@@ -394,7 +423,7 @@ router.get("/top-products", authenticateToken, requirePermission("canViewDashboa
 });
 
 // Payment method breakdown
-router.get("/payment-methods", authenticateToken, requirePermission("canViewDashboard"), async (req, res) => {
+router.get("/payment-methods", authenticateToken, requireAnyPermission(["canViewSale", "canViewSalesReport"]), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const now = new Date();

@@ -52,6 +52,7 @@ model Branch {
   fuelTanks            FuelTank[]
   fuelDeliveries       FuelDelivery[]
   fuelShiftReports     FuelShiftReport[]
+  fuelSales            FuelSale[]
   fuelDipstickReadings FuelDipstickReading[]
   fuelPricing          FuelPricing[]
   fuelCompliance       FuelCompliance[]
@@ -154,6 +155,7 @@ model Tenant {
   customers                       Customer[]
   customerWithdrawals             CustomerWithdrawal[]
   customerPaymentAllocations      CustomerPaymentAllocation[]
+  customerCreditApplications      CustomerCreditApplication[]
   receivableReconciliationReviews CustomerReceivableReconciliationReview[]
   suppliers                       Supplier[]
   features                        TenantFeature[]
@@ -217,9 +219,12 @@ model Tenant {
   // =====================
   fuelPumps            FuelPump[]
   fuelTanks            FuelTank[]
+  fuelStockMovements   FuelStockMovement[]
+  fuelStockAdjustments FuelStockAdjustment[]
   fuelDeliveries       FuelDelivery[]
   fuelMeterReadings    FuelMeterReading[]
   fuelShiftReports     FuelShiftReport[]
+  fuelSales            FuelSale[]
   fuelDipstickReadings FuelDipstickReading[]
   fuelPricing          FuelPricing[]
   fuelCompliance       FuelCompliance[]
@@ -525,6 +530,7 @@ model User {
   stickyNotes                     StickyNote[]
   calculatorHistory               CalculatorHistory[]
   createdReceiptAllocations       CustomerPaymentAllocation[]              @relation("ReceiptAllocationCreator")
+  customerCreditApplications      CustomerCreditApplication[]              @relation("CustomerCreditApplicationCreator")
   receivableReconciliationReviews CustomerReceivableReconciliationReview[] @relation("ReceivableReconciliationReviewer")
   receivablesGlMigrationApprovals ReceivablesGlMigrationBatch[]            @relation("ReceivablesGlMigrationApprover")
   accountingCutovers              TenantAccountingCutover[]                @relation("TenantAccountingCutoverPerformer")
@@ -1105,6 +1111,10 @@ model AuditLog {
   targetTenantId String? // which tenant was affected by this operation (for cross-tenant operations)
   userId         String
   userEmail      String
+  subjectUserId  String? // user account affected by the event, when different from the actor
+  subjectEmail   String?
+  branchId       String?
+  branchName     String?
   action         String // create, update, delete, login, checkout, reset, suspend, enable, disable, etc.
   model          String // Product, Sale, Purchase, User, Plan, Tenant, Feature, etc.
   recordId       String? // ID of the affected record
@@ -1118,6 +1128,8 @@ model AuditLog {
   @@index([tenantId, createdAt])
   @@index([tenantId, severity])
   @@index([targetTenantId]) // fast lookup of operations affecting a specific tenant
+  @@index([tenantId, subjectUserId])
+  @@index([tenantId, branchId, createdAt])
   @@index([severity])
   @@map("audit_logs")
 }
@@ -1166,6 +1178,7 @@ model Category {
   name         String
   slug         String
   tenantId     String
+  businessType String?
   categoryType CategoryType @default(product) // product or service
   products     Product[]
   createdAt    DateTime     @default(now())
@@ -1305,6 +1318,7 @@ model Customer {
   sales                           SaleRecord[]
   payments                        CustomerPayment[]
   paymentAllocations              CustomerPaymentAllocation[]
+  creditApplications               CustomerCreditApplication[]
   receivableReconciliationReviews CustomerReceivableReconciliationReview[]
   withdrawals                     CustomerWithdrawal[]
   invoices                        Invoice[]
@@ -1363,12 +1377,14 @@ model SaleRecord {
   items                           SaleRecordItem[]
   payments                        CustomerPayment[]
   paymentAllocations              CustomerPaymentAllocation[]
+  creditApplications               CustomerCreditApplication[]
   receivableReconciliationReviews CustomerReceivableReconciliationReview[]
   creditNotes                     CreditNote[]
   createdAt                       DateTime                                 @default(now())
   updatedAt                       DateTime                                 @updatedAt
   freightAmount                   Float                                    @default(0)
   procurementInvoice              ProcurementInvoice?
+  fuelSale                        FuelSale?
   User                            User                                     @relation(fields: [userId], references: [id])
 
   @@unique([tenantId, receiptNo])
@@ -1476,6 +1492,28 @@ model CustomerPaymentAllocation {
   @@map("customer_payment_allocations")
 }
 
+model CustomerCreditApplication {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  saleId      String
+  sale        SaleRecord @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  sourceType  String
+  sourceId    String
+  amount      Decimal  @db.Decimal(18, 2)
+  createdById String
+  createdBy   User     @relation("CustomerCreditApplicationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, sourceType, sourceId, saleId])
+  @@index([tenantId, customerId, createdAt])
+  @@index([tenantId, saleId])
+  @@map("customer_credit_applications")
+}
+
 model CustomerReceivableReconciliationReview {
   id                     String     @id @default(cuid())
   tenantId               String
@@ -1547,7 +1585,6 @@ model Invoice {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
-  @@unique([tenantId, invoiceNo])
   @@index([tenantId, branchId])
   @@map("invoices")
 }
@@ -1645,6 +1682,7 @@ model Supplier {
 
   purchases SupplierPurchase[]
   payments  SupplierPayment[]
+  fuelDeliveries FuelDelivery[]
   Tenant    Tenant             @relation(fields: [tenantId], references: [id])
 
   debitNotes DebitNote[]
@@ -1682,6 +1720,7 @@ model SupplierPurchase {
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
   User          User                   @relation(fields: [userId], references: [id])
+  fuelDelivery  FuelDelivery?
 
   @@index([tenantId, branchId])
   @@map("supplier_purchases")
@@ -3660,9 +3699,58 @@ model FuelTank {
   pumps            FuelPump[]
   deliveries       FuelDelivery[]
   dipstickReadings FuelDipstickReading[]
+  stockMovements   FuelStockMovement[]
+  stockAdjustments FuelStockAdjustment[]
+  sales            FuelSale[]
 
   @@index([tenantId, branchId])
   @@map("fuel_tanks")
+}
+
+model FuelStockMovement {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tankId        String
+  tank          FuelTank @relation(fields: [tankId], references: [id], onDelete: Restrict)
+  branchId      String?
+  movementType  String
+  litresDelta   Float
+  balanceAfter  Float
+  unitCost      Float    @default(0)
+  stockValueDelta Float  @default(0)
+  stockValueAfter Float  @default(0)
+  sourceType    String
+  sourceId      String?
+  reason        String?
+  actorId       String?
+  createdAt     DateTime @default(now())
+
+  @@unique([tenantId, sourceType, sourceId])
+  @@index([tenantId, tankId, createdAt])
+  @@index([tenantId, branchId, createdAt])
+  @@map("fuel_stock_movements")
+}
+
+model FuelStockAdjustment {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tankId        String
+  tank          FuelTank @relation(fields: [tankId], references: [id], onDelete: Restrict)
+  branchId      String?
+  litresDelta   Float
+  reason        String
+  status        String   @default("pending")
+  requestedById String
+  approvedById  String?
+  reviewNote    String?
+  requestedAt   DateTime @default(now())
+  reviewedAt    DateTime?
+
+  @@index([tenantId, status, requestedAt])
+  @@index([tenantId, tankId, requestedAt])
+  @@map("fuel_stock_adjustments")
 }
 
 model FuelDelivery {
@@ -3673,6 +3761,10 @@ model FuelDelivery {
   branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   tankId       String
   tank         FuelTank @relation(fields: [tankId], references: [id])
+  supplierId   String?
+  supplier     Supplier? @relation(fields: [supplierId], references: [id])
+  supplierPurchaseId String? @unique
+  supplierPurchase SupplierPurchase? @relation(fields: [supplierPurchaseId], references: [id], onDelete: SetNull)
   supplierName String?
   invoiceNo    String?
   litres       Float
@@ -3683,6 +3775,7 @@ model FuelDelivery {
   createdAt    DateTime @default(now())
 
   @@index([tenantId, branchId])
+  @@unique([tenantId, supplierId, invoiceNo])
   @@map("fuel_deliveries")
 }
 
@@ -3697,6 +3790,7 @@ model FuelMeterReading {
   closingReading Float    @default(0) // litres at end
   litresSold     Float    @default(0)
   amount         Float    @default(0)
+  priceOverrideReason String?
   readingDate    DateTime @default(now())
   createdAt      DateTime @default(now())
 
@@ -3726,16 +3820,49 @@ model FuelShiftReport {
   carWashIncome  Float     @default(0)
   expenses       Float     @default(0)
   netAmount      Float     @default(0)
+  expectedFuelSales Float  @default(0)
+  actualTenderTotal Float  @default(0)
+  reportedSalesTotal Float @default(0)
+  reconciliationVariance Float @default(0)
+  varianceReason String?
+  reviewedById   String?
+  reviewNote     String?
+  cashAccountId String?
+  mobileAccountId String?
+  expenseAccountId String?
   startDate      DateTime
   endDate        DateTime?
   status         String    @default("open") // open, closed, reconciled
   notes          String?
+  salesMode      String    @default("aggregate")
+  fuelSales      FuelSale[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   @@unique([tenantId, shiftNo])
   @@index([tenantId, branchId])
   @@map("fuel_shift_reports")
+}
+
+model FuelSale {
+  id          String         @id @default(cuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  tankId      String
+  tank        FuelTank        @relation(fields: [tankId], references: [id], onDelete: Restrict)
+  shiftId     String
+  shift       FuelShiftReport @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  saleId      String          @unique
+  sale        SaleRecord      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  idempotencyKey String?      @unique
+  litres      Float
+  unitPrice   Float
+  createdAt   DateTime        @default(now())
+
+  @@index([tenantId, shiftId, createdAt])
+  @@map("fuel_sales")
 }
 
 model FuelDipstickReading {

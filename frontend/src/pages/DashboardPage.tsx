@@ -24,10 +24,19 @@ export default function DashboardPage() {
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
   const { toast } = useToast()
   const online = useOnlineStatus()
-  const dashboardEnabled = Boolean(user) && hasPermission('canViewDashboard') && hasFeature('dashboard')
+  const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
+  const dashboardAccess = {
+    sales: hasPermission('canViewSale') || hasPermission('canViewSalesReport'),
+    finance: hasPermission('canViewFinancialReport'),
+    expenses: hasPermission('canViewExpense'),
+    inventory: hasPermission('canViewProduct'),
+    customers: hasPermission('canViewCustomer'),
+    receivables: hasPermission('canViewReceivable'),
+    tax: hasPermission('canViewTax'),
+  }
   const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
   const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
-    loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey)
+    loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey, dashboardAccess)
 
   useEffect(() => {
     setBillingForm(current => ({
@@ -38,12 +47,13 @@ export default function DashboardPage() {
   }, [user?.phone, user?.email])
 
   useEffect(() => {
-    if (hasPermission('canViewDashboard') && hasFeature('dashboard')) {
+    if (dashboardEnabled && (user?.role === 'owner' || hasPermission('canPaySubscriptionInvoice'))) {
       loadBillingReminder()
     }
-  }, [hasPermission, hasFeature])
+  }, [dashboardEnabled, user?.role, hasPermission])
 
   useEffect(() => {
+    if (user?.role !== 'owner' && !hasPermission('canPaySubscriptionInvoice')) return
     const billingReference = new URLSearchParams(window.location.search).get('billingRef')
     if (billingReference) {
       setBillingPaymentState('pending')
@@ -51,7 +61,7 @@ export default function DashboardPage() {
       window.history.replaceState({}, document.title, window.location.pathname)
       void pollBillingStatus(billingReference)
     }
-  }, [])
+  }, [user?.role, hasPermission])
 
   const loadBillingReminder = async () => {
     try {
@@ -175,18 +185,6 @@ export default function DashboardPage() {
   }
 
 
-  if (!hasPermission('canViewDashboard')) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <LayoutDashboard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-lg font-semibold">Access Denied</h2>
-          <p className="text-muted-foreground">You don't have permission to access the dashboard.</p>
-        </div>
-      </div>
-    )
-  }
-
   // If dashboard feature itself is not enabled, show upgrade
   if (!hasFeature('dashboard')) {
     return (
@@ -273,6 +271,9 @@ export default function DashboardPage() {
         </div>
       </div>
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
+      {!Object.values(dashboardAccess).some(Boolean) && !hasPermission('canViewCustomer') && !hasPermission('canViewPayable') && !hasPermission('canViewPurchase') && !hasPermission('canViewTax') && (
+        <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">Your dashboard is ready. Ask your business admin to grant the module viewing permissions for the insights you need.</p>
+      )}
 
       {billingReminder && !billingReminder.isTrial && billingReminder.paymentStatus !== 'paid' && (!billingReminder.isAnnualPartialPayment || billingReminder.isAnnualPartialReminderWindow) && (billingReminder.isPartiallyPaid || billingReminder.isDueSoon || billingReminder.isGracePeriodActive || billingReminder.isOverdue) && (
         <div className={`rounded-xl border p-4 ${billingReminder.isOverdue ? 'border-red-300 bg-red-50 text-red-900' : billingReminder.isTrialActive ? 'border-blue-200 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
@@ -300,7 +301,7 @@ export default function DashboardPage() {
 
       {/* KPI Cards Row 1 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {hasFeature('sales') && hasPermission('canViewSale') && (
+        {hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && (
         <Card className="border-l-4 border-l-blue-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Revenue</CardTitle>
@@ -331,7 +332,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('sales') && hasPermission('canViewSale') && (
+        {hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && (
         <Card className="border-l-4 border-l-purple-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sales</CardTitle>
@@ -420,20 +421,20 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold">{k.customerCount}</div>
-            <p className="text-xs text-muted-foreground">{hasFeature('inventory') ? `${k.productCount} products` : ''}</p>
+            {hasFeature('inventory') && hasPermission('canViewProduct') && <p className="text-xs text-muted-foreground">{k.productCount} products</p>}
           </CardContent>
         </Card>
         )}
       </div>
 
       {/* Daily Performance Chart */}
-      {hasFeature('sales') && hasPermission('canViewSale') && dailyPerf && (
+      {(hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) || hasFeature('accounting') && hasPermission('canViewFinancialReport')) && dailyPerf && (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-blue-500" /> Daily Performance</CardTitle>
-              <CardDescription>Revenue & profit per day — {formatDisplayDate(new Date())}</CardDescription>
+              <CardDescription>Daily business activity — {formatDisplayDate(new Date())}</CardDescription>
             </div>
             {dailyPerf.summary.bestDay && (
               <div className="flex gap-4 text-xs">
@@ -473,8 +474,8 @@ export default function DashboardPage() {
                 labelFormatter={(label) => `Day ${label}`}
                 contentStyle={{ borderRadius: 8, fontSize: 13 }}
               />
-              <Bar dataKey="revenue" fill="url(#colorRevBar)" radius={[3, 3, 0, 0]} name="revenue" />
-              <Bar dataKey="profit" fill="url(#colorProfitBar)" radius={[3, 3, 0, 0]} name="profit" />
+            {(hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && <Bar dataKey="revenue" fill="url(#colorRevBar)" radius={[3, 3, 0, 0]} name="revenue" />}
+              {hasPermission('canViewFinancialReport') && <Bar dataKey="profit" fill="url(#colorProfitBar)" radius={[3, 3, 0, 0]} name="profit" />}
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
@@ -484,7 +485,7 @@ export default function DashboardPage() {
       {/* Charts Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Revenue vs Operating Expenses Chart */}
-        {hasFeature('sales') && hasPermission('canViewSale') && (
+        {hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport') || hasPermission('canViewExpense')) && (
         <Card>
           <CardHeader>
             <CardTitle>Revenue vs Operating Expenses</CardTitle>
@@ -497,8 +498,8 @@ export default function DashboardPage() {
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Revenue" />
-                <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="7 7" name="Operating Expenses" />
+                {(hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Revenue" />}
+                {hasPermission('canViewExpense') && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="7 7" name="Operating Expenses" />}
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -531,7 +532,7 @@ export default function DashboardPage() {
       {/* Bottom Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Products */}
-        {hasFeature('inventory') && hasPermission('canViewProduct') && (
+        {hasFeature('inventory') && hasPermission('canViewProduct') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && (
         <Card>
           <CardHeader>
             <CardTitle>Top Selling Products</CardTitle>

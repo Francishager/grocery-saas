@@ -9,6 +9,9 @@ interface AuditLog {
   tenantName: string
   actor?: string
   userEmail?: string
+  subjectEmail?: string | null
+  branchId?: string | null
+  branchName?: string | null
   ip: string | null
   engagement: { activeMs: number; interactionCount: number; maxScrollDepth: number; kind: string } | null
   action: string
@@ -98,7 +101,7 @@ export const PlatformAuditPage: React.FC = () => {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   }).format(new Date(value))
   const actionLabel = (action: string) => ({
-    create: 'Created', update: 'Updated', delete: 'Deleted', view: 'Opened page', engagement: 'Active use',
+    create: 'Created', update: 'Updated', delete: 'Deleted', view: 'Opened page', engagement: 'Active use', staff_account_created: 'Staff account created', user_account_created: 'User account created',
     create_sensitive: 'Created (sensitive)', update_sensitive: 'Updated (sensitive)', delete_sensitive: 'Deleted (sensitive)',
     login: 'Signed in', login_failed: 'Sign-in failed', login_requires_reset: 'Password reset required', login_blocked_subscription: 'Sign-in blocked · subscription', login_blocked_schedule: 'Sign-in blocked · schedule',
   }[action] || action.replaceAll('_', ' '))
@@ -230,14 +233,15 @@ export const PlatformAuditPage: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1200px]">
               <thead className="border-b bg-gray-50 text-left">
-                <tr><th className="px-4 py-3 text-xs font-medium text-gray-500">Business</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Action</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Model / feature</th><th className="px-4 py-3 text-xs font-medium text-gray-500">User email</th><th className="px-4 py-3 text-xs font-medium text-gray-500">IP address</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Engagement</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Outcome</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Date & time</th></tr>
+                <tr><th className="px-4 py-3 text-xs font-medium text-gray-500">Business</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Action</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Model / feature</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Actor</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Affected user / branch</th><th className="px-4 py-3 text-xs font-medium text-gray-500">IP address</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Engagement</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Outcome</th><th className="px-4 py-3 text-xs font-medium text-gray-500">Date & time</th></tr>
               </thead>
               <tbody className="divide-y">
-                {!logs.length ? <tr><td colSpan={8} className="py-8 text-center text-sm text-gray-500">No activity found for these filters</td></tr> : logs.map(log => <tr key={log.id} className="hover:bg-gray-50">
+                {!logs.length ? <tr><td colSpan={9} className="py-8 text-center text-sm text-gray-500">No activity found for these filters</td></tr> : logs.map(log => <tr key={log.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">{log.tenantId ? <button onClick={() => navigate(`/saas/businesses/${log.tenantId}`)} className="text-left text-sm text-blue-700 hover:underline">{log.tenantName}</button> : <span className="text-sm">{log.tenantName}</span>}</td>
                   <td className="px-4 py-3"><span className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">{actionLabel(log.action)}</span></td>
                   <td className="px-4 py-3 text-sm text-gray-700">{log.model || 'Other'}</td>
                   <td className="max-w-[220px] break-all px-4 py-3 text-sm text-gray-700">{log.userEmail || log.actor || (log.action === 'login_failed' ? 'Unidentified sign-in attempt' : 'Email not captured')}</td>
+                  <td className="max-w-[240px] break-all px-4 py-3 text-sm text-gray-700">{log.subjectEmail || log.branchName ? <><div>{log.subjectEmail || '—'}</div>{log.branchName && <div className="mt-0.5 text-xs text-gray-500">{log.branchName}</div>}</> : '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-700">{log.ip || 'IP not captured'}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">{log.engagement ? <span>{formatDuration(log.engagement.activeMs)} active · {log.engagement.interactionCount.toLocaleString()} interactions · {log.engagement.maxScrollDepth}% scroll</span> : '—'}</td>
                   <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 text-xs ${log.statusCode >= 400 ? 'text-red-700' : 'text-emerald-700'}`}><ShieldCheck size={13} />{log.statusCode >= 400 ? `Failed (${log.statusCode})` : 'Success'}</span></td>

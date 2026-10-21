@@ -477,6 +477,9 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     const userId = req.user?.id;
     const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, amountPaid, changeGiven } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
+    if (amountPaid === undefined || amountPaid === null || amountPaid === '' || !Number.isFinite(Number(amountPaid)) || Number(amountPaid) <= 0) {
+      return res.status(400).json({ error: "Enter the amount received before completing this sale." });
+    }
     if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
       return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
     }

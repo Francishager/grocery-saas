@@ -13,7 +13,8 @@ import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
-import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
+import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
+import { applyAvailableCustomerCredit } from '../src/services/customerCreditApplicationService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -291,7 +292,8 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
             }
           },
           User: { select: { id: true, fname: true, lname: true } },
-          branch: { select: { id: true, name: true } }
+          branch: { select: { id: true, name: true } },
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } }
         },
         orderBy: { createdAt: 'asc' }
       }),
@@ -309,8 +311,25 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
     const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
 
-    const outstandingItems = outstandingSales.flatMap((sale) =>
-      sale.items.map((item) => ({
+    const outstandingItems = outstandingSales.flatMap((sale) => sale.fuelSale ? [{
+        id: sale.fuelSale.id,
+        saleId: sale.id,
+        receiptNo: sale.receiptNo,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        productName: `${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}`,
+        itemType: 'fuel',
+        quantity: sale.fuelSale.litres,
+        unitName: 'L',
+        unitPrice: sale.fuelSale.unitPrice,
+        total: sale.total,
+        saleTotal: sale.total,
+        amountPaid: sale.amountPaid,
+        saleBalance: sale.balance,
+        paymentStatus: sale.paymentStatus,
+        staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
+        branch: sale.branch?.name || '',
+      }] : sale.items.map((item) => ({
         id: item.id,
         saleId: sale.id,
         receiptNo: sale.receiptNo,
@@ -357,7 +376,15 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         paymentMethod: sale.paymentMethod,
         staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
         branch: sale.branch?.name || '',
-        items: sale.items.map((item) => ({
+          items: sale.fuelSale ? [{
+            id: sale.fuelSale.id,
+            productName: `${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}`,
+            itemType: 'fuel',
+            quantity: sale.fuelSale.litres,
+            unitName: 'L',
+            unitPrice: sale.fuelSale.unitPrice,
+            total: sale.total,
+          }] : sale.items.map((item) => ({
           id: item.id,
           productId: item.productId,
           productName: item.product?.name || 'Item',
@@ -412,6 +439,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         include: {
           branch: { select: { id: true, name: true } },
           User: userSelect,
+          creditApplications: { select: { id: true, sourceType: true, sourceId: true, amount: true, createdAt: true } },
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } },
           items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
         },
         orderBy: { createdAt: 'asc' },
@@ -508,7 +537,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         date: sale.createdAt,
         dueDate: sale.dueDate,
         reference: sale.receiptNo,
-        description: `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold`,
+        description: sale.fuelSale ? `${sale.fuelSale.litres} L ${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}` : `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold`,
         debit: toMoney(sale.total),
         credit: 0,
         amount: toMoney(sale.total),
@@ -520,7 +549,16 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         status: sale.paymentStatus,
         branch: sale.branch?.name || '',
         staff: userName(sale.User),
-        items: sale.items.map((item) => ({
+        items: sale.fuelSale ? [{
+          id: sale.fuelSale.id,
+          productName: `${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}`,
+          sku: '',
+          itemType: 'fuel',
+          quantity: sale.fuelSale.litres,
+          unitName: 'L',
+          unitPrice: sale.fuelSale.unitPrice,
+          total: sale.total,
+        }] : sale.items.map((item) => ({
           id: item.id,
           productId: item.productId,
           productName: item.product?.name || 'Item',
@@ -535,7 +573,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         sortOrder: 10
       })
 
-      const missingPayment = Math.max(0, Math.round((toMoney(sale.amountPaid) - toMoney(paymentTotalBySale.get(sale.id))) * 100) / 100)
+      const saleCreditApplied = (sale.creditApplications || []).reduce((sum, application) => sum + toMoney(application.amount), 0)
+      const missingPayment = Math.max(0, Math.round((toMoney(sale.amountPaid) - toMoney(paymentTotalBySale.get(sale.id)) - saleCreditApplied) * 100) / 100)
       if (missingPayment > 0) {
         rows.push({
           id: `${sale.id}-paid-at-sale`,
@@ -557,6 +596,27 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           sortOrder: 11
         })
       }
+      ;(sale.creditApplications || []).forEach((application) => {
+        rows.push({
+          id: application.id,
+          source: 'customer_credit_application',
+          type: 'Customer Credit Applied',
+          date: application.createdAt,
+          reference: sale.receiptNo,
+          description: `Applied ${application.sourceType.replace('_', ' ')} credit to ${sale.receiptNo}`,
+          debit: 0,
+          credit: 0,
+          amount: toMoney(application.amount),
+          balanceImpact: 0,
+          affectsBalance: false,
+          paymentMethod: 'customer_credit',
+          status: 'applied',
+          branch: sale.branch?.name || '',
+          staff: userName(sale.User),
+          items: [],
+          sortOrder: 12,
+        })
+      })
     })
 
     payments.forEach((payment) => {
@@ -1023,6 +1083,7 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
           customer: true,
           branch: true,
           User: userSelect,
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } },
           items: {
             include: {
               product: { select: { id: true, name: true, sku: true } }
@@ -1169,6 +1230,11 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     }
 
     const sale = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
+      const creditCheck = validateCreditSaleLimit({ ...customer, balance: customerBalanceBefore?.balance ?? customer.balance }, balance)
+      if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
+      const availableCustomerCredit = Math.max(0, -toMoney(customerBalanceBefore?.balance))
         const createdSale = await tx.saleRecord.create({
           data: {
           receiptNo,
@@ -1307,16 +1373,36 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         }
       }
 
+      let creditApplied = 0
+      if (balance > 0 && availableCustomerCredit > 0) {
+        const application = await applyAvailableCustomerCredit(tx, {
+          scope, customerId, saleId: createdSale.id,
+          amountDue: balance, availableCredit: availableCustomerCredit,
+          userId: req.user.id, branchId: scope.branchId,
+        })
+        creditApplied = application.amount
+        if (creditApplied > 0 && arConfig?.isEnabled) {
+          for (const creditApplication of application.applications.filter((row) => row.sourceType === 'payment')) {
+            await postCustomerCreditApplicationJournal(tx, {
+              tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+              application: creditApplication, reference: createdSale.receiptNo,
+            })
+          }
+        }
+      }
+
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
-      return createdSale
+      return { ...createdSale, creditApplied }
     })
 
     const printableSale = await prisma.saleRecord.findUnique({
       where: { id: sale.id },
       include: {
         customer: true,
-        branch: true,
+          branch: true,
         User: userSelect,
+        creditApplications: { select: { id: true, sourceType: true, sourceId: true, amount: true, createdAt: true } },
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } },
         items: {
           include: {
             product: { select: { id: true, name: true, sku: true } }
@@ -1325,7 +1411,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       }
     })
 
-    res.status(201).json(withUser(printableSale))
+    res.status(201).json({ ...withUser(printableSale), creditApplied: sale.creditApplied || 0 })
   } catch (error) {
     console.error('Create sale error:', error)
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })

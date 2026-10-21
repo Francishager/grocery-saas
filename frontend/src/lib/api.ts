@@ -1043,27 +1043,28 @@ export interface RegisterData {
 }
 
 export interface DashboardKpis {
-  revenue: number
-  revenueChange: number
-  salesCount: number
-  taxCollected: number
-  totalDiscount: number
-  purchases: number
-  expenses: number
-  cogs: number
-  grossProfit: number
-  netProfit: number
-  productCount: number
-  lowStockCount: number
-  customerCount: number
+  revenue: number | null
+  revenueChange: number | null
+  salesCount: number | null
+  taxCollected: number | null
+  totalDiscount: number | null
+  purchases: number | null
+  expenses: number | null
+  cogs: number | null
+  grossProfit: number | null
+  netProfit: number | null
+  productCount: number | null
+  lowStockCount: number | null
+  expiringCount?: number | null
+  customerCount: number | null
   receivablesOutstanding: number | null
   receivablesCount: number | null
 }
 
 export interface SalesChartData {
   labels: string[]
-  revenue: number[]
-  expenses: number[]
+  revenue: number[] | null
+  expenses: number[] | null
 }
 
 export interface ProfitLossData {
@@ -1087,11 +1088,11 @@ export interface PaymentMethodData {
 }
 
 export interface DailyPerformanceData {
-  data: { day: number; label: string; revenue: number; cogs: number; expenses: number; profit: number; salesCount: number }[]
+  data: { day: number; label: string; revenue: number | null; cogs: number | null; expenses: number | null; profit: number | null; salesCount: number | null }[]
   summary: {
     bestDay: { day: number; revenue: number } | null
     worstDay: { day: number; revenue: number } | null
-    avgDailyRevenue: number
+    avgDailyRevenue: number | null
     daysElapsed: number
     daysInMonth: number
   }
