@@ -226,7 +226,8 @@ function App() {
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
-          <Route path="restaurant" element={<FeatureGuard feature="restaurant"><RestaurantPage /></FeatureGuard>} />
+          <Route path="restaurant" element={<Navigate to="/tenant/restaurant/dashboard" replace />} />
+          <Route path="restaurant/:tab" element={<FeatureGuard feature="restaurant" permission="canViewRestaurant"><RestaurantPage /></FeatureGuard>} />
           <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
           <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station" permission="canViewFuelStation"><FuelStationPage /></FeatureGuard>} />
           <Route path="manufacturing" element={<FeatureGuard feature="manufacturing"><ManufacturingPage /></FeatureGuard>} />

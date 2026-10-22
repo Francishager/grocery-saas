@@ -282,6 +282,74 @@ router.delete('/menu/:productId/image', authenticateToken, requirePermission('ca
 // =====================================================
 // ORDERS
 // =====================================================
+router.get('/menu', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const entries = await prisma.restaurantMenuEntry.findMany({
+      where: scopedWhere(scope, { product: { isActive: true } }),
+      include: { product: { include: { category: { select: { id: true, name: true } } } } },
+      orderBy: [{ sortOrder: 'asc' }, { category: 'asc' }, { createdAt: 'asc' }],
+    })
+    res.json(entries)
+  } catch (error) { handleBranchError(res, error) }
+})
+
+router.post('/menu', authenticateToken, requirePermission('canCreateRestaurant'), requireFeature('restaurant'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const productId = String(req.body?.productId || '').trim()
+    const category = String(req.body?.category || '').trim().slice(0, 80) || 'General'
+    const description = String(req.body?.description || '').trim().slice(0, 500) || null
+    const station = req.body?.station === 'bar' ? 'bar' : 'kitchen'
+    const price = Number(req.body?.price)
+    if (!productId) return res.status(400).json({ error: 'Choose an inventory item to add to the menu.' })
+    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Enter a valid non-negative menu price.' })
+    const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: productId, isActive: true }), select: { id: true } })
+    if (!product) return res.status(404).json({ error: 'Active inventory item not found in this business or branch.' })
+    const entry = await prisma.restaurantMenuEntry.create({
+      data: { tenantId: scope.tenantId, branchId: scope.branchId, productId, category, description, station, price },
+      include: { product: { include: { category: { select: { id: true, name: true } } } } },
+    })
+    res.status(201).json(entry)
+  } catch (error) {
+    if (error?.code === 'P2002') return res.status(409).json({ error: 'This inventory item is already on the restaurant menu.' })
+    handleBranchError(res, error)
+  }
+})
+
+router.put('/menu/:id', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const current = await prisma.restaurantMenuEntry.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
+    if (!current) return res.status(404).json({ error: 'Menu entry not found.' })
+    const price = req.body?.price === undefined ? current.price : Number(req.body.price)
+    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Enter a valid non-negative menu price.' })
+    const entry = await prisma.restaurantMenuEntry.update({
+      where: { id: current.id },
+      data: {
+        price,
+        category: req.body?.category === undefined ? current.category : String(req.body.category || '').trim().slice(0, 80) || 'General',
+        description: req.body?.description === undefined ? current.description : String(req.body.description || '').trim().slice(0, 500) || null,
+        station: req.body?.station === 'bar' ? 'bar' : req.body?.station === 'kitchen' ? 'kitchen' : current.station,
+        isAvailable: typeof req.body?.isAvailable === 'boolean' ? req.body.isAvailable : current.isAvailable,
+        sortOrder: Number.isInteger(Number(req.body?.sortOrder)) ? Number(req.body.sortOrder) : current.sortOrder,
+      },
+      include: { product: { include: { category: { select: { id: true, name: true } } } } },
+    })
+    res.json(entry)
+  } catch (error) { handleBranchError(res, error) }
+})
+
+router.delete('/menu/:id', authenticateToken, requirePermission('canDeleteRestaurant'), requireFeature('restaurant'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const current = await prisma.restaurantMenuEntry.findFirst({ where: scopedWhere(scope, { id: req.params.id }), select: { id: true } })
+    if (!current) return res.status(404).json({ error: 'Menu entry not found.' })
+    await prisma.restaurantMenuEntry.delete({ where: { id: current.id } })
+    res.json({ message: 'Menu entry removed. Inventory and historical sales were not deleted.' })
+  } catch (error) { handleBranchError(res, error) }
+})
+
 router.get('/orders', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
@@ -326,6 +394,13 @@ router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant
     if (orderType === 'dine_in' && !tableId) return res.status(400).json({ error: 'Table is required for dine-in orders' })
     if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one item is required' })
     if (items.some(i => !i.productId || i.quantity < 1)) return res.status(400).json({ error: 'All items must have a product and quantity >= 1' })
+    const menuProductIds = [...new Set(items.map(item => item.productId))]
+    const menuEntries = await prisma.restaurantMenuEntry.findMany({
+      where: scopedWhere(scope, { productId: { in: menuProductIds }, isAvailable: true, product: { isActive: true } }),
+      select: { productId: true, price: true, station: true },
+    })
+    const menuByProductId = new Map(menuEntries.map(entry => [entry.productId, entry]))
+    if (menuEntries.length !== menuProductIds.length) return res.status(400).json({ error: 'One or more selected items are unavailable or not on the restaurant menu.' })
     const waiterFeatureEnabled = hasFeatureAccess(req.tenantFeatures || new Set(), 'restaurant.waiters')
     if (waiterId) {
       if (!waiterFeatureEnabled) return res.status(403).json({ error: 'Waiter selection is not enabled for this business.' })
@@ -349,15 +424,17 @@ router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant
     // Calculate totals
     let subtotal = 0
     const orderItems = items.map(item => {
-      const total = item.price * item.quantity - (item.discount || 0)
+      const menuEntry = menuByProductId.get(item.productId)
+      const price = Number(menuEntry.price)
+      const total = price * item.quantity - (item.discount || 0)
       subtotal += total
       return {
         productId: item.productId,
         quantity: item.quantity,
-        price: item.price,
+        price,
         discount: item.discount || 0,
         total,
-        station: item.station || 'kitchen',
+        station: menuEntry.station,
         specialInstructions: item.specialInstructions,
       }
     })
@@ -474,6 +551,16 @@ router.post('/orders/:id/complete', authenticateToken, requirePermission('canEdi
     const receiptNo = `RCP-${String(saleCount + 1).padStart(5, '0')}`
 
     // Create sale
+    const saleItems = await Promise.all(order.items.map(async item => {
+      const recipe = await prisma.recipe.findFirst({
+        where: { productId: item.productId, tenantId: order.tenantId, isActive: true },
+        include: { ingredients: { include: { product: { select: { cost: true } } } } },
+      })
+      const cost = recipe
+        ? recipe.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.product.cost || 0) * Number(ingredient.quantity || 0), 0)
+        : Number(item.product.cost || 0)
+      return { productId: item.productId, quantity: item.quantity, price: item.price, cost, discount: item.discount, total: item.total }
+    }))
     const sale = await prisma.sale.create({
       data: {
         receiptNo, tenantId: order.tenantId, branchId: order.branchId,
@@ -486,15 +573,7 @@ router.post('/orders/:id/complete', authenticateToken, requirePermission('canEdi
         total,
         paymentMethod: paymentMethod || 'cash',
         status: 'completed',
-        items: {
-          create: order.items.map(item => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            price: item.price,
-            discount: item.discount,
-            total: item.total
-          }))
-        }
+        items: { create: saleItems }
       }
     })
 
@@ -614,7 +693,7 @@ router.get('/reservations', authenticateToken, requirePermission('canViewRestaur
   try {
     const scope = await resolveBranchScope(prisma, req)
     const { date } = req.query
-    const where = scopedWhere(scope, ...(date ? { date: new Date(date) } : {}))
+    const where = scopedWhere(scope, date ? { date: new Date(date) } : {})
     const reservations = await prisma.reservation.findMany({
       where, include: { table: true, customer: true }, orderBy: { date: 'asc' }
     })
@@ -814,7 +893,11 @@ router.get('/deliveries', authenticateToken, requirePermission('canViewRestauran
     const scope = await resolveBranchScope(prisma, req)
     const { status } = req.query
     const deliveries = await prisma.delivery.findMany({
-      where: scopedWhere(scope, ...(status ? { status } : {})),
+      where: {
+        tenantId: scope.tenantId,
+        ...(scope.branchId ? { order: { is: { branchId: scope.branchId } } } : {}),
+        ...(status ? { status } : {}),
+      },
       include: { order: true, customer: true },
       orderBy: { createdAt: 'desc' }
     })
@@ -872,8 +955,8 @@ router.get('/dashboard', authenticateToken, requirePermission('canViewRestaurant
       prisma.restaurantOrder.count({ where: { ...where, createdAt: { gte: today } } }),
       prisma.restaurantTable.count({ where: { ...where, status: 'available', isActive: true } }),
       prisma.restaurantTable.count({ where: { ...where, status: 'occupied', isActive: true } }),
-      prisma.restaurantOrder.count({ where: { ...where, status: { in: ['pending', 'preparing'] } } }),
-      prisma.restaurantOrder.count({ where: { ...where, status: { in: ['pending', 'preparing'] } } }),
+      prisma.restaurantOrder.count({ where: { ...where, status: { in: ['pending', 'preparing'] }, items: { some: { status: { in: ['pending', 'preparing'] }, OR: [{ station: 'kitchen' }, { station: null }] } } } }),
+      prisma.restaurantOrder.count({ where: { ...where, status: { in: ['pending', 'preparing'] }, items: { some: { station: 'bar', status: { in: ['pending', 'preparing'] } } } } }),
       prisma.restaurantOrder.findMany({ where: { ...where, status: 'completed', createdAt: { gte: today } }, include: { items: true } })
     ])
 

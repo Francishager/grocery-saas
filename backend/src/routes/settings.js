@@ -30,7 +30,7 @@ router.get("/", authenticateToken, requirePermission("canViewSettings"), async (
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       select: {
-        id: true, name: true, slug: true, email: true, phone: true, address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
+        id: true, name: true, slug: true, email: true, phone: true, address: true, businessType: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
         logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
         taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
         createdAt: true, updatedAt: true, workingHours: true,
@@ -54,7 +54,7 @@ router.get("/business-profile", authenticateToken, async (req, res) => {
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       select: {
-        id: true, name: true, slug: true, email: true, phone: true, address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
+        id: true, name: true, slug: true, email: true, phone: true, address: true, businessType: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
         logo: true, currency: true, timezone: true, dateFormat: true, taxRate: true, taxEnabled: true, taxId: true,
         receiptHeader: true, receiptFooter: true,
       },

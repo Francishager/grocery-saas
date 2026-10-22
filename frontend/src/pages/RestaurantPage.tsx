@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
-import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye, ImagePlus, Printer } from 'lucide-react'
+import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye, ImagePlus, Printer, Package, RefreshCw } from 'lucide-react'
 import { useOnlineStatus } from '@/db/hooks'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { getLocalProducts } from '@/db/hybrid'
@@ -28,7 +29,8 @@ interface Order { id: string; orderNo: string; status: string; orderType: string
 interface Reservation { id: string; customerName: string; customerPhone: string | null; date: string; time: string; guests: number; status: string; specialRequests: string | null; table?: Table | null }
 interface Recipe { id: string; name: string; yield: string | null; isActive: boolean; product: { id: string; name: string }; ingredients: { id: string; productId: string; product: { id: string; name: string }; quantity: number; unit: string }[] }
 interface Delivery { id: string; customerName: string; customerPhone: string; address: string; riderName: string | null; riderPhone: string | null; deliveryFee: number; status: string; order?: { id: string; orderNo: string } | null }
-interface Product { id: string; name: string; price: number; quantity: number; image?: string | null; itemType?: string }
+interface Product { id: string; name: string; price: number; quantity: number; image?: string | null; itemType?: string; minStock?: number; baseUnit?: string; expiryDate?: string | null; branchId?: string | null; cost?: number | null }
+interface RestaurantMenuEntry { id: string; productId: string; category: string; description: string | null; station: string; price: number; isAvailable: boolean; sortOrder: number; product: Product & { category?: { id: string; name: string } | null } }
 interface DashboardStats { ordersToday: number; openTables: number; occupiedTables: number; kitchenOrders: number; barOrders: number; todaySales: number; avgBill: number; completedCount: number }
 interface HappyHourRule { id: string; name: string; productId: string; product: { id: string; name: string }; startTime: string; endTime: string; daysOfWeek: string; discountType: string; discountValue: number; isActive: boolean }
 interface ComboMeal { id: string; name: string; description: string | null; price: number; isActive: boolean; items: { id: string; productId: string; product: { id: string; name: string }; quantity: number }[] }
@@ -49,10 +51,17 @@ const statusColors: Record<string, string> = {
 
 export default function RestaurantPage() {
   const { toast } = useToast()
+  const navigate = useNavigate()
+  const { tab: routeTab } = useParams()
   const { hasPermission } = useAuth()
   const { hasFeature } = useFeatureAccess()
+  const canAdjustStock = hasPermission('canAdjustStock')
   const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
-  const [tab, setTab] = useState('dashboard')
+  const [tab, setActiveTab] = useState(routeTab || 'dashboard')
+  const setTab = (nextTab: string) => {
+    setActiveTab(nextTab)
+    if (routeTab !== nextTab) navigate(`/tenant/restaurant/${nextTab}`)
+  }
   const [tables, setTables] = useState<Table[]>([])
   const [waiters, setWaiters] = useState<Waiter[]>([])
   const [hrWaiterEmployees, setHrWaiterEmployees] = useState<HrWaiterEmployee[]>([])
@@ -63,6 +72,7 @@ export default function RestaurantPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [menuEntries, setMenuEntries] = useState<RestaurantMenuEntry[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [activeWaiterId, setActiveWaiterId] = useState(() => sessionStorage.getItem('restaurant.activeWaiterId') || '')
   const [waiterSessionToken, setWaiterSessionToken] = useState(() => sessionStorage.getItem('restaurant.waiterSessionToken') || '')
@@ -93,7 +103,16 @@ export default function RestaurantPage() {
   const [showEditWaiterModal, setShowEditWaiterModal] = useState(false)
   const [showEditRecipeModal, setShowEditRecipeModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
+  const [showMenuEntryModal, setShowMenuEntryModal] = useState(false)
+  const [showStockAdjustModal, setShowStockAdjustModal] = useState(false)
+  const [editingMenuEntry, setEditingMenuEntry] = useState<RestaurantMenuEntry | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [menuSearchQuery, setMenuSearchQuery] = useState('')
+  const [stockSearchQuery, setStockSearchQuery] = useState('')
+  const [stockAdjustProduct, setStockAdjustProduct] = useState<Product | null>(null)
+  const [stockAdjustForm, setStockAdjustForm] = useState({ adjustmentType: 'stock_in', quantity: 1, reason: '' })
+  const [savingStockAdjustment, setSavingStockAdjustment] = useState(false)
+  const [menuCategoryFilter, setMenuCategoryFilter] = useState('all')
   const [orderStatusFilter, setOrderStatusFilter] = useState('all')
   const [reservationDateFilter, setReservationDateFilter] = useState('')
   const [happyHours, setHappyHours] = useState<HappyHourRule[]>([])
@@ -108,6 +127,7 @@ export default function RestaurantPage() {
   const [mergeTableIds, setMergeTableIds] = useState<string[]>([])
   const [mergePrimaryId, setMergePrimaryId] = useState('')
   const [tableForm, setTableForm] = useState({ name: '', capacity: 4, area: '' })
+  const [menuForm, setMenuForm] = useState({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' })
   const [waiterForm, setWaiterForm] = useState({ name: '', phone: '', code: '', pin: '', employeeId: '' })
   const [editTableForm, setEditTableForm] = useState({ name: '', capacity: 4, area: '', status: 'available', isActive: true })
   const [editWaiterForm, setEditWaiterForm] = useState({ name: '', phone: '', code: '', pin: '', isActive: true, employeeId: '' })
@@ -124,12 +144,13 @@ export default function RestaurantPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [tablesRes, waitersRes, productsRes, statsRes, hrEmployeesRes] = await Promise.all([
+      const [tablesRes, waitersRes, productsRes, statsRes, hrEmployeesRes, menuRes] = await Promise.all([
         apiFetch('/api/restaurant/tables'),
         apiFetch('/api/restaurant/waiters'),
-        apiFetch('/api/inventory?limit=100'),
+        apiFetch('/api/inventory?limit=500'),
         apiFetch('/api/restaurant/dashboard'),
         canLinkWaiterToHr ? apiFetch('/api/restaurant/waiters/hr-employees') : Promise.resolve(null),
+        apiFetch('/api/restaurant/menu'),
       ])
       if (tablesRes.ok) setTables(await tablesRes.json())
       if (waitersRes.ok) setWaiters(await waitersRes.json())
@@ -138,11 +159,21 @@ export default function RestaurantPage() {
       if (productsRes.ok) { const p = await productsRes.json(); setProducts(p?.products || p?.records || []) }
       else if (!online) { const local = await getLocalProducts(); setProducts(local.map((p: any) => ({ id: p.id, name: p.product_name, price: p.unit_price, quantity: p.quantity }))) }
       if (statsRes.ok) setStats(await statsRes.json())
+      if (menuRes.ok) setMenuEntries(await menuRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)
   }, [canLinkWaiterToHr])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    const allowedTabs = ['dashboard', 'tables', 'orders', 'kitchen', 'bar', 'menu', 'stockroom', 'reservations', 'recipes', 'delivery', 'waiters', 'happy-hour', 'combos', 'tips']
+    if (!routeTab || !allowedTabs.includes(routeTab)) {
+      navigate('/tenant/restaurant/dashboard', { replace: true })
+      return
+    }
+    setActiveTab(routeTab)
+  }, [routeTab, navigate])
 
   useEffect(() => {
     if (activeWaiterId && waiters.length > 0 && !waiters.some(waiter => waiter.id === activeWaiterId && waiter.isActive)) {
@@ -243,6 +274,7 @@ export default function RestaurantPage() {
     if (tab === 'kitchen') fetchKitchen()
     if (tab === 'reservations') fetchReservations()
     if (tab === 'recipes') fetchRecipes()
+    if (tab === 'stockroom') fetchRecipes()
     if (tab === 'delivery') fetchDeliveries()
     if (tab === 'happy-hour') fetchHappyHours()
     if (tab === 'combos') fetchCombos()
@@ -316,8 +348,8 @@ export default function RestaurantPage() {
     if (orderItems.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'All items must have a product and quantity' }); return }
     try {
       const items = orderItems.map(i => {
-        const p = products.find(p => p.id === i.productId)
-        return { productId: i.productId, quantity: i.quantity, price: p?.price || 0, station: i.station }
+        const menuEntry = menuEntries.find(entry => entry.productId === i.productId)
+        return { productId: i.productId, quantity: i.quantity, price: menuEntry?.price || 0, station: menuEntry?.station || i.station }
       })
       const res = await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(waiterSessionToken ? { 'X-Restaurant-Waiter-Session': waiterSessionToken } : {}) }, body: JSON.stringify({ ...orderForm, waiterId: activeWaiterId || null, items }) })
       if (res.ok) {
@@ -326,6 +358,7 @@ export default function RestaurantPage() {
         setShowOrderModal(false)
         setOrderForm({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' })
         setOrderItems([])
+        setMenuSearchQuery('')
         fetchOrders()
         if (kitchenPrinterId) {
           const stations = [...new Set((createdOrder.items || []).map((item: OrderItem) => item.station || 'kitchen'))].filter((station): station is 'kitchen' | 'bar' => station === 'kitchen' || station === 'bar')
@@ -371,6 +404,7 @@ export default function RestaurantPage() {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Image upload failed')
       setProducts(current => current.map(product => product.id === productId ? { ...product, image: data.image } : product))
+      setMenuEntries(current => current.map(entry => entry.productId === productId ? { ...entry, product: { ...entry.product, image: data.image } } : entry))
       toast({ title: 'Menu image updated' })
     } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Image upload failed' }) }
   }
@@ -380,6 +414,7 @@ export default function RestaurantPage() {
       const response = await apiFetch(`/api/restaurant/menu/${productId}/image`, { method: 'DELETE' })
       if (!response.ok) throw new Error('Could not remove menu image')
       setProducts(current => current.map(product => product.id === productId ? { ...product, image: null } : product))
+      setMenuEntries(current => current.map(entry => entry.productId === productId ? { ...entry, product: { ...entry.product, image: null } } : entry))
       toast({ title: 'Menu image removed' })
     } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not remove menu image' }) }
   }
@@ -519,6 +554,136 @@ export default function RestaurantPage() {
 
   const totalTips = useMemo(() => tips.reduce((sum, t) => sum + t.amount, 0), [tips])
 
+  const visibleMenuEntries = useMemo(() => menuEntries.filter(entry => {
+    if (menuCategoryFilter !== 'all' && entry.category !== menuCategoryFilter) return false
+    const query = menuSearchQuery.trim().toLowerCase()
+    return !query || entry.product.name.toLowerCase().includes(query) || entry.category.toLowerCase().includes(query) || (entry.description || '').toLowerCase().includes(query)
+  }), [menuEntries, menuCategoryFilter, menuSearchQuery])
+  const menuCategories = useMemo(() => [...new Set(menuEntries.map(entry => entry.category).filter(Boolean))].sort(), [menuEntries])
+  const stockroomRows = useMemo(() => {
+    const menuByProductId = new Map(menuEntries.map(entry => [entry.productId, entry]))
+    const recipesByIngredientId = new Map<string, Recipe[]>()
+    recipes.filter(recipe => recipe.isActive).forEach(recipe => recipe.ingredients.forEach(ingredient => {
+      const linked = recipesByIngredientId.get(ingredient.productId) || []
+      if (!linked.some(item => item.id === recipe.id)) linked.push(recipe)
+      recipesByIngredientId.set(ingredient.productId, linked)
+    }))
+    const query = stockSearchQuery.trim().toLowerCase()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return products
+      .filter(product => product.itemType !== 'service')
+      .map(product => {
+        const linkedRecipes = recipesByIngredientId.get(product.id) || []
+        const menuEntry = menuByProductId.get(product.id)
+        const expiryDays = product.expiryDate ? Math.ceil((new Date(product.expiryDate).getTime() - today.getTime()) / 86400000) : null
+        const recipeCapacities = linkedRecipes.map(recipe => {
+          const recipeLines = recipe.ingredients.filter(ingredient => ingredient.quantity > 0)
+          const unitsMatch = recipeLines.every(ingredient => {
+            const ingredientProduct = products.find(item => item.id === ingredient.productId)
+            return ingredientProduct && (ingredient.unit || '').trim().toLowerCase() === (ingredientProduct.baseUnit || 'Piece').trim().toLowerCase()
+          })
+          const portions = unitsMatch && recipeLines.length > 0
+            ? Math.min(...recipeLines.map(ingredient => {
+              const ingredientProduct = products.find(item => item.id === ingredient.productId)
+              return ingredientProduct ? Math.floor(ingredientProduct.quantity / ingredient.quantity) : 0
+            }))
+            : null
+          return { name: recipe.name, portions }
+        })
+        return { product, linkedRecipes, menuEntry, expiryDays, recipeCapacities }
+      })
+      .filter(row => !query || row.product.name.toLowerCase().includes(query) || row.linkedRecipes.some(recipe => recipe.name.toLowerCase().includes(query)) || (row.menuEntry?.category || '').toLowerCase().includes(query))
+      .sort((a, b) => Number(a.product.quantity > (a.product.minStock ?? 0)) - Number(b.product.quantity > (b.product.minStock ?? 0)) || (a.expiryDays ?? Number.MAX_SAFE_INTEGER) - (b.expiryDays ?? Number.MAX_SAFE_INTEGER) || a.product.name.localeCompare(b.product.name))
+  }, [products, recipes, menuEntries, stockSearchQuery])
+  const stockroomSummary = useMemo(() => {
+    const tracked = products.filter(product => product.itemType !== 'service')
+    const ingredientIds = new Set(recipes.filter(recipe => recipe.isActive).flatMap(recipe => recipe.ingredients.map(ingredient => ingredient.productId)))
+    const now = Date.now()
+    return {
+      ingredients: tracked.filter(product => ingredientIds.has(product.id)).length,
+      lowStock: tracked.filter(product => product.quantity > 0 && product.quantity <= (product.minStock ?? 0)).length,
+      outOfStock: tracked.filter(product => product.quantity <= 0).length,
+      expiring: tracked.filter(product => product.expiryDate && new Date(product.expiryDate).getTime() >= now && new Date(product.expiryDate).getTime() <= now + 30 * 86400000).length,
+    }
+  }, [products, recipes])
+
+  const saveMenuEntry = async () => {
+    const selectedProduct = products.find(product => product.id === menuForm.productId)
+    if (!editingMenuEntry && !selectedProduct) { toast({ variant: 'destructive', title: 'Select an inventory item to link to the menu' }); return }
+    const price = Number(menuForm.price)
+    if (!Number.isFinite(price) || price < 0) { toast({ variant: 'destructive', title: 'Enter a valid menu price' }); return }
+    try {
+      const response = await apiFetch(editingMenuEntry ? `/api/restaurant/menu/${editingMenuEntry.id}` : '/api/restaurant/menu', { method: editingMenuEntry ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...menuForm, price }) })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Could not add menu item')
+      setMenuEntries(current => editingMenuEntry ? current.map(entry => entry.id === editingMenuEntry.id ? data : entry) : [...current, data])
+      setShowMenuEntryModal(false)
+      setEditingMenuEntry(null)
+      setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' })
+      toast({ title: editingMenuEntry ? 'Menu item updated' : 'Menu item added' })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not add menu item' }) }
+  }
+
+  const updateMenuEntry = async (entry: RestaurantMenuEntry, patch: Partial<RestaurantMenuEntry>) => {
+    try {
+      const response = await apiFetch(`/api/restaurant/menu/${entry.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Could not update menu item')
+      setMenuEntries(current => current.map(item => item.id === entry.id ? data : item))
+      toast({ title: 'Menu item updated' })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not update menu item' }) }
+  }
+
+  const deleteMenuEntry = async (entry: RestaurantMenuEntry) => {
+    try {
+      const response = await apiFetch(`/api/restaurant/menu/${entry.id}`, { method: 'DELETE' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Could not remove menu item')
+      setMenuEntries(current => current.filter(item => item.id !== entry.id))
+      setOrderItems(current => current.filter(item => item.productId !== entry.productId))
+      toast({ title: 'Menu item removed' })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not remove menu item' }) }
+  }
+
+  const submitStockAdjustment = async () => {
+    if (!stockAdjustProduct || !canAdjustStock) return
+    if (!Number.isInteger(stockAdjustForm.quantity) || stockAdjustForm.quantity <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a positive whole-unit quantity' })
+      return
+    }
+    if (!stockAdjustForm.reason.trim()) {
+      toast({ variant: 'destructive', title: 'A reason is required for the stock movement' })
+      return
+    }
+    setSavingStockAdjustment(true)
+    try {
+      const response = await apiFetch(`/api/inventory/${stockAdjustProduct.id}/stock-adjust`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...stockAdjustForm, branchId: stockAdjustProduct.branchId || undefined }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Stock movement could not be recorded')
+      setProducts(current => current.map(product => product.id === stockAdjustProduct.id ? { ...product, quantity: data.adjustment.newQuantity } : product))
+      setShowStockAdjustModal(false)
+      setStockAdjustProduct(null)
+      setStockAdjustForm({ adjustmentType: 'stock_in', quantity: 1, reason: '' })
+      toast({ title: stockAdjustForm.adjustmentType === 'stock_in' ? 'Stock received' : 'Stock-out recorded', description: `${stockAdjustProduct.name}: ${data.adjustment.previousQuantity} → ${data.adjustment.newQuantity}` })
+    } catch (error) {
+      toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Stock movement could not be recorded' })
+    } finally { setSavingStockAdjustment(false) }
+  }
+
+  const addMenuEntryToCart = (entry: RestaurantMenuEntry) => {
+    if (!entry.isAvailable) return
+    setOrderItems(current => {
+      const existing = current.find(item => item.productId === entry.productId)
+      return existing
+        ? current.map(item => item.productId === entry.productId ? { ...item, quantity: item.quantity + 1 } : item)
+        : [...current, { productId: entry.productId, quantity: 1, station: entry.station }]
+    })
+  }
+
   const addOrderItem = () => setOrderItems([...orderItems, { productId: '', quantity: 1, station: 'kitchen' }])
   const updateOrderItem = (idx: number, field: string, value: string) => setOrderItems(orderItems.map((i, x) => x === idx ? { ...i, [field]: value } : i))
   const removeOrderItem = (idx: number) => setOrderItems(orderItems.filter((_, x) => x !== idx))
@@ -547,12 +712,13 @@ export default function RestaurantPage() {
         </div>}
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="flex-wrap">
+      <Tabs value={tab === 'bar' ? 'kitchen' : tab} onValueChange={setTab}>
+        <TabsList className="hidden">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+          <TabsTrigger value="stockroom"><Package className="mr-1 h-3 w-3" /> Stockroom</TabsTrigger>
           <TabsTrigger value="tables">Tables</TabsTrigger>
           <TabsTrigger value="orders">Orders</TabsTrigger>
-          <TabsTrigger value="kitchen">Kitchen / Bar</TabsTrigger>
+          <TabsTrigger value="kitchen">Kitchen</TabsTrigger>
           <TabsTrigger value="menu">Menu</TabsTrigger>
           <TabsTrigger value="reservations">Reservations</TabsTrigger>
           <TabsTrigger value="recipes">Recipes</TabsTrigger>
@@ -564,7 +730,96 @@ export default function RestaurantPage() {
         </TabsList>
 
         {/* Dashboard */}
-        <TabsContent value="dashboard">
+        <TabsContent value="dashboard" className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Service overview</h2>
+              <p className="text-sm text-muted-foreground">Today&apos;s restaurant activity and live service status.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setTab('tables')}><Table2 className="mr-2 h-4 w-4" /> Floor</Button>
+              <Button variant="outline" onClick={() => setTab('kitchen')}><ChefHat className="mr-2 h-4 w-4" /> Kitchen</Button>
+              <Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Card role="button" tabIndex={0} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => setTab('orders')} onKeyDown={event => { if (event.key === 'Enter') setTab('orders') }}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Sales today</CardTitle></CardHeader>
+              <CardContent><div className="text-2xl font-semibold">{(stats?.todaySales || 0).toLocaleString()}</div><p className="mt-1 text-xs text-muted-foreground">{stats?.completedCount || 0} completed checks · Avg. {(stats?.avgBill || 0).toLocaleString()}</p></CardContent>
+            </Card>
+            <Card role="button" tabIndex={0} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => setTab('orders')} onKeyDown={event => { if (event.key === 'Enter') setTab('orders') }}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Orders today</CardTitle></CardHeader>
+              <CardContent><div className="text-2xl font-semibold">{stats?.ordersToday ?? 0}</div><p className="mt-1 text-xs text-muted-foreground">All dine-in, takeaway and delivery orders</p></CardContent>
+            </Card>
+            <Card role="button" tabIndex={0} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => setTab('kitchen')} onKeyDown={event => { if (event.key === 'Enter') setTab('kitchen') }}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">In preparation</CardTitle></CardHeader>
+              <CardContent><div className="text-2xl font-semibold">{stats?.kitchenOrders ?? 0}</div><p className="mt-1 text-xs text-muted-foreground">Kitchen and bar orders in progress</p></CardContent>
+            </Card>
+            <Card role="button" tabIndex={0} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => setTab('tables')} onKeyDown={event => { if (event.key === 'Enter') setTab('tables') }}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Table availability</CardTitle></CardHeader>
+              <CardContent><div className="text-2xl font-semibold">{stats?.openTables ?? 0}<span className="ml-1 text-base font-normal text-muted-foreground">available</span></div><p className="mt-1 text-xs text-muted-foreground">{stats?.occupiedTables ?? 0} occupied · {tables.filter(table => table.status === 'reserved' && table.isActive).length} reserved</p></CardContent>
+            </Card>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader><CardTitle className="text-base">Service queues</CardTitle></CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2">
+                <button className="flex items-center justify-between rounded-md border p-4 text-left hover:bg-muted/40" onClick={() => setTab('kitchen')}><span className="flex items-center gap-3"><ChefHat className="h-5 w-5 text-orange-600" /><span><span className="block font-medium">Kitchen</span><span className="text-xs text-muted-foreground">Open kitchen tickets</span></span></span><Badge>{stats?.kitchenOrders ?? 0}</Badge></button>
+                <button className="flex items-center justify-between rounded-md border p-4 text-left hover:bg-muted/40" onClick={() => setTab('bar')}><span className="flex items-center gap-3"><Wine className="h-5 w-5 text-rose-600" /><span><span className="block font-medium">Bar</span><span className="text-xs text-muted-foreground">Open bar tickets</span></span></span><Badge>{stats?.barOrders ?? 0}</Badge></button>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-base">Quick access</CardTitle></CardHeader>
+              <CardContent className="grid gap-2 sm:grid-cols-2">
+                <Button variant="outline" className="justify-start" onClick={() => setTab('menu')}><UtensilsCrossed className="mr-2 h-4 w-4" /> Menu &amp; pricing</Button>
+                <Button variant="outline" className="justify-start" onClick={() => setTab('reservations')}><CalendarClock className="mr-2 h-4 w-4" /> Reservations</Button>
+                <Button variant="outline" className="justify-start" onClick={() => setTab('delivery')}><Bike className="mr-2 h-4 w-4" /> Deliveries</Button>
+                <Button variant="outline" className="justify-start" onClick={() => setTab('tips')}><DollarSign className="mr-2 h-4 w-4" /> Waiter tips</Button>
+              </CardContent>
+            </Card>
+          </div>
+          {!stats && !loading && <div className="text-sm text-muted-foreground">Restaurant summary is not available right now. Refresh to try again.</div>}
+        </TabsContent>
+
+        <TabsContent value="stockroom" className="space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div><h2 className="font-semibold">Restaurant stockroom</h2><p className="text-sm text-muted-foreground">Track recipe ingredients, ready-to-sell stock, replenishment levels and expiry risk in one service-focused view.</p></div>
+            <Button variant="outline" onClick={() => { void fetchData(); void fetchRecipes() }} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh stock</Button>
+          </div>
+          <div className="grid gap-3 grid-cols-2 xl:grid-cols-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Recipe ingredients</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{stockroomSummary.ingredients}</div><p className="text-xs text-muted-foreground">Items used by active recipes</p></CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Below reorder level</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold text-amber-700">{stockroomSummary.lowStock}</div><p className="text-xs text-muted-foreground">On hand, at or below minimum</p></CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Out of stock</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold text-destructive">{stockroomSummary.outOfStock}</div><p className="text-xs text-muted-foreground">May block service or sales</p></CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Expiring in 30 days</CardTitle></CardHeader><CardContent><div className="text-2xl font-semibold">{stockroomSummary.expiring}</div><p className="text-xs text-muted-foreground">Based on item expiry dates</p></CardContent></Card>
+          </div>
+          <Card>
+            <CardHeader className="pb-3"><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle className="text-base">Stock by service use</CardTitle><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={stockSearchQuery} onChange={event => setStockSearchQuery(event.target.value)} placeholder="Search item, recipe or menu category" /></div></div></CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] text-sm">
+                  <thead><tr className="border-b text-left text-xs text-muted-foreground"><th className="pb-3 pr-4 font-medium">Stock item</th><th className="pb-3 pr-4 font-medium">Service use</th><th className="pb-3 pr-4 font-medium">On hand</th><th className="pb-3 pr-4 font-medium">Reorder at</th><th className="pb-3 pr-4 font-medium">Recipe capacity</th><th className="pb-3 pr-4 font-medium">Expiry</th><th className="pb-3 text-right font-medium">Action</th></tr></thead>
+                  <tbody>
+                    {stockroomRows.map(({ product, linkedRecipes, menuEntry, expiryDays, recipeCapacities }) => {
+                      const low = product.quantity <= (product.minStock ?? 0)
+                      const expired = expiryDays !== null && expiryDays < 0
+                      const expirySoon = expiryDays !== null && expiryDays >= 0 && expiryDays <= 30
+                      return <tr key={product.id} className="border-b last:border-0">
+                        <td className="py-3 pr-4"><div className="font-medium">{product.name}</div><div className="text-xs text-muted-foreground">{product.baseUnit || 'Piece'} · {product.branchId ? 'Branch stock' : 'Business stock'}</div></td>
+                        <td className="py-3 pr-4"><div className="flex flex-wrap gap-1">{linkedRecipes.length > 0 && <Badge variant="secondary">Ingredient · {linkedRecipes.length} recipe{linkedRecipes.length === 1 ? '' : 's'}</Badge>}{menuEntry && <Badge variant="outline">{menuEntry.station === 'bar' ? 'Bar' : 'Ready item'} · {menuEntry.category}</Badge>}{linkedRecipes.length === 0 && !menuEntry && <span className="text-muted-foreground">Other stock</span>}</div></td>
+                        <td className="py-3 pr-4"><span className={`font-semibold ${product.quantity <= 0 ? 'text-destructive' : low ? 'text-amber-700' : ''}`}>{product.quantity}</span> <span className="text-xs text-muted-foreground">{product.baseUnit || 'Piece'}</span></td>
+                        <td className="py-3 pr-4">{product.minStock ?? 0} <span className="text-xs text-muted-foreground">{product.baseUnit || 'Piece'}</span>{low && <Badge variant="outline" className="ml-2 border-amber-500 text-amber-700">Reorder</Badge>}</td>
+                        <td className="py-3 pr-4">{recipeCapacities.length === 0 ? <span className="text-muted-foreground">Not recipe-linked</span> : <div className="space-y-1">{recipeCapacities.map(capacity => <div key={capacity.name}><span className="text-muted-foreground">{capacity.name}: </span>{capacity.portions === null ? <span className="text-amber-700">check units</span> : <span>{capacity.portions.toLocaleString()} portions</span>}</div>)}</div>}</td>
+                        <td className="py-3 pr-4">{expiryDays === null ? <span className="text-muted-foreground">Not set</span> : <span className={expired || expirySoon ? 'font-medium text-amber-700' : ''}>{expired ? `Expired ${Math.abs(expiryDays)}d ago` : expiryDays === 0 ? 'Expires today' : `${expiryDays}d`}</span>}</td>
+                        <td className="py-3 text-right">{canAdjustStock ? <div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => { setStockAdjustProduct(product); setStockAdjustForm({ adjustmentType: 'stock_in', quantity: 1, reason: '' }); setShowStockAdjustModal(true) }}>Receive</Button><Button size="sm" variant="ghost" disabled={product.quantity <= 0} onClick={() => { setStockAdjustProduct(product); setStockAdjustForm({ adjustmentType: 'stock_out', quantity: 1, reason: 'Waste / spoilage' }); setShowStockAdjustModal(true) }}>Waste / out</Button></div> : <span className="text-xs text-muted-foreground">View only</span>}</td>
+                      </tr>
+                    })}
+                    {stockroomRows.length === 0 && <tr><td colSpan={7} className="py-10 text-center text-muted-foreground">{products.length ? 'No stock items match this search.' : 'No tracked stock items found.'}</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">Recipe capacity is estimated only when ingredient units exactly match the stock item&apos;s base unit. Stock movements are logged; use purchasing to record supplier invoices and financial cost.</p>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Tables */}
@@ -592,27 +847,39 @@ export default function RestaurantPage() {
         </TabsContent>
 
         <TabsContent value="menu">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <div><h2 className="font-semibold">Food &amp; drink menu</h2><p className="text-sm text-muted-foreground">Menu images are optimized automatically. Maximum upload size: 2 MB.</p></div>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div><h2 className="font-semibold">Restaurant menu</h2><p className="text-sm text-muted-foreground">Curate what guests can order here; each menu item stays linked to its stock and recipe record.</p></div>
+            <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>
           </div>
-          {products.length === 0 ? <div className="py-10 text-center text-muted-foreground">No inventory items are available for the menu yet.</div> :
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search menu items" className="pl-9" /></div>
+            <Select value={menuCategoryFilter} onValueChange={setMenuCategoryFilter}><SelectTrigger className="sm:w-52"><SelectValue placeholder="All categories" /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem>{menuCategories.map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}</SelectContent></Select>
+          </div>
+          {visibleMenuEntries.length === 0 ? <div className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">{menuEntries.length ? 'No available menu items match this search.' : 'Your restaurant menu is empty. Add items from tracked inventory to start taking orders.'}</div> :
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {products.map(product => <Card key={product.id} className="overflow-hidden">
+              {visibleMenuEntries.map(entry => <Card key={entry.id} className={`overflow-hidden ${entry.isAvailable ? '' : 'opacity-60'}`}>
                 <div className="aspect-[4/3] bg-muted">
-                  {product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" loading="lazy" /> : <div className="flex h-full items-center justify-center text-muted-foreground"><ImagePlus className="h-8 w-8" /></div>}
+                  {entry.product.image ? <img src={entry.product.image} alt={entry.product.name} className="h-full w-full object-cover" loading="lazy" /> : <div className="flex h-full items-center justify-center text-muted-foreground"><ImagePlus className="h-8 w-8" /></div>}
                 </div>
-                <CardContent className="space-y-2 p-3">
-                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={product.name}>{product.name}</p><p className="text-sm text-muted-foreground">{product.price.toLocaleString()} · Stock {product.quantity}</p></div></div>
-                  <div className="flex flex-wrap gap-2">
-                    <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent">
-                      <ImagePlus className="h-4 w-4" /> {product.image ? 'Change image' : 'Add image'}
-                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(product.id, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
+                <CardContent className="space-y-3 p-3">
+                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={entry.product.name}>{entry.product.name}</p><p className="text-sm text-muted-foreground">{entry.category} · {entry.station === 'bar' ? 'Bar' : 'Kitchen'}</p>{entry.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.description}</p>}</div><div className="flex flex-col items-end gap-1"><Badge variant="outline">{entry.product.quantity} in stock</Badge>{!entry.isAvailable && <Badge variant="secondary">Paused</Badge>}</div></div>
+                  <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span><Button size="sm" disabled={!entry.isAvailable} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button></div>
+                  <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+                    <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
+                      <ImagePlus className="h-3.5 w-3.5" /> {entry.product.image ? 'Change photo' : 'Add photo'}
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(entry.productId, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
                     </label>
-                    {product.image && <Button size="sm" variant="ghost" onClick={() => removeMenuImage(product.id)}>Remove</Button>}
+                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause' : 'Resume'}</Button>
+                    <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>
                   </div>
                 </CardContent>
               </Card>)}
             </div>}
+          {orderItems.length > 0 && <div className="sticky bottom-3 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-3 shadow-lg">
+            <div><p className="font-medium">Order cart · {orderItems.reduce((count, item) => count + item.quantity, 0)} items</p><p className="text-sm text-muted-foreground">Estimated total: {orderItems.reduce((sum, item) => sum + item.quantity * (menuEntries.find(entry => entry.productId === item.productId)?.price || 0), 0).toLocaleString()}</p></div>
+            <div className="flex gap-2"><Button variant="outline" onClick={() => setOrderItems([])}>Clear cart</Button><Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'takeaway', specialInstructions: '' }); setShowOrderModal(true) }}>Continue to order</Button></div>
+          </div>}
         </TabsContent>
 
         {/* Orders */}
@@ -666,11 +933,11 @@ export default function RestaurantPage() {
         {/* Kitchen / Bar Display */}
         <TabsContent value="kitchen">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
-            <div><p className="font-medium">Kitchen printer</p><p className="text-sm text-muted-foreground">{kitchenPrinterId ? `Configured on this device: ${availablePrinters.find(printer => printer.id === kitchenPrinterId)?.name || 'saved printer'}` : 'Choose a local printer to send kitchen and bar tickets directly.'}</p></div>
+            <div><p className="font-medium">{tab === 'bar' ? 'Bar printer' : 'Kitchen printer'}</p><p className="text-sm text-muted-foreground">{kitchenPrinterId ? `Configured on this device: ${availablePrinters.find(printer => printer.id === kitchenPrinterId)?.name || 'saved printer'}` : `Choose a local printer to send ${tab === 'bar' ? 'bar' : 'kitchen'} tickets directly.`}</p></div>
             <Button variant="outline" onClick={discoverKitchenPrinters} disabled={printerDiscoveryBusy}><Printer className="mr-2 h-4 w-4" />{printerDiscoveryBusy ? 'Searching…' : kitchenPrinterId ? 'Change printer' : 'Set printer'}</Button>
           </div>
           <div className="grid gap-6 md:grid-cols-2">
-            <div>
+            {tab !== 'bar' && <div>
               <h3 className="font-semibold flex items-center gap-2 mb-3"><ChefHat className="h-5 w-5" /> Kitchen Orders</h3>
               <div className="space-y-3">
                 {kitchenOrders.map(o => (
@@ -691,8 +958,8 @@ export default function RestaurantPage() {
                 ))}
                 {kitchenOrders.length === 0 && <div className="text-center text-muted-foreground py-4">No kitchen orders.</div>}
               </div>
-            </div>
-            <div>
+            </div>}
+            {tab === 'bar' && <div className="md:col-span-2">
               <h3 className="font-semibold flex items-center gap-2 mb-3"><Beaker className="h-5 w-5" /> Bar Orders</h3>
               <div className="space-y-3">
                 {barOrders.map(o => (
@@ -713,7 +980,7 @@ export default function RestaurantPage() {
                 ))}
                 {barOrders.length === 0 && <div className="text-center text-muted-foreground py-4">No bar orders.</div>}
               </div>
-            </div>
+            </div>}
           </div>
         </TabsContent>
 
@@ -852,6 +1119,20 @@ export default function RestaurantPage() {
         </TabsContent>
       </Tabs>
 
+      <Dialog open={showStockAdjustModal} onOpenChange={open => { setShowStockAdjustModal(open); if (!open) setStockAdjustProduct(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{stockAdjustForm.adjustmentType === 'stock_in' ? 'Receive stock' : 'Record stock-out'}{stockAdjustProduct ? ` · ${stockAdjustProduct.name}` : ''}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Movement</Label><Select value={stockAdjustForm.adjustmentType} onValueChange={adjustmentType => setStockAdjustForm(current => ({ ...current, adjustmentType, reason: adjustmentType === 'stock_in' ? '' : 'Waste / spoilage' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stock_in">Receive / add stock</SelectItem><SelectItem value="stock_out">Waste / remove stock</SelectItem></SelectContent></Select></div>
+            <div><Label>Quantity ({stockAdjustProduct?.baseUnit || 'Piece'})</Label><Input type="number" min="1" step="1" value={stockAdjustForm.quantity} onChange={event => setStockAdjustForm(current => ({ ...current, quantity: Number(event.target.value) }))} /></div>
+            <div><Label>Reason</Label><Input required value={stockAdjustForm.reason} onChange={event => setStockAdjustForm(current => ({ ...current, reason: event.target.value }))} placeholder={stockAdjustForm.adjustmentType === 'stock_in' ? 'e.g. Opening count correction' : 'e.g. Spoilage, breakage, staff meal'} /></div>
+            {stockAdjustForm.adjustmentType === 'stock_out' && stockAdjustProduct && <p className="text-xs text-muted-foreground">Available: {stockAdjustProduct.quantity} {stockAdjustProduct.baseUnit || 'Piece'}. The recorded quantity cannot exceed stock on hand.</p>}
+            <p className="text-xs text-muted-foreground">This records an audited quantity movement. Supplier purchases and their costs should still be entered through purchasing.</p>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowStockAdjustModal(false)} disabled={savingStockAdjustment}>Cancel</Button><Button onClick={() => void submitStockAdjustment()} disabled={savingStockAdjustment || !canAdjustStock}>{savingStockAdjustment ? 'Saving…' : 'Record movement'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Table Modal */}
       <Dialog open={showTableModal} onOpenChange={setShowTableModal}>
         <DialogContent><DialogHeader><DialogTitle>Add Table</DialogTitle></DialogHeader>
@@ -889,6 +1170,32 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showMenuEntryModal} onOpenChange={open => { setShowMenuEntryModal(open); if (!open) setEditingMenuEntry(null) }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>{editingMenuEntry ? 'Edit restaurant menu item' : 'Add restaurant menu item'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Tracked inventory item</Label>
+              <Select value={menuForm.productId} disabled={Boolean(editingMenuEntry)} onValueChange={value => {
+                const product = products.find(item => item.id === value)
+                setMenuForm(current => ({ ...current, productId: value, price: String(product?.price ?? '') }))
+              }}>
+                <SelectTrigger><SelectValue placeholder="Choose item linked to stock and cost" /></SelectTrigger>
+                <SelectContent>{products.filter(product => editingMenuEntry?.productId === product.id || !menuEntries.some(entry => entry.productId === product.id)).map(product => <SelectItem key={product.id} value={product.id}>{product.name} · stock {product.quantity}</SelectItem>)}</SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">Menu pricing and availability are managed here. Stock and recipe ingredients remain linked to inventory.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div><Label>Menu price</Label><Input type="number" min="0" step="0.01" value={menuForm.price} onChange={event => setMenuForm(current => ({ ...current, price: event.target.value }))} /></div>
+              <div><Label>Menu category</Label><Input value={menuForm.category} onChange={event => setMenuForm(current => ({ ...current, category: event.target.value }))} placeholder="Meals, Drinks, Sides" /></div>
+              <div><Label>Preparation station</Label><Select value={menuForm.station} onValueChange={station => setMenuForm(current => ({ ...current, station }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>
+            </div>
+            <div><Label>Description</Label><Input value={menuForm.description} onChange={event => setMenuForm(current => ({ ...current, description: event.target.value }))} placeholder="Menu description or serving notes" /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Order Modal */}
       <Dialog open={showOrderModal} onOpenChange={setShowOrderModal}>
         <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>New Order</DialogTitle></DialogHeader>
@@ -899,9 +1206,10 @@ export default function RestaurantPage() {
               <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label>Items</Label>
+              <Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search food and drinks" className="mb-2" />
               <div className="space-y-2">{orderItems.map((item, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-6"><Select value={item.productId} onValueChange={v => updateOrderItem(idx, 'productId', v)}><SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger><SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div>
+                  <div className="col-span-6"><Select value={item.productId} onValueChange={v => updateOrderItem(idx, 'productId', v)}><SelectTrigger><SelectValue placeholder="Select menu item" /></SelectTrigger><SelectContent>{menuEntries.filter(entry => entry.isAvailable && entry.product.name.toLowerCase().includes(menuSearchQuery.toLowerCase())).map(entry => <SelectItem key={entry.productId} value={entry.productId}>{entry.product.name} · {entry.price.toLocaleString()}</SelectItem>)}</SelectContent></Select></div>
                   <div className="col-span-2"><Input type="number" min={1} value={item.quantity} onChange={e => updateOrderItem(idx, 'quantity', e.target.value)} /></div>
                   <div className="col-span-3"><Select value={item.station} onValueChange={v => updateOrderItem(idx, 'station', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>
                   <div className="col-span-1"><Button size="sm" variant="ghost" onClick={() => removeOrderItem(idx)}>✕</Button></div>

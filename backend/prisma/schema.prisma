@@ -46,6 +46,7 @@ model Branch {
   stockTransfersFrom   StockTransfer[]       @relation("TransferFrom")
   stockTransfersTo     StockTransfer[]       @relation("TransferTo")
   restaurantTables     RestaurantTable[]
+  restaurantMenuEntries RestaurantMenuEntry[]
   restaurantOrders     RestaurantOrder[]
   reservations         Reservation[]
   fuelPumps            FuelPump[]
@@ -206,6 +207,7 @@ model Tenant {
   pushTokens           PushToken[]
   integrations         IntegrationConfig[]
   restaurantTables     RestaurantTable[]
+  restaurantMenuEntries RestaurantMenuEntry[]
   restaurantOrders     RestaurantOrder[]
   reservations         Reservation[]
   recipes              Recipe[]
@@ -1117,6 +1119,7 @@ model Product {
   recipeIngredients             RecipeIngredient[]
   comboMealItems                ComboMealItem[]
   orderItems                    RestaurantOrderItem[]
+  restaurantMenuEntry           RestaurantMenuEntry?
   recipes                       Recipe[]
   productionOrders              ProductionOrder[]
   productionWaste               ProductionWaste[]
@@ -3477,6 +3480,27 @@ model RestaurantOrderItem {
 
   @@index([orderId])
   @@map("restaurant_order_items")
+}
+
+model RestaurantMenuEntry {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  productId    String   @unique
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category     String   @default("General")
+  description  String?
+  station      String   @default("kitchen")
+  price        Float
+  isAvailable  Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, branchId, isAvailable, sortOrder])
+  @@map("restaurant_menu_entries")
 }
 
 enum ItemStatus {

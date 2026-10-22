@@ -2,7 +2,7 @@ import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal, Printer } from 'lucide-react'
-import { inventoryApi, categoriesApi, branchesApi, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
+import { inventoryApi, categoriesApi, branchesApi, settingsApi, apiFetch, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -209,6 +209,7 @@ const formatQty = (value: number | undefined | null) =>
 
 export default function InventoryPage() {
   const { hasFeature } = useFeatureAccess()
+  const restaurantFeatureEnabled = hasFeature('restaurant')
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryQuery, setCategoryQuery] = useState('')
   const [categorySaving, setCategorySaving] = useState(false)
@@ -216,6 +217,11 @@ export default function InventoryPage() {
   const [categoriesError, setCategoriesError] = useState<string | null>(null)
   const categoryRequestRef = useRef(0)
   const [items, setItems] = useState<InventoryItem[]>([])
+  const [hospitalityBusiness, setHospitalityBusiness] = useState(false)
+  const [hospitalityBusinessType, setHospitalityBusinessType] = useState('')
+  const [hospitalityClassificationsLoaded, setHospitalityClassificationsLoaded] = useState(false)
+  const [hospitalityIngredientIds, setHospitalityIngredientIds] = useState<Set<string>>(new Set())
+  const [hospitalityMenuItems, setHospitalityMenuItems] = useState<Map<string, string>>(new Map())
   const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
@@ -258,6 +264,47 @@ export default function InventoryPage() {
   const canEditProduct = hasPermission('canEditProduct')
   const canDeleteProduct = hasPermission('canDeleteProduct')
   const canAdjustStock = hasPermission('canAdjustStock')
+  const canViewRestaurant = hasPermission('canViewRestaurant')
+  const hospitalityView = searchParams.get('hospitalityView') || 'all'
+  const showHospitalityInventory = hospitalityBusiness && restaurantFeatureEnabled && canViewRestaurant && lockedType === 'product'
+  const hospitalityViewLabel: Record<string, string> = { all: 'All stock', ingredients: 'Recipe ingredients', menu: 'Menu items', bar: 'Bar stock', supplies: 'Unlinked stock' }
+  const hospitalityBusinessLabel = hospitalityBusinessType === 'hotel_restaurant' ? 'Hotel & Restaurant' : hospitalityBusinessType === 'bar' ? 'Bar' : hospitalityBusinessType === 'bakery' ? 'Bakery' : 'Restaurant'
+
+  useEffect(() => {
+    let active = true
+    setHospitalityClassificationsLoaded(false)
+    settingsApi.getBusinessProfile().then(async (profile: any) => {
+      if (!active) return
+      const type = String(profile?.businessType || '').toLowerCase()
+      const hospitalityTypes = new Set(['restaurant', 'bar', 'restaurant_bar', 'cafe', 'coffee_shop', 'fast_food', 'hotel_restaurant', 'bakery'])
+      const isHospitality = hospitalityTypes.has(type)
+      setHospitalityBusinessType(type)
+      setHospitalityBusiness(isHospitality)
+      if (!isHospitality || !restaurantFeatureEnabled || !canViewRestaurant) {
+        setHospitalityIngredientIds(new Set())
+        setHospitalityMenuItems(new Map())
+        setHospitalityClassificationsLoaded(true)
+        return
+      }
+      const [recipesResponse, menuResponse] = await Promise.all([
+        apiFetch('/api/restaurant/recipes'),
+        apiFetch('/api/restaurant/menu'),
+      ])
+      const [recipes, menu] = await Promise.all([
+        recipesResponse.ok ? recipesResponse.json() : Promise.resolve([]),
+        menuResponse.ok ? menuResponse.json() : Promise.resolve([]),
+      ])
+      if (!active) return
+      setHospitalityIngredientIds(new Set((Array.isArray(recipes) ? recipes : []).filter((recipe: any) => recipe.isActive).flatMap((recipe: any) => (recipe.ingredients || []).map((ingredient: any) => String(ingredient.productId)))))
+      setHospitalityMenuItems(new Map((Array.isArray(menu) ? menu : []).map((entry: any) => [String(entry.productId), String(entry.station || 'kitchen')])))
+      setHospitalityClassificationsLoaded(true)
+    }).catch(() => {
+      if (!active) return
+      setHospitalityBusiness(false)
+      setHospitalityClassificationsLoaded(true)
+    })
+    return () => { active = false }
+  }, [restaurantFeatureEnabled, canViewRestaurant])
 
   // Determine create/edit/delete permission based on the active item type
   const activeType = lockedType || itemTypeFilter
@@ -270,11 +317,23 @@ export default function InventoryPage() {
 
   const filteredItems = useMemo(() => {
     let result = items
+    if (showHospitalityInventory && hospitalityView !== 'all') {
+      result = result.filter(item => {
+        const id = String(item.id)
+        const isIngredient = hospitalityIngredientIds.has(id)
+        const menuStation = hospitalityMenuItems.get(id)
+        if (hospitalityView === 'ingredients') return isIngredient
+        if (hospitalityView === 'menu') return Boolean(menuStation)
+        if (hospitalityView === 'bar') return menuStation === 'bar'
+        if (hospitalityView === 'supplies') return !isIngredient && !menuStation
+        return true
+      })
+    }
     if (showUncategorizedOnly) {
       result = result.filter((item) => (item as any).isUncategorized)
     }
     return result
-  }, [items, showUncategorizedOnly])
+  }, [items, showUncategorizedOnly, showHospitalityInventory, hospitalityView, hospitalityIngredientIds, hospitalityMenuItems])
 
   const categoryNameById = useMemo(
     () => new Map(categories.map((category) => [category.id, category.name])),
@@ -290,7 +349,7 @@ export default function InventoryPage() {
 
   useEffect(() => {
     resetPage()
-  }, [appliedSearch, branchFilter, activeType, showUncategorizedOnly, movementPreset, customMovementDate, resetPage])
+  }, [appliedSearch, branchFilter, activeType, showUncategorizedOnly, movementPreset, customMovementDate, hospitalityView, resetPage])
 
   useEffect(() => {
     if (currentPage > Math.max(1, totalPages)) goToPage(Math.max(1, totalPages))
@@ -1091,7 +1150,7 @@ export default function InventoryPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            {urlTab === 'products' ? 'Products' :
+            {showHospitalityInventory ? `${hospitalityBusinessLabel} Inventory · ${hospitalityViewLabel[hospitalityView] || 'All stock'}` : urlTab === 'products' ? 'Products' :
              urlTab === 'services' ? 'Services' :
              urlTab === 'rentals' ? 'Rental Items' :
              urlTab === 'lubricants' ? 'Lubricants & Dry Stock' :
@@ -1099,7 +1158,7 @@ export default function InventoryPage() {
              'Items'}
           </h1>
           <p className="text-muted-foreground">
-            {urlTab === 'products' ? 'Manage your product inventory' :
+            {showHospitalityInventory ? hospitalityBusinessType === 'hotel_restaurant' ? 'Manage restaurant, bar and hotel stock in one inventory, with your existing categories, branch controls and movement history.' : 'Manage ingredients, menu stock and supplies using your existing inventory records, categories and movement history.' : urlTab === 'products' ? 'Manage your product inventory' :
              urlTab === 'services' ? 'Manage service items' :
              urlTab === 'rentals' ? 'Manage rental items' :
              urlTab === 'lubricants' ? 'Manage lubricants and dry stock inventory' :
@@ -1110,10 +1169,25 @@ export default function InventoryPage() {
         {canCreateCurrent && (
           <Button onClick={openNewForm}>
             <Plus className="mr-2 h-4 w-4" />
-            {isServicesPage ? 'Add Service' : lockedType === 'product' ? 'Add Product' : 'Add Item'}
+            {isServicesPage ? 'Add Service' : showHospitalityInventory ? 'Add Stock Item' : lockedType === 'product' ? 'Add Product' : 'Add Item'}
           </Button>
         )}
       </div>
+
+      {showHospitalityInventory && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label="Hospitality inventory views">
+        <div><h2 className="font-semibold">{hospitalityBusinessLabel} stock</h2><p className="text-sm text-muted-foreground">Recipe ingredients and menu items are linked from Recipes & Ingredients and Menu & Pricing. Other stock stays in this same inventory; use your categories to distinguish hotel areas such as housekeeping, minibar and room supplies.</p></div>
+        <div className="flex max-w-full gap-2 overflow-x-auto pb-1" role="group" aria-label="Filter hospitality stock">
+          {([['all', 'All stock'], ['ingredients', 'Recipe ingredients'], ['menu', 'Menu items'], ['bar', 'Bar stock'], ['supplies', 'Unlinked stock']] as const).map(([value, label]) => <button key={value} type="button" disabled={!hospitalityClassificationsLoaded && value !== 'all'} onClick={() => setSearchParams(current => {
+            const next = new URLSearchParams(current)
+            if (value === 'all') next.delete('hospitalityView')
+            else next.set('hospitalityView', value)
+            return next
+          })} aria-pressed={(hospitalityView === value || (value === 'all' && !['ingredients', 'menu', 'bar', 'supplies'].includes(hospitalityView))) ? 'true' : 'false'} className={cn('shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50', (hospitalityView === value || (value === 'all' && !['ingredients', 'menu', 'bar', 'supplies'].includes(hospitalityView))) ? 'border-primary bg-primary/10 text-primary' : 'border-input bg-background text-muted-foreground hover:bg-muted')}>
+            {label}
+          </button>)}
+        </div>
+        {hospitalityView !== 'all' && !hospitalityClassificationsLoaded && <p className="text-xs text-muted-foreground">Loading recipe and menu links…</p>}
+      </section>}
 
       <UsageLimitBanner resource="products" label={isServicesPage ? 'Services' : 'Products'} currentCount={items.length} />
 
