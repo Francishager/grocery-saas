@@ -30,7 +30,7 @@ export interface SessionMonitorProps {
 }
 
 export const SessionMonitor: React.FC<SessionMonitorProps> = ({
-  timeout = 30 * 60 * 1000, // 30 minutes
+  timeout = 24 * 60 * 60 * 1000, // 24 hours
   warningTime = 5 * 60 * 1000, // 5 minutes before timeout
   onSessionExpire,
   onSessionExtend,

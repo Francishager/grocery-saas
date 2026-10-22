@@ -96,7 +96,7 @@ export const passwordRequirements = {
 // Session settings
 export const sessionSettings = {
   maxSessions: 5,
-  sessionTimeout: 30 * 60 * 1000, // 30 minutes
+  sessionTimeout: 24 * 60 * 60 * 1000, // 24 hours
   rememberMeDuration: 30 * 24 * 60 * 60 * 1000, // 30 days
   passwordExpiryDays: 90,
   passwordHistoryCount: 5,

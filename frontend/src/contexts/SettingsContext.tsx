@@ -101,7 +101,7 @@ const defaultSettings: Settings = {
   },
   security: {
     twoFactorEnabled: false,
-    sessionTimeout: 30,
+    sessionTimeout: 24 * 60,
     passwordExpiryDays: 90,
     loginNotifications: true,
   },

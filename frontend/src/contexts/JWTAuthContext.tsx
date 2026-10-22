@@ -83,6 +83,8 @@ export interface JWTAuthContextValue {
 }
 
 const JWTAuthContext = createContext<JWTAuthContextValue | undefined>(undefined)
+const SESSION_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000
+const SESSION_ACTIVITY_STORAGE_KEY = 'auth_last_activity'
 
 export interface JWTAuthProviderProps {
   children: ReactNode
@@ -234,6 +236,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       setUser(userData)
       setTokens(tokenData)
       persistAuth(userData, tokenData)
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
       await refreshOnboardingStatus()
       // Reset feature access service on login so stale features from previous session don't persist
       featureAccessService.reset()
@@ -270,6 +273,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
+              localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
               // Silent
               return { user: cachedUser, tokens: cachedTokens }
             }
@@ -295,6 +299,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
               setUser(cachedUser)
               setTokens(cachedTokens)
               persistAuth(cachedUser, cachedTokens)
+              localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
               // Silent
               return { user: cachedUser, tokens: cachedTokens }
             }
@@ -329,6 +334,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       setUser(null)
       setTokens(null)
       persistAuth(null, null)
+      localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY)
       // Reset feature access service on logout
       featureAccessService.reset()
       // Clear IndexedDB to prevent cross-tenant data leakage
@@ -337,6 +343,42 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       onLogout?.()
     }
   }, [resolvedApiEndpoint, tokens, onLogout])
+
+  // Keep active sessions usable while ending sessions after a full day of inactivity.
+  useEffect(() => {
+    if (!user || !tokens) return
+
+    const now = Date.now()
+    const storedActivity = Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY))
+    if (Number.isFinite(storedActivity) && storedActivity > 0 && now - storedActivity >= SESSION_IDLE_TIMEOUT_MS) {
+      void logout()
+      return
+    }
+    if (!storedActivity) localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(now))
+
+    let lastSavedAt = now
+    const recordActivity = () => {
+      const currentTime = Date.now()
+      if (currentTime - lastSavedAt < 60_000) return
+      lastSavedAt = currentTime
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(currentTime))
+    }
+    const checkInactivity = () => {
+      const lastActivity = Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY))
+      if (Number.isFinite(lastActivity) && lastActivity > 0 && Date.now() - lastActivity >= SESSION_IDLE_TIMEOUT_MS) {
+        void logout()
+      }
+    }
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'click']
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }))
+    const interval = window.setInterval(checkInactivity, 60_000)
+    window.addEventListener('storage', checkInactivity)
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity))
+      window.clearInterval(interval)
+      window.removeEventListener('storage', checkInactivity)
+    }
+  }, [user?.id, Boolean(tokens), logout])
 
   const register = useCallback(async (data: { email: string; password: string; name: string }) => {
     setLoading(true)
