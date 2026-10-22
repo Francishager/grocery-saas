@@ -13,6 +13,7 @@ globalThis.prisma = prisma;
 const { default: reports } = await import('../src/routes/reports.js');
 const { default: accounting } = await import('../routes/accounting.js');
 const { default: dashboard } = await import('../src/routes/dashboard.js');
+const { resolveEffectivePermissions } = await import('../src/utils/permissions.js');
 
 const protectedRoutes = [
   [reports, '/api/reports', ['/daily-business', '/expenses', '/profit', '/financial/profit-loss',
@@ -80,6 +81,14 @@ test('individual report permissions are distinct from legacy category grants and
     assert.deepEqual(await run([unrelated]), { status: 403, body: { error: 'Permission denied', required: reportKey } });
     assert.equal((await run(['canViewFinancialReport', 'canViewSalesReport'])).status, 403);
   }
+});
+
+test('stale report category grants are ignored while explicit report grants remain effective', () => {
+  const permissions = resolveEffectivePermissions(
+    { id: 'staff', role: 'staff' },
+    { canViewSalesReport: true, canViewFinancialReport: true, canViewReportSalesDaily: true },
+  );
+  assert.deepEqual(permissions, ['canViewReportSalesDaily']);
 });
 
 function ledgerFixture(t, { branchId = null, gap = 0 } = {}) {

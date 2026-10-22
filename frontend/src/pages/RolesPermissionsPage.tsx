@@ -84,17 +84,17 @@ const PERM_LABELS: Record<string, string> = {
   canManageHRPayrollSettings:'Can manage HR payroll setup',
   canManageHRPayroll:'Can manage HR payroll',
   canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
-  canViewSalesReport:'Can view sales reports', canViewInventoryReport:'Can view inventory reports', canViewFinancialReport:'Can view financial reports', canViewCustomerReport:'Can view customer reports', canViewSupplierReport:'Can view supplier reports', canViewReceivablesReport:'Can view receivables reports', canViewPayablesReport:'Can view payables reports', canViewPerformanceReport:'Can view business performance reports', canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
+  canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
   canViewSettings:'Can view settings', canEditSettings:'Can edit settings', canGiveDiscount:'Can give discounts',
   canPaySubscriptionInvoice:'Can pay subscription invoices',
   canViewReceipt:'Can view receipts', canCreateReceipt:'Can create receipts',
   canViewTax:'Can view tax', canManageTax:'Can manage tax',
-  canViewService:'Can view services', canCreateService:'Can create services', canEditService:'Can edit services', canDeleteService:'Can delete services', canManageServiceCategory:'Can manage service categories', canViewServiceReport:'Can view service reports',
-  canViewRental:'Can view rentals', canCreateRental:'Can create rentals', canEditRental:'Can edit rentals', canDeleteRental:'Can cancel rentals', canProcessRentalReturn:'Can process returns', canViewRentalReport:'Can view rental reports',
-  canViewRestaurant:'Can view restaurant', canCreateRestaurant:'Can create restaurant entries', canEditRestaurant:'Can edit restaurant entries', canDeleteRestaurant:'Can delete restaurant entries', canViewRestaurantReport:'Can view restaurant reports',
-  canViewFuelStation:'Can view fuel station', canCreateFuelStation:'Can create fuel station entries', canEditFuelStation:'Can edit fuel station entries', canDeleteFuelStation:'Can delete fuel station entries', canViewFuelStationReport:'Can view fuel station reports',
-  canViewManufacturing:'Can view manufacturing', canCreateManufacturing:'Can create manufacturing entries', canEditManufacturing:'Can edit manufacturing entries', canDeleteManufacturing:'Can delete manufacturing entries', canViewManufacturingReport:'Can view manufacturing reports',
-  canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries', canViewAgricultureReport:'Can view agriculture reports',
+  canViewService:'Can view services', canCreateService:'Can create services', canEditService:'Can edit services', canDeleteService:'Can delete services', canManageServiceCategory:'Can manage service categories',
+  canViewRental:'Can view rentals', canCreateRental:'Can create rentals', canEditRental:'Can edit rentals', canDeleteRental:'Can cancel rentals', canProcessRentalReturn:'Can process returns',
+  canViewRestaurant:'Can view restaurant', canCreateRestaurant:'Can create restaurant entries', canEditRestaurant:'Can edit restaurant entries', canDeleteRestaurant:'Can delete restaurant entries',
+  canViewFuelStation:'Can view fuel station', canCreateFuelStation:'Can create fuel station entries', canEditFuelStation:'Can edit fuel station entries', canDeleteFuelStation:'Can delete fuel station entries',
+  canViewManufacturing:'Can view manufacturing', canCreateManufacturing:'Can create manufacturing entries', canEditManufacturing:'Can edit manufacturing entries', canDeleteManufacturing:'Can delete manufacturing entries',
+  canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries',
   canViewCommunication:'Can view communication records', canCreateCommunication:'Can create communication records', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
   canViewTeamMessaging:'View Team Messaging', canSendTeamMessages:'Send Team Messages',
   canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canDeleteAccounting:'Can delete accounting entries', canReverseAccountingEntry:'Can reverse accounting entries', canViewChartOfAccounts:'Can view chart of accounts', canCreateChartOfAccounts:'Can create chart of accounts', canEditChartOfAccounts:'Can edit chart of accounts',
@@ -135,11 +135,7 @@ const HR_PERMISSION_KEYS = [
 const EXPENSE_PERMISSION_KEYS = ['canCreateExpense', 'canViewExpense', 'canEditExpense', 'canDeleteExpense']
 
 const REPORT_PERMISSION_KEYS = [
-  'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport',
-  'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport',
-  'canViewAuditReport', 'canExportReport', 'canViewServiceReport', 'canViewRentalReport',
-  'canViewRestaurantReport', 'canViewFuelStationReport', 'canViewManufacturingReport', 'canViewAgricultureReport',
-  'canViewServiceBusinessReport', ...GRANULAR_REPORT_PERMISSION_KEYS,
+  'canViewAuditReport', 'canExportReport', ...GRANULAR_REPORT_PERMISSION_KEYS,
 ]
 
 const FALLBACK_CATEGORY_IDS: Record<string, string> = {

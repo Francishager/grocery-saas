@@ -25,9 +25,11 @@ export default function DashboardPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
+  const canViewSalesDashboard = hasPermission('canViewSale') || hasPermission('canViewReportSalesSummary') || hasPermission('canViewReportSalesDaily')
+  const canViewFinancialDashboard = hasPermission('canViewReportFinancialProfitLoss')
   const dashboardAccess = {
-    sales: hasPermission('canViewSale') || hasPermission('canViewSalesReport'),
-    finance: hasPermission('canViewFinancialReport'),
+    sales: canViewSalesDashboard,
+    finance: canViewFinancialDashboard,
     expenses: hasPermission('canViewExpense'),
     inventory: hasPermission('canViewProduct'),
     customers: hasPermission('canViewCustomer'),
@@ -301,7 +303,7 @@ export default function DashboardPage() {
 
       {/* KPI Cards Row 1 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && (
+        {hasFeature('sales') && canViewSalesDashboard && (
         <Card className="border-l-4 border-l-blue-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Revenue</CardTitle>
@@ -319,7 +321,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
+        {hasFeature('accounting') && canViewFinancialDashboard && (
         <Card className="border-l-4 border-l-green-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
@@ -332,7 +334,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && (
+        {hasFeature('sales') && canViewSalesDashboard && (
         <Card className="border-l-4 border-l-purple-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sales</CardTitle>
@@ -361,7 +363,7 @@ export default function DashboardPage() {
 
       {/* KPI Cards Row 2 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
+        {hasFeature('accounting') && canViewFinancialDashboard && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
@@ -374,7 +376,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
+        {hasFeature('accounting') && canViewFinancialDashboard && (
         <Card className="border-l-4 border-l-amber-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Cost of Sales (COGS)</CardTitle>
@@ -428,7 +430,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Daily Performance Chart */}
-      {(hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) || hasFeature('accounting') && hasPermission('canViewFinancialReport')) && dailyPerf && (
+      {(hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && dailyPerf && (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -474,8 +476,8 @@ export default function DashboardPage() {
                 labelFormatter={(label) => `Day ${label}`}
                 contentStyle={{ borderRadius: 8, fontSize: 13 }}
               />
-            {(hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && <Bar dataKey="revenue" fill="url(#colorRevBar)" radius={[3, 3, 0, 0]} name="revenue" />}
-              {hasPermission('canViewFinancialReport') && <Bar dataKey="profit" fill="url(#colorProfitBar)" radius={[3, 3, 0, 0]} name="profit" />}
+            {canViewSalesDashboard && <Bar dataKey="revenue" fill="url(#colorRevBar)" radius={[3, 3, 0, 0]} name="revenue" />}
+              {canViewFinancialDashboard && <Bar dataKey="profit" fill="url(#colorProfitBar)" radius={[3, 3, 0, 0]} name="profit" />}
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
@@ -485,7 +487,7 @@ export default function DashboardPage() {
       {/* Charts Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Revenue vs Operating Expenses Chart */}
-        {hasFeature('sales') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport') || hasPermission('canViewExpense')) && (
+        {hasFeature('sales') && (canViewSalesDashboard || hasPermission('canViewExpense')) && (
         <Card>
           <CardHeader>
             <CardTitle>Revenue vs Operating Expenses</CardTitle>
@@ -498,7 +500,7 @@ export default function DashboardPage() {
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                {(hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Revenue" />}
+                {canViewSalesDashboard && <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Revenue" />}
                 {hasPermission('canViewExpense') && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="7 7" name="Operating Expenses" />}
               </LineChart>
             </ResponsiveContainer>
@@ -507,7 +509,7 @@ export default function DashboardPage() {
         )}
 
         {/* Profit & Loss Chart */}
-        {hasFeature('accounting') && hasPermission('canViewFinancialReport') && (
+        {hasFeature('accounting') && canViewFinancialDashboard && (
         <Card>
           <CardHeader>
             <CardTitle>Profit & Loss</CardTitle>
@@ -532,7 +534,7 @@ export default function DashboardPage() {
       {/* Bottom Row — only show for enabled features */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Products */}
-        {hasFeature('inventory') && hasPermission('canViewProduct') && (hasPermission('canViewSale') || hasPermission('canViewSalesReport')) && (
+        {hasFeature('inventory') && hasPermission('canViewProduct') && canViewSalesDashboard && (
         <Card>
           <CardHeader>
             <CardTitle>Top Selling Products</CardTitle>

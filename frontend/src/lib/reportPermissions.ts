@@ -23,14 +23,19 @@ export const GRANULAR_REPORT_IDS = [
   'mfgProductionSummary','mfgByProduct','mfgWasteReport','mfgCostAnalysis','mfgBOMReport','executiveSummary',
 ] as const
 export const GRANULAR_REPORT_PERMISSION_KEYS = GRANULAR_REPORT_IDS.map(salesReportPermissionKey)
+const LEGACY_REPORT_GROUP_PERMISSIONS = new Set([
+  'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport',
+  'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport',
+  'canViewServiceReport', 'canViewRentalReport', 'canViewFuelStationReport', 'canViewManufacturingReport',
+  'canViewAgricultureReport', 'canViewServiceBusinessReport',
+])
 
 export function canViewReportItem(
   reportId: string,
   categoryPermission: string,
   hasPermission: (permission: string) => boolean,
 ) {
-  if ((GRANULAR_REPORT_IDS as readonly string[]).includes(reportId)) {
-    return hasPermission(salesReportPermissionKey(reportId))
-  }
-  return hasPermission(categoryPermission)
+  if ((GRANULAR_REPORT_IDS as readonly string[]).includes(reportId)) return hasPermission(salesReportPermissionKey(reportId))
+  if (categoryPermission && !LEGACY_REPORT_GROUP_PERMISSIONS.has(categoryPermission)) return hasPermission(categoryPermission)
+  return false
 }

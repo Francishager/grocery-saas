@@ -98,7 +98,7 @@ export default function RentalsPage() {
   const canCreateRental = hasPermission('canCreateRental')
   const canProcessReturn = hasPermission('canProcessRentalReturn')
   const canDeleteRental = hasPermission('canDeleteRental')
-  const canViewReport = hasPermission('canViewRentalReport')
+  const canViewReport = hasPermission('canViewReportRentalsSummary')
 
   useEffect(() => {
     loadRentals()

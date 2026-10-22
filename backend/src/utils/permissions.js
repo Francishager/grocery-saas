@@ -20,23 +20,29 @@ export const SALES_REPORT_PERMISSION_ITEMS = [
 export const SALES_REPORT_PERMISSION_KEYS = SALES_REPORT_PERMISSION_ITEMS.map(([id]) =>
   `canViewReport${id[0].toUpperCase()}${id.slice(1)}`
 );
-const REPORT_GROUPS = [
-  ['reports_inventory', 'reports.inventory', 'canViewInventoryReport', [['inventoryStock','Current Stock Report'],['inventoryValuation','Stock Valuation Report'],['inventoryLowStock','Low Stock Report'],['inventoryOutOfStock','Out of Stock Report'],['inventoryStockMovement','Stock Movement Report'],['inventoryAdjustments','Inventory Adjustment Report'],['inventoryExpiry','Expiry Report'],['inventoryDamaged','Damaged/Lost Stock Report'],['inventoryFastMoving','Fast Moving Products'],['inventorySlowMoving','Slow Moving Products'],['inventoryProductLedger','Product Ledger']]],
-  ['reports_financial', 'reports.financial', 'canViewFinancialReport', [['financialProfitLoss','Profit & Loss Report'],['financialIncome','Income Report'],['financialExpense','Expense Report'],['financialCashFlow','Cash Flow Report'],['financialTrialBalance','Trial Balance'],['financialBalanceSheet','Balance Sheet'],['financialGeneralLedger','General Ledger'],['financialBankTransactions','Bank Transactions Report'],['financialTax','Tax Report']]],
-  ['reports_customers', 'reports.customers', 'canViewCustomerReport', [['customersList','Customer List Report'],['customersSales','Customer Sales Report'],['customersBalance','Customer Balance Report'],['customersReceivables','Customer Receivables Report'],['customersTop','Top Customers Report'],['customersLedger','Customer Ledger'],['customersStatement','Customer Statement'],['customersCreditNotes','Customer Credit Notes Report']]],
-  ['reports_suppliers', 'reports.suppliers', 'canViewSupplierReport', [['suppliersList','Supplier List Report'],['suppliersPurchases','Supplier Purchases Report'],['suppliersPayables','Supplier Payables Report'],['suppliersBalance','Supplier Balance Report'],['suppliersStatement','Supplier Statement'],['suppliersDebitNotes','Supplier Debit Notes Report'],['suppliersLedger','Supplier Ledger']]],
-  ['reports_receivables', 'reports.customers', 'canViewReceivablesReport', [['receivablesOutstanding','Outstanding Invoices'],['receivablesAging','Customer Aging Report'],['receivablesCollection','Collection Report'],['receivablesOverdue','Overdue Accounts Report'],['receivablesCreditNotes','Receivables Credit Notes Report']]],
-  ['reports_payables', 'reports.financial', 'canViewPayablesReport', [['payablesOutstanding','Outstanding Bills Report'],['payablesAging','Supplier Aging Report'],['payablesPaymentHistory','Payment History Report'],['payablesOverdue','Overdue Supplier Balances'],['payablesDebitNotes','Payables Debit Notes Report']]],
-  ['reports_performance', 'reports.performance', 'canViewPerformanceReport', [['performanceBranch','Branch Performance Report'],['performanceProduct','Product Performance Report'],['performanceCategory','Category Performance Report'],['performanceUserActivity','User Activity Report'],['performanceTopProducts','Top Selling Products'],['performanceLeastProducts','Least Selling Products']]],
-  ['reports_services', 'reports.services', 'canViewServiceReport', [['servicesSummary','Service Summary'],['servicesList','Service List'],['servicesSales','Service Sales Report'],['servicesByCategory','Service Sales by Category'],['servicesByBranch','Service Sales by Branch'],['servicesTop','Top Services']]],
-  ['reports_rentals', 'reports.rentals', 'canViewRentalReport', [['rentalsSummary','Rental Summary'],['rentalsList','Rental List Report'],['rentalsByItem','Rental by Item'],['rentalsByCustomer','Rental by Customer'],['rentalsByBranch','Rental by Branch'],['rentalsActive','Active Rentals'],['rentalsOverdue','Overdue Rentals'],['rentalsReturns','Rental Returns Report'],['rentalsDaily','Daily Rental Report'],['rentalsMonthly','Monthly Rental Report']]],
-  ['reports_fuel', 'fuel_station.reports', 'canViewFuelStationReport', [['fuelSalesSummary','Fuel Sales Summary'],['fuelByPump','Sales by Pump'],['fuelByTank','Tank Stock Report'],['fuelDeliveries','Fuel Deliveries Report'],['fuelShiftSummary','Shift Summary Report'],['fuelLubricantSales','Lubricant Sales Report'],['fuelCarWash','Car Wash Income Report'],['fuelMeterReadings','Meter Readings Report']]],
-  ['reports_manufacturing', 'manufacturing.reports', 'canViewManufacturingReport', [['mfgProductionSummary','Production Summary'],['mfgByProduct','Production by Product'],['mfgWasteReport','Waste Report'],['mfgCostAnalysis','Production Cost Analysis'],['mfgBOMReport','BOM / Recipe Report']]],
-  ['reports_analysis', 'reports', 'canViewFinancialReport', [['executiveSummary','Executive Summary & Insights']]],
+export const LEGACY_REPORT_GROUP_PERMISSION_KEYS = [
+  'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport',
+  'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport',
+  'canViewServiceReport', 'canViewRentalReport', 'canViewFuelStationReport', 'canViewManufacturingReport',
+  'canViewAgricultureReport', 'canViewRestaurantReport', 'canViewServiceBusinessReport',
 ];
-export const OTHER_REPORT_PERMISSION_ITEMS = REPORT_GROUPS.flatMap(([category, feature, legacy, items]) => items.map(([id, name]) => [id, name, category, feature, legacy]));
+const REPORT_GROUPS = [
+  ['reports_inventory', 'reports.inventory', [['inventoryStock','Current Stock Report'],['inventoryValuation','Stock Valuation Report'],['inventoryLowStock','Low Stock Report'],['inventoryOutOfStock','Out of Stock Report'],['inventoryStockMovement','Stock Movement Report'],['inventoryAdjustments','Inventory Adjustment Report'],['inventoryExpiry','Expiry Report'],['inventoryDamaged','Damaged/Lost Stock Report'],['inventoryFastMoving','Fast Moving Products'],['inventorySlowMoving','Slow Selling Products'],['inventoryProductLedger','Product Ledger']]],
+  ['reports_financial', 'reports.financial', [['financialProfitLoss','Profit & Loss Report'],['financialIncome','Income Report'],['financialExpense','Expense Report'],['financialCashFlow','Cash Flow Report'],['financialTrialBalance','Trial Balance'],['financialBalanceSheet','Balance Sheet'],['financialGeneralLedger','General Ledger'],['financialBankTransactions','Bank Transactions Report'],['financialTax','Tax Report']]],
+  ['reports_customers', 'reports.customers', [['customersList','Customer List Report'],['customersSales','Customer Sales Report'],['customersBalance','Customer Balance Report'],['customersReceivables','Customer Receivables Report'],['customersTop','Top Customers Report'],['customersLedger','Customer Ledger'],['customersStatement','Customer Statement'],['customersCreditNotes','Customer Credit Notes Report']]],
+  ['reports_suppliers', 'reports.suppliers', [['suppliersList','Supplier List Report'],['suppliersPurchases','Supplier Purchases Report'],['suppliersPayables','Supplier Payables Report'],['suppliersBalance','Supplier Balance Report'],['suppliersStatement','Supplier Statement'],['suppliersDebitNotes','Supplier Debit Notes Report'],['suppliersLedger','Supplier Ledger']]],
+  ['reports_receivables', 'reports.customers', [['receivablesOutstanding','Outstanding Invoices'],['receivablesAging','Customer Aging Report'],['receivablesCollection','Collection Report'],['receivablesOverdue','Overdue Accounts Report'],['receivablesCreditNotes','Receivables Credit Notes Report']]],
+  ['reports_payables', 'reports.financial', [['payablesOutstanding','Outstanding Bills Report'],['payablesAging','Supplier Aging Report'],['payablesPaymentHistory','Payment History Report'],['payablesOverdue','Overdue Supplier Balances'],['payablesDebitNotes','Payables Debit Notes Report']]],
+  ['reports_performance', 'reports.performance', [['performanceBranch','Branch Performance Report'],['performanceProduct','Product Performance Report'],['performanceCategory','Category Performance Report'],['performanceUserActivity','User Activity Report'],['performanceTopProducts','Top Selling Products'],['performanceLeastProducts','Least Selling Products']]],
+  ['reports_services', 'reports.services', [['servicesSummary','Service Summary'],['servicesList','Service List'],['servicesSales','Service Sales Report'],['servicesByCategory','Service Sales by Category'],['servicesByBranch','Service Sales by Branch'],['servicesTop','Top Services']]],
+  ['reports_rentals', 'reports.rentals', [['rentalsSummary','Rental Summary'],['rentalsList','Rental List Report'],['rentalsByItem','Rental by Item'],['rentalsByCustomer','Rental by Customer'],['rentalsByBranch','Rental by Branch'],['rentalsActive','Active Rentals'],['rentalsOverdue','Overdue Rentals'],['rentalsReturns','Rental Returns Report'],['rentalsDaily','Daily Rental Report'],['rentalsMonthly','Monthly Rental Report']]],
+  ['reports_fuel', 'fuel_station.reports', [['fuelSalesSummary','Fuel Sales Summary'],['fuelByPump','Sales by Pump'],['fuelByTank','Tank Stock Report'],['fuelDeliveries','Fuel Deliveries Report'],['fuelShiftSummary','Shift Summary Report'],['fuelLubricantSales','Lubricant Sales Report'],['fuelCarWash','Car Wash Income Report'],['fuelMeterReadings','Meter Readings Report']]],
+  ['reports_manufacturing', 'manufacturing.reports', [['mfgProductionSummary','Production Summary'],['mfgByProduct','Production by Product'],['mfgWasteReport','Waste Report'],['mfgCostAnalysis','Production Cost Analysis'],['mfgBOMReport','BOM / Recipe Report']]],
+  ['reports_analysis', 'reports', [['executiveSummary','Executive Summary & Insights']]],
+];
+export const OTHER_REPORT_PERMISSION_ITEMS = REPORT_GROUPS.flatMap(([category, feature, items]) => items.map(([id, name]) => [id, name, category, feature]));
 export const REPORT_PERMISSION_ITEMS = [
-  ...SALES_REPORT_PERMISSION_ITEMS.map(([id, name]) => [id, name, 'reports_sales', 'reports.sales', 'canViewSalesReport']),
+  ...SALES_REPORT_PERMISSION_ITEMS.map(([id, name]) => [id, name, 'reports_sales', 'reports.sales']),
   ...OTHER_REPORT_PERMISSION_ITEMS,
 ];
 export const REPORT_PERMISSION_KEYS = REPORT_PERMISSION_ITEMS.map(([id]) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`);
@@ -169,14 +175,6 @@ const PERMISSION_TO_FEATURES = {
   canViewBranch: [],
   canEditBranch: [],
   canDeleteBranch: [],
-  canViewSalesReport: ['reports', 'reports.sales'],
-  canViewInventoryReport: ['reports', 'reports.inventory'],
-  canViewFinancialReport: ['reports', 'reports.financial'],
-  canViewCustomerReport: ['reports', 'reports.customers'],
-  canViewSupplierReport: ['reports', 'reports.suppliers'],
-  canViewReceivablesReport: ['reports', 'reports.customers', 'receivables.aging'],
-  canViewPayablesReport: ['reports', 'reports.financial', 'payables.aging'],
-  canViewPerformanceReport: ['reports', 'reports.performance'],
   canViewAuditReport: ['reports', 'reports.audit', 'audit'],
   canExportReport: ['reports'],
   canViewSettings: [],
@@ -189,38 +187,31 @@ const PERMISSION_TO_FEATURES = {
   canEditService: ['services', 'inventory.services'],
   canDeleteService: ['services', 'inventory.services'],
   canManageServiceCategory: ['services', 'inventory.services', 'inventory.categories'],
-  canViewServiceReport: ['reports', 'reports.services', 'services', 'inventory.services'],
   canViewRental: ['rentals', 'inventory.rentals'],
   canCreateRental: ['rentals', 'inventory.rentals'],
   canEditRental: ['rentals', 'inventory.rentals'],
   canDeleteRental: ['rentals', 'inventory.rentals'],
   canProcessRentalReturn: ['rentals', 'inventory.rentals'],
-  canViewRentalReport: ['reports', 'reports.rentals', 'rentals', 'inventory.rentals'],
   canViewRestaurant: ['restaurant', 'restaurant.orders'],
   canCreateRestaurant: ['restaurant', 'restaurant.orders'],
   canEditRestaurant: ['restaurant', 'restaurant.orders'],
   canDeleteRestaurant: ['restaurant', 'restaurant.orders'],
-  canViewRestaurantReport: ['reports', 'restaurant.reports', 'restaurant', 'restaurant.orders'],
   canViewManufacturing: ['manufacturing', 'manufacturing.production_orders'],
   canCreateManufacturing: ['manufacturing', 'manufacturing.production_orders'],
   canEditManufacturing: ['manufacturing', 'manufacturing.production_orders'],
   canDeleteManufacturing: ['manufacturing', 'manufacturing.production_orders'],
-  canViewManufacturingReport: ['reports', 'manufacturing.reports', 'manufacturing', 'manufacturing.production_orders'],
   canViewAgriculture: ['agriculture', 'agriculture.fields'],
   canCreateAgriculture: ['agriculture', 'agriculture.fields'],
   canEditAgriculture: ['agriculture', 'agriculture.fields'],
   canDeleteAgriculture: ['agriculture', 'agriculture.fields'],
-  canViewAgricultureReport: ['reports', 'agriculture', 'agriculture.fields'],
   canViewFuelStation: ['fuel_station', 'fuel_station.pumps'],
   canCreateFuelStation: ['fuel_station', 'fuel_station.pumps'],
   canEditFuelStation: ['fuel_station', 'fuel_station.pumps'],
   canDeleteFuelStation: ['fuel_station', 'fuel_station.pumps'],
-  canViewFuelStationReport: ['reports', 'fuel_station.reports', 'fuel_station', 'fuel_station.pumps'],
   canViewServiceBusiness: ['service_business', 'service', 'service.appointments'],
   canCreateServiceBusiness: ['service_business', 'service', 'service.appointments'],
   canEditServiceBusiness: ['service_business', 'service', 'service.appointments'],
   canDeleteServiceBusiness: ['service_business', 'service', 'service.appointments'],
-  canViewServiceBusinessReport: ['reports', 'service_business', 'service', 'service.appointments'],
   canViewTeamMessaging: ['communication.team_messaging'],
   canSendTeamMessages: ['communication.team_messaging'],
   canEditCommunication: ['communication'],
@@ -307,9 +298,7 @@ export const ALL_PERMISSION_KEYS = [
   // Branches
   "canCreateBranch", "canViewBranch", "canEditBranch", "canDeleteBranch",
   // Reports
-  "canViewSalesReport", "canViewInventoryReport", "canViewFinancialReport", "canViewCustomerReport",
-  "canViewSupplierReport", "canViewReceivablesReport", "canViewPayablesReport",
-  "canViewPerformanceReport", "canViewAuditReport", "canExportReport",
+  "canViewAuditReport", "canExportReport",
   ...REPORT_PERMISSION_KEYS,
   // Settings
   "canViewSettings", "canEditSettings",
@@ -322,22 +311,18 @@ export const ALL_PERMISSION_KEYS = [
   "canViewTax", "canManageTax",
   // Services (inventory service items)
   "canViewService", "canCreateService", "canEditService", "canDeleteService",
-  "canManageServiceCategory", "canViewServiceReport",
+  "canManageServiceCategory",
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
-  "canProcessRentalReturn", "canViewRentalReport",
+  "canProcessRentalReturn",
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
-  "canViewRestaurantReport",
   // Fuel Station
   "canViewFuelStation", "canCreateFuelStation", "canEditFuelStation", "canDeleteFuelStation",
-  "canViewFuelStationReport",
   // Manufacturing
   "canViewManufacturing", "canCreateManufacturing", "canEditManufacturing", "canDeleteManufacturing",
-  "canViewManufacturingReport",
   // Agriculture
   "canViewAgriculture", "canCreateAgriculture", "canEditAgriculture", "canDeleteAgriculture",
-  "canViewAgricultureReport",
   // Service Business (appointments, work orders, contracts)
   ...SERVICE_PERMISSION_KEYS,
   // Communication and team messaging
@@ -353,7 +338,7 @@ export const ALL_PERMISSION_KEYS = [
   "canUseCash", "canUseMobileMoney", "canUseBank", "canUseCard",
   // Data Import
   "canImportInventory",
-];
+].filter((key) => !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(key));
 
 export const PERMISSION_CATEGORIES = [
   { id: 'dashboard', name: 'Dashboard' },
@@ -768,30 +753,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Delete or deactivate branches',
     description: 'Remove or deactivate branch records where the system allows it.',
   },
-  canViewSalesReport: {
-    name: 'View sales reports',
-    description: 'Open sales summaries, daily sales analysis, cash versus credit totals, and sales trends.',
-  },
-  canViewInventoryReport: {
-    name: 'View inventory reports',
-    description: 'See stock movement, sold inventory, restock activity, valuation, and low-stock reports.',
-  },
-  canViewFinancialReport: {
-    name: 'View financial reports',
-    description: 'Open profit, loss, cash status, trial balance, balance sheet, and financial summaries.',
-  },
-  canViewCustomerReport: {
-    name: 'View customer reports',
-    description: 'See customer activity, balances, repayment behavior, and customer performance reports.',
-  },
-  canViewSupplierReport: {
-    name: 'View supplier reports',
-    description: 'See supplier balances, purchase activity, payable history, and supplier performance reports.',
-  },
-  canViewReceivablesReport: {
-    name: 'View receivables reports',
-    description: 'Open customer credit, aging, collections, and outstanding receivable reports.',
-  },
   canViewReceivableReconciliation: {
     name: 'View receivable reconciliation',
     description: 'View customer receipt allocation mismatches and reconciliation history without changing financial records.',
@@ -803,14 +764,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canApplyReceivableReconciliation: {
     name: 'Apply receivable reconciliation',
     description: 'Convert verified legacy customer receipts into explicit invoice allocations while preserving customer and cash balances.',
-  },
-  canViewPayablesReport: {
-    name: 'View payables reports',
-    description: 'Open supplier bills, aging, unpaid balances, and supplier payment reports.',
-  },
-  canViewPerformanceReport: {
-    name: 'View performance reports',
-    description: 'See business performance, product performance, staff performance, and trend reports.',
   },
   canViewAuditReport: {
     name: 'View audit log',
@@ -860,10 +813,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Manage service categories',
     description: 'Create and organize categories used for service items.',
   },
-  canViewServiceReport: {
-    name: 'View service reports',
-    description: 'See service sales, service performance, and service revenue reports.',
-  },
   canViewRental: {
     name: 'View rentals',
     description: 'See rental items, rental orders, availability, and rental history.',
@@ -884,10 +833,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Process rental returns',
     description: 'Receive returned rental items, update availability, and record charges or balances.',
   },
-  canViewRentalReport: {
-    name: 'View rental reports',
-    description: 'See rental revenue, item usage, overdue rentals, and rental performance reports.',
-  },
   canViewRestaurant: {
     name: 'View restaurant operations',
     description: 'Open restaurant orders, tables, kitchen activity, and restaurant summaries.',
@@ -903,10 +848,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canDeleteRestaurant: {
     name: 'Cancel restaurant orders',
     description: 'Cancel or remove restaurant orders where allowed.',
-  },
-  canViewRestaurantReport: {
-    name: 'View restaurant reports',
-    description: 'See restaurant sales, item performance, table activity, and kitchen reports.',
   },
   canViewFuelStation: {
     name: 'View fuel station operations',
@@ -924,10 +865,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Delete fuel station transactions',
     description: 'Remove fuel station records where allowed.',
   },
-  canViewFuelStationReport: {
-    name: 'View fuel station reports',
-    description: 'See fuel sales, pump performance, deliveries, variance, and station reports.',
-  },
   canViewManufacturing: {
     name: 'View manufacturing',
     description: 'Open production orders, raw materials, finished goods, and manufacturing summaries.',
@@ -943,10 +880,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canDeleteManufacturing: {
     name: 'Delete manufacturing records',
     description: 'Remove production or manufacturing records where allowed.',
-  },
-  canViewManufacturingReport: {
-    name: 'View manufacturing reports',
-    description: 'See production cost, material usage, output, variance, and manufacturing performance reports.',
   },
   canViewAgriculture: {
     name: 'View agriculture operations',
@@ -964,10 +897,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Delete agriculture records',
     description: 'Remove agriculture records where allowed.',
   },
-  canViewAgricultureReport: {
-    name: 'View agriculture reports',
-    description: 'See harvest, input cost, field performance, stock, and agriculture reports.',
-  },
   canViewServiceBusiness: {
     name: 'View service business operations',
     description: 'Open appointments, work orders, contracts, service customers, and service delivery summaries.',
@@ -983,10 +912,6 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canDeleteServiceBusiness: {
     name: 'Delete service business records',
     description: 'Remove service business records where allowed.',
-  },
-  canViewServiceBusinessReport: {
-    name: 'View service business reports',
-    description: 'See appointment, work order, contract, service revenue, and customer service reports.',
   },
   canViewCommunication: {
     name: 'View communication records',
@@ -1290,13 +1215,13 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
 
   if (Array.isArray(inheritedPermissions)) {
     inheritedPermissions
-      .filter((permission) => permission && !LEGACY_SERVICE_PERMISSION_KEYS.includes(permission) && permissionAllowedForTenant(permission, tenantFeatures))
+      .filter((permission) => permission && !LEGACY_SERVICE_PERMISSION_KEYS.includes(permission) && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(permission) && permissionAllowedForTenant(permission, tenantFeatures))
       .forEach((permission) => granted.add(permission));
   }
 
   const normalized = normalizePermissionRecord(permissionRecord || {});
   for (const [key, enabled] of Object.entries(normalized)) {
-    if (enabled && key.startsWith("can") && permissionAllowedForTenant(key, tenantFeatures)) {
+    if (enabled && key.startsWith("can") && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, tenantFeatures)) {
       granted.add(key);
     }
   }

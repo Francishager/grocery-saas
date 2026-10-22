@@ -441,7 +441,7 @@ router.get('/my-cash-account', authenticateToken, async (req, res) => {
 })
 
 // Get all cash accounts
-router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseOwnCashAccount', 'canUseOtherStaffCashAccount', 'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
+router.get('/cash-accounts', authenticateToken, loadUserPermissions, requireAnyPermission(['canViewTransactionAccount', 'canUseOwnCashAccount', 'canUseOtherStaffCashAccount', 'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount', 'canCreateTransactionAccount', 'canEditTransactionAccount', 'canDeleteTransactionAccount', 'canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canCreateReceivable', 'canCreatePayable', 'canCreateWithdrawal']), requireAnyFeature(['accounting', 'expenses', 'receivables', 'payables']), requireTenant, async (req, res) => {
   try {
     // Include assigned users so we can surface staff + branch on the API response
     const rawAccounts = await prisma.cashAccount.findMany({
@@ -734,7 +734,7 @@ router.delete('/cash-accounts/:id', authenticateToken, requirePermission('canDel
 // === CASH TRANSACTIONS ===
 
 // Get cash transactions
-router.get('/cash-transactions', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense', 'canViewFinancialReport']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
+router.get('/cash-transactions', authenticateToken, requireAnyPermission(['canViewAccounting', 'canViewExpense']), requireAnyFeature(['accounting', 'expenses']), requireTenant, async (req, res) => {
   try {
     const { page = 1, limit = 50, accountId, type, search } = req.query
     const skip = (Number(page) - 1) * Number(limit)

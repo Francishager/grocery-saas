@@ -1,5 +1,5 @@
 import { servicePagePermissions, serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
-import { canViewReportItem } from '@/lib/reportPermissions'
+import { canViewReportItem, GRANULAR_REPORT_PERMISSION_KEYS } from '@/lib/reportPermissions'
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { MessageSquare, Trash2 } from 'lucide-react'
 import { trashPermissions } from '@/lib/trashPermissions'
@@ -107,11 +107,11 @@ const navItems = [
   { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
   { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: ['appointments','work-orders','contracts','technicians','job-cards','feedback','car-wash','garage'].flatMap(servicePagePermissions), isService: true },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
-  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewFinancialReport', isAccounting: true },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewAccounting', isAccounting: true },
   { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewHR', isHR: true },
   { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication', permission: 'canViewCommunication' },
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
-  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: 'canViewSalesReport', isReports: true },
+  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: GRANULAR_REPORT_PERMISSION_KEYS, isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
   { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: ['canViewSettings', 'canPaySubscriptionInvoice'], feature: 'settings', isSettings: true },
   { to: '/tenant/data-importer', label: 'Data Importer', icon: FileSpreadsheet, permission: 'canImportInventory', feature: 'developer.data_importer' },
@@ -302,7 +302,7 @@ const reportCategories: ReportCategoryDef[] = [
 const accountingSubItems = [
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts'] },
   { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: ['accounting', 'expenses'], permission: 'canViewTransactionAccount' },
-  { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewFinancialReport'] },
+  { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewAccounting'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
   { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: 'canViewStaffTillSheet' },
 ]

@@ -195,12 +195,12 @@ function App() {
           <Route path="procurement/selling/fulfilment" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="orders" /></FeatureGuard>} />
           <Route path="procurement/selling/buyers" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="relationships" /></FeatureGuard>} />
           <Route path="procurement/selling/profile" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="profile" /></FeatureGuard>} />
-          <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
-          <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewFinancialReport']}><CreditDebitNotesPage /></FeatureGuard>} />
+          <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
+          <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts']}><AccountingPage /></FeatureGuard>} />
-          <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense', 'canViewFinancialReport']}><ExpensesPage /></FeatureGuard>} />
+          <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense']}><ExpensesPage /></FeatureGuard>} />
           <Route path="accounting/transactions" element={<FeatureGuard feature={['accounting', 'expenses']} permission="canViewTransactionAccount"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="developer.data_importer"><DataImporterPage /></FeatureGuard>} />

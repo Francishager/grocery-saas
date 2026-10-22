@@ -498,13 +498,24 @@ router.put('/orders/:id/status', authenticateToken, requirePermission('canEditRe
 })
 
 // Update individual item status (kitchen display)
-router.put('/orders/:id/items/:itemId/status', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.kitchen'), async (req, res) => {
+router.put('/orders/:id/items/:itemId/status', authenticateToken, requirePermission('canEditRestaurant'), async (req, res) => {
   try {
     const { status } = req.body
-    const item = await prisma.restaurantOrderItem.update({
-      where: { id: req.params.itemId },
-      data: { status }
+    if (!['pending', 'preparing', 'ready', 'served'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid kitchen item status' })
+    }
+    const scope = await resolveBranchScope(prisma, req)
+    const existing = await prisma.restaurantOrderItem.findFirst({
+      where: { id: req.params.itemId, orderId: req.params.id, order: { tenantId: scope.tenantId } },
+      select: { id: true, station: true },
     })
+    if (!existing) return res.status(404).json({ error: 'Order item not found' })
+    const features = await getTenantFeatures(scope.tenantId)
+    const stationFeature = existing.station === 'bar' ? 'restaurant.bar' : 'restaurant.kitchen'
+    if (!hasFeatureAccess(features, stationFeature)) {
+      return res.status(403).json({ error: 'This service station is not enabled for this business' })
+    }
+    const item = await prisma.restaurantOrderItem.update({ where: { id: existing.id }, data: { status } })
     res.json(item)
   } catch (error) { handleBranchError(res, error) }
 })
@@ -960,12 +971,13 @@ router.get('/dashboard', authenticateToken, requirePermission('canViewRestaurant
       prisma.restaurantOrder.findMany({ where: { ...where, status: 'completed', createdAt: { gte: today } }, include: { items: true } })
     ])
 
-    const todaySales = completedToday.reduce((sum, o) => sum + o.total, 0)
-    const avgBill = completedToday.length > 0 ? todaySales / completedToday.length : 0
+    const canViewSales = req.user.permissions?.includes('*') || req.user.permissions?.includes('canViewSale') || req.user.permissions?.includes('canViewReportSalesSummary')
+    const todaySales = canViewSales ? completedToday.reduce((sum, o) => sum + o.total, 0) : null
+    const avgBill = canViewSales && completedToday.length > 0 ? todaySales / completedToday.length : null
 
     res.json({
       ordersToday, openTables, occupiedTables, kitchenOrders, barOrders,
-      todaySales, avgBill, completedCount: completedToday.length
+      todaySales, avgBill, completedCount: canViewSales ? completedToday.length : null
     })
   } catch (error) { handleBranchError(res, error) }
 })

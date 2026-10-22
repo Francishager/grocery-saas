@@ -799,7 +799,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
 });
 
 // Financial statements share the same account balances as the Reports page.
-router.get("/reports/trial-balance", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
+router.get("/reports/trial-balance", authenticateToken, requirePermission("canViewReportFinancialTrialBalance"), requireFeature("accounting"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
     const accounts = await loadLedgerBalances(prisma, scope, reportEndDate(req.query.to));
@@ -810,7 +810,7 @@ router.get("/reports/trial-balance", authenticateToken, requirePermission("canVi
   } catch (err) { handleBranchError(res, err, "Failed to generate trial balance"); }
 });
 
-router.get("/reports/profit-loss", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
+router.get("/reports/profit-loss", authenticateToken, requirePermission("canViewReportFinancialProfitLoss"), requireFeature("accounting"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
     const accounts = await loadLedgerBalances(prisma, scope, reportEndDate(req.query.to));
@@ -831,7 +831,7 @@ router.get("/reports/profit-loss", authenticateToken, requirePermission("canView
   } catch (err) { handleBranchError(res, err, "Failed to generate P&L report"); }
 });
 
-router.get("/reports/balance-sheet", authenticateToken, requirePermission("canViewFinancialReport"), requireFeature("accounting"), async (req, res) => {
+router.get("/reports/balance-sheet", authenticateToken, requirePermission("canViewReportFinancialBalanceSheet"), requireFeature("accounting"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "query"), { source: "query", allowOwnerAll: true });
     const accounts = await loadLedgerBalances(prisma, scope, reportEndDate(req.query.to));

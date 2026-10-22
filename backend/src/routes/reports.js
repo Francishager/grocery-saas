@@ -16,7 +16,7 @@ import {
   transformCashFlowData,
 } from "../utils/enrichedReportTransform.js";
 import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
-import { SALES_REPORT_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
+import { LEGACY_REPORT_GROUP_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
 import { expenseDateWhere, cashMovementDirection, loadJournalExpenseRows, summarizeCashMovements, accountCashBalances, loadLedgerBalances, ledgerBalanceSheet, postedJournalWhere } from '../utils/reportAccounting.js';
 
 const router = Router();
@@ -51,7 +51,6 @@ const reportPermMap = {
   agriculture: "canViewAgricultureReport",
   "daily-business": "canViewSalesReport",
   "service-business": "canViewServiceBusinessReport",
-  restaurant: "canViewRestaurantReport",
 };
 const salesReportPermissionByPath = new Map([
   ['/sales/summary', 'salesSummary'], ['/sales/daily', 'salesDaily'], ['/daily-business', 'salesDaily'],
@@ -91,14 +90,7 @@ function requireReportPermission(req, res, next) {
   const permKey = reportPermMap[pathSeg];
 
   if (req.path === '/sales') {
-    return prisma.userPermission.findUnique({ where: { userId: req.user.id } }).then((record) => {
-      const hasGranularSalesAccess = SALES_REPORT_PERMISSION_KEYS.some((key) => record?.[key] === true);
-      if (hasGranularSalesAccess && !(req.user.permissions || []).includes('canViewSale')) {
-        return res.status(403).json({ error: 'Permission denied', required: 'canViewSale' });
-      }
-      if ((req.user.permissions || []).includes('*') || (req.user.permissions || []).includes(permKey) || record?.[permKey]) return next();
-      return res.status(403).json({ error: 'Permission denied', required: permKey });
-    }).catch(() => res.status(500).json({ error: 'Failed to check permission' }));
+    return requirePermission('canViewSale')(req, res, next);
   }
 
   const reportIds = granularReportByPath.get(req.path);
@@ -116,8 +108,11 @@ function requireReportPermission(req, res, next) {
   }
 
   if (!permKey) {
-    // No mapping — fall back to role check
-    return next();
+    return res.status(403).json({ error: 'No report permission is mapped to this endpoint.' });
+  }
+
+  if (LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(permKey)) {
+    return res.status(403).json({ error: 'Use the specific report permission assigned to this report.', required: 'report-specific permission' });
   }
 
   // Check if user has the permission in their permissions array or specific perm key

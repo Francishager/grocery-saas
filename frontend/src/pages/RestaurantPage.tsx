@@ -55,6 +55,10 @@ export default function RestaurantPage() {
   const { tab: routeTab } = useParams()
   const { hasPermission } = useAuth()
   const { hasFeature } = useFeatureAccess()
+  const canViewRestaurant = hasPermission('canViewRestaurant')
+  const canCreateRestaurant = hasPermission('canCreateRestaurant')
+  const canEditRestaurant = hasPermission('canEditRestaurant')
+  const canDeleteRestaurant = hasPermission('canDeleteRestaurant')
   const canAdjustStock = hasPermission('canAdjustStock')
   const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
   const [tab, setActiveTab] = useState(routeTab || 'dashboard')
@@ -141,28 +145,39 @@ export default function RestaurantPage() {
   const [completeForm, setCompleteForm] = useState({ paymentMethod: 'cash', discount: 0, tipAmount: 0, tipWaiterId: '' })
   const [splitForm, setSplitForm] = useState<{ itemIds: string[]; paymentMethod: string; tipAmount: number }[]>([])
 
+  const tabFeature: Record<string, string> = {
+    dashboard: 'restaurant', tables: 'restaurant.tables', orders: 'restaurant.orders',
+    kitchen: 'restaurant.kitchen', bar: 'restaurant.bar', menu: 'restaurant', stockroom: 'restaurant',
+    reservations: 'restaurant.reservations', recipes: 'restaurant.recipes', delivery: 'restaurant.delivery',
+    waiters: 'restaurant.waiters', 'happy-hour': 'restaurant.happy_hour', combos: 'restaurant.combos', tips: 'restaurant.tips',
+  }
+  const canAccessTab = (value: string) => canViewRestaurant && hasFeature(tabFeature[value] || 'restaurant') &&
+    (value !== 'stockroom' || hasPermission('canViewProduct'))
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       const [tablesRes, waitersRes, productsRes, statsRes, hrEmployeesRes, menuRes] = await Promise.all([
-        apiFetch('/api/restaurant/tables'),
-        apiFetch('/api/restaurant/waiters'),
-        apiFetch('/api/inventory?limit=500'),
-        apiFetch('/api/restaurant/dashboard'),
+        hasFeature('restaurant.tables') && canViewRestaurant ? apiFetch('/api/restaurant/tables') : Promise.resolve(null),
+        hasFeature('restaurant.waiters') && canViewRestaurant ? apiFetch('/api/restaurant/waiters') : Promise.resolve(null),
+        hasFeature('restaurant') && hasPermission('canViewProduct') ? apiFetch('/api/inventory?limit=500') : Promise.resolve(null),
+        hasFeature('restaurant') && canViewRestaurant ? apiFetch('/api/restaurant/dashboard') : Promise.resolve(null),
         canLinkWaiterToHr ? apiFetch('/api/restaurant/waiters/hr-employees') : Promise.resolve(null),
-        apiFetch('/api/restaurant/menu'),
+        hasFeature('restaurant') && canViewRestaurant ? apiFetch('/api/restaurant/menu') : Promise.resolve(null),
       ])
-      if (tablesRes.ok) setTables(await tablesRes.json())
-      if (waitersRes.ok) setWaiters(await waitersRes.json())
+      if (tablesRes?.ok) setTables(await tablesRes.json())
+      else if (!hasFeature('restaurant.tables')) setTables([])
+      if (waitersRes?.ok) setWaiters(await waitersRes.json())
+      else if (!hasFeature('restaurant.waiters')) setWaiters([])
       if (hrEmployeesRes?.ok) setHrWaiterEmployees(await hrEmployeesRes.json())
       else if (!canLinkWaiterToHr) setHrWaiterEmployees([])
-      if (productsRes.ok) { const p = await productsRes.json(); setProducts(p?.products || p?.records || []) }
-      else if (!online) { const local = await getLocalProducts(); setProducts(local.map((p: any) => ({ id: p.id, name: p.product_name, price: p.unit_price, quantity: p.quantity }))) }
-      if (statsRes.ok) setStats(await statsRes.json())
-      if (menuRes.ok) setMenuEntries(await menuRes.json())
+      if (productsRes?.ok) { const p = await productsRes.json(); setProducts(p?.products || p?.records || []) }
+      else if (!productsRes && !online && hasPermission('canViewProduct')) { const local = await getLocalProducts(); setProducts(local.map((p: any) => ({ id: p.id, name: p.product_name, price: p.unit_price, quantity: p.quantity }))) }
+      if (statsRes?.ok) setStats(await statsRes.json())
+      if (menuRes?.ok) setMenuEntries(await menuRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [canLinkWaiterToHr])
+  }, [canLinkWaiterToHr, canViewRestaurant, hasFeature, hasPermission, online])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -172,8 +187,13 @@ export default function RestaurantPage() {
       navigate('/tenant/restaurant/dashboard', { replace: true })
       return
     }
+    if (!canAccessTab(routeTab)) {
+      const fallback = allowedTabs.find(canAccessTab)
+      if (fallback) navigate(`/tenant/restaurant/${fallback}`, { replace: true })
+      return
+    }
     setActiveTab(routeTab)
-  }, [routeTab, navigate])
+  }, [routeTab, navigate, canViewRestaurant, hasFeature, hasPermission])
 
   useEffect(() => {
     if (activeWaiterId && waiters.length > 0 && !waiters.some(waiter => waiter.id === activeWaiterId && waiter.isActive)) {
@@ -344,6 +364,7 @@ export default function RestaurantPage() {
   // === Order handlers ===
   const createOrder = async () => {
     if (!orderForm.tableId && orderForm.orderType === 'dine_in') { toast({ variant: 'destructive', title: 'Select a table for dine-in orders' }); return }
+    if (waiters.some(waiter => waiter.isActive) && !activeWaiterId) { toast({ variant: 'destructive', title: 'Select a waiter and confirm their PIN before taking an order' }); return }
     if (orderItems.length === 0) { toast({ variant: 'destructive', title: 'Add at least one item to the order' }); return }
     if (orderItems.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'All items must have a product and quantity' }); return }
     try {
@@ -366,7 +387,11 @@ export default function RestaurantPage() {
         }
       } else {
         const data = await res.json().catch(() => ({}))
-        if (data.code === 'WAITER_PIN_REQUIRED') clearWaiterIdentity()
+        if (data.code === 'WAITER_PIN_REQUIRED') {
+          const waiterId = activeWaiterId
+          clearWaiterIdentity()
+          if (waiterId) requestWaiterIdentity(waiterId)
+        }
         toast({ variant: 'destructive', title: data.error || 'Could not create order' })
       }
     } catch (e) { console.error(e) }
@@ -696,6 +721,8 @@ export default function RestaurantPage() {
   const toggleSplitItem = (splitIdx: number, itemId: string) => setSplitForm(splitForm.map((s, i) => i === splitIdx ? { ...s, itemIds: s.itemIds.includes(itemId) ? s.itemIds.filter(id => id !== itemId) : [...s.itemIds, itemId] } : s))
   const addSplitGroup = () => setSplitForm([...splitForm, { itemIds: [], paymentMethod: 'cash', tipAmount: 0 }])
 
+  if (!canAccessTab(tab)) return <div className="mx-auto max-w-xl py-16 text-center"><h1 className="text-lg font-semibold">Restaurant access unavailable</h1><p className="mt-2 text-sm text-muted-foreground">Your role or this business plan does not include this restaurant area.</p></div>
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -737,9 +764,9 @@ export default function RestaurantPage() {
               <p className="text-sm text-muted-foreground">Today&apos;s restaurant activity and live service status.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => setTab('tables')}><Table2 className="mr-2 h-4 w-4" /> Floor</Button>
-              <Button variant="outline" onClick={() => setTab('kitchen')}><ChefHat className="mr-2 h-4 w-4" /> Kitchen</Button>
-              <Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>
+              {canAccessTab('tables') && <Button variant="outline" onClick={() => setTab('tables')}><Table2 className="mr-2 h-4 w-4" /> Floor</Button>}
+              {canAccessTab('kitchen') && <Button variant="outline" onClick={() => setTab('kitchen')}><ChefHat className="mr-2 h-4 w-4" /> Kitchen</Button>}
+              {canCreateRestaurant && <Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -825,8 +852,8 @@ export default function RestaurantPage() {
         {/* Tables */}
         <TabsContent value="tables">
           <div className="flex justify-between mb-4">
-            <Button variant="outline" onClick={() => setShowMergeModal(true)} disabled={tables.length < 2}><Merge className="h-4 w-4 mr-1" /> Merge Tables</Button>
-            <Button onClick={() => setShowTableModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Table</Button>
+            {canEditRestaurant && <Button variant="outline" onClick={() => setShowMergeModal(true)} disabled={tables.length < 2}><Merge className="h-4 w-4 mr-1" /> Merge Tables</Button>}
+            {canCreateRestaurant && <Button onClick={() => setShowTableModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Table</Button>}
           </div>
           <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
             {tables.map(t => (
@@ -836,8 +863,8 @@ export default function RestaurantPage() {
                   <div className="text-sm text-muted-foreground">Capacity: {t.capacity} {t.area && `· ${t.area}`}</div>
                   <div className="text-xs text-muted-foreground mt-1">Orders: {t._count?.orders ?? 0}</div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" variant="outline" onClick={() => openEditTable(t)}><Pencil className="h-3 w-3" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteTable(t.id)}><Trash2 className="h-3 w-3" /></Button>
+                    {canEditRestaurant && <Button size="sm" variant="outline" onClick={() => openEditTable(t)}><Pencil className="h-3 w-3" /></Button>}
+                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteTable(t.id)}><Trash2 className="h-3 w-3" /></Button>}
                   </div>
                 </CardContent>
               </Card>
@@ -849,7 +876,7 @@ export default function RestaurantPage() {
         <TabsContent value="menu">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div><h2 className="font-semibold">Restaurant menu</h2><p className="text-sm text-muted-foreground">Curate what guests can order here; each menu item stays linked to its stock and recipe record.</p></div>
-            <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>
+            {canCreateRestaurant && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
           </div>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search menu items" className="pl-9" /></div>
@@ -863,20 +890,20 @@ export default function RestaurantPage() {
                 </div>
                 <CardContent className="space-y-3 p-3">
                   <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={entry.product.name}>{entry.product.name}</p><p className="text-sm text-muted-foreground">{entry.category} · {entry.station === 'bar' ? 'Bar' : 'Kitchen'}</p>{entry.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.description}</p>}</div><div className="flex flex-col items-end gap-1"><Badge variant="outline">{entry.product.quantity} in stock</Badge>{!entry.isAvailable && <Badge variant="secondary">Paused</Badge>}</div></div>
-                  <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span><Button size="sm" disabled={!entry.isAvailable} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button></div>
+                  <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span>{canCreateRestaurant && <Button size="sm" disabled={!entry.isAvailable} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button>}</div>
                   <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-                    <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
+                    {canEditRestaurant && <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
                       <ImagePlus className="h-3.5 w-3.5" /> {entry.product.image ? 'Change photo' : 'Add photo'}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(entry.productId, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
-                    </label>
-                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
-                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause' : 'Resume'}</Button>
-                    <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>
+                    </label>}
+                    {canEditRestaurant && <><Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause' : 'Resume'}</Button></>}
+                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>}
                   </div>
                 </CardContent>
               </Card>)}
             </div>}
-          {orderItems.length > 0 && <div className="sticky bottom-3 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-3 shadow-lg">
+          {canCreateRestaurant && orderItems.length > 0 && <div className="sticky bottom-3 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-3 shadow-lg">
             <div><p className="font-medium">Order cart · {orderItems.reduce((count, item) => count + item.quantity, 0)} items</p><p className="text-sm text-muted-foreground">Estimated total: {orderItems.reduce((sum, item) => sum + item.quantity * (menuEntries.find(entry => entry.productId === item.productId)?.price || 0), 0).toLocaleString()}</p></div>
             <div className="flex gap-2"><Button variant="outline" onClick={() => setOrderItems([])}>Clear cart</Button><Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'takeaway', specialInstructions: '' }); setShowOrderModal(true) }}>Continue to order</Button></div>
           </div>}
@@ -901,7 +928,7 @@ export default function RestaurantPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>
+            {canCreateRestaurant && <Button onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
           </div>
           <div className="space-y-3">
             {paginatedOrders.map(o => (
@@ -914,13 +941,13 @@ export default function RestaurantPage() {
                   {o.tipAmount > 0 && <div className="flex justify-between text-sm"><span>Tip</span><span>{o.tipAmount.toLocaleString()}</span></div>}
                   <div className="flex justify-between font-medium border-t pt-2 mt-1"><span>Total</span><span>{o.total.toLocaleString()}</span></div>
                   <div className="flex flex-wrap gap-2 mt-3">
-                    {o.status === 'pending' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'preparing')}>Start Preparing</Button>}
-                    {o.status === 'preparing' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'ready')}>Mark Ready</Button>}
-                    {o.status === 'ready' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'served')}>Mark Served</Button>}
-                    {o.status === 'served' && <Button size="sm" onClick={() => openCompleteModal(o)}><CheckCircle className="h-3 w-3 mr-1" /> Complete & Pay</Button>}
-                    {o.status === 'served' && <Button size="sm" variant="outline" onClick={() => openSplitModal(o)}><Split className="h-3 w-3 mr-1" /> Split Bill</Button>}
-                    {o.status !== 'completed' && o.status !== 'cancelled' && o.table && <Button size="sm" variant="outline" onClick={() => openMoveModal(o)}><ArrowRightLeft className="h-3 w-3 mr-1" /> Move Table</Button>}
-                    {o.status !== 'completed' && o.status !== 'cancelled' && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel</Button>}
+                    {canEditRestaurant && o.status === 'pending' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'preparing')}>Start Preparing</Button>}
+                    {canEditRestaurant && o.status === 'preparing' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'ready')}>Mark Ready</Button>}
+                    {canEditRestaurant && o.status === 'ready' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'served')}>Mark Served</Button>}
+                    {canEditRestaurant && o.status === 'served' && <Button size="sm" onClick={() => openCompleteModal(o)}><CheckCircle className="h-3 w-3 mr-1" /> Complete & Pay</Button>}
+                    {canEditRestaurant && o.status === 'served' && <Button size="sm" variant="outline" onClick={() => openSplitModal(o)}><Split className="h-3 w-3 mr-1" /> Split Bill</Button>}
+                    {canEditRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && o.table && <Button size="sm" variant="outline" onClick={() => openMoveModal(o)}><ArrowRightLeft className="h-3 w-3 mr-1" /> Move Table</Button>}
+                    {canDeleteRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel</Button>}
                   </div>
                 </CardContent>
               </Card>
@@ -947,9 +974,9 @@ export default function RestaurantPage() {
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name} {i.specialInstructions && <span className="text-orange-600">⚠ {i.specialInstructions}</span>}</span>
                         <div className="flex gap-1">
-                          {i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
-                          {i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
-                          {i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
+                          {canEditRestaurant && i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
+                          {canEditRestaurant && i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
+                          {canEditRestaurant && i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
                           <Badge className={statusColors[i.status]}>{i.status}</Badge>
                         </div>
                       </div>
@@ -969,9 +996,9 @@ export default function RestaurantPage() {
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name}</span>
                         <div className="flex gap-1">
-                          {i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
-                          {i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
-                          {i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
+                          {canEditRestaurant && i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
+                          {canEditRestaurant && i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
+                          {canEditRestaurant && i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
                           <Badge className={statusColors[i.status]}>{i.status}</Badge>
                         </div>
                       </div>
@@ -989,7 +1016,7 @@ export default function RestaurantPage() {
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <Input type="date" value={reservationDateFilter} onChange={e => setReservationDateFilter(e.target.value)} className="sm:w-[180px]" />
             <div className="flex-1" />
-            <Button onClick={() => setShowReservationModal(true)}><Plus className="h-4 w-4 mr-1" /> New Reservation</Button>
+            {canCreateRestaurant && <Button onClick={() => setShowReservationModal(true)}><Plus className="h-4 w-4 mr-1" /> New Reservation</Button>}
           </div>
           <div className="space-y-3">
             {filteredReservations.map(r => (
@@ -998,10 +1025,10 @@ export default function RestaurantPage() {
                   <div className="flex items-center justify-between">
                     <div><div className="font-medium">{r.customerName} {r.customerPhone && <span className="text-muted-foreground">· {r.customerPhone}</span>}</div><div className="text-sm text-muted-foreground">{new Date(r.date).toLocaleDateString()} at {r.time} · {r.guests} guests {r.table && `· ${r.table.name}`}</div>{r.specialRequests && <div className="text-sm text-orange-600 mt-1">⚠ {r.specialRequests}</div>}</div>
                     <div className="flex items-center gap-2"><Badge className={statusColors[r.status]}>{r.status}</Badge>
-                      {r.status === 'reserved' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check In</Button>}
-                      {r.status === 'checked_in' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'completed')}>Complete</Button>}
-                      {r.status !== 'cancelled' && r.status !== 'completed' && <Button size="sm" variant="outline" onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel</Button>}
-                      <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteReservation(r.id)}><Trash2 className="h-3 w-3" /></Button>
+                      {canEditRestaurant && r.status === 'reserved' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check In</Button>}
+                      {canEditRestaurant && r.status === 'checked_in' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'completed')}>Complete</Button>}
+                      {canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed' && <Button size="sm" variant="outline" onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel</Button>}
+                      {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteReservation(r.id)}><Trash2 className="h-3 w-3" /></Button>}
                     </div>
                   </div>
                 </CardContent>
@@ -1013,11 +1040,11 @@ export default function RestaurantPage() {
 
         {/* Recipes */}
         <TabsContent value="recipes">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowRecipeModal(true)}><Plus className="h-4 w-4 mr-1" /> New Recipe</Button></div>
+          <div className="flex justify-end mb-4">{canCreateRestaurant && <Button onClick={() => setShowRecipeModal(true)}><Plus className="h-4 w-4 mr-1" /> New Recipe</Button>}</div>
           <div className="space-y-3">
             {recipes.map(r => (
               <Card key={r.id}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2">{r.name} <Badge variant="outline">{r.product.name}</Badge>{!r.isActive && <Badge variant="secondary">Inactive</Badge>}</span><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => openEditRecipe(r)}><Pencil className="h-3 w-3" /></Button><Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteRecipe(r.id)}><Trash2 className="h-3 w-3" /></Button></div></CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2">{r.name} <Badge variant="outline">{r.product.name}</Badge>{!r.isActive && <Badge variant="secondary">Inactive</Badge>}</span><div className="flex gap-1">{canEditRestaurant && <Button size="sm" variant="ghost" onClick={() => openEditRecipe(r)}><Pencil className="h-3 w-3" /></Button>}{canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteRecipe(r.id)}><Trash2 className="h-3 w-3" /></Button>}</div></CardTitle></CardHeader>
                 <CardContent><div className="text-sm space-y-1">{r.ingredients.map(i => <div key={i.id} className="flex justify-between"><span>{i.product.name}</span><span className="text-muted-foreground">{i.quantity} {i.unit}</span></div>)}</div>{r.yield && <div className="text-xs text-muted-foreground mt-2">Yield: {r.yield}</div>}</CardContent>
               </Card>
             ))}
@@ -1027,7 +1054,7 @@ export default function RestaurantPage() {
 
         {/* Delivery */}
         <TabsContent value="delivery">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowDeliveryModal(true)}><Plus className="h-4 w-4 mr-1" /> New Delivery</Button></div>
+          <div className="flex justify-end mb-4">{canCreateRestaurant && <Button onClick={() => setShowDeliveryModal(true)}><Plus className="h-4 w-4 mr-1" /> New Delivery</Button>}</div>
           <div className="space-y-3">
             {deliveries.map(d => (
               <Card key={d.id}>
@@ -1036,8 +1063,8 @@ export default function RestaurantPage() {
                     <div><div className="font-medium">{d.customerName} · {d.customerPhone}</div><div className="text-sm text-muted-foreground">{d.address}</div><div className="text-sm mt-1">Rider: {d.riderName || 'Unassigned'} {d.riderPhone && `· ${d.riderPhone}`} · Fee: {d.deliveryFee.toLocaleString()}</div>{d.order && <Badge variant="outline" className="mt-1">{d.order.orderNo}</Badge>}</div>
                     <div className="flex items-center gap-2">
                       <Badge className={statusColors[d.status]}>{d.status}</Badge>
-                      {d.status === 'pending' && <Button size="sm" onClick={() => updateDeliveryStatus(d.id, 'on_delivery')}>Dispatch</Button>}
-                      {d.status === 'on_delivery' && <Button size="sm" onClick={() => updateDeliveryStatus(d.id, 'delivered')}>Delivered</Button>}
+                      {canEditRestaurant && d.status === 'pending' && <Button size="sm" onClick={() => updateDeliveryStatus(d.id, 'on_delivery')}>Dispatch</Button>}
+                      {canEditRestaurant && d.status === 'on_delivery' && <Button size="sm" onClick={() => updateDeliveryStatus(d.id, 'delivered')}>Delivered</Button>}
                     </div>
                   </div>
                 </CardContent>
@@ -1049,11 +1076,11 @@ export default function RestaurantPage() {
 
         {/* Waiters */}
         <TabsContent value="waiters">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowWaiterModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Waiter</Button></div>
+          <div className="flex justify-end mb-4">{canCreateRestaurant && <Button onClick={() => setShowWaiterModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Waiter</Button>}</div>
           <div className="grid gap-4 md:grid-cols-3">
             {waiters.map(w => (
               <Card key={w.id} className={w.isActive ? '' : 'opacity-50'}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}<Badge variant={w.hasPin ? 'secondary' : 'outline'}>{w.hasPin ? 'PIN set' : 'PIN needed'}</Badge></span><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => openEditWaiter(w)}><Pencil className="h-3 w-3" /></Button><Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button></div></CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}<Badge variant={w.hasPin ? 'secondary' : 'outline'}>{w.hasPin ? 'PIN set' : 'PIN needed'}</Badge></span><div className="flex gap-1">{canEditRestaurant && <Button size="sm" variant="ghost" onClick={() => openEditWaiter(w)}><Pencil className="h-3 w-3" /></Button>}{canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button>}</div></CardTitle></CardHeader>
                 <CardContent><div className="text-sm text-muted-foreground">{w.phone || 'No phone'} {w.code && `· Code: ${w.code}`}</div><div className="text-sm mt-1">Orders: {w._count?.orders ?? 0} · Tips: {w._count?.tips ?? 0}</div></CardContent>
               </Card>
             ))}
@@ -1063,7 +1090,7 @@ export default function RestaurantPage() {
 
         {/* Happy Hour */}
         <TabsContent value="happy-hour">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowHappyHourModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Rule</Button></div>
+          <div className="flex justify-end mb-4">{canCreateRestaurant && <Button onClick={() => setShowHappyHourModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Rule</Button>}</div>
           <div className="space-y-3">
             {happyHours.map(h => (
               <Card key={h.id} className={h.isActive ? '' : 'opacity-50'}>
@@ -1071,8 +1098,8 @@ export default function RestaurantPage() {
                 <CardContent>
                   <div className="text-sm text-muted-foreground">{h.startTime} - {h.endTime} · Days: {h.daysOfWeek} · {h.discountType === 'percentage' ? `${h.discountValue}%` : h.discountValue} off</div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" variant="outline" onClick={() => updateHappyHour(h.id, { isActive: !h.isActive })}>{h.isActive ? 'Disable' : 'Enable'}</Button>
-                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteHappyHour(h.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>
+                    {canEditRestaurant && <Button size="sm" variant="outline" onClick={() => updateHappyHour(h.id, { isActive: !h.isActive })}>{h.isActive ? 'Disable' : 'Enable'}</Button>}
+                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteHappyHour(h.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>}
                   </div>
                 </CardContent>
               </Card>
@@ -1083,7 +1110,7 @@ export default function RestaurantPage() {
 
         {/* Combos */}
         <TabsContent value="combos">
-          <div className="flex justify-end mb-4"><Button onClick={() => setShowComboModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Combo</Button></div>
+          <div className="flex justify-end mb-4">{canCreateRestaurant && <Button onClick={() => setShowComboModal(true)}><Plus className="h-4 w-4 mr-1" /> Add Combo</Button>}</div>
           <div className="grid gap-4 md:grid-cols-2">
             {combos.map(c => (
               <Card key={c.id} className={c.isActive ? '' : 'opacity-50'}>
@@ -1093,8 +1120,8 @@ export default function RestaurantPage() {
                   <div className="text-sm space-y-1 mb-2">{c.items.map(i => <div key={i.id} className="flex justify-between"><span>{i.quantity}× {i.product.name}</span></div>)}</div>
                   <div className="flex justify-between font-medium border-t pt-2"><span>Combo Price</span><span>{c.price.toLocaleString()}</span></div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" variant="outline" onClick={() => updateCombo(c.id, { isActive: !c.isActive, name: c.name, description: c.description, price: c.price, items: c.items.map(i => ({ productId: i.productId, quantity: i.quantity })) })}>{c.isActive ? 'Disable' : 'Enable'}</Button>
-                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCombo(c.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>
+                    {canEditRestaurant && <Button size="sm" variant="outline" onClick={() => updateCombo(c.id, { isActive: !c.isActive, name: c.name, description: c.description, price: c.price, items: c.items.map(i => ({ productId: i.productId, quantity: i.quantity })) })}>{c.isActive ? 'Disable' : 'Enable'}</Button>}
+                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCombo(c.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>}
                   </div>
                 </CardContent>
               </Card>
@@ -1192,7 +1219,7 @@ export default function RestaurantPage() {
             </div>
             <div><Label>Description</Label><Input value={menuForm.description} onChange={event => setMenuForm(current => ({ ...current, description: event.target.value }))} placeholder="Menu description or serving notes" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry} disabled={editingMenuEntry ? !canEditRestaurant : !canCreateRestaurant}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1202,7 +1229,7 @@ export default function RestaurantPage() {
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Serving as</Label><div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">{waiters.find(waiter => waiter.id === activeWaiterId)?.name || 'Signed-in cashier'}</div></div>
+              <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Select waiter</SelectItem>{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>
               <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label>Items</Label>
@@ -1219,7 +1246,7 @@ export default function RestaurantPage() {
             </div>
             <div><Label>Special Instructions</Label><Input value={orderForm.specialInstructions} onChange={e => setOrderForm({ ...orderForm, specialInstructions: e.target.value })} placeholder="No onions, extra spicy..." /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowOrderModal(false)}>Cancel</Button><Button onClick={createOrder}>Create Order</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowOrderModal(false)}>Cancel</Button><Button onClick={createOrder} disabled={!canCreateRestaurant || (waiters.some(waiter => waiter.isActive) && !activeWaiterId) || orderItems.length === 0}>Create Order</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

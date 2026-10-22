@@ -383,7 +383,7 @@ router.delete("/:id", authenticateToken, requirePermission("canDeleteRental"), r
 });
 
 // Rentals summary/report
-router.get("/report/summary", authenticateToken, requirePermission("canViewRentalReport"), requireTenant, async (req, res) => {
+router.get("/report/summary", authenticateToken, requirePermission("canViewReportRentalsSummary"), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
 

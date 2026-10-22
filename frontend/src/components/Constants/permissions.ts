@@ -148,15 +148,7 @@ export const permissions: Permission[] = [
   { id: 'canApproveProcurementPayment', name: 'Confirm Buyer-Submitted Marketplace Repayments', description: 'Confirm repayments reported by a buyer before they reduce seller receivables', category: 'procurement', accessesBusinessData: true },
   { id: 'canRecordProcurementPayment', name: 'Record Seller-Received Marketplace Repayments', description: 'Record funds received by the seller into a permitted transaction account', category: 'procurement', accessesBusinessData: true },
   
-  // Reports (granular)
-  { id: 'canViewSalesReport', name: 'View Sales Reports', description: 'View sales reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewInventoryReport', name: 'View Inventory Reports', description: 'View inventory reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewFinancialReport', name: 'View Financial Reports', description: 'View financial reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewCustomerReport', name: 'View Customer Reports', description: 'View customer reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewSupplierReport', name: 'View Supplier Reports', description: 'View supplier reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewReceivablesReport', name: 'View Receivables Reports', description: 'View receivables reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewPayablesReport', name: 'View Payables Reports', description: 'View payables reports', category: 'reports', accessesBusinessData: true },
-  { id: 'canViewPerformanceReport', name: 'View Performance Reports', description: 'View business performance reports', category: 'reports', accessesBusinessData: true },
+  // Reports are granted per report from the backend permission schema.
   { id: 'canViewAuditReport', name: 'View Audit Reports', description: 'View audit log reports', category: 'reports', accessesBusinessData: true },
   { id: 'canExportReport', name: 'Export Reports', description: 'Export reports to file', category: 'reports', accessesBusinessData: true },
   
@@ -231,7 +223,6 @@ export const permissions: Permission[] = [
   { id: 'canEditService', name: 'Edit Services', description: 'Edit existing service items', category: 'services', accessesBusinessData: true },
   { id: 'canDeleteService', name: 'Delete Services', description: 'Delete service items', category: 'services', accessesBusinessData: true },
   { id: 'canManageServiceCategory', name: 'Manage Service Categories', description: 'Create and edit service categories', category: 'services', accessesBusinessData: true },
-  { id: 'canViewServiceReport', name: 'View Service Reports', description: 'View service-related reports', category: 'services', accessesBusinessData: true },
 
   // Rentals / Hire
   { id: 'canViewRental', name: 'View Rentals', description: 'View rental/hire records', category: 'rentals', accessesBusinessData: true },
@@ -239,35 +230,30 @@ export const permissions: Permission[] = [
   { id: 'canEditRental', name: 'Edit Rentals', description: 'Edit existing rental records', category: 'rentals', accessesBusinessData: true },
   { id: 'canDeleteRental', name: 'Cancel Rentals', description: 'Cancel rental bookings', category: 'rentals', accessesBusinessData: true },
   { id: 'canProcessRentalReturn', name: 'Process Returns', description: 'Process return of hired items', category: 'rentals', accessesBusinessData: true },
-  { id: 'canViewRentalReport', name: 'View Rental Reports', description: 'View rental-related reports', category: 'rentals', accessesBusinessData: true },
   
   // Restaurant & Bar
   { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },
   { id: 'canCreateRestaurant', name: 'Create Restaurant', description: 'Create restaurant orders, tables, reservations', category: 'restaurant', accessesBusinessData: true },
   { id: 'canEditRestaurant', name: 'Edit Restaurant', description: 'Edit restaurant orders and settings', category: 'restaurant', accessesBusinessData: true },
   { id: 'canDeleteRestaurant', name: 'Delete Restaurant', description: 'Delete restaurant records', category: 'restaurant', accessesBusinessData: true },
-  { id: 'canViewRestaurantReport', name: 'View Restaurant Reports', description: 'View restaurant-related reports', category: 'restaurant', accessesBusinessData: true },
 
   // Fuel Station
   { id: 'canViewFuelStation', name: 'View Fuel Station', description: 'Access fuel station module', category: 'fuel_station', accessesBusinessData: true },
   { id: 'canCreateFuelStation', name: 'Create Fuel Station', description: 'Create pumps, tanks, deliveries, shifts', category: 'fuel_station', accessesBusinessData: true },
   { id: 'canEditFuelStation', name: 'Edit Fuel Station', description: 'Edit fuel station records', category: 'fuel_station', accessesBusinessData: true },
   { id: 'canDeleteFuelStation', name: 'Delete Fuel Station', description: 'Delete fuel station records', category: 'fuel_station', accessesBusinessData: true },
-  { id: 'canViewFuelStationReport', name: 'View Fuel Station Reports', description: 'View fuel station reports', category: 'fuel_station', accessesBusinessData: true },
 
   // Manufacturing
   { id: 'canViewManufacturing', name: 'View Manufacturing', description: 'Access manufacturing module', category: 'manufacturing', accessesBusinessData: true },
   { id: 'canCreateManufacturing', name: 'Create Manufacturing', description: 'Create production orders, waste records, BOMs', category: 'manufacturing', accessesBusinessData: true },
   { id: 'canEditManufacturing', name: 'Edit Manufacturing', description: 'Edit manufacturing records', category: 'manufacturing', accessesBusinessData: true },
   { id: 'canDeleteManufacturing', name: 'Delete Manufacturing', description: 'Delete manufacturing records', category: 'manufacturing', accessesBusinessData: true },
-  { id: 'canViewManufacturingReport', name: 'View Manufacturing Reports', description: 'View manufacturing reports', category: 'manufacturing', accessesBusinessData: true },
 
   // Agriculture
   { id: 'canViewAgriculture', name: 'View Agriculture', description: 'Access agriculture module', category: 'agriculture', accessesBusinessData: true },
   { id: 'canCreateAgriculture', name: 'Create Agriculture', description: 'Create fields, livestock, harvests, expenses', category: 'agriculture', accessesBusinessData: true },
   { id: 'canEditAgriculture', name: 'Edit Agriculture', description: 'Edit agriculture records', category: 'agriculture', accessesBusinessData: true },
   { id: 'canDeleteAgriculture', name: 'Delete Agriculture', description: 'Delete agriculture records', category: 'agriculture', accessesBusinessData: true },
-  { id: 'canViewAgricultureReport', name: 'View Agriculture Reports', description: 'View agriculture reports', category: 'agriculture', accessesBusinessData: true },
 
   // Service Business (appointments, work orders, contracts)
   ...SERVICE_PERMISSION_DEFINITIONS.map(p => ({ ...p, accessesBusinessData: true })),

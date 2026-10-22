@@ -1,7 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift, Store } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift, Store, Search } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 
@@ -39,8 +39,6 @@ const MODULES = [
       { name: 'inventory.batch_numbers', displayName: 'Batch Numbers' },
       { name: 'inventory.expiry_tracking', displayName: 'Expiry Tracking' },
       { name: 'inventory.barcode_printing', displayName: 'Barcode Printing' },
-      { name: 'fuel_station.lubricants', displayName: 'Lubricants & Dry Stock' },
-      { name: 'fuel_station.convenience', displayName: 'Convenience Shop' },
     ]
   },
   {
@@ -50,8 +48,6 @@ const MODULES = [
       { name: 'customers.loyalty', displayName: 'Loyalty Program' },
       { name: 'customers.wallet', displayName: 'Customer Wallet' },
       { name: 'customers.statements', displayName: 'Customer Statements' },
-      { name: 'fuel_station.fuel_cards', displayName: 'Fuel Cards' },
-      { name: 'fuel_station.credit_accounts', displayName: 'Credit Accounts' },
     ]
   },
   {
@@ -214,6 +210,10 @@ const MODULES = [
       { name: 'fuel_station.tank_calibration', displayName: 'Tank Calibration' },
       { name: 'fuel_station.shift_reports', displayName: 'Shift Reports' },
       { name: 'fuel_station.pricing', displayName: 'Price Management' },
+      { name: 'fuel_station.fuel_cards', displayName: 'Fuel Cards' },
+      { name: 'fuel_station.credit_accounts', displayName: 'Fuel Credit Accounts' },
+      { name: 'fuel_station.lubricants', displayName: 'Lubricants & Dry Stock' },
+      { name: 'fuel_station.convenience', displayName: 'Convenience Shop' },
       { name: 'fuel_station.compliance', displayName: 'Environmental Compliance' },
       { name: 'fuel_station.reports', displayName: 'Fuel Station Reports' },
     ]
@@ -282,6 +282,12 @@ const MODULES = [
   },
 ]
 
+const FEATURE_SECTIONS = [
+  { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
+  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'service', 'rentals', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets'] },
+  { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, integrations, administration, security and developer tools.', modules: ['hr', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
+]
+
 interface TenantListItem { id: string; name: string; planId: string; plan: { name: string } }
 interface TenantFeatureAccess { [key: string]: { enabled: boolean; source: string } }
 
@@ -298,6 +304,7 @@ export const FeaturesPage: React.FC = () => {
   const [selectedTenant, setSelectedTenant] = useState<string>('')
   const [tenantFeatureAccess, setTenantFeatureAccess] = useState<TenantFeatureAccess>({})
   const [tenantLoading, setTenantLoading] = useState(false)
+  const [featureSearch, setFeatureSearch] = useState('')
 
   const fetchData = async () => {
     setLoading(true)
@@ -416,6 +423,22 @@ export const FeaturesPage: React.FC = () => {
     return access.enabled ? 'enabled' : 'default'
   }
 
+  const searchTerm = featureSearch.trim().toLowerCase()
+  const featureSections = FEATURE_SECTIONS.map(section => ({
+    ...section,
+    moduleItems: section.modules.flatMap(moduleId => {
+      const mod = MODULES.find(module => module.id === moduleId)
+      if (!mod) return []
+      const moduleMatches = !searchTerm || mod.name.toLowerCase().includes(searchTerm)
+      const matchingFeatures = mod.features.filter(feature => moduleMatches || `${feature.displayName} ${feature.name}`.toLowerCase().includes(searchTerm))
+      return matchingFeatures.length ? [{ ...mod, features: matchingFeatures }] : []
+    }),
+  })).filter(section => section.moduleItems.length > 0)
+  const ungroupedFeatures = features
+    .filter(feature => !MODULES.some(module => module.features.some(item => item.name === feature.name)))
+    .filter(feature => !searchTerm || `${feature.displayName} ${feature.name} ${feature.category}`.toLowerCase().includes(searchTerm))
+    .sort((a, b) => `${a.category}:${a.displayName || a.name}`.localeCompare(`${b.category}:${b.displayName || b.name}`))
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -451,13 +474,19 @@ export const FeaturesPage: React.FC = () => {
             </span>
           )}
         </div>
+        <label className="relative mt-4 block max-w-xl">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <input value={featureSearch} onChange={event => setFeatureSearch(event.target.value)} placeholder="Find a module or feature" className="w-full rounded-md border border-slate-700 bg-slate-800 py-2 pl-9 pr-3 text-sm text-white placeholder:text-slate-500" />
+        </label>
       </div>
 
       {tenantLoading ? (
         <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
       ) : selectedTenant ? (
         <div className="space-y-4">
-          {MODULES.map(mod => {
+          {featureSections.map(section => <section key={section.id} className="space-y-3">
+            <div><h2 className="text-lg font-semibold text-white">{section.title}</h2><p className="text-sm text-slate-400">{section.description}</p></div>
+            <div className="space-y-4">{section.moduleItems.map(mod => {
             const ModIcon = mod.icon
             return (
               <div key={mod.id} className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
@@ -490,13 +519,14 @@ export const FeaturesPage: React.FC = () => {
                 </div>
               </div>
             )
-          })}
+            })}</div>
+          </section>)}
 
-          {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).length > 0 && (
+          {ungroupedFeatures.length > 0 && (
             <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
               <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other Features</h2></div>
               <div className="divide-y divide-slate-800">
-                {features.filter(f => !MODULES.some(m => m.features.some(mf => mf.name === f.name))).map(f => {
+                {ungroupedFeatures.map(f => {
                   const state = getTenantFeatureState(f.name)
                   const isOn = state === 'enabled'
                   const isOverride = state === 'enabled' || state === 'disabled'
