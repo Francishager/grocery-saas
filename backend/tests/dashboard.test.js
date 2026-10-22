@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const prisma = {};
 for (const model of ['sale', 'saleRecord', 'creditNote', 'customer', 'customerPayment',
-  'customerPaymentAllocation', 'customerWithdrawal', 'saleReturn', 'purchase', 'supplierPurchase', 'expense', 'journalEntry', 'product']) {
+  'customerPaymentAllocation', 'customerCreditApplication', 'customerWithdrawal', 'saleReturn', 'purchase', 'supplierPurchase', 'expense', 'journalEntry', 'product']) {
   prisma[model] = Object.fromEntries(['aggregate', 'findMany', 'groupBy', 'count'].map((method) =>
     [method, async () => { throw new Error(`Unexpected query: ${model}.${method}`); }]));
 }
@@ -31,6 +31,9 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   t.mock.method(prisma.creditNote, 'findMany', async () => [{ ...note, sale: returned }]);
   t.mock.method(prisma.customer, 'findMany', async () => [{ id: 'customer', openingBalance: 20, balance: 99999 }]);
   t.mock.method(prisma.customer, 'count', async () => 1);
+  t.mock.method(prisma.customerPayment, 'findMany', async () => [{ id: 'payment', customerId: 'customer', saleId: null, allocationMode: 'legacy', amount: 50 }]);
+  t.mock.method(prisma.customerPaymentAllocation, 'findMany', async () => []);
+  t.mock.method(prisma.customerCreditApplication, 'findMany', async () => []);
   t.mock.method(prisma.customerPayment, 'groupBy', async () => [{ customerId: 'customer', saleId: null, _sum: { amount: 50 } }]);
   t.mock.method(prisma.customerPaymentAllocation, 'groupBy', async () => []);
   t.mock.method(prisma.customerWithdrawal, 'groupBy', async () => []);
@@ -43,7 +46,7 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   t.mock.method(prisma.product, 'count', async () => 0);
   const handler = dashboard.stack.find((layer) => layer.route?.path === '/kpis').route.stack.at(-1).handle;
   let result;
-  await handler({ user: { role: 'owner', tenantId: 'tenant' }, query: {} }, {
+  await handler({ user: { role: 'owner', tenantId: 'tenant', permissions: ['*'] }, query: {} }, {
     json(value) { result = value; }, status(code) { throw new Error(`Unexpected HTTP ${code}`); },
   });
   assert.equal(result.receivablesOutstanding, 88);
