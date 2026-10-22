@@ -13,7 +13,7 @@ import { useToast } from '@/hooks/use-toast'
 import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye, ImagePlus, Printer } from 'lucide-react'
 import { useOnlineStatus } from '@/db/hooks'
 import { useAuth } from '@/hooks/useAuth'
-import { useInstitution } from '@/hooks/useInstitution'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { getLocalProducts } from '@/db/hybrid'
 import { db } from '@/db/index'
 import { usePagination } from '@/hooks/usePagination'
@@ -50,7 +50,7 @@ const statusColors: Record<string, string> = {
 export default function RestaurantPage() {
   const { toast } = useToast()
   const { hasPermission } = useAuth()
-  const { hasFeature } = useInstitution()
+  const { hasFeature } = useFeatureAccess()
   const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
   const [tab, setTab] = useState('dashboard')
   const [tables, setTables] = useState<Table[]>([])
