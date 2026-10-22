@@ -1218,6 +1218,7 @@ export interface ReceiptPreview {
   }
   branch?: BranchOption | null
   cashier?: string
+  servedBy?: string | null
   customerName?: string | null
   paymentMethod: string
   createdAt: string

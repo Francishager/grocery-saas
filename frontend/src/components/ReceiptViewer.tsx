@@ -440,6 +440,10 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                       <span>Cashier</span>
                       <span className="text-right font-bold">{receipt.cashier || '-'}</span>
                     </div>
+                    {receipt.servedBy && <div className="flex justify-between gap-3">
+                      <span>Served by</span>
+                      <span className="text-right font-bold">{receipt.servedBy}</span>
+                    </div>}
                     <div className="flex justify-between gap-3">
                       <span>Payment</span>
                       <span className="text-right font-bold uppercase">{receipt.paymentMethod}</span>

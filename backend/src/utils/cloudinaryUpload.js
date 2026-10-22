@@ -39,6 +39,7 @@ export function uploadBufferToCloudinary(buffer, options = {}) {
         folder: options.folder,
         public_id: options.publicId,
         overwrite: options.overwrite ?? false,
+        ...(options.transformation ? { transformation: options.transformation } : {}),
       },
       (error, result) => {
         if (error) return reject(error);
@@ -47,4 +48,10 @@ export function uploadBufferToCloudinary(buffer, options = {}) {
     );
     stream.end(buffer);
   });
+}
+
+export async function deleteCloudinaryAsset(publicId, resourceType = 'image') {
+  if (!publicId) return;
+  ensureCloudinaryConfigured();
+  return cloudinary.v2.uploader.destroy(publicId, { resource_type: resourceType });
 }

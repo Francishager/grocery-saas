@@ -10,21 +10,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
-import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye } from 'lucide-react'
+import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye, ImagePlus, Printer } from 'lucide-react'
 import { useOnlineStatus } from '@/db/hooks'
+import { useAuth } from '@/hooks/useAuth'
+import { useInstitution } from '@/hooks/useInstitution'
 import { getLocalProducts } from '@/db/hybrid'
 import { db } from '@/db/index'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { discoverPrintAgent, getPrintAgentPrinters, printReceiptViaAgent, type PrintAgentPrinter } from '@/lib/printAgent'
 
 interface Table { id: string; name: string; capacity: number; status: string; area: string | null; isActive: boolean; _count?: { orders: number } }
-interface Waiter { id: string; name: string; phone: string | null; code: string | null; isActive: boolean; _count?: { orders: number; tips: number } }
+interface Waiter { id: string; name: string; phone: string | null; code: string | null; isActive: boolean; employeeId?: string | null; hasPin?: boolean; _count?: { orders: number; tips: number } }
+interface HrWaiterEmployee { id: string; firstName: string; middleName?: string | null; lastName: string; phone?: string | null; employeeNumber?: string | null; branchId?: string | null }
 interface OrderItem { id: string; productId: string; product: { id: string; name: string; price: number }; quantity: number; price: number; discount: number; total: number; station: string | null; status: string; specialInstructions: string | null }
-interface Order { id: string; orderNo: string; status: string; orderType: string; subtotal: number; total: number; tipAmount: number; discount: number; paymentStatus: string; table?: Table | null; waiter?: Waiter | null; items: OrderItem[]; specialInstructions: string | null; createdAt: string }
+interface Order { id: string; orderNo: string; status: string; orderType: string; subtotal: number; total: number; tipAmount: number; discount: number; paymentStatus: string; table?: Table | null; waiter?: Waiter | null; user?: { fname?: string | null; lname?: string | null } | null; items: OrderItem[]; specialInstructions: string | null; createdAt: string }
 interface Reservation { id: string; customerName: string; customerPhone: string | null; date: string; time: string; guests: number; status: string; specialRequests: string | null; table?: Table | null }
 interface Recipe { id: string; name: string; yield: string | null; isActive: boolean; product: { id: string; name: string }; ingredients: { id: string; productId: string; product: { id: string; name: string }; quantity: number; unit: string }[] }
 interface Delivery { id: string; customerName: string; customerPhone: string; address: string; riderName: string | null; riderPhone: string | null; deliveryFee: number; status: string; order?: { id: string; orderNo: string } | null }
-interface Product { id: string; name: string; price: number; quantity: number }
+interface Product { id: string; name: string; price: number; quantity: number; image?: string | null; itemType?: string }
 interface DashboardStats { ordersToday: number; openTables: number; occupiedTables: number; kitchenOrders: number; barOrders: number; todaySales: number; avgBill: number; completedCount: number }
 interface HappyHourRule { id: string; name: string; productId: string; product: { id: string; name: string }; startTime: string; endTime: string; daysOfWeek: string; discountType: string; discountValue: number; isActive: boolean }
 interface ComboMeal { id: string; name: string; description: string | null; price: number; isActive: boolean; items: { id: string; productId: string; product: { id: string; name: string }; quantity: number }[] }
@@ -45,9 +49,13 @@ const statusColors: Record<string, string> = {
 
 export default function RestaurantPage() {
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  const { hasFeature } = useInstitution()
+  const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
   const [tab, setTab] = useState('dashboard')
   const [tables, setTables] = useState<Table[]>([])
   const [waiters, setWaiters] = useState<Waiter[]>([])
+  const [hrWaiterEmployees, setHrWaiterEmployees] = useState<HrWaiterEmployee[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [kitchenOrders, setKitchenOrders] = useState<Order[]>([])
   const [barOrders, setBarOrders] = useState<Order[]>([])
@@ -56,6 +64,18 @@ export default function RestaurantPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [activeWaiterId, setActiveWaiterId] = useState(() => sessionStorage.getItem('restaurant.activeWaiterId') || '')
+  const [waiterSessionToken, setWaiterSessionToken] = useState(() => sessionStorage.getItem('restaurant.waiterSessionToken') || '')
+  const [pinWaiter, setPinWaiter] = useState<Waiter | null>(null)
+  const [waiterPin, setWaiterPin] = useState('')
+  const [showWaiterPinDialog, setShowWaiterPinDialog] = useState(false)
+  const [verifyingWaiterPin, setVerifyingWaiterPin] = useState(false)
+  const [kitchenPrinterId, setKitchenPrinterId] = useState(() => { try { return localStorage.getItem('jibusales_kitchen_printer_id') || '' } catch { return '' } })
+  const [availablePrinters, setAvailablePrinters] = useState<PrintAgentPrinter[]>([])
+  const [printAgentUrl, setPrintAgentUrl] = useState('')
+  const [printerDiscoveryBusy, setPrinterDiscoveryBusy] = useState(false)
+  const [printingOrderId, setPrintingOrderId] = useState('')
+  const [showPrinterDialog, setShowPrinterDialog] = useState(false)
   const [loading, setLoading] = useState(false)
   const online = useOnlineStatus()
   const [showTableModal, setShowTableModal] = useState(false)
@@ -88,9 +108,9 @@ export default function RestaurantPage() {
   const [mergeTableIds, setMergeTableIds] = useState<string[]>([])
   const [mergePrimaryId, setMergePrimaryId] = useState('')
   const [tableForm, setTableForm] = useState({ name: '', capacity: 4, area: '' })
-  const [waiterForm, setWaiterForm] = useState({ name: '', phone: '', code: '' })
+  const [waiterForm, setWaiterForm] = useState({ name: '', phone: '', code: '', pin: '', employeeId: '' })
   const [editTableForm, setEditTableForm] = useState({ name: '', capacity: 4, area: '', status: 'available', isActive: true })
-  const [editWaiterForm, setEditWaiterForm] = useState({ name: '', phone: '', code: '', isActive: true })
+  const [editWaiterForm, setEditWaiterForm] = useState({ name: '', phone: '', code: '', pin: '', isActive: true, employeeId: '' })
   const [reservationForm, setReservationForm] = useState({ customerName: '', customerPhone: '', date: '', time: '', guests: 1, tableId: '', specialRequests: '' })
   const [deliveryForm, setDeliveryForm] = useState({ orderId: '', customerName: '', customerPhone: '', address: '', riderName: '', riderPhone: '', deliveryFee: 0, notes: '' })
   const [orderForm, setOrderForm] = useState({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' })
@@ -104,22 +124,83 @@ export default function RestaurantPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [tablesRes, waitersRes, productsRes, statsRes] = await Promise.all([
+      const [tablesRes, waitersRes, productsRes, statsRes, hrEmployeesRes] = await Promise.all([
         apiFetch('/api/restaurant/tables'),
         apiFetch('/api/restaurant/waiters'),
         apiFetch('/api/inventory?limit=100'),
         apiFetch('/api/restaurant/dashboard'),
+        canLinkWaiterToHr ? apiFetch('/api/restaurant/waiters/hr-employees') : Promise.resolve(null),
       ])
       if (tablesRes.ok) setTables(await tablesRes.json())
       if (waitersRes.ok) setWaiters(await waitersRes.json())
+      if (hrEmployeesRes?.ok) setHrWaiterEmployees(await hrEmployeesRes.json())
+      else if (!canLinkWaiterToHr) setHrWaiterEmployees([])
       if (productsRes.ok) { const p = await productsRes.json(); setProducts(p?.products || p?.records || []) }
       else if (!online) { const local = await getLocalProducts(); setProducts(local.map((p: any) => ({ id: p.id, name: p.product_name, price: p.unit_price, quantity: p.quantity }))) }
       if (statsRes.ok) setStats(await statsRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [])
+  }, [canLinkWaiterToHr])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    if (activeWaiterId && waiters.length > 0 && !waiters.some(waiter => waiter.id === activeWaiterId && waiter.isActive)) {
+      setActiveWaiterId('')
+      setWaiterSessionToken('')
+      sessionStorage.removeItem('restaurant.activeWaiterId')
+      sessionStorage.removeItem('restaurant.waiterSessionToken')
+      return
+    }
+    if (activeWaiterId) sessionStorage.setItem('restaurant.activeWaiterId', activeWaiterId)
+    else sessionStorage.removeItem('restaurant.activeWaiterId')
+    if (waiterSessionToken) sessionStorage.setItem('restaurant.waiterSessionToken', waiterSessionToken)
+    else sessionStorage.removeItem('restaurant.waiterSessionToken')
+  }, [activeWaiterId, waiterSessionToken, waiters])
+
+  const clearWaiterIdentity = () => {
+    setActiveWaiterId('')
+    setWaiterSessionToken('')
+    sessionStorage.removeItem('restaurant.activeWaiterId')
+    sessionStorage.removeItem('restaurant.waiterSessionToken')
+  }
+
+  const requestWaiterIdentity = (waiterId: string) => {
+    if (waiterId === 'unassigned') { clearWaiterIdentity(); return }
+    const waiter = waiters.find(candidate => candidate.id === waiterId && candidate.isActive)
+    if (!waiter) return
+    if (!waiter.hasPin) {
+      toast({ variant: 'destructive', title: `A manager must set a PIN for ${waiter.name} first` })
+      return
+    }
+    setPinWaiter(waiter)
+    setWaiterPin('')
+    setShowWaiterPinDialog(true)
+  }
+
+  const confirmWaiterIdentity = async () => {
+    if (!pinWaiter || !/^\d{4,8}$/.test(waiterPin)) {
+      toast({ variant: 'destructive', title: 'Enter the waiter PIN (4 to 8 digits)' })
+      return
+    }
+    setVerifyingWaiterPin(true)
+    try {
+      const response = await apiFetch(`/api/restaurant/waiters/${pinWaiter.id}/verify-pin`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: waiterPin }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'PIN verification failed')
+      setActiveWaiterId(pinWaiter.id)
+      setWaiterSessionToken(data.token)
+      sessionStorage.setItem('restaurant.activeWaiterId', pinWaiter.id)
+      sessionStorage.setItem('restaurant.waiterSessionToken', data.token)
+      setShowWaiterPinDialog(false)
+      setWaiterPin('')
+      setPinWaiter(null)
+      toast({ title: `${pinWaiter.name} confirmed for this shift` })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'PIN verification failed' }) }
+    finally { setVerifyingWaiterPin(false) }
+  }
 
   const fetchOrders = useCallback(async () => {
     try { const res = await apiFetch('/api/restaurant/orders'); if (res.ok) setOrders(await res.json()) } catch (e) { console.error(e) }
@@ -192,7 +273,23 @@ export default function RestaurantPage() {
   // === Waiter handlers ===
   const createWaiter = async () => {
     if (!waiterForm.name.trim()) { toast({ variant: 'destructive', title: 'Waiter name is required' }); return }
-    try { const res = await apiFetch('/api/restaurant/waiters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(waiterForm) }); if (res.ok) { toast({ title: 'Waiter added' }); setShowWaiterModal(false); setWaiterForm({ name: '', phone: '', code: '' }); fetchData() } } catch (e) { console.error(e) }
+    if (!/^\d{4,8}$/.test(waiterForm.pin)) { toast({ variant: 'destructive', title: 'Set a PIN with 4 to 8 digits' }); return }
+    try {
+      const payload = canLinkWaiterToHr ? waiterForm : (({ employeeId: _employeeId, ...form }) => form)(waiterForm)
+      const res = await apiFetch('/api/restaurant/waiters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Could not add waiter')
+      toast({ title: 'Waiter added' }); setShowWaiterModal(false); setWaiterForm({ name: '', phone: '', code: '', pin: '', employeeId: '' }); fetchData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not add waiter' }) }
+  }
+  const applyHrEmployeeToWaiterForm = (employeeId: string, editing = false) => {
+    const employee = hrWaiterEmployees.find(item => item.id === employeeId)
+    const details = employee ? {
+      name: [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' '),
+      phone: employee.phone || '',
+    } : null
+    if (editing) setEditWaiterForm(form => ({ ...form, employeeId: employeeId === 'manual' ? '' : employeeId, ...(details || {}) }))
+    else setWaiterForm(form => ({ ...form, employeeId: employeeId === 'manual' ? '' : employeeId, ...(details || {}) }))
   }
   const deleteWaiter = async (id: string) => {
     try { const res = await apiFetch(`/api/restaurant/waiters/${id}`, { method: 'DELETE' }); if (res.ok) { toast({ title: 'Waiter deleted' }); fetchData() } } catch (e) { console.error(e) }
@@ -200,9 +297,17 @@ export default function RestaurantPage() {
   const updateWaiter = async () => {
     if (!editingWaiter) return
     if (!editWaiterForm.name.trim()) { toast({ variant: 'destructive', title: 'Waiter name is required' }); return }
-    try { const res = await apiFetch(`/api/restaurant/waiters/${editingWaiter.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editWaiterForm) }); if (res.ok) { toast({ title: 'Waiter updated' }); setShowEditWaiterModal(false); setEditingWaiter(null); fetchData() } } catch (e) { console.error(e) }
+    if (editWaiterForm.pin && !/^\d{4,8}$/.test(editWaiterForm.pin)) { toast({ variant: 'destructive', title: 'PIN must contain 4 to 8 digits' }); return }
+    try {
+      const payload = canLinkWaiterToHr ? editWaiterForm : (({ employeeId: _employeeId, ...form }) => form)(editWaiterForm)
+      const res = await apiFetch(`/api/restaurant/waiters/${editingWaiter.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Could not update waiter')
+      if (editWaiterForm.pin && activeWaiterId === editingWaiter.id) clearWaiterIdentity()
+      toast({ title: 'Waiter updated' }); setShowEditWaiterModal(false); setEditingWaiter(null); fetchData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not update waiter' }) }
   }
-  const openEditWaiter = (w: Waiter) => { setEditingWaiter(w); setEditWaiterForm({ name: w.name, phone: w.phone || '', code: w.code || '', isActive: w.isActive }); setShowEditWaiterModal(true) }
+  const openEditWaiter = (w: Waiter) => { setEditingWaiter(w); setEditWaiterForm({ name: w.name, phone: w.phone || '', code: w.code || '', pin: '', isActive: w.isActive, employeeId: w.employeeId || '' }); setShowEditWaiterModal(true) }
 
   // === Order handlers ===
   const createOrder = async () => {
@@ -214,8 +319,23 @@ export default function RestaurantPage() {
         const p = products.find(p => p.id === i.productId)
         return { productId: i.productId, quantity: i.quantity, price: p?.price || 0, station: i.station }
       })
-      const res = await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...orderForm, items }) })
-      if (res.ok) { toast({ title: 'Order created' }); setShowOrderModal(false); setOrderForm({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); fetchOrders() }
+      const res = await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(waiterSessionToken ? { 'X-Restaurant-Waiter-Session': waiterSessionToken } : {}) }, body: JSON.stringify({ ...orderForm, waiterId: activeWaiterId || null, items }) })
+      if (res.ok) {
+        const createdOrder = await res.json()
+        toast({ title: 'Order created' })
+        setShowOrderModal(false)
+        setOrderForm({ tableId: '', waiterId: '', orderType: 'dine_in', specialInstructions: '' })
+        setOrderItems([])
+        fetchOrders()
+        if (kitchenPrinterId) {
+          const stations = [...new Set((createdOrder.items || []).map((item: OrderItem) => item.station || 'kitchen'))].filter((station): station is 'kitchen' | 'bar' => station === 'kitchen' || station === 'bar')
+          for (const station of stations) void printKitchenTicket(createdOrder, station)
+        }
+      } else {
+        const data = await res.json().catch(() => ({}))
+        if (data.code === 'WAITER_PIN_REQUIRED') clearWaiterIdentity()
+        toast({ variant: 'destructive', title: data.error || 'Could not create order' })
+      }
     } catch (e) { console.error(e) }
   }
   const updateOrderStatus = async (id: string, status: string) => {
@@ -239,6 +359,73 @@ export default function RestaurantPage() {
   const openSplitModal = (o: Order) => { setSplitOrder(o); setSplitForm([{ itemIds: [], paymentMethod: 'cash', tipAmount: 0 }]); setShowSplitModal(true) }
   const updateItemStatus = async (orderId: string, itemId: string, status: string) => {
     try { await apiFetch(`/api/restaurant/orders/${orderId}/items/${itemId}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); fetchKitchen() } catch (e) { console.error(e) }
+  }
+
+  const uploadMenuImage = async (productId: string, file?: File) => {
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) { toast({ variant: 'destructive', title: 'Image must be 2 MB or smaller' }); return }
+    const body = new FormData()
+    body.append('image', file)
+    try {
+      const response = await apiFetch(`/api/restaurant/menu/${productId}/image`, { method: 'POST', body })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Image upload failed')
+      setProducts(current => current.map(product => product.id === productId ? { ...product, image: data.image } : product))
+      toast({ title: 'Menu image updated' })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Image upload failed' }) }
+  }
+
+  const removeMenuImage = async (productId: string) => {
+    try {
+      const response = await apiFetch(`/api/restaurant/menu/${productId}/image`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('Could not remove menu image')
+      setProducts(current => current.map(product => product.id === productId ? { ...product, image: null } : product))
+      toast({ title: 'Menu image removed' })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not remove menu image' }) }
+  }
+
+  const discoverKitchenPrinters = async () => {
+    setPrinterDiscoveryBusy(true)
+    try {
+      const connection = await discoverPrintAgent()
+      if (!connection) throw new Error('No local print service found on this device')
+      const printers = await getPrintAgentPrinters(connection.baseUrl)
+      setPrintAgentUrl(connection.baseUrl)
+      setAvailablePrinters(printers)
+      if (!printers.length) throw new Error('No printers were reported by the local print service')
+      setShowPrinterDialog(true)
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not find printers' }) }
+    finally { setPrinterDiscoveryBusy(false) }
+  }
+
+  const printKitchenTicket = async (order: Order, station: 'kitchen' | 'bar') => {
+    if (!kitchenPrinterId) { await discoverKitchenPrinters(); return }
+    const items = order.items.filter(item => (item.station || 'kitchen') === station)
+    if (!items.length) { toast({ variant: 'destructive', title: `No ${station} items on this order` }); return }
+    setPrintingOrderId(`${order.id}:${station}`)
+    const textHex = (value: string) => Array.from(new TextEncoder().encode(value)).map(byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
+    const line = (value: string) => `${textHex(value)}0A`
+    const commands = ['1B40', '1B6101', '1B4501', line(station === 'bar' ? 'BAR TICKET' : 'KITCHEN TICKET'), '1B4500', line(`Order ${order.orderNo}`)]
+    if (order.table?.name) commands.push(line(`Table: ${order.table.name}`))
+    const serverName = order.waiter?.name || [order.user?.fname, order.user?.lname].filter(Boolean).join(' ').trim() || 'Unassigned'
+    commands.push(line(`Served by: ${serverName}`), line(new Date(order.createdAt).toLocaleString()), '1B6100', '1B4501')
+    for (const item of items) {
+      commands.push(line(`${item.quantity} x ${item.product.name}`))
+      if (item.specialInstructions) commands.push(line(`  NOTE: ${item.specialInstructions}`))
+    }
+    commands.push('1B4500', line('--------------------------------'), line(order.specialInstructions ? `Order note: ${order.specialInstructions}` : ''), '1B6404', '1D5600')
+    try {
+      await printReceiptViaAgent({ baseUrl: printAgentUrl || undefined, printerId: kitchenPrinterId, saleId: order.id, receiptNo: `${station.toUpperCase()}-${order.orderNo}`, commands, documentType: station === 'bar' ? 'BAR_TICKET' : 'KITCHEN_TICKET', rememberPrinter: false })
+      toast({ title: `${station === 'bar' ? 'Bar' : 'Kitchen'} ticket sent` })
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Ticket printing failed' }) }
+    finally { setPrintingOrderId('') }
+  }
+
+  const selectKitchenPrinter = (printerId: string) => {
+    setKitchenPrinterId(printerId)
+    try { localStorage.setItem('jibusales_kitchen_printer_id', printerId) } catch { /* device storage may be disabled */ }
+    setShowPrinterDialog(false)
+    toast({ title: 'Kitchen printer saved for this device' })
   }
 
   // === Reservation handlers ===
@@ -348,6 +535,16 @@ export default function RestaurantPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-2"><UtensilsCrossed className="h-6 w-6" /> Restaurant & Bar</h1>
+        {waiters.some(waiter => waiter.isActive) && <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Serving as</span>
+          <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}>
+            <SelectTrigger className="w-[190px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unassigned">No waiter selected</SelectItem>
+              {waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>}
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -356,6 +553,7 @@ export default function RestaurantPage() {
           <TabsTrigger value="tables">Tables</TabsTrigger>
           <TabsTrigger value="orders">Orders</TabsTrigger>
           <TabsTrigger value="kitchen">Kitchen / Bar</TabsTrigger>
+          <TabsTrigger value="menu">Menu</TabsTrigger>
           <TabsTrigger value="reservations">Reservations</TabsTrigger>
           <TabsTrigger value="recipes">Recipes</TabsTrigger>
           <TabsTrigger value="delivery">Delivery</TabsTrigger>
@@ -393,6 +591,30 @@ export default function RestaurantPage() {
           {tables.length === 0 && <div className="text-center text-muted-foreground py-8">No tables yet. Add your first table.</div>}
         </TabsContent>
 
+        <TabsContent value="menu">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div><h2 className="font-semibold">Food &amp; drink menu</h2><p className="text-sm text-muted-foreground">Menu images are optimized automatically. Maximum upload size: 2 MB.</p></div>
+          </div>
+          {products.length === 0 ? <div className="py-10 text-center text-muted-foreground">No inventory items are available for the menu yet.</div> :
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {products.map(product => <Card key={product.id} className="overflow-hidden">
+                <div className="aspect-[4/3] bg-muted">
+                  {product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" loading="lazy" /> : <div className="flex h-full items-center justify-center text-muted-foreground"><ImagePlus className="h-8 w-8" /></div>}
+                </div>
+                <CardContent className="space-y-2 p-3">
+                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={product.name}>{product.name}</p><p className="text-sm text-muted-foreground">{product.price.toLocaleString()} · Stock {product.quantity}</p></div></div>
+                  <div className="flex flex-wrap gap-2">
+                    <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent">
+                      <ImagePlus className="h-4 w-4" /> {product.image ? 'Change image' : 'Add image'}
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(product.id, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
+                    </label>
+                    {product.image && <Button size="sm" variant="ghost" onClick={() => removeMenuImage(product.id)}>Remove</Button>}
+                  </div>
+                </CardContent>
+              </Card>)}
+            </div>}
+        </TabsContent>
+
         {/* Orders */}
         <TabsContent value="orders">
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -412,7 +634,7 @@ export default function RestaurantPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => setShowOrderModal(true)}><Plus className="h-4 w-4 mr-1" /> New Order</Button>
+            <Button onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>
           </div>
           <div className="space-y-3">
             {paginatedOrders.map(o => (
@@ -443,13 +665,17 @@ export default function RestaurantPage() {
 
         {/* Kitchen / Bar Display */}
         <TabsContent value="kitchen">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+            <div><p className="font-medium">Kitchen printer</p><p className="text-sm text-muted-foreground">{kitchenPrinterId ? `Configured on this device: ${availablePrinters.find(printer => printer.id === kitchenPrinterId)?.name || 'saved printer'}` : 'Choose a local printer to send kitchen and bar tickets directly.'}</p></div>
+            <Button variant="outline" onClick={discoverKitchenPrinters} disabled={printerDiscoveryBusy}><Printer className="mr-2 h-4 w-4" />{printerDiscoveryBusy ? 'Searching…' : kitchenPrinterId ? 'Change printer' : 'Set printer'}</Button>
+          </div>
           <div className="grid gap-6 md:grid-cols-2">
             <div>
               <h3 className="font-semibold flex items-center gap-2 mb-3"><ChefHat className="h-5 w-5" /> Kitchen Orders</h3>
               <div className="space-y-3">
                 {kitchenOrders.map(o => (
                   <Card key={o.id} className="border-l-4 border-l-orange-400">
-                    <CardHeader className="pb-2"><CardTitle className="text-sm flex justify-between">{o.orderNo} {o.table && <Badge variant="outline">{o.table.name}</Badge>}</CardTitle></CardHeader>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm flex justify-between">{o.orderNo} <span className="flex gap-2">{o.table && <Badge variant="outline">{o.table.name}</Badge>}<Badge variant="secondary">{o.waiter?.name || [o.user?.fname, o.user?.lname].filter(Boolean).join(' ') || 'Unassigned'}</Badge></span></CardTitle></CardHeader>
                     <CardContent><div className="space-y-2">{o.items.map(i => (
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name} {i.specialInstructions && <span className="text-orange-600">⚠ {i.specialInstructions}</span>}</span>
@@ -460,7 +686,7 @@ export default function RestaurantPage() {
                           <Badge className={statusColors[i.status]}>{i.status}</Badge>
                         </div>
                       </div>
-                    ))}</div></CardContent>
+                    ))}</div><div className="mt-3 border-t pt-3"><Button size="sm" variant="outline" onClick={() => printKitchenTicket(o, 'kitchen')} disabled={printingOrderId === `${o.id}:kitchen`}><Printer className="mr-2 h-4 w-4" />{printingOrderId === `${o.id}:kitchen` ? 'Sending…' : 'Print kitchen ticket'}</Button></div></CardContent>
                   </Card>
                 ))}
                 {kitchenOrders.length === 0 && <div className="text-center text-muted-foreground py-4">No kitchen orders.</div>}
@@ -471,7 +697,7 @@ export default function RestaurantPage() {
               <div className="space-y-3">
                 {barOrders.map(o => (
                   <Card key={o.id} className="border-l-4 border-l-purple-400">
-                    <CardHeader className="pb-2"><CardTitle className="text-sm flex justify-between">{o.orderNo} {o.table && <Badge variant="outline">{o.table.name}</Badge>}</CardTitle></CardHeader>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm flex justify-between">{o.orderNo} <span className="flex gap-2">{o.table && <Badge variant="outline">{o.table.name}</Badge>}<Badge variant="secondary">{o.waiter?.name || [o.user?.fname, o.user?.lname].filter(Boolean).join(' ') || 'Unassigned'}</Badge></span></CardTitle></CardHeader>
                     <CardContent><div className="space-y-2">{o.items.map(i => (
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name}</span>
@@ -482,7 +708,7 @@ export default function RestaurantPage() {
                           <Badge className={statusColors[i.status]}>{i.status}</Badge>
                         </div>
                       </div>
-                    ))}</div></CardContent>
+                    ))}</div><div className="mt-3 border-t pt-3"><Button size="sm" variant="outline" onClick={() => printKitchenTicket(o, 'bar')} disabled={printingOrderId === `${o.id}:bar`}><Printer className="mr-2 h-4 w-4" />{printingOrderId === `${o.id}:bar` ? 'Sending…' : 'Print bar ticket'}</Button></div></CardContent>
                   </Card>
                 ))}
                 {barOrders.length === 0 && <div className="text-center text-muted-foreground py-4">No bar orders.</div>}
@@ -560,7 +786,7 @@ export default function RestaurantPage() {
           <div className="grid gap-4 md:grid-cols-3">
             {waiters.map(w => (
               <Card key={w.id} className={w.isActive ? '' : 'opacity-50'}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}</span><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => openEditWaiter(w)}><Pencil className="h-3 w-3" /></Button><Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button></div></CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}<Badge variant={w.hasPin ? 'secondary' : 'outline'}>{w.hasPin ? 'PIN set' : 'PIN needed'}</Badge></span><div className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => openEditWaiter(w)}><Pencil className="h-3 w-3" /></Button><Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button></div></CardTitle></CardHeader>
                 <CardContent><div className="text-sm text-muted-foreground">{w.phone || 'No phone'} {w.code && `· Code: ${w.code}`}</div><div className="text-sm mt-1">Orders: {w._count?.orders ?? 0} · Tips: {w._count?.tips ?? 0}</div></CardContent>
               </Card>
             ))}
@@ -642,11 +868,24 @@ export default function RestaurantPage() {
       <Dialog open={showWaiterModal} onOpenChange={setShowWaiterModal}>
         <DialogContent><DialogHeader><DialogTitle>Add Waiter</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Name</Label><Input value={waiterForm.name} onChange={e => setWaiterForm({ ...waiterForm, name: e.target.value })} /></div>
-            <div><Label>Phone</Label><Input value={waiterForm.phone} onChange={e => setWaiterForm({ ...waiterForm, phone: e.target.value })} /></div>
+            {canLinkWaiterToHr && <div><Label>HR employee (optional)</Label><Select value={waiterForm.employeeId || 'manual'} onValueChange={value => applyHrEmployeeToWaiterForm(value)}><SelectTrigger><SelectValue placeholder="Create standalone waiter" /></SelectTrigger><SelectContent><SelectItem value="manual">Standalone waiter</SelectItem>{hrWaiterEmployees.map(employee => <SelectItem key={employee.id} value={employee.id}>{[employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' ')}{employee.employeeNumber ? ` · ${employee.employeeNumber}` : ''}</SelectItem>)}</SelectContent></Select></div>}
+            <div><Label>Name</Label><Input value={waiterForm.name} disabled={Boolean(waiterForm.employeeId)} onChange={e => setWaiterForm({ ...waiterForm, name: e.target.value })} /></div>
+            <div><Label>Phone</Label><Input value={waiterForm.phone} disabled={Boolean(waiterForm.employeeId)} onChange={e => setWaiterForm({ ...waiterForm, phone: e.target.value })} /></div>
             <div><Label>Code</Label><Input value={waiterForm.code} onChange={e => setWaiterForm({ ...waiterForm, code: e.target.value })} placeholder="W1" /></div>
+            <div><Label>Waiter PIN</Label><Input type="password" inputMode="numeric" autoComplete="new-password" maxLength={8} value={waiterForm.pin} onChange={e => setWaiterForm({ ...waiterForm, pin: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="4 to 8 digits" /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setShowWaiterModal(false)}>Cancel</Button><Button onClick={createWaiter}>Add Waiter</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showWaiterPinDialog} onOpenChange={open => { setShowWaiterPinDialog(open); if (!open) { setWaiterPin(''); setPinWaiter(null) } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Confirm server identity</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Enter {pinWaiter?.name}’s waiter PIN to assign this shift’s orders to them.</p>
+            <div><Label htmlFor="restaurant-waiter-pin">Waiter PIN</Label><Input id="restaurant-waiter-pin" type="password" inputMode="numeric" autoComplete="off" maxLength={8} value={waiterPin} onChange={event => setWaiterPin(event.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={event => { if (event.key === 'Enter') void confirmWaiterIdentity() }} /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowWaiterPinDialog(false)}>Cancel</Button><Button onClick={confirmWaiterIdentity} disabled={verifyingWaiterPin || waiterPin.length < 4}>{verifyingWaiterPin ? 'Checking…' : 'Confirm'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -656,7 +895,7 @@ export default function RestaurantPage() {
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Waiter</Label><Select value={orderForm.waiterId} onValueChange={v => setOrderForm({ ...orderForm, waiterId: v })}><SelectTrigger><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{waiters.filter(w => w.isActive).map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label>Serving as</Label><div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">{waiters.find(waiter => waiter.id === activeWaiterId)?.name || 'Signed-in cashier'}</div></div>
               <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label>Items</Label>
@@ -755,9 +994,11 @@ export default function RestaurantPage() {
       <Dialog open={showEditWaiterModal} onOpenChange={setShowEditWaiterModal}>
         <DialogContent><DialogHeader><DialogTitle>Edit Waiter</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Name</Label><Input value={editWaiterForm.name} onChange={e => setEditWaiterForm({ ...editWaiterForm, name: e.target.value })} /></div>
-            <div><Label>Phone</Label><Input value={editWaiterForm.phone} onChange={e => setEditWaiterForm({ ...editWaiterForm, phone: e.target.value })} /></div>
+            {canLinkWaiterToHr && <div><Label>HR employee (optional)</Label><Select value={editWaiterForm.employeeId || 'manual'} onValueChange={value => applyHrEmployeeToWaiterForm(value, true)}><SelectTrigger><SelectValue placeholder="Choose employee or standalone waiter" /></SelectTrigger><SelectContent><SelectItem value="manual">Standalone waiter</SelectItem>{hrWaiterEmployees.map(employee => <SelectItem key={employee.id} value={employee.id}>{[employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' ')}{employee.employeeNumber ? ` · ${employee.employeeNumber}` : ''}</SelectItem>)}</SelectContent></Select></div>}
+            <div><Label>Name</Label><Input value={editWaiterForm.name} disabled={Boolean(editWaiterForm.employeeId)} onChange={e => setEditWaiterForm({ ...editWaiterForm, name: e.target.value })} /></div>
+            <div><Label>Phone</Label><Input value={editWaiterForm.phone} disabled={Boolean(editWaiterForm.employeeId)} onChange={e => setEditWaiterForm({ ...editWaiterForm, phone: e.target.value })} /></div>
             <div><Label>Code</Label><Input value={editWaiterForm.code} onChange={e => setEditWaiterForm({ ...editWaiterForm, code: e.target.value })} /></div>
+            <div><Label>New waiter PIN</Label><Input type="password" inputMode="numeric" autoComplete="new-password" maxLength={8} value={editWaiterForm.pin} onChange={e => setEditWaiterForm({ ...editWaiterForm, pin: e.target.value.replace(/\D/g, '').slice(0, 8) })} placeholder="Leave blank to keep the current PIN" /></div>
             <div className="flex items-center gap-2"><Label>Active</Label><Switch checked={editWaiterForm.isActive} onCheckedChange={v => setEditWaiterForm({ ...editWaiterForm, isActive: v })} /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setShowEditWaiterModal(false)}>Cancel</Button><Button onClick={updateWaiter}>Save Changes</Button></DialogFooter>
@@ -902,6 +1143,20 @@ export default function RestaurantPage() {
             </div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setShowComboModal(false)}>Cancel</Button><Button onClick={createCombo}>Create Combo</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPrinterDialog} onOpenChange={setShowPrinterDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Select kitchen printer</DialogTitle></DialogHeader>
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+            {availablePrinters.map(printer => <Button key={printer.id} variant="outline" className="h-auto w-full justify-between py-3" onClick={() => selectKitchenPrinter(printer.id)}>
+              <span className="min-w-0 text-left"><span className="block truncate font-medium">{printer.name}</span><span className="block text-xs text-muted-foreground">{printer.connectionType || 'Local printer'}{printer.status ? ` · ${printer.status}` : ''}</span></span>
+              {printer.id === kitchenPrinterId && <Badge>Selected</Badge>}
+            </Button>)}
+            {availablePrinters.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No printers found. Check that a printer is connected and available to this device.</p>}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowPrinterDialog(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

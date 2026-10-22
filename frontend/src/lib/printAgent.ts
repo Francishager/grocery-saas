@@ -43,6 +43,8 @@ export interface PrintReceiptViaAgentOptions {
   commands: string[]
   receipt?: ReceiptPreview | null
   copies?: number
+  documentType?: string
+  rememberPrinter?: boolean
 }
 
 export class PrintAgentUnavailableError extends Error {
@@ -93,8 +95,9 @@ export async function printReceiptViaAgent(options: PrintReceiptViaAgentOptions)
   const printerId = options.printerId || getStoredPrintAgentPrinterId() || undefined
   const workstationId = getWorkstationId()
   const copies = Math.max(1, options.copies || 1)
+  const documentType = options.documentType || 'RECEIPT'
   const idempotencyKey = [
-    'receipt',
+    documentType.toLowerCase(),
     options.saleId,
     workstationId,
     printerId || 'default',
@@ -106,7 +109,7 @@ export async function printReceiptViaAgent(options: PrintReceiptViaAgentOptions)
     idempotencyKey,
     workstationId,
     printerId,
-    documentType: 'RECEIPT',
+    documentType,
     documentReference: options.receiptNo,
     copies,
     commands: options.commands,
@@ -129,7 +132,7 @@ export async function printReceiptViaAgent(options: PrintReceiptViaAgentOptions)
       headers: {
         'Content-Type': 'application/json',
         'X-JibuSales-Workstation-Id': workstationId,
-        'X-JibuSales-Document-Type': 'RECEIPT',
+        'X-JibuSales-Document-Type': documentType,
         ...agentAuthHeaders(),
       },
       body: JSON.stringify(body),
@@ -137,7 +140,7 @@ export async function printReceiptViaAgent(options: PrintReceiptViaAgentOptions)
 
     if (response.ok) {
       rememberAgentUrl(baseUrl)
-      rememberPrintAgentPrinter(printerId)
+      if (options.rememberPrinter !== false) rememberPrintAgentPrinter(printerId)
       const data = response.data as any
       return {
         jobId: data?.jobId || data?.id || body.jobId,
@@ -153,7 +156,7 @@ export async function printReceiptViaAgent(options: PrintReceiptViaAgentOptions)
     }
 
     const message = extractErrorMessage(response.data) || `HTTP ${response.status}`
-    throw new Error(`JibuSales Print Agent rejected the receipt: ${message}`)
+    throw new Error(`JibuSales Print Agent rejected the print job: ${message}`)
   }
 
   throw new Error(`JibuSales Print Agent does not expose a supported print endpoint. ${errors.join('; ')}`)

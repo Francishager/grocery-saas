@@ -609,6 +609,14 @@ router.put("/:id", authenticateToken, requirePermission("canEditHREmployee"), as
         terminationDate: terminationDate ? new Date(terminationDate) : undefined,
       },
     });
+    await prisma.waiter.updateMany({
+      where: { tenantId: emp.tenantId, employeeId: emp.id },
+      data: {
+        name: [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(" "),
+        phone: emp.phone,
+        branchId: emp.branchId || undefined,
+      },
+    });
     res.json(emp);
   } catch (err) {
     res.status(500).json({ error: "Failed to update employee" });

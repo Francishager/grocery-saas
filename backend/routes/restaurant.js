@@ -1,10 +1,87 @@
 import express from 'express'
 import prisma from '../src/db.js'
-import { authenticateToken, requirePermission } from '../middleware/auth.js'
-import { requireFeature } from '../middleware/featureCheck.js'
+import { authenticateToken, requireAnyPermission, requirePermission } from '../middleware/auth.js'
+import { getTenantFeatures, hasFeatureAccess, requireFeature } from '../middleware/featureCheck.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { resolveEffectivePermissions } from '../src/utils/permissions.js'
+import multer from 'multer'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
+import { deleteCloudinaryAsset, safeCloudinaryId, uploadBufferToCloudinary } from '../src/utils/cloudinaryUpload.js'
+import { getJwtSecret } from '../src/utils/jwtSecret.js'
+import { createRateLimiter } from '../src/middleware/rateLimit.js'
 
 const router = express.Router()
+const HR_WAITER_LINK_PERMISSIONS = ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee']
+const waiterPinLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  keyGenerator: req => `${req.user?.id || 'unknown'}:${req.params.id || 'unknown'}:${req.ip || 'unknown'}`,
+})
+const menuImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)
+    ? callback(null, true) : callback(new Error('UNSUPPORTED_MENU_IMAGE')),
+})
+
+function parseMenuImage(req, res, next) {
+  menuImageUpload.single('image')(req, res, error => {
+    if (!error) return next()
+    const message = error.code === 'LIMIT_FILE_SIZE' ? 'Menu images must be 2 MB or smaller.'
+      : error.message === 'UNSUPPORTED_MENU_IMAGE' ? 'Choose a JPEG, PNG, or WebP image.'
+        : 'The menu image could not be accepted.'
+    res.status(400).json({ error: message })
+  })
+}
+
+function isSupportedMenuImage(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return true
+  return buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP'
+}
+
+async function hasHrWaiterLinkPermission(req, features) {
+  const permissionRecord = await prisma.userPermission.findUnique({ where: { userId: req.user.id } })
+  const permissions = resolveEffectivePermissions(req.user, permissionRecord, [], features)
+  return permissions.includes('*') || HR_WAITER_LINK_PERMISSIONS.some(permission => permissions.includes(permission))
+}
+
+async function findLinkableHrEmployee(req, scope, employeeId) {
+  const features = await getTenantFeatures(scope.tenantId)
+  if (!hasFeatureAccess(features, 'hr')) {
+    const error = new Error('HR is not enabled for this business.')
+    error.statusCode = 403
+    throw error
+  }
+  if (!await hasHrWaiterLinkPermission(req, features)) {
+    const error = new Error('You do not have permission to link an HR employee.')
+    error.statusCode = 403
+    throw error
+  }
+  const employee = await prisma.employee.findFirst({
+    where: scopedWhere(scope, { id: employeeId, status: 'active' }),
+    select: { id: true, firstName: true, middleName: true, lastName: true, phone: true, branchId: true },
+  })
+  if (!employee) {
+    const error = new Error('Active HR employee not found in this business or branch.')
+    error.statusCode = 404
+    throw error
+  }
+  if (scope.branchId && employee.branchId && scope.branchId !== employee.branchId) {
+    const error = new Error('The HR employee belongs to a different branch.')
+    error.statusCode = 400
+    throw error
+  }
+  return employee
+}
+
+function waiterDetailsFromEmployee(employee) {
+  return {
+    name: [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' '),
+    phone: employee.phone || null,
+  }
+}
 
 // =====================================================
 // TABLES
@@ -73,37 +150,132 @@ router.get('/waiters', authenticateToken, requirePermission('canViewRestaurant')
     const scope = await resolveBranchScope(prisma, req)
     const waiters = await prisma.waiter.findMany({
       where: scopedWhere(scope),
-      include: { _count: { select: { orders: true, tips: true } } },
+      select: { id: true, name: true, phone: true, code: true, isActive: true, branchId: true, employeeId: true, pinHash: true, _count: { select: { orders: true, tips: true } } },
       orderBy: { name: 'asc' }
     })
-    res.json(waiters)
+    res.json(waiters.map(({ pinHash, ...waiter }) => ({ ...waiter, hasPin: Boolean(pinHash) })))
+  } catch (error) { handleBranchError(res, error) }
+})
+
+router.get('/waiters/hr-employees', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.waiters'), requireFeature('hr'), requireAnyPermission(HR_WAITER_LINK_PERMISSIONS), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const employees = await prisma.employee.findMany({
+      where: scopedWhere(scope, { status: 'active' }),
+      select: { id: true, firstName: true, middleName: true, lastName: true, phone: true, employeeNumber: true, branchId: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    })
+    res.json(employees)
   } catch (error) { handleBranchError(res, error) }
 })
 
 router.post('/waiters', authenticateToken, requirePermission('canCreateRestaurant'), requireFeature('restaurant.waiters'), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
-    const { name, phone, code } = req.body
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Waiter name is required' })
+    const { name, phone, code, pin, employeeId } = req.body
+    const employee = employeeId ? await findLinkableHrEmployee(req, scope, employeeId) : null
+    const employeeDetails = employee ? waiterDetailsFromEmployee(employee) : null
+    if (!(employeeDetails?.name || name?.trim())) return res.status(400).json({ error: 'Waiter name is required' })
+    if (!/^\d{4,8}$/.test(String(pin || ''))) return res.status(400).json({ error: 'Set a PIN with 4 to 8 digits.' })
     const waiter = await prisma.waiter.create({
-      data: { name, phone, code, tenantId: scope.tenantId, branchId: scope.branchId }
+      data: { name: employeeDetails?.name || name, phone: employeeDetails ? employeeDetails.phone : phone, code, employeeId: employee?.id || null, pinHash: await bcrypt.hash(String(pin), 12), pinUpdatedAt: new Date(), tenantId: scope.tenantId, branchId: employee?.branchId || scope.branchId }
     })
-    res.status(201).json(waiter)
+    const { pinHash: _pinHash, pinUpdatedAt: _pinUpdatedAt, ...safeWaiter } = waiter
+    res.status(201).json({ ...safeWaiter, hasPin: true })
   } catch (error) { handleBranchError(res, error) }
 })
 
 router.put('/waiters/:id', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.waiters'), async (req, res) => {
   try {
-    const { name, phone, code, isActive } = req.body
-    const waiter = await prisma.waiter.update({ where: { id: req.params.id }, data: { name, phone, code, isActive } })
-    res.json(waiter)
+    const scope = await resolveBranchScope(prisma, req)
+    const existing = await prisma.waiter.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
+    if (!existing) return res.status(404).json({ error: 'Waiter not found.' })
+    const { name, phone, code, isActive, pin, employeeId } = req.body
+    if (pin !== undefined && pin !== '' && !/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must contain 4 to 8 digits.' })
+    const employee = employeeId ? await findLinkableHrEmployee(req, scope, employeeId) : null
+    const retainedEmployee = employeeId === undefined && existing.employeeId
+      ? await prisma.employee.findFirst({ where: { id: existing.employeeId, tenantId: scope.tenantId }, select: { id: true, firstName: true, middleName: true, lastName: true, phone: true, branchId: true } })
+      : null
+    const linkedEmployee = employee || retainedEmployee
+    const employeeDetails = linkedEmployee ? waiterDetailsFromEmployee(linkedEmployee) : null
+    const waiter = await prisma.waiter.update({
+      where: { id: existing.id },
+      data: {
+        name: employeeDetails?.name || name,
+        phone: employeeDetails ? employeeDetails.phone : phone,
+        code,
+        isActive,
+        ...(employeeId !== undefined ? { employeeId: employee?.id || null, ...(employee ? { branchId: employee.branchId || scope.branchId } : {}) } : {}),
+        ...(pin ? { pinHash: await bcrypt.hash(String(pin), 12), pinUpdatedAt: new Date() } : {}),
+      },
+    })
+    const { pinHash: _pinHash, pinUpdatedAt: _pinUpdatedAt, ...safeWaiter } = waiter
+    res.json({ ...safeWaiter, hasPin: Boolean(waiter.pinHash) })
+  } catch (error) { handleBranchError(res, error) }
+})
+
+router.post('/waiters/:id/verify-pin', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.waiters'), waiterPinLimiter, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const waiter = await prisma.waiter.findFirst({ where: scopedWhere(scope, { id: req.params.id, isActive: true }) })
+    if (!waiter?.pinHash) return res.status(400).json({ error: 'This waiter needs a PIN set by a restaurant manager before they can be selected.' })
+    const pin = String(req.body?.pin || '')
+    const correct = /^\d{4,8}$/.test(pin) && await bcrypt.compare(pin, waiter.pinHash)
+    if (!correct) return res.status(401).json({ error: 'Incorrect waiter PIN.' })
+    const token = jwt.sign({
+      typ: 'restaurant_waiter_session',
+      tenantId: scope.tenantId,
+      userId: req.user.id,
+      waiterId: waiter.id,
+      pinUpdatedAt: waiter.pinUpdatedAt.getTime(),
+    }, getJwtSecret(), { expiresIn: '12h' })
+    res.json({ token, expiresInSeconds: 43200, waiter: { id: waiter.id, name: waiter.name } })
   } catch (error) { handleBranchError(res, error) }
 })
 
 router.delete('/waiters/:id', authenticateToken, requirePermission('canDeleteRestaurant'), requireFeature('restaurant.waiters'), async (req, res) => {
   try {
-    await prisma.waiter.delete({ where: { id: req.params.id } })
+    const scope = await resolveBranchScope(prisma, req)
+    const waiter = await prisma.waiter.findFirst({ where: scopedWhere(scope, { id: req.params.id }), select: { id: true } })
+    if (!waiter) return res.status(404).json({ error: 'Waiter not found.' })
+    await prisma.waiter.delete({ where: { id: waiter.id } })
     res.json({ message: 'Waiter deleted' })
+  } catch (error) { handleBranchError(res, error) }
+})
+
+// Menu images use the existing product record so all business views share one image URL.
+router.post('/menu/:productId/image', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant'), parseMenuImage, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' })
+    if (!isSupportedMenuImage(req.file.buffer)) return res.status(400).json({ error: 'The selected file is not a valid JPEG, PNG, or WebP image.' })
+    const scope = await resolveBranchScope(prisma, req)
+    const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }), select: { id: true, tenantId: true, imagePublicId: true } })
+    if (!product) return res.status(404).json({ error: 'Menu item not found.' })
+    const result = await uploadBufferToCloudinary(req.file.buffer, {
+      resourceType: 'image',
+      folder: `jibusales/restaurant-menu/${scope.tenantId}`,
+      publicId: `${safeCloudinaryId(product.id)}-${Date.now()}`,
+      transformation: [{ width: 1200, height: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
+    })
+    if (!result?.secure_url || !result?.public_id) return res.status(502).json({ error: 'Image storage did not return a usable image.' })
+    const updated = await prisma.product.update({
+      where: { id: product.id },
+      data: { image: result.secure_url, imagePublicId: result.public_id },
+      select: { id: true, image: true },
+    })
+    if (product.imagePublicId) deleteCloudinaryAsset(product.imagePublicId).catch(error => console.error('Old menu image cleanup failed:', error))
+    res.json(updated)
+  } catch (error) { handleBranchError(res, error) }
+})
+
+router.delete('/menu/:productId/image', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req)
+    const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }), select: { id: true, imagePublicId: true } })
+    if (!product) return res.status(404).json({ error: 'Menu item not found.' })
+    await prisma.product.update({ where: { id: product.id }, data: { image: null, imagePublicId: null } })
+    if (product.imagePublicId) await deleteCloudinaryAsset(product.imagePublicId).catch(error => console.error('Menu image cleanup failed:', error))
+    res.json({ message: 'Menu image removed.' })
   } catch (error) { handleBranchError(res, error) }
 })
 
@@ -123,7 +295,7 @@ router.get('/orders', authenticateToken, requirePermission('canViewRestaurant'),
       include: {
         items: { include: { product: true } },
         table: true,
-        waiter: true,
+        waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } },
         tips: true,
         delivery: true,
         customer: true,
@@ -136,9 +308,10 @@ router.get('/orders', authenticateToken, requirePermission('canViewRestaurant'),
 
 router.get('/orders/:id', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
   try {
-    const order = await prisma.restaurantOrder.findUnique({
-      where: { id: req.params.id },
-      include: { items: { include: { product: true } }, table: true, waiter: true, tips: true, delivery: true, customer: true }
+    const scope = await resolveBranchScope(prisma, req)
+    const order = await prisma.restaurantOrder.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, user: { select: { fname: true, lname: true } }, tips: true, delivery: true, customer: true }
     })
     if (!order) return res.status(404).json({ message: 'Order not found' })
     res.json(order)
@@ -153,6 +326,21 @@ router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant
     if (orderType === 'dine_in' && !tableId) return res.status(400).json({ error: 'Table is required for dine-in orders' })
     if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one item is required' })
     if (items.some(i => !i.productId || i.quantity < 1)) return res.status(400).json({ error: 'All items must have a product and quantity >= 1' })
+    const waiterFeatureEnabled = hasFeatureAccess(req.tenantFeatures || new Set(), 'restaurant.waiters')
+    if (waiterId) {
+      if (!waiterFeatureEnabled) return res.status(403).json({ error: 'Waiter selection is not enabled for this business.' })
+      const waiter = await prisma.waiter.findFirst({ where: scopedWhere(scope, { id: waiterId, isActive: true }) })
+      if (!waiter) return res.status(400).json({ error: 'Choose an active server from this business and branch.' })
+      if (!waiter.pinHash) return res.status(403).json({ error: 'This server needs a PIN set by a restaurant manager.' })
+      let session
+      try { session = jwt.verify(String(req.headers['x-restaurant-waiter-session'] || ''), getJwtSecret()) } catch { session = null }
+      if (!session || session.typ !== 'restaurant_waiter_session' || session.tenantId !== scope.tenantId || session.userId !== req.user.id || session.waiterId !== waiter.id || session.pinUpdatedAt !== waiter.pinUpdatedAt.getTime()) {
+        return res.status(403).json({ error: 'Confirm this server’s PIN again before taking an order.', code: 'WAITER_PIN_REQUIRED' })
+      }
+    } else if (waiterFeatureEnabled) {
+      const activeWaiters = await prisma.waiter.count({ where: scopedWhere(scope, { isActive: true }) })
+      if (activeWaiters > 0) return res.status(400).json({ error: 'Select a server and confirm their PIN before taking an order.', code: 'WAITER_PIN_REQUIRED' })
+    }
 
     // Generate order number
     const count = await prisma.restaurantOrder.count({ where: { tenantId: scope.tenantId } })
@@ -185,7 +373,7 @@ router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant
         specialInstructions,
         items: { create: orderItems }
       },
-      include: { items: { include: { product: true } }, table: true, waiter: true }
+      include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true, user: { select: { fname: true, lname: true } } }
     })
 
     // Update table status
@@ -269,9 +457,10 @@ router.put('/orders/:id/move', authenticateToken, requirePermission('canEditRest
 router.post('/orders/:id/complete', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
   try {
     const { paymentMethod, discount, tipAmount, tipWaiterId } = req.body
-    const order = await prisma.restaurantOrder.findUnique({
-      where: { id: req.params.id },
-      include: { items: { include: { product: true } }, table: true }
+    const scope = await resolveBranchScope(prisma, req)
+    const order = await prisma.restaurantOrder.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
     })
     if (!order) return res.status(404).json({ message: 'Order not found' })
     if (order.status === 'completed') return res.status(400).json({ message: 'Order already completed' })
@@ -289,6 +478,8 @@ router.post('/orders/:id/complete', authenticateToken, requirePermission('canEdi
       data: {
         receiptNo, tenantId: order.tenantId, branchId: order.branchId,
         userId: req.user.id,
+        servedBy: order.waiter?.name || [req.user.fname, req.user.lname].filter(Boolean).join(' ').trim() || req.user.email || 'Server not recorded',
+        customerName: order.customer?.name || null,
         subtotal: order.subtotal,
         discount: finalDiscount,
         tax: 0,
@@ -354,9 +545,10 @@ router.post('/orders/:id/complete', authenticateToken, requirePermission('canEdi
 router.post('/orders/:id/split', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.split_bills'), async (req, res) => {
   try {
     const { splits } = req.body // array of { itemIds: [], paymentMethod, tipAmount }
-    const order = await prisma.restaurantOrder.findUnique({
-      where: { id: req.params.id },
-      include: { items: true }
+    const scope = await resolveBranchScope(prisma, req)
+    const order = await prisma.restaurantOrder.findFirst({
+      where: scopedWhere(scope, { id: req.params.id }),
+      include: { items: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
     })
     if (!order) return res.status(404).json({ message: 'Order not found' })
 
@@ -373,7 +565,7 @@ router.post('/orders/:id/split', authenticateToken, requirePermission('canEditRe
       const sale = await prisma.sale.create({
         data: {
           receiptNo, tenantId: order.tenantId, branchId: order.branchId,
-          userId: req.user.id, subtotal, discount: 0, tax: 0, total,
+          userId: req.user.id, servedBy: order.waiter?.name || [req.user.fname, req.user.lname].filter(Boolean).join(' ').trim() || req.user.email || 'Server not recorded', customerName: order.customer?.name || null, subtotal, discount: 0, tax: 0, total,
           paymentMethod: split.paymentMethod || 'cash', status: 'completed',
           items: { create: splitItems.map(i => ({ productId: i.productId, quantity: i.quantity, price: i.price, discount: i.discount, total: i.total })) }
         }
@@ -396,7 +588,7 @@ router.get('/kitchen/orders', authenticateToken, requirePermission('canViewResta
     const scope = await resolveBranchScope(prisma, req)
     const orders = await prisma.restaurantOrder.findMany({
       where: { ...scopedWhere(scope), status: { in: ['pending', 'preparing', 'ready'] } },
-      include: { items: { where: { station: 'kitchen', status: { in: ['pending', 'preparing', 'ready'] } }, include: { product: true } }, table: true },
+      include: { items: { where: { station: 'kitchen', status: { in: ['pending', 'preparing', 'ready'] } }, include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, user: { select: { fname: true, lname: true } } },
       orderBy: { createdAt: 'asc' }
     })
     res.json(orders.filter(o => o.items.length > 0))
@@ -408,7 +600,7 @@ router.get('/bar/orders', authenticateToken, requirePermission('canViewRestauran
     const scope = await resolveBranchScope(prisma, req)
     const orders = await prisma.restaurantOrder.findMany({
       where: { ...scopedWhere(scope), status: { in: ['pending', 'preparing', 'ready'] } },
-      include: { items: { where: { station: 'bar', status: { in: ['pending', 'preparing', 'ready'] } }, include: { product: true } }, table: true },
+      include: { items: { where: { station: 'bar', status: { in: ['pending', 'preparing', 'ready'] } }, include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, user: { select: { fname: true, lname: true } } },
       orderBy: { createdAt: 'asc' }
     })
     res.json(orders.filter(o => o.items.length > 0))
@@ -660,7 +852,7 @@ router.get('/tips', authenticateToken, requirePermission('canViewRestaurant'), r
     const scope = await resolveBranchScope(prisma, req)
     const tips = await prisma.tip.findMany({
       where: { tenantId: scope.tenantId },
-      include: { waiter: true, order: true },
+      include: { waiter: { select: { id: true, name: true } }, order: true },
       orderBy: { createdAt: 'desc' }
     })
     res.json(tips)

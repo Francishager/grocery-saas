@@ -87,6 +87,7 @@ function receiptJson(data) {
     },
     branch: sale.branch || null,
     cashier,
+    servedBy: sale.servedBy || null,
     customerName: sale.customerName || null,
     paymentMethod: sale.paymentMethod || "cash",
     createdAt: sale.createdAt,
@@ -201,6 +202,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     doc.fontSize(9).font("Helvetica-Bold").text(`RECEIPT: ${sale.receiptNo}`, { align: "center" });
     doc.fontSize(9).font("Helvetica-Bold").text(`Date: ${formatReceiptDate(sale.createdAt)}`, { align: "center" });
     doc.fontSize(9).font("Helvetica-Bold").text(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim(), { align: "center" });
+    if (sale.servedBy) doc.fontSize(9).font("Helvetica-Bold").text(`Served by: ${sale.servedBy}`, { align: "center" });
     if (sale.customerName) {
       doc.fontSize(9).font("Helvetica-Bold").text(`Customer: ${sale.customerName}`, { align: "center" });
     }
@@ -314,6 +316,7 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
     cmds.push(escText(`Receipt: ${sale.receiptNo}`));
     cmds.push(escText(`Date: ${formatReceiptDate(sale.createdAt)}`));
     cmds.push(escText(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim()));
+    if (sale.servedBy) cmds.push(escText(`Served by: ${sale.servedBy}`));
     if (sale.customerName) {
       cmds.push(escText(`Customer: ${sale.customerName}`));
     }
