@@ -25,6 +25,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReportData } from '@/db/hybrid'
 import { EnrichedReport, type EnrichedReportData } from '@/components/EnrichedReportRenderer'
 import DailyBusinessReport from '@/components/DailyBusinessReport'
+import { canViewReportItem } from '@/lib/reportPermissions'
 
 type IconType = React.ComponentType<{ className?: string }>
 
@@ -1969,7 +1970,7 @@ export default function ReportsPage() {
   const visibleCategories = useMemo(() => CATEGORIES.flatMap(c => c.id === 'services' ? [
     { ...c, items: c.items.filter(item => !serviceReportPermissions[item.id]) },
     { ...c, id: 'service-business', label: 'Service Business Reports', feature: 'service.reports', items: c.items.filter(item => serviceReportPermissions[item.id]) },
-  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => (!item.feature || canAccessFeature(item.feature)) && (isOwner || hasPermission(serviceReportPermissions[item.id] || c.permission))) }))
+  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => (!item.feature || canAccessFeature(item.feature)) && (isOwner || canViewReportItem(item.id, serviceReportPermissions[item.id] || c.permission, hasPermission))) }))
     .filter(c => c.items.length > 0 && (!c.feature || canAccessFeature(c.feature))), [hasPermission, isOwner, canAccessFeature])
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
 
@@ -2117,6 +2118,7 @@ export default function ReportsPage() {
         if (currentReport.entityType === 'supplier' && selectedEntityId) params.supplierId = selectedEntityId
         if (currentReport.entityType === 'product' && selectedEntityId) params.productId = selectedEntityId
         if (currentReport.showBranchFilter && selectedBranchId && selectedBranchId !== 'all') params.branchId = selectedBranchId
+        params.reportId = currentReport.id
         if (currentReport.id === 'salesDaily') {
           if (selectedStaffId) params.staffId = selectedStaffId
           if (selectedDailyCustomerId) params.customerId = selectedDailyCustomerId

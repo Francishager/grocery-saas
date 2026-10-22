@@ -1,4 +1,5 @@
 import { servicePagePermissions, serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
+import { canViewReportItem } from '@/lib/reportPermissions'
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { MessageSquare, Trash2 } from 'lucide-react'
 import { trashPermissions } from '@/lib/trashPermissions'
@@ -115,6 +116,7 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'salesByCategory', label: 'Sales by Category' },
       { id: 'salesByCustomer', label: 'Sales by Customer' },
       { id: 'salesByUser', label: 'Sales by User/Cashier' },
+      { id: 'salesServiceJobs', label: 'Product & Service Jobs' },
       { id: 'salesByBranch', label: 'Sales by Branch' },
       { id: 'salesDiscounts', label: 'Discount Report' },
       { id: 'salesReturns', label: 'Returns & Refunds Report' },
@@ -543,10 +545,13 @@ export function TenantLayout() {
   const visibleProcurementBuyerItems = procurementBuyerItems.filter(subItemVisible)
   const visibleProcurementSellerItems = procurementSellerItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
-  const visibleReportCategories = reportCategories.map(cat => cat.id === 'service' ? { ...cat, items: cat.items.filter(item => hasPermission(serviceReportPermissions[serviceReportIds[item.id]])) } : cat).filter((cat) => {
+  const visibleReportCategories = reportCategories.map(cat => ({ ...cat, items: cat.items.filter(item =>
+    cat.id === 'service'
+      ? hasPermission(serviceReportPermissions[serviceReportIds[item.id]])
+      : canViewReportItem(item.id, cat.permission, hasPermission)
+  ) })).filter((cat) => {
     if (!cat.items.length) return false
     if (cat.feature && !canAccessFeature(cat.feature)) return false
-    if (cat.permission && !hasRequiredPermission(cat.permission)) return false
     return true
   })
   const visibleNavItems = navItems.filter((item) => {

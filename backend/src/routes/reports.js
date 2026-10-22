@@ -16,6 +16,7 @@ import {
   transformCashFlowData,
 } from "../utils/enrichedReportTransform.js";
 import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
+import { SALES_REPORT_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
 import { expenseDateWhere, cashMovementDirection, loadJournalExpenseRows, summarizeCashMovements, accountCashBalances, loadLedgerBalances, ledgerBalanceSheet, postedJournalWhere } from '../utils/reportAccounting.js';
 
 const router = Router();
@@ -52,6 +53,28 @@ const reportPermMap = {
   "service-business": "canViewServiceBusinessReport",
   restaurant: "canViewRestaurantReport",
 };
+const salesReportPermissionByPath = new Map([
+  ['/sales/summary', 'salesSummary'], ['/sales/daily', 'salesDaily'], ['/daily-business', 'salesDaily'],
+  ['/sales/weekly', 'salesWeekly'], ['/sales/monthly', 'salesMonthly'], ['/sales/by-product', 'salesByProduct'],
+  ['/sales/by-category', 'salesByCategory'], ['/sales/by-customer', 'salesByCustomer'],
+  ['/sales/by-user', 'salesByUser'], ['/sales/service-jobs', 'salesServiceJobs'],
+  ['/sales/by-branch', 'salesByBranch'], ['/sales/discounts', 'salesDiscounts'], ['/sales/returns', 'salesReturns'],
+]);
+const granularReportByPath = new Map([
+  ...salesReportPermissionByPath,
+  ['/inventory/stock','inventoryStock'], ['/inventory/valuation','inventoryValuation'], ['/inventory/low-stock','inventoryLowStock'], ['/inventory/out-of-stock','inventoryOutOfStock'], ['/inventory/stock-movement','inventoryStockMovement'], ['/inventory/adjustments','inventoryAdjustments'], ['/inventory/expiry','inventoryExpiry'], ['/inventory/damaged','inventoryDamaged'], ['/inventory/fast-moving','inventoryFastMoving'], ['/inventory/slow-moving','inventorySlowMoving'], ['/inventory/product-ledger','inventoryProductLedger'],
+  ['/financial/profit-loss','financialProfitLoss'], ['/financial/income','financialIncome'], ['/financial/expense','financialExpense'], ['/financial/cash-flow','financialCashFlow'], ['/financial/trial-balance','financialTrialBalance'], ['/financial/balance-sheet','financialBalanceSheet'], ['/financial/general-ledger','financialGeneralLedger'], ['/financial/bank-transactions','financialBankTransactions'], ['/financial/tax','financialTax'],
+  ['/customers/list','customersList'], ['/customers/sales','customersSales'], ['/customers/balance','customersBalance'], ['/customers/receivables','customersReceivables'], ['/customers/top','customersTop'], ['/customers/ledger','customersLedger'], ['/customers/statement','customersStatement'], ['/customers/credit-notes',['customersCreditNotes','receivablesCreditNotes']],
+  ['/suppliers/list','suppliersList'], ['/suppliers/purchases','suppliersPurchases'], ['/suppliers/payables','suppliersPayables'], ['/suppliers/balance','suppliersBalance'], ['/suppliers/statement','suppliersStatement'], ['/suppliers/debit-notes',['suppliersDebitNotes','payablesDebitNotes']], ['/suppliers/ledger','suppliersLedger'],
+  ['/receivables/outstanding','receivablesOutstanding'], ['/receivables/aging','receivablesAging'], ['/receivables/collection','receivablesCollection'], ['/receivables/overdue','receivablesOverdue'],
+  ['/payables/outstanding','payablesOutstanding'], ['/payables/aging','payablesAging'], ['/payables/payment-history','payablesPaymentHistory'], ['/payables/overdue','payablesOverdue'],
+  ['/performance/branch','performanceBranch'], ['/performance/product','performanceProduct'], ['/performance/category','performanceCategory'], ['/performance/user-activity','performanceUserActivity'], ['/performance/top-products','performanceTopProducts'], ['/performance/least-products','performanceLeastProducts'],
+  ['/services/summary','servicesSummary'], ['/services/list','servicesList'], ['/services/sales','servicesSales'], ['/services/by-category','servicesByCategory'], ['/services/by-branch','servicesByBranch'], ['/services/top','servicesTop'],
+  ['/rentals/summary','rentalsSummary'], ['/rentals/list','rentalsList'], ['/rentals/by-item','rentalsByItem'], ['/rentals/by-customer','rentalsByCustomer'], ['/rentals/by-branch','rentalsByBranch'], ['/rentals/active','rentalsActive'], ['/rentals/overdue','rentalsOverdue'], ['/rentals/returns','rentalsReturns'], ['/rentals/daily','rentalsDaily'], ['/rentals/monthly','rentalsMonthly'],
+  ['/fuel/sales-summary','fuelSalesSummary'], ['/fuel/sales-by-pump','fuelByPump'], ['/fuel/tank-stock','fuelByTank'], ['/fuel/deliveries','fuelDeliveries'], ['/fuel/shift-summary','fuelShiftSummary'], ['/fuel/lubricant-sales','fuelLubricantSales'], ['/fuel/car-wash-income','fuelCarWash'], ['/fuel/meter-readings','fuelMeterReadings'],
+  ['/manufacturing/summary','mfgProductionSummary'], ['/manufacturing/by-product','mfgByProduct'], ['/manufacturing/waste','mfgWasteReport'], ['/manufacturing/cost-analysis','mfgCostAnalysis'], ['/manufacturing/bom','mfgBOMReport'], ['/analysis/executive-summary','executiveSummary'],
+  ['/expenses','financialExpense'], ['/profit','financialProfitLoss'], ['/purchases','suppliersPurchases'], ['/decision-support','executiveSummary'],
+]);
 
 // Middleware: check granular report permission based on route prefix
 function requireReportPermission(req, res, next) {
@@ -66,6 +89,31 @@ function requireReportPermission(req, res, next) {
   // Check UserPermission table for the specific report permission
   const pathSeg = req.path.split("/").filter(Boolean)[0]; // e.g. "sales", "inventory"
   const permKey = reportPermMap[pathSeg];
+
+  if (req.path === '/sales') {
+    return prisma.userPermission.findUnique({ where: { userId: req.user.id } }).then((record) => {
+      const hasGranularSalesAccess = SALES_REPORT_PERMISSION_KEYS.some((key) => record?.[key] === true);
+      if (hasGranularSalesAccess && !(req.user.permissions || []).includes('canViewSale')) {
+        return res.status(403).json({ error: 'Permission denied', required: 'canViewSale' });
+      }
+      if ((req.user.permissions || []).includes('*') || (req.user.permissions || []).includes(permKey) || record?.[permKey]) return next();
+      return res.status(403).json({ error: 'Permission denied', required: permKey });
+    }).catch(() => res.status(500).json({ error: 'Failed to check permission' }));
+  }
+
+  const reportIds = granularReportByPath.get(req.path);
+  if (reportIds) {
+    const candidates = Array.isArray(reportIds) ? reportIds : [reportIds];
+    const requestedId = String(req.query?.reportId || '');
+    const permittedCandidates = requestedId && candidates.includes(requestedId) ? [requestedId] : requestedId ? [] : candidates;
+    const storedPermissionPromise = prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+    return storedPermissionPromise.then((record) => {
+      const allowed = permittedCandidates.find((id) => userHasReportAccess(id, req.user.permissions, record));
+      if (allowed) return next();
+      const required = permittedCandidates[0] || candidates[0];
+      return res.status(403).json({ error: 'Permission denied', required: `canViewReport${required[0].toUpperCase()}${required.slice(1)}` });
+    }).catch(() => res.status(500).json({ error: 'Failed to check permission' }));
+  }
 
   if (!permKey) {
     // No mapping — fall back to role check

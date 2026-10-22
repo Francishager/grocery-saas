@@ -3,7 +3,61 @@
 // =====================================================
 import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_KEYS, SERVICE_PERMISSION_CATEGORIES, LEGACY_SERVICE_PERMISSION_KEYS } from './servicePermissions.js';
 import { sanitizePlatformPermissions } from './platformPermissions.js';
+export const SALES_REPORT_PERMISSION_ITEMS = [
+  ['salesSummary', 'Sales Summary'],
+  ['salesDaily', 'Daily Sales Report'],
+  ['salesWeekly', 'Weekly Sales Report'],
+  ['salesMonthly', 'Monthly Sales Report'],
+  ['salesByProduct', 'Sales by Product'],
+  ['salesByCategory', 'Sales by Category'],
+  ['salesByCustomer', 'Sales by Customer'],
+  ['salesByUser', 'Sales by User/Cashier'],
+  ['salesServiceJobs', 'Product & Service Jobs'],
+  ['salesByBranch', 'Sales by Branch'],
+  ['salesDiscounts', 'Discount Report'],
+  ['salesReturns', 'Returns & Refunds Report'],
+];
+export const SALES_REPORT_PERMISSION_KEYS = SALES_REPORT_PERMISSION_ITEMS.map(([id]) =>
+  `canViewReport${id[0].toUpperCase()}${id.slice(1)}`
+);
+const REPORT_GROUPS = [
+  ['reports_inventory', 'reports.inventory', 'canViewInventoryReport', [['inventoryStock','Current Stock Report'],['inventoryValuation','Stock Valuation Report'],['inventoryLowStock','Low Stock Report'],['inventoryOutOfStock','Out of Stock Report'],['inventoryStockMovement','Stock Movement Report'],['inventoryAdjustments','Inventory Adjustment Report'],['inventoryExpiry','Expiry Report'],['inventoryDamaged','Damaged/Lost Stock Report'],['inventoryFastMoving','Fast Moving Products'],['inventorySlowMoving','Slow Moving Products'],['inventoryProductLedger','Product Ledger']]],
+  ['reports_financial', 'reports.financial', 'canViewFinancialReport', [['financialProfitLoss','Profit & Loss Report'],['financialIncome','Income Report'],['financialExpense','Expense Report'],['financialCashFlow','Cash Flow Report'],['financialTrialBalance','Trial Balance'],['financialBalanceSheet','Balance Sheet'],['financialGeneralLedger','General Ledger'],['financialBankTransactions','Bank Transactions Report'],['financialTax','Tax Report']]],
+  ['reports_customers', 'reports.customers', 'canViewCustomerReport', [['customersList','Customer List Report'],['customersSales','Customer Sales Report'],['customersBalance','Customer Balance Report'],['customersReceivables','Customer Receivables Report'],['customersTop','Top Customers Report'],['customersLedger','Customer Ledger'],['customersStatement','Customer Statement'],['customersCreditNotes','Customer Credit Notes Report']]],
+  ['reports_suppliers', 'reports.suppliers', 'canViewSupplierReport', [['suppliersList','Supplier List Report'],['suppliersPurchases','Supplier Purchases Report'],['suppliersPayables','Supplier Payables Report'],['suppliersBalance','Supplier Balance Report'],['suppliersStatement','Supplier Statement'],['suppliersDebitNotes','Supplier Debit Notes Report'],['suppliersLedger','Supplier Ledger']]],
+  ['reports_receivables', 'reports.customers', 'canViewReceivablesReport', [['receivablesOutstanding','Outstanding Invoices'],['receivablesAging','Customer Aging Report'],['receivablesCollection','Collection Report'],['receivablesOverdue','Overdue Accounts Report'],['receivablesCreditNotes','Receivables Credit Notes Report']]],
+  ['reports_payables', 'reports.financial', 'canViewPayablesReport', [['payablesOutstanding','Outstanding Bills Report'],['payablesAging','Supplier Aging Report'],['payablesPaymentHistory','Payment History Report'],['payablesOverdue','Overdue Supplier Balances'],['payablesDebitNotes','Payables Debit Notes Report']]],
+  ['reports_performance', 'reports.performance', 'canViewPerformanceReport', [['performanceBranch','Branch Performance Report'],['performanceProduct','Product Performance Report'],['performanceCategory','Category Performance Report'],['performanceUserActivity','User Activity Report'],['performanceTopProducts','Top Selling Products'],['performanceLeastProducts','Least Selling Products']]],
+  ['reports_services', 'reports.services', 'canViewServiceReport', [['servicesSummary','Service Summary'],['servicesList','Service List'],['servicesSales','Service Sales Report'],['servicesByCategory','Service Sales by Category'],['servicesByBranch','Service Sales by Branch'],['servicesTop','Top Services']]],
+  ['reports_rentals', 'reports.rentals', 'canViewRentalReport', [['rentalsSummary','Rental Summary'],['rentalsList','Rental List Report'],['rentalsByItem','Rental by Item'],['rentalsByCustomer','Rental by Customer'],['rentalsByBranch','Rental by Branch'],['rentalsActive','Active Rentals'],['rentalsOverdue','Overdue Rentals'],['rentalsReturns','Rental Returns Report'],['rentalsDaily','Daily Rental Report'],['rentalsMonthly','Monthly Rental Report']]],
+  ['reports_fuel', 'fuel_station.reports', 'canViewFuelStationReport', [['fuelSalesSummary','Fuel Sales Summary'],['fuelByPump','Sales by Pump'],['fuelByTank','Tank Stock Report'],['fuelDeliveries','Fuel Deliveries Report'],['fuelShiftSummary','Shift Summary Report'],['fuelLubricantSales','Lubricant Sales Report'],['fuelCarWash','Car Wash Income Report'],['fuelMeterReadings','Meter Readings Report']]],
+  ['reports_manufacturing', 'manufacturing.reports', 'canViewManufacturingReport', [['mfgProductionSummary','Production Summary'],['mfgByProduct','Production by Product'],['mfgWasteReport','Waste Report'],['mfgCostAnalysis','Production Cost Analysis'],['mfgBOMReport','BOM / Recipe Report']]],
+  ['reports_analysis', 'reports', 'canViewFinancialReport', [['executiveSummary','Executive Summary & Insights']]],
+];
+export const OTHER_REPORT_PERMISSION_ITEMS = REPORT_GROUPS.flatMap(([category, feature, legacy, items]) => items.map(([id, name]) => [id, name, category, feature, legacy]));
+export const REPORT_PERMISSION_ITEMS = [
+  ...SALES_REPORT_PERMISSION_ITEMS.map(([id, name]) => [id, name, 'reports_sales', 'reports.sales', 'canViewSalesReport']),
+  ...OTHER_REPORT_PERMISSION_ITEMS,
+];
+export const REPORT_PERMISSION_KEYS = REPORT_PERMISSION_ITEMS.map(([id]) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`);
+export const reportPermissionKey = (id) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`;
+export function userHasReportAccess(id, permissions = [], record = null) {
+  const key = reportPermissionKey(id);
+  const grants = Array.isArray(permissions) ? permissions : [];
+  return grants.includes('*') || grants.includes(key) || record?.[key] === true;
+}
+export const salesReportPermissionKey = (id) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`;
+export function userHasSalesReportAccess(id, userPermissions = [], permissionRecord = null) {
+  const permissions = Array.isArray(userPermissions) ? userPermissions : [];
+  if (permissions.includes('*')) return true;
+  const granularKey = salesReportPermissionKey(id);
+  return permissions.includes(granularKey) || permissionRecord?.[granularKey] === true;
+}
+const reportPermissionMetadata = Object.fromEntries(REPORT_PERMISSION_ITEMS.map(([id, name]) => [reportPermissionKey(id), {
+  name: `View ${name}`, description: `Open only the ${name.toLowerCase()} report.`,
+}]));
 const PERMISSION_TO_FEATURES = {
+  ...Object.fromEntries(REPORT_PERMISSION_ITEMS.map(([id, , , feature]) => [reportPermissionKey(id), [feature]])),
   ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, [p.feature, 'service']])),
   canViewDashboard: [],
   canUseBusinessAI: ['dashboard'],
@@ -256,6 +310,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewSalesReport", "canViewInventoryReport", "canViewFinancialReport", "canViewCustomerReport",
   "canViewSupplierReport", "canViewReceivablesReport", "canViewPayablesReport",
   "canViewPerformanceReport", "canViewAuditReport", "canExportReport",
+  ...REPORT_PERMISSION_KEYS,
   // Settings
   "canViewSettings", "canEditSettings",
   "canPaySubscriptionInvoice",
@@ -323,6 +378,8 @@ export const PERMISSION_CATEGORIES = [
   { id: 'hr_payroll', name: 'HR Payroll & Accounting' },
   { id: 'branches', name: 'Branches' },
   { id: 'reports', name: 'Reports' },
+  { id: 'reports_sales', name: 'Sales Report Access' },
+  ...REPORT_GROUPS.map(([id]) => ({ id, name: id.replace('reports_', '').replace(/^./, c => c.toUpperCase()) + ' Report Access' })),
   { id: 'settings', name: 'Settings' },
   { id: 'subscription_billing', name: 'Subscription & Billing' },
   { id: 'receipts', name: 'Receipts' },
@@ -342,6 +399,7 @@ export const PERMISSION_CATEGORIES = [
 ];
 
 const PERMISSION_DETAIL_OVERRIDES = {
+  ...reportPermissionMetadata,
   ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, p])),
   canUseBusinessAI: {
     name: 'Use AI business advisor',
@@ -1049,6 +1107,8 @@ const PERMISSION_DETAIL_OVERRIDES = {
 };
 
 function permissionCategoryForKey(key) {
+  const report = REPORT_PERMISSION_ITEMS.find(([id]) => reportPermissionKey(id) === key);
+  if (report) return report[2];
   if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
   if (key === 'canViewTeamMessaging' || key === 'canSendTeamMessages') return 'team_messaging';
   if (key.includes('Procurement') || key.includes('SupplierNetwork') || key.includes('Marketplace')) return 'procurement';

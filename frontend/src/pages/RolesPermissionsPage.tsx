@@ -12,6 +12,7 @@ import { getLocalStaff, getLocalBranches } from '@/db/hybrid'
 import WorkingHoursEditor, { type WorkingHours } from '@/components/WorkingHoursEditor'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_CATEGORIES, LEGACY_SERVICE_PERMISSION_KEYS } from '@/lib/servicePermissions'
+import { GRANULAR_REPORT_PERMISSION_KEYS } from '@/lib/reportPermissions'
 
 type PermissionDefinition = {
   id: string
@@ -138,7 +139,7 @@ const REPORT_PERMISSION_KEYS = [
   'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport',
   'canViewAuditReport', 'canExportReport', 'canViewServiceReport', 'canViewRentalReport',
   'canViewRestaurantReport', 'canViewFuelStationReport', 'canViewManufacturingReport', 'canViewAgricultureReport',
-  'canViewServiceBusinessReport',
+  'canViewServiceBusinessReport', ...GRANULAR_REPORT_PERMISSION_KEYS,
 ]
 
 const FALLBACK_CATEGORY_IDS: Record<string, string> = {

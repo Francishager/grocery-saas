@@ -62,13 +62,13 @@ test('all protected report routes are unique and reject anonymous HTTP requests'
   }
 });
 
-test('sales and financial report permissions are distinct and fail closed', async (t) => {
+test('individual report permissions are distinct from legacy category grants and fail closed', async (t) => {
   t.mock.method(prisma.userPermission, 'findUnique', async () => ({}));
   const check = reports.stack.find((layer) => layer.handle.name === 'requireReportPermission').handle;
-  for (const [path, permission, unrelated] of [
-    ['/daily-business', 'canViewSalesReport', 'canViewFinancialReport'],
-    ['/financial/trial-balance', 'canViewFinancialReport', 'canViewSalesReport'],
-    ['/expenses', 'canViewFinancialReport', 'canViewSalesReport'],
+  for (const [path, reportKey, unrelated] of [
+    ['/daily-business', 'canViewReportSalesDaily', 'canViewReportFinancialTrialBalance'],
+    ['/financial/trial-balance', 'canViewReportFinancialTrialBalance', 'canViewReportSalesDaily'],
+    ['/expenses', 'canViewReportFinancialExpense', 'canViewReportSalesDaily'],
   ]) {
     const run = (permissions) => new Promise((resolve) => {
       let status = 200;
@@ -76,8 +76,9 @@ test('sales and financial report permissions are distinct and fail closed', asyn
         status(value) { status = value; return this; }, json(body) { resolve({ status, body }); },
       }, () => resolve({ status: 200 }));
     });
-    assert.equal((await run([permission])).status, 200);
-    assert.deepEqual(await run([unrelated]), { status: 403, body: { error: 'Permission denied', required: permission } });
+    assert.equal((await run([reportKey])).status, 200);
+    assert.deepEqual(await run([unrelated]), { status: 403, body: { error: 'Permission denied', required: reportKey } });
+    assert.equal((await run(['canViewFinancialReport', 'canViewSalesReport'])).status, 403);
   }
 });
 
