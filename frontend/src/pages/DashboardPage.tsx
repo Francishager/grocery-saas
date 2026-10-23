@@ -22,6 +22,7 @@ export default function DashboardPage() {
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: user?.phone || '', email: user?.email || '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
+  const [dashboardView, setDashboardView] = useState<'daily' | 'trends' | 'mix'>('daily')
   const { toast } = useToast()
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
@@ -36,9 +37,19 @@ export default function DashboardPage() {
     receivables: hasPermission('canViewReceivable'),
     tax: hasPermission('canViewTax'),
   }
+  const hasDailyInsights = hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard
+  const hasTrendInsights = hasFeature('sales') && (canViewSalesDashboard || dashboardAccess.expenses) || hasFeature('accounting') && canViewFinancialDashboard
+  const hasMixInsights = hasFeature('inventory') && dashboardAccess.inventory && canViewSalesDashboard || hasFeature('sales') && hasPermission('canViewSale')
   const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
   const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
     loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey, dashboardAccess)
+
+  useEffect(() => {
+    if (!hasDailyInsights && !hasTrendInsights && !hasMixInsights) return
+    if (dashboardView === 'daily' && !hasDailyInsights) setDashboardView(hasTrendInsights ? 'trends' : 'mix')
+    else if (dashboardView === 'trends' && !hasTrendInsights) setDashboardView(hasDailyInsights ? 'daily' : 'mix')
+    else if (dashboardView === 'mix' && !hasMixInsights) setDashboardView(hasDailyInsights ? 'daily' : 'trends')
+  }, [dashboardView, hasDailyInsights, hasTrendInsights, hasMixInsights])
 
   useEffect(() => {
     setBillingForm(current => ({
@@ -429,8 +440,26 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {(hasDailyInsights || hasTrendInsights || hasMixInsights) && <div className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Business insights</h2>
+          <p className="text-sm text-muted-foreground">Choose a view to focus on the numbers you need.</p>
+        </div>
+        <div className="flex max-w-full gap-1 overflow-x-auto rounded-md border bg-muted/40 p-1" role="tablist" aria-label="Dashboard insights">
+          {(hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && (
+            <button type="button" role="tab" aria-selected={dashboardView === 'daily'} onClick={() => setDashboardView('daily')} className={`shrink-0 rounded px-3 py-2 text-sm font-medium ${dashboardView === 'daily' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Daily</button>
+          )}
+          {(hasFeature('sales') && (canViewSalesDashboard || hasPermission('canViewExpense')) || hasFeature('accounting') && canViewFinancialDashboard) && (
+            <button type="button" role="tab" aria-selected={dashboardView === 'trends'} onClick={() => setDashboardView('trends')} className={`shrink-0 rounded px-3 py-2 text-sm font-medium ${dashboardView === 'trends' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Trends</button>
+          )}
+          {(hasFeature('inventory') && hasPermission('canViewProduct') && canViewSalesDashboard || hasFeature('sales') && hasPermission('canViewSale')) && (
+            <button type="button" role="tab" aria-selected={dashboardView === 'mix'} onClick={() => setDashboardView('mix')} className={`shrink-0 rounded px-3 py-2 text-sm font-medium ${dashboardView === 'mix' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Products &amp; payments</button>
+          )}
+        </div>
+      </div>}
+
       {/* Daily Performance Chart */}
-      {(hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && dailyPerf && (
+      {dashboardView === 'daily' && (hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && dailyPerf && (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -485,7 +514,7 @@ export default function DashboardPage() {
       )}
 
       {/* Charts Row — only show for enabled features */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      {dashboardView === 'trends' && <div className="grid gap-6 lg:grid-cols-2">
         {/* Revenue vs Operating Expenses Chart */}
         {hasFeature('sales') && (canViewSalesDashboard || hasPermission('canViewExpense')) && (
         <Card>
@@ -529,10 +558,10 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         )}
-      </div>
+      </div>}
 
       {/* Bottom Row — only show for enabled features */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      {dashboardView === 'mix' && <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Products */}
         {hasFeature('inventory') && hasPermission('canViewProduct') && canViewSalesDashboard && (
         <Card>
@@ -584,7 +613,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         )}
-      </div>
+      </div>}
 
       {showBillingPrompt && billingReminder && !billingReminder.isTrial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

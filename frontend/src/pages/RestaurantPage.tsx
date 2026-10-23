@@ -364,7 +364,7 @@ export default function RestaurantPage() {
   // === Order handlers ===
   const createOrder = async () => {
     if (!orderForm.tableId && orderForm.orderType === 'dine_in') { toast({ variant: 'destructive', title: 'Select a table for dine-in orders' }); return }
-    if (waiters.some(waiter => waiter.isActive) && !activeWaiterId) { toast({ variant: 'destructive', title: 'Select a waiter and confirm their PIN before taking an order' }); return }
+    if (waiters.some(waiter => waiter.isActive) && (!activeWaiterId || !waiterSessionToken)) { toast({ variant: 'destructive', title: 'Select a waiter and confirm their PIN before taking an order' }); return }
     if (orderItems.length === 0) { toast({ variant: 'destructive', title: 'Add at least one item to the order' }); return }
     if (orderItems.some(i => !i.productId || i.quantity < 1)) { toast({ variant: 'destructive', title: 'All items must have a product and quantity' }); return }
     try {
@@ -1246,7 +1246,7 @@ export default function RestaurantPage() {
             </div>
             <div><Label>Special Instructions</Label><Input value={orderForm.specialInstructions} onChange={e => setOrderForm({ ...orderForm, specialInstructions: e.target.value })} placeholder="No onions, extra spicy..." /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowOrderModal(false)}>Cancel</Button><Button onClick={createOrder} disabled={!canCreateRestaurant || (waiters.some(waiter => waiter.isActive) && !activeWaiterId) || orderItems.length === 0}>Create Order</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowOrderModal(false)}>Cancel</Button><Button onClick={createOrder} disabled={!canCreateRestaurant || (waiters.some(waiter => waiter.isActive) && (!activeWaiterId || !waiterSessionToken)) || orderItems.length === 0}>Create Order</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
