@@ -368,7 +368,27 @@ export function TenantLayout() {
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const location = useLocation()
-  const handleLogout = () => { logout(); navigate('/login') }
+  const [waiterMode, setWaiterMode] = useState(() => Boolean(sessionStorage.getItem('restaurant.activeWaiterId') && sessionStorage.getItem('restaurant.waiterSessionToken')))
+  const handleLogout = () => {
+    sessionStorage.removeItem('restaurant.activeWaiterId')
+    sessionStorage.removeItem('restaurant.waiterSessionToken')
+    setWaiterMode(false)
+    logout()
+    navigate('/login')
+  }
+
+  useEffect(() => {
+    const syncWaiterMode = () => setWaiterMode(Boolean(sessionStorage.getItem('restaurant.activeWaiterId') && sessionStorage.getItem('restaurant.waiterSessionToken')))
+    syncWaiterMode()
+    window.addEventListener('restaurant-waiter-session-changed', syncWaiterMode)
+    return () => window.removeEventListener('restaurant-waiter-session-changed', syncWaiterMode)
+  }, [])
+
+  useEffect(() => {
+    if (!waiterMode) return
+    const allowedPaths = ['/tenant/restaurant/orders', '/tenant/restaurant/menu']
+    if (!allowedPaths.includes(location.pathname)) navigate('/tenant/restaurant/orders', { replace: true })
+  }, [waiterMode, location.pathname, navigate])
 
   useEffect(() => {
     if (!tenantId) return
@@ -565,7 +585,9 @@ export function TenantLayout() {
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
-  const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible)
+  const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible).filter(item =>
+    !waiterMode || ['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(item.to)
+  )
   const visibleProcurementBuyerItems = procurementBuyerItems.filter(subItemVisible)
   const visibleProcurementSellerItems = procurementSellerItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
@@ -579,6 +601,7 @@ export function TenantLayout() {
     return true
   })
   const visibleNavItems = navItems.filter((item) => {
+    if (waiterMode) return item.isRestaurant && visibleRestaurantSubItems.length > 0
     if (item.feature === 'dashboard') return canAccessFeature('dashboard')
     if (item.isProcurement) return visibleProcurementBuyerItems.length > 0 || visibleProcurementSellerItems.length > 0
     // Special handling for Communication: only show if the exact 'communication' feature is enabled
@@ -683,7 +706,7 @@ export function TenantLayout() {
             <div className="flex items-center gap-2 mb-3">
               <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
             </div>
-            {(() => { const dashItem = visibleNavItems.find(i => i.feature === 'dashboard') || navItems[0]; const DashIcon = dashItem.icon; return (
+            {waiterMode ? <div className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-200">Waiter service</div> : (() => { const dashItem = visibleNavItems.find(i => i.feature === 'dashboard') || navItems[0]; const DashIcon = dashItem.icon; return (
             <NavLink to={dashItem.to} onClick={() => setSidebarOpen(false)}
               className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
 <DashIcon className="h-6 w-6 lg:h-5 lg:w-5" />{t(dashItem.label)}
@@ -975,13 +998,13 @@ export function TenantLayout() {
                 </NavLink>
               )
             )}
-            {loading && <div className="px-3 py-2 text-sm text-slate-500">Loading plan features...</div>}
-            <OnboardingGuideCard
+            {!waiterMode && loading && <div className="px-3 py-2 text-sm text-slate-500">Loading plan features...</div>}
+            {!waiterMode && <OnboardingGuideCard
               hasCompleted={onboardingCompleted}
               onStatusChange={completeOnboarding}
-            />
-            <UserGuideMenu />
-            {trashPermissions.some(hasPermission) && (
+            />}
+            {!waiterMode && <UserGuideMenu />}
+            {!waiterMode && trashPermissions.some(hasPermission) && (
               <NavLink to="/tenant/trash" onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
                 <Trash2 className="h-6 w-6 lg:h-5 lg:w-5" />{t('Trash')}
@@ -997,7 +1020,7 @@ export function TenantLayout() {
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
           </div>
           <div className="flex-1" />
-          <SyncIndicator />
+          {!waiterMode && <><SyncIndicator />
           <BusinessChatWidget />
           <button
             type="button"
@@ -1008,8 +1031,8 @@ export function TenantLayout() {
             {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
           </button>
           <NotificationBell />
-          <WidgetLauncher />
-          <div className="group relative">
+          <WidgetLauncher /></>}
+          {waiterMode ? <Button variant="outline" size="sm" onClick={handleLogout}><LogOut className="mr-2 h-4 w-4" />Sign out</Button> : <div className="group relative">
             <button
               type="button"
               className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden"
@@ -1021,7 +1044,7 @@ export function TenantLayout() {
                 user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'
               )}
             </button>
-            <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+            {!waiterMode && <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
               <div className="mb-3 border-b pb-3 flex items-center gap-3">
                 {user?.avatar ? (
                   <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
@@ -1048,17 +1071,21 @@ export function TenantLayout() {
                   Logout
                 </Button>
               </div>
-            </div>
-          </div>
+            </div>}
+          </div>}
         </header>
-        <main className="overflow-x-clip p-4 lg:p-6"><Outlet /></main>
+        <main className="overflow-x-clip p-4 lg:p-6">
+          {waiterMode && !['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(location.pathname)
+            ? <p role="status" className="py-12 text-center text-sm text-muted-foreground">Opening the waiter order screen…</p>
+            : <Outlet />}
+        </main>
       </div>
-      <OnboardingGuideModal
+      {!waiterMode && <OnboardingGuideModal
         isOpen={showOnboardingModal}
         onClose={dismissOnboarding}
         onComplete={completeOnboarding}
-      />
-      <SubscriptionBillingReminder />
+      />}
+      {!waiterMode && <SubscriptionBillingReminder />}
     </div>
   )
 }

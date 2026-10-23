@@ -80,6 +80,10 @@ export default function RestaurantPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [activeWaiterId, setActiveWaiterId] = useState(() => sessionStorage.getItem('restaurant.activeWaiterId') || '')
   const [waiterSessionToken, setWaiterSessionToken] = useState(() => sessionStorage.getItem('restaurant.waiterSessionToken') || '')
+  const requiresWaiterIdentity = waiters.some(waiter => waiter.isActive)
+  const waiterIdentityConfirmed = Boolean(activeWaiterId && waiterSessionToken)
+  const waiterMode = waiterIdentityConfirmed
+  const canStartOrder = canCreateRestaurant && (!requiresWaiterIdentity || waiterIdentityConfirmed)
   const [pinWaiter, setPinWaiter] = useState<Waiter | null>(null)
   const [waiterPin, setWaiterPin] = useState('')
   const [showWaiterPinDialog, setShowWaiterPinDialog] = useState(false)
@@ -201,6 +205,7 @@ export default function RestaurantPage() {
       setWaiterSessionToken('')
       sessionStorage.removeItem('restaurant.activeWaiterId')
       sessionStorage.removeItem('restaurant.waiterSessionToken')
+      window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
       return
     }
     if (activeWaiterId) sessionStorage.setItem('restaurant.activeWaiterId', activeWaiterId)
@@ -214,6 +219,7 @@ export default function RestaurantPage() {
     setWaiterSessionToken('')
     sessionStorage.removeItem('restaurant.activeWaiterId')
     sessionStorage.removeItem('restaurant.waiterSessionToken')
+    window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
   }
 
   const requestWaiterIdentity = (waiterId: string) => {
@@ -245,6 +251,7 @@ export default function RestaurantPage() {
       setWaiterSessionToken(data.token)
       sessionStorage.setItem('restaurant.activeWaiterId', pinWaiter.id)
       sessionStorage.setItem('restaurant.waiterSessionToken', data.token)
+      window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
       setShowWaiterPinDialog(false)
       setWaiterPin('')
       setPinWaiter(null)
@@ -732,7 +739,7 @@ export default function RestaurantPage() {
           <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}>
             <SelectTrigger className="w-[190px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="unassigned">No waiter selected</SelectItem>
+              {!waiterMode && <SelectItem value="unassigned">No waiter selected</SelectItem>}
               {waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -766,7 +773,7 @@ export default function RestaurantPage() {
             <div className="flex flex-wrap gap-2">
               {canAccessTab('tables') && <Button variant="outline" onClick={() => setTab('tables')}><Table2 className="mr-2 h-4 w-4" /> Floor</Button>}
               {canAccessTab('kitchen') && <Button variant="outline" onClick={() => setTab('kitchen')}><ChefHat className="mr-2 h-4 w-4" /> Kitchen</Button>}
-              {canCreateRestaurant && <Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
+              {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -876,7 +883,7 @@ export default function RestaurantPage() {
         <TabsContent value="menu">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div><h2 className="font-semibold">Restaurant menu</h2><p className="text-sm text-muted-foreground">Curate what guests can order here; each menu item stays linked to its stock and recipe record.</p></div>
-            {canCreateRestaurant && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
+            {canCreateRestaurant && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
           </div>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search menu items" className="pl-9" /></div>
@@ -890,22 +897,22 @@ export default function RestaurantPage() {
                 </div>
                 <CardContent className="space-y-3 p-3">
                   <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={entry.product.name}>{entry.product.name}</p><p className="text-sm text-muted-foreground">{entry.category} · {entry.station === 'bar' ? 'Bar' : 'Kitchen'}</p>{entry.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.description}</p>}</div><div className="flex flex-col items-end gap-1"><Badge variant="outline">{entry.product.quantity} in stock</Badge>{!entry.isAvailable && <Badge variant="secondary">Paused</Badge>}</div></div>
-                  <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span>{canCreateRestaurant && <Button size="sm" disabled={!entry.isAvailable} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button>}</div>
+                  <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span>{canCreateRestaurant && <Button size="sm" disabled={!entry.isAvailable || !canStartOrder} title={!canStartOrder ? 'Confirm Serving as before adding items to an order' : undefined} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button>}</div>
                   <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-                    {canEditRestaurant && <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
+                    {canEditRestaurant && !waiterMode && <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
                       <ImagePlus className="h-3.5 w-3.5" /> {entry.product.image ? 'Change photo' : 'Add photo'}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(entry.productId, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
                     </label>}
-                    {canEditRestaurant && <><Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
+                    {canEditRestaurant && !waiterMode && <><Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
                     <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause' : 'Resume'}</Button></>}
-                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>}
+                    {canDeleteRestaurant && !waiterMode && <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>}
                   </div>
                 </CardContent>
               </Card>)}
             </div>}
           {canCreateRestaurant && orderItems.length > 0 && <div className="sticky bottom-3 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-3 shadow-lg">
             <div><p className="font-medium">Order cart · {orderItems.reduce((count, item) => count + item.quantity, 0)} items</p><p className="text-sm text-muted-foreground">Estimated total: {orderItems.reduce((sum, item) => sum + item.quantity * (menuEntries.find(entry => entry.productId === item.productId)?.price || 0), 0).toLocaleString()}</p></div>
-            <div className="flex gap-2"><Button variant="outline" onClick={() => setOrderItems([])}>Clear cart</Button><Button onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'takeaway', specialInstructions: '' }); setShowOrderModal(true) }}>Continue to order</Button></div>
+            <div className="flex gap-2"><Button variant="outline" onClick={() => setOrderItems([])}>Clear cart</Button><Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before continuing' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'takeaway', specialInstructions: '' }); setShowOrderModal(true) }}>Continue to order</Button></div>
           </div>}
         </TabsContent>
 
@@ -928,7 +935,7 @@ export default function RestaurantPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-            {canCreateRestaurant && <Button onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
+            {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
           </div>
           <div className="space-y-3">
             {paginatedOrders.map(o => (
@@ -1229,7 +1236,7 @@ export default function RestaurantPage() {
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Select waiter</SelectItem>{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>
+              <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{!waiterMode && <SelectItem value="unassigned">Select waiter</SelectItem>}{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>
               <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label>Items</Label>
@@ -1246,7 +1253,7 @@ export default function RestaurantPage() {
             </div>
             <div><Label>Special Instructions</Label><Input value={orderForm.specialInstructions} onChange={e => setOrderForm({ ...orderForm, specialInstructions: e.target.value })} placeholder="No onions, extra spicy..." /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowOrderModal(false)}>Cancel</Button><Button onClick={createOrder} disabled={!canCreateRestaurant || (waiters.some(waiter => waiter.isActive) && (!activeWaiterId || !waiterSessionToken)) || orderItems.length === 0}>Create Order</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowOrderModal(false)}>Cancel</Button><Button onClick={createOrder} disabled={!canStartOrder || orderItems.length === 0}>Create Order</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
