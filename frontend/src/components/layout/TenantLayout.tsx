@@ -368,17 +368,23 @@ export function TenantLayout() {
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const location = useLocation()
-  const [waiterMode, setWaiterMode] = useState(() => Boolean(sessionStorage.getItem('restaurant.activeWaiterId') && sessionStorage.getItem('restaurant.waiterSessionToken')))
+  const [waiterMode, setWaiterMode] = useState(() => sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
   const handleLogout = () => {
     sessionStorage.removeItem('restaurant.activeWaiterId')
     sessionStorage.removeItem('restaurant.waiterSessionToken')
+    sessionStorage.removeItem('restaurant.waiterKioskMode')
     setWaiterMode(false)
     logout()
     navigate('/login')
   }
+  const handleWaiterSignOut = () => {
+    sessionStorage.removeItem('restaurant.activeWaiterId')
+    sessionStorage.removeItem('restaurant.waiterSessionToken')
+    window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
+  }
 
   useEffect(() => {
-    const syncWaiterMode = () => setWaiterMode(Boolean(sessionStorage.getItem('restaurant.activeWaiterId') && sessionStorage.getItem('restaurant.waiterSessionToken')))
+    const syncWaiterMode = () => setWaiterMode(sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
     syncWaiterMode()
     window.addEventListener('restaurant-waiter-session-changed', syncWaiterMode)
     return () => window.removeEventListener('restaurant-waiter-session-changed', syncWaiterMode)
@@ -1032,7 +1038,7 @@ export function TenantLayout() {
           </button>
           <NotificationBell />
           <WidgetLauncher /></>}
-          {waiterMode ? <Button variant="outline" size="sm" onClick={handleLogout}><LogOut className="mr-2 h-4 w-4" />Sign out</Button> : <div className="group relative">
+          {waiterMode ? <Button variant="outline" size="sm" onClick={handleWaiterSignOut} title="Sign out this waiter and let the next waiter confirm their PIN"><LogOut className="mr-2 h-4 w-4" />Sign out waiter</Button> : <div className="group relative">
             <button
               type="button"
               className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden"

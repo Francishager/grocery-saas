@@ -80,10 +80,11 @@ export default function RestaurantPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [activeWaiterId, setActiveWaiterId] = useState(() => sessionStorage.getItem('restaurant.activeWaiterId') || '')
   const [waiterSessionToken, setWaiterSessionToken] = useState(() => sessionStorage.getItem('restaurant.waiterSessionToken') || '')
+  const [waiterKioskMode, setWaiterKioskMode] = useState(() => sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
   const requiresWaiterIdentity = waiters.some(waiter => waiter.isActive)
   const waiterIdentityConfirmed = Boolean(activeWaiterId && waiterSessionToken)
-  const waiterMode = waiterIdentityConfirmed
-  const canStartOrder = canCreateRestaurant && (!requiresWaiterIdentity || waiterIdentityConfirmed)
+  const waiterMode = waiterKioskMode || waiterIdentityConfirmed
+  const canStartOrder = canCreateRestaurant && (waiterKioskMode ? waiterIdentityConfirmed : (!requiresWaiterIdentity || waiterIdentityConfirmed))
   const [pinWaiter, setPinWaiter] = useState<Waiter | null>(null)
   const [waiterPin, setWaiterPin] = useState('')
   const [showWaiterPinDialog, setShowWaiterPinDialog] = useState(false)
@@ -149,6 +150,16 @@ export default function RestaurantPage() {
   const [completeForm, setCompleteForm] = useState({ paymentMethod: 'cash', discount: 0, tipAmount: 0, tipWaiterId: '' })
   const [splitForm, setSplitForm] = useState<{ itemIds: string[]; paymentMethod: string; tipAmount: number }[]>([])
 
+  useEffect(() => {
+    const syncWaiterSession = () => {
+      setActiveWaiterId(sessionStorage.getItem('restaurant.activeWaiterId') || '')
+      setWaiterSessionToken(sessionStorage.getItem('restaurant.waiterSessionToken') || '')
+      setWaiterKioskMode(sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
+    }
+    window.addEventListener('restaurant-waiter-session-changed', syncWaiterSession)
+    return () => window.removeEventListener('restaurant-waiter-session-changed', syncWaiterSession)
+  }, [])
+
   const tabFeature: Record<string, string> = {
     dashboard: 'restaurant', tables: 'restaurant.tables', orders: 'restaurant.orders',
     kitchen: 'restaurant.kitchen', bar: 'restaurant.bar', menu: 'restaurant', stockroom: 'restaurant',
@@ -205,6 +216,7 @@ export default function RestaurantPage() {
       setWaiterSessionToken('')
       sessionStorage.removeItem('restaurant.activeWaiterId')
       sessionStorage.removeItem('restaurant.waiterSessionToken')
+      setWaiterKioskMode(sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
       window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
       return
     }
@@ -219,6 +231,7 @@ export default function RestaurantPage() {
     setWaiterSessionToken('')
     sessionStorage.removeItem('restaurant.activeWaiterId')
     sessionStorage.removeItem('restaurant.waiterSessionToken')
+    setWaiterKioskMode(sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
     window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
   }
 
@@ -249,8 +262,10 @@ export default function RestaurantPage() {
       if (!response.ok) throw new Error(data.error || 'PIN verification failed')
       setActiveWaiterId(pinWaiter.id)
       setWaiterSessionToken(data.token)
+      setWaiterKioskMode(true)
       sessionStorage.setItem('restaurant.activeWaiterId', pinWaiter.id)
       sessionStorage.setItem('restaurant.waiterSessionToken', data.token)
+      sessionStorage.setItem('restaurant.waiterKioskMode', 'true')
       window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
       setShowWaiterPinDialog(false)
       setWaiterPin('')
@@ -737,9 +752,9 @@ export default function RestaurantPage() {
         {waiters.some(waiter => waiter.isActive) && <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Serving as</span>
           <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}>
-            <SelectTrigger className="w-[190px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[190px]" disabled={waiterIdentityConfirmed} aria-label={waiterIdentityConfirmed ? 'Serving waiter is locked until sign out' : 'Select serving waiter'}><SelectValue /></SelectTrigger>
             <SelectContent>
-              {!waiterMode && <SelectItem value="unassigned">No waiter selected</SelectItem>}
+              {!waiterKioskMode && <SelectItem value="unassigned">No waiter selected</SelectItem>}
               {waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -1236,7 +1251,7 @@ export default function RestaurantPage() {
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{!waiterMode && <SelectItem value="unassigned">Select waiter</SelectItem>}{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>
+              <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger disabled={waiterIdentityConfirmed} aria-label={waiterIdentityConfirmed ? 'Serving waiter is locked until sign out' : 'Select serving waiter'}><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{!waiterKioskMode && <SelectItem value="unassigned">Select waiter</SelectItem>}{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>
               <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label>Items</Label>
