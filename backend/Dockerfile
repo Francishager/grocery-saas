@@ -1,5 +1,5 @@
-# Use Node.js 18 LTS for better compatibility
-FROM node:18-alpine AS base
+# Keep the runtime aligned with firebase-admin 14 and other dependencies requiring Node 20+.
+FROM node:22-alpine AS base
 
 # Build stage
 FROM base AS builder

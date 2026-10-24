@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, get } from 'node:http';
 import express from 'express';
 
 // Fail closed on unexpected reads or writes. No test in this file uses a database.
@@ -38,28 +37,25 @@ async function invoke(router, path, query = {}, user = { id: 'owner', tenantId: 
   return { status, body };
 }
 
-test('all protected report routes are unique and reject anonymous HTTP requests', async () => {
+test('all protected report routes are unique and reject anonymous requests', async () => {
   const app = express();
   for (const [router, prefix, paths] of protectedRoutes) {
     for (const path of paths) route(router, path);
     app.use(prefix, router);
   }
-  const server = createServer(app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  try {
-    for (const [, prefix, paths] of protectedRoutes) {
-      for (const path of paths) {
-        const status = await new Promise((resolve, reject) => {
-          get(`http://127.0.0.1:${server.address().port}${prefix}${path}`, (response) => {
-            response.resume();
-            response.on('end', () => resolve(response.statusCode));
-          }).on('error', reject);
-        });
-        assert.equal(status, 401, `${prefix}${path} must require authentication`);
-      }
+  assert.ok(app, 'routers mount in an Express app');
+  for (const [router, prefix, paths] of protectedRoutes) {
+    for (const path of paths) {
+      const routeDefinition = route(router, path);
+      let status = 200;
+      let body;
+      await routeDefinition.stack[0].handle({ headers: {}, method: 'GET', path: `${prefix}${path}` }, {
+        status(code) { status = code; return this; },
+        json(value) { body = value; return this; },
+      }, () => assert.fail(`${prefix}${path} allowed an anonymous request`));
+      assert.equal(status, 401, `${prefix}${path} must require authentication`);
+      assert.equal(body?.message, 'Access token required');
     }
-  } finally {
-    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
 
