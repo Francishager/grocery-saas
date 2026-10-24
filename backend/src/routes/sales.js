@@ -13,7 +13,7 @@ import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
 import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
 import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivablesJournal } from '../services/receivablesAccountingService.js';
-import { customerProfileAccess } from '../utils/customerProfileAccess.js';
+import { customerProfileAccess, customerProfilePayload } from '../utils/customerProfileAccess.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -227,21 +227,7 @@ async function getCustomerCreditInfo(scope, customerId, access) {
   );
 
   return {
-    customer: {
-      id: customer.id,
-      name: customer.name,
-      ...(access.phone && { phone: customer.phone }),
-      ...(access.email && { email: customer.email }),
-      ...(access.address && { address: customer.address }),
-      ...(access.balance && {
-        creditLimit: toMoney(customer.creditLimit),
-        balance: toMoney(reconciledCustomer.balance),
-        openingBalance: toMoney(customer.openingBalance),
-        openingBalanceDate: customer.openingBalanceDate,
-        openingBalanceNote: customer.openingBalanceNote,
-        trustScore,
-      }),
-    },
+    customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
     summary: {
       ...(access.balance && {
         balance: toMoney(reconciledCustomer.balance),
@@ -318,16 +304,7 @@ router.get("/customers/credit-options", authenticateToken, requirePermission("ca
     const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw);
     const access = customerProfileAccess(req.user?.permissions);
     const customers = balancedCustomers.map((customer) => ({
-      id: customer.id,
-      name: customer.name,
-      ...(access.phone && { phone: customer.phone }),
-      ...(access.balance && {
-        balance: toMoney(customer.balance),
-        creditLimit: toMoney(customer.creditLimit),
-        openingBalance: toMoney(customer.openingBalance),
-        openingBalanceDate: customer.openingBalanceDate,
-        openingBalanceNote: customer.openingBalanceNote,
-      }),
+      ...customerProfilePayload(customer, access),
     }));
     res.json({ customers });
   } catch (err) {

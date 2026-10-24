@@ -180,15 +180,17 @@ export function customerCreditApplicationLines(config, { amount, reference }) {
 async function ensureCustomerReceiptAdvanceJournal(client, { tenantId, application, config }) {
   await client.$queryRaw`SELECT "id" FROM "customer_payments" WHERE "id" = ${application.sourceId} AND "tenantId" = ${tenantId} FOR UPDATE`
   const payment = await client.customerPayment.findFirst({
-    where: { id: application.sourceId, tenantId, customerId: application.customerId, allocationMode: 'explicit' },
+    where: { id: application.sourceId, tenantId, customerId: application.customerId },
     include: { allocations: true },
   })
-  const accountAllocations = (payment?.allocations || []).filter((row) => row.targetType === 'customer_account' && !row.saleId)
-  if (!payment || !accountAllocations.length || payment.saleId) {
-    throw Object.assign(new Error('This customer credit receipt has no explicit customer-account allocation. Review its receipt allocation before applying the credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  if (!payment || payment.saleId) {
+    throw Object.assign(new Error('This customer credit receipt is not an unlinked customer-account receipt. Review its allocation before applying the credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
   }
 
-  const allocatedCredit = money(accountAllocations.reduce((sum, row) => sum + money(row.amount), 0))
+  const accountAllocations = (payment.allocations || []).filter((row) => row.targetType === 'customer_account' && !row.saleId)
+  const allocatedCredit = payment.allocationMode === 'explicit'
+    ? money(accountAllocations.reduce((sum, row) => sum + money(row.amount), 0))
+    : money(Number(payment.amount) - (payment.allocations || []).reduce((sum, row) => sum + money(row.amount), 0))
   if (allocatedCredit <= 0 || allocatedCredit - money(payment.amount) > 0.01) {
     throw Object.assign(new Error('The customer receipt allocation does not match its recorded amount. Reconcile the receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
   }
@@ -230,21 +232,64 @@ async function ensureCustomerReceiptAdvanceJournal(client, { tenantId, applicati
     throw Object.assign(new Error('The original receipt account is not linked to an active accounting transaction account. Link it in Accounting before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
   }
 
+  const receiptEntry = await client.journalEntry.findFirst({
+    where: { tenantId, sourceType: 'CUSTOMER_RECEIPT', sourceId: payment.id, status: 'posted' },
+    include: { lines: true },
+  })
+  if (!receiptEntry) {
+    await postReceivablesJournal(client, {
+      tenantId,
+      branchId: payment.branchId || cashAccount.branchId || null,
+      userId: cashRow.userId,
+      sourceType: 'CUSTOMER_RECEIPT',
+      sourceId: payment.id,
+      date: payment.createdAt,
+      reference: payment.reference || payment.id,
+      description: `Customer receipt ${payment.reference || payment.id} (historical receipt reconciliation)`,
+      lines: receiptCollectionLines(config, {
+        transactionAccountId: transactionAccount.id,
+        amount: payment.amount,
+        receivableApplied,
+        reference: payment.reference || payment.id,
+      }),
+    })
+    return
+  }
+
+  const net = (lines, accountId) => money(lines
+    .filter((line) => line.accountId === accountId)
+    .reduce((sum, line) => sum + money(line.debit) - money(line.credit), 0))
+  const debitTotal = money(receiptEntry.lines.reduce((sum, line) => sum + money(line.debit), 0))
+  const creditTotal = money(receiptEntry.lines.reduce((sum, line) => sum + money(line.credit), 0))
+  if (Math.abs(debitTotal - creditTotal) > 0.01 || Math.abs(net(receiptEntry.lines, transactionAccount.id) - money(payment.amount)) > 0.01) {
+    throw Object.assign(new Error('The posted receipt does not match the verified cash transaction. Reconcile the original receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+
+  const reclassEntry = await client.journalEntry.findFirst({
+    where: { tenantId, sourceType: 'CUSTOMER_RECEIPT_ADVANCE_RECLASS', sourceId: payment.id, status: 'posted' },
+    include: { lines: true },
+  })
+  const advancesAlreadyRecognized = money(net(receiptEntry.lines, config.customerAdvancesAccountId) * -1 - net(reclassEntry?.lines || [], config.customerAdvancesAccountId))
+  const shortfall = money(Math.max(0, advancesAmount - advancesAlreadyRecognized))
+  if (shortfall <= 0.01) return
+
+  const receivableAvailableToReclass = money(-net(receiptEntry.lines, config.receivableAccountId) - receivableApplied)
+  if (receivableAvailableToReclass + 0.01 < shortfall) {
+    throw Object.assign(new Error('The original receipt journal does not contain a matching receivable credit to reclassify safely. Reconcile the original receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
   await postReceivablesJournal(client, {
     tenantId,
     branchId: payment.branchId || cashAccount.branchId || null,
     userId: cashRow.userId,
-    sourceType: 'CUSTOMER_RECEIPT',
+    sourceType: 'CUSTOMER_RECEIPT_ADVANCE_RECLASS',
     sourceId: payment.id,
     date: payment.createdAt,
     reference: payment.reference || payment.id,
-    description: `Customer receipt ${payment.reference || payment.id} (historical receipt reconciliation)`,
-    lines: receiptCollectionLines(config, {
-      transactionAccountId: transactionAccount.id,
-      amount: payment.amount,
-      receivableApplied,
-      reference: payment.reference || payment.id,
-    }),
+    description: `Reclassify customer receipt ${payment.reference || payment.id} from receivables to customer advances`,
+    lines: [
+      { accountId: config.receivableAccountId, debit: shortfall, credit: 0, description: 'Correct over-applied receivable credit on customer receipt' },
+      { accountId: config.customerAdvancesAccountId, debit: 0, credit: shortfall, description: 'Recognize unapplied customer receipt as customer advance' },
+    ],
   })
 }
 
@@ -255,7 +300,9 @@ export async function postCustomerCreditApplicationJournal(client, { tenantId, b
     where: { tenantId, sourceType: 'CUSTOMER_RECEIPT', sourceId: application.sourceId, status: 'posted' },
     include: { lines: true },
   })
-  if (!receiptEntry) {
+  const existingAdvances = money((receiptEntry?.lines || []).filter((line) => line.accountId === config.customerAdvancesAccountId)
+    .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0))
+  if (!receiptEntry || existingAdvances + 0.01 < money(application.amount)) {
     await ensureCustomerReceiptAdvanceJournal(client, { tenantId, application, config })
     receiptEntry = await client.journalEntry.findFirst({
       where: { tenantId, sourceType: 'CUSTOMER_RECEIPT', sourceId: application.sourceId, status: 'posted' },
@@ -263,8 +310,16 @@ export async function postCustomerCreditApplicationJournal(client, { tenantId, b
     })
   }
   if (!receiptEntry) throw Object.assign(new Error('The original customer receipt could not be reconciled to the general ledger. No credit was applied.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_SOURCE_MISSING' })
-  const advancesCredit = money(receiptEntry.lines.filter((line) => line.accountId === config.customerAdvancesAccountId)
-    .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0))
+  const reclassEntry = await client.journalEntry.findFirst({
+    where: { tenantId, sourceType: 'CUSTOMER_RECEIPT_ADVANCE_RECLASS', sourceId: application.sourceId, status: 'posted' },
+    include: { lines: true },
+  })
+  const advancesCredit = money(
+    receiptEntry.lines.filter((line) => line.accountId === config.customerAdvancesAccountId)
+      .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0) +
+    (reclassEntry?.lines || []).filter((line) => line.accountId === config.customerAdvancesAccountId)
+      .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0),
+  )
   const [previousApplicationBalance] = await client.$queryRaw`
     SELECT COALESCE(SUM(jl."debit" - jl."credit"), 0)::double precision AS amount
     FROM "customer_credit_applications" cca

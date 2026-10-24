@@ -24,8 +24,12 @@ interface Customer {
   id: string
   name: string
   email?: string
+  maskedEmail?: string
   phone?: string
+  maskedPhone?: string
   address?: string
+  maskedAddress?: string
+  maskedNotes?: string
   creditLimit: number
   balance: number
   openingBalance?: number
@@ -56,6 +60,11 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
   const canManageOpeningBalances = Boolean(
     user && (openingBalanceRoles.includes(user.role) || user.permissions?.includes('*'))
   )
+  const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
+  const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
+  const canViewCustomerAddress = hasPermission('canViewCustomerAddress')
+  const canViewCustomerBalance = hasPermission('canViewCustomerBalance')
+  const canViewCustomerNotes = hasPermission('canViewCustomerNotes')
   
   const [formData, setFormData] = useState({
     name: '',
@@ -125,7 +134,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       return
     }
 
-    if (Number(formData.creditLimit || 0) <= 0) {
+    if ((!initialData?.id || canViewCustomerBalance) && Number(formData.creditLimit || 0) <= 0) {
       toast({
         title: 'Credit limit required',
         description: 'Set a customer credit limit greater than zero before saving this customer.',
@@ -158,9 +167,14 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         return
       }
       const payload = {
-        ...formData,
-        creditLimit: Number(formData.creditLimit || 0),
+        name: formData.name,
+        status: formData.status,
         branchId: formData.branchId || undefined,
+        creditLimit: !initialData?.id || canViewCustomerBalance ? Number(formData.creditLimit || 0) : undefined,
+        phone: !initialData?.id || canViewCustomerPhone ? formData.phone : undefined,
+        email: !initialData?.id || canViewCustomerEmail ? formData.email : undefined,
+        address: !initialData?.id || canViewCustomerAddress ? formData.address : undefined,
+        notes: !initialData?.id || canViewCustomerNotes ? formData.notes : undefined,
         openingBalance: canManageOpeningBalances ? Number(formData.openingBalance || 0) : undefined,
         openingBalanceDate: canManageOpeningBalances ? formData.openingBalanceDate || null : undefined,
         openingBalanceNote: canManageOpeningBalances ? formData.openingBalanceNote || '' : undefined,
@@ -260,30 +274,30 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
             
             <div className="space-y-2">
               <Label htmlFor="phone">Phone</Label>
-              <Input
+              {(!initialData?.id || canViewCustomerPhone) ? <Input
                 id="phone"
                 value={formData.phone}
                 onChange={(e) => handleInputChange('phone', e.target.value)}
                 placeholder="Enter phone number"
-              />
+              /> : <Input id="phone" value="" readOnly placeholder={initialData.maskedPhone || '07xxxxxx'} aria-label="Phone number masked by your permissions" />}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input
+              {(!initialData?.id || canViewCustomerEmail) ? <Input
                 id="email"
                 type="email"
                 value={formData.email}
                 onChange={(e) => handleInputChange('email', e.target.value)}
                 placeholder="Enter email address"
-              />
+              /> : <Input id="email" value="" readOnly placeholder={initialData.maskedEmail || 'x******@*****'} aria-label="Email masked by your permissions" />}
             </div>
             
             <div className="space-y-2">
               <Label htmlFor="creditLimit">Credit Limit *</Label>
-              <Input
+              {(!initialData?.id || canViewCustomerBalance) ? <Input
                 id="creditLimit"
                 type="number"
                 value={formData.creditLimit}
@@ -292,19 +306,19 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
                 min="0.01"
                 step="0.01"
                 required
-              />
+              /> : <Input id="creditLimit" value="" readOnly placeholder="******" aria-label="Credit limit masked by your permissions" />}
             </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="address">Address</Label>
-            <Textarea
+            {(!initialData?.id || canViewCustomerAddress) ? <Textarea
               id="address"
               value={formData.address}
               onChange={(e) => handleInputChange('address', e.target.value)}
               placeholder="Enter customer address"
               rows={2}
-            />
+            /> : <Textarea id="address" value="" readOnly placeholder={initialData.maskedAddress || '******'} aria-label="Address masked by your permissions" rows={2} />}
           </div>
 
           {canManageOpeningBalances && (
@@ -365,7 +379,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
             </div>
           )}
 
-          <div className="space-y-2">
+          {(!initialData?.id || canViewCustomerNotes) && <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>
             <Textarea
               id="notes"
@@ -374,7 +388,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
               placeholder="Enter any additional notes"
               rows={3}
             />
-          </div>
+          </div>}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

@@ -46,6 +46,7 @@ const PERM_LABELS: Record<string, string> = {
   canCreateCustomer:'Can create customers', canViewCustomer:'Can view customers', canEditCustomer:'Can edit customers', canDeleteCustomer:'Can delete customers',
   canViewCustomerPhone:'Can view customer phone numbers', canViewCustomerEmail:'Can view customer email addresses', canViewCustomerAddress:'Can view customer addresses', canViewCustomerBalance:'Can view customer balances and credit limits',
   canViewCustomerSalesHistory:'Can view customer sales history', canViewCustomerPaymentsHistory:'Can view customer payment history', canViewCustomerReturnsHistory:'Can view customer returns history', canViewCustomerCreditNotesHistory:'Can view customer credit note history', canViewCustomerWithdrawalsHistory:'Can view customer withdrawal history', canViewCustomerBusinessActivity:'Can view customer service and order activity',
+  canViewCustomerNotes:'Can view customer notes', canRecordCustomerPayment:'Can record customer payments', canPrintCustomerReceipts:'Can print and download customer receipts',
   canCreateReceivable:'Can create credit sales', canViewReceivable:'Can view receivables', canEditReceivable:'Can edit receivables', canDeleteReceivable:'Can delete receivables',
   canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
   canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaff:'Can edit staff', canDeleteStaff:'Can delete staff',

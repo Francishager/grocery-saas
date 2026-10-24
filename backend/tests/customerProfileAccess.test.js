@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
+import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows, maskCustomerEmail, maskCustomerPhone } from '../src/utils/customerProfileAccess.js'
 
 test('customer profile strips contact and financial fields unless explicitly permitted', () => {
   const access = customerProfileAccess(['canViewCustomer'])
@@ -9,7 +9,10 @@ test('customer profile strips contact and financial fields unless explicitly per
     balance: 120000, creditLimit: 200000, openingBalance: 50000, trustScore: 82, status: 'active',
   }, access)
 
-  assert.deepEqual(customer, { id: 'customer-1', name: 'A Customer', status: 'active' })
+  assert.deepEqual(customer, {
+    id: 'customer-1', name: 'A Customer', maskedPhone: '+2567xxxxxxxx',
+    maskedEmail: 'x******@*****', maskedAddress: '******', status: 'active',
+  })
 })
 
 test('customer profile exposes only specifically granted contact and balance fields', () => {
@@ -24,6 +27,22 @@ test('customer profile exposes only specifically granted contact and balance fie
   assert.equal(customer.trustScore, 82)
   assert.equal('email' in customer, false)
   assert.equal('address' in customer, false)
+  assert.equal(customer.maskedEmail, 'x******@*****')
+})
+
+test('masked contact formats retain only the requested phone prefix and no email address characters', () => {
+  assert.equal(maskCustomerPhone('0754938901'), '07xxxxxxxx')
+  assert.equal(maskCustomerPhone('+256 770 123 456'), '+256 7xx xxx xxx')
+  assert.equal(maskCustomerEmail('person@example.com'), 'x******@*****')
+})
+
+test('customer operational permissions are independent of profile viewing', () => {
+  const access = customerProfileAccess(['canRecordCustomerPayment', 'canPrintCustomerReceipts', 'canCreateWithdrawal'])
+  assert.equal(access.recordPayment, true)
+  assert.equal(access.printReceipts, true)
+  assert.equal(access.withdraw, true)
+  assert.equal(access.balance, false)
+  assert.equal(access.sales, false)
 })
 
 test('customer history permission groups do not expose other transaction categories', () => {

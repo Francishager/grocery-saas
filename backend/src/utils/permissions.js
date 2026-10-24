@@ -108,6 +108,9 @@ const PERMISSION_TO_FEATURES = {
   canViewCustomerCreditNotesHistory: ['customers', 'crm'],
   canViewCustomerWithdrawalsHistory: ['customers', 'crm'],
   canViewCustomerBusinessActivity: ['customers', 'crm'],
+  canViewCustomerNotes: ['customers', 'crm'],
+  canRecordCustomerPayment: ['customers', 'crm', 'receivables.payments'],
+  canPrintCustomerReceipts: ['customers', 'crm'],
   canEditCustomer: ['customers', 'crm'],
   canDeleteCustomer: ['customers', 'crm'],
   canCreateReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
@@ -284,6 +287,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerAddress", "canViewCustomerBalance",
   "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
   "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
+  "canViewCustomerNotes", "canRecordCustomerPayment", "canPrintCustomerReceipts",
   "canCreateReceivable", "canViewReceivable", "canEditReceivable", "canDeleteReceivable",
   "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
@@ -570,6 +574,18 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canViewCustomerBusinessActivity: {
     name: 'View customer service and order activity',
     description: 'See customer rentals, restaurant orders, reservations, deliveries, appointments, work orders, and service contracts.',
+  },
+  canViewCustomerNotes: {
+    name: 'View customer notes',
+    description: 'See private customer profile notes.',
+  },
+  canRecordCustomerPayment: {
+    name: 'Record customer payments',
+    description: 'Record payments against customer balances and unapplied customer funds.',
+  },
+  canPrintCustomerReceipts: {
+    name: 'Print and download customer receipts',
+    description: 'Reprint or download receipts from customer transaction history.',
   },
   canEditCustomer: {
     name: 'Edit customers',

@@ -51,9 +51,13 @@ interface Customer {
   name: string
   email?: string
   phone?: string
+  maskedPhone?: string
   address?: string
+  maskedAddress?: string
+  maskedEmail?: string
   creditLimit?: number
   balance?: number
+  availableForWithdrawal?: number
   openingBalance?: number
   openingBalanceDate?: string | null
   openingBalanceNote?: string
@@ -137,8 +141,10 @@ const parseAmount = (value: string | number | undefined) => {
   return Number.isFinite(amount) ? amount : 0
 }
 
-const availableCustomerFunds = (customer: Pick<Customer, 'balance'> | null | undefined) =>
-  Math.max(0, -parseAmount(customer?.balance))
+const availableCustomerFunds = (customer: Pick<Customer, 'balance' | 'availableForWithdrawal'> | null | undefined) =>
+  customer?.availableForWithdrawal != null
+    ? Math.max(0, parseAmount(customer.availableForWithdrawal))
+    : Math.max(0, -parseAmount(customer?.balance))
 
 const searchText = (...values: unknown[]) =>
   values
@@ -213,7 +219,6 @@ export default function ReceivablesPage() {
   const savingWithdrawalRef = React.useRef(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
-  const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<Customer | null>(null)
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
   const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
@@ -236,7 +241,9 @@ export default function ReceivablesPage() {
   const creditEnabled = hasPermission('canViewReceivable')
   const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
   const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
-  const canViewCustomerBalance = hasPermission('canViewCustomerBalance') || creditEnabled
+  const canViewCustomerBalance = hasPermission('canViewCustomerBalance')
+  const canRecordCustomerPayment = hasPermission('canRecordCustomerPayment')
+  const canEditCustomer = hasPermission('canEditCustomer') || hasPermission('canEditReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
   const canDeleteCustomer = hasPermission('canDeleteCustomer')
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
@@ -867,7 +874,7 @@ export default function ReceivablesPage() {
   const recordPayment = async () => {
     if (savingPaymentRef.current) return
 
-    if (selectedSale && !canRecordSalePayment(sales.find((sale) => sale.id === selectedSale.id) || selectedSale)) {
+    if (selectedSale && (!canRecordCustomerPayment || !canRecordSalePayment(sales.find((sale) => sale.id === selectedSale.id) || selectedSale))) {
       toast({ title: 'No payment due', description: 'This sale has no outstanding payment to record.' })
       setShowPaymentModal(false)
       setSelectedSale(null)
@@ -1089,7 +1096,7 @@ export default function ReceivablesPage() {
   }
 
   const renderCustomerNameButton = (customer?: CustomerHistoryTarget | null, fallback = 'Walk-in customer') => {
-    if (!customer?.id) return <span>{customer?.name || fallback}</span>
+    if (!customer?.id || !hasPermission('canViewCustomer')) return <span>{customer?.name || fallback}</span>
     return (
       <button
         type="button"
@@ -1484,7 +1491,6 @@ export default function ReceivablesPage() {
   }
 
   const closeDetails = () => {
-    setSelectedCustomerDetail(null)
     setSelectedSaleDetail(null)
   }
 
@@ -1655,8 +1661,8 @@ export default function ReceivablesPage() {
                       </div>
                       <div className="min-w-0 break-words">
                         <h3>{renderCustomerNameButton(customer, customer.name)}</h3>
-                        <p className="text-sm text-muted-foreground">{canViewCustomerPhone ? customer.phone || 'No phone' : 'Phone restricted'}</p>
-                        <p className="text-sm text-muted-foreground">{canViewCustomerEmail ? customer.email || 'No email' : 'Email restricted'}</p>
+                        <p className="text-sm text-muted-foreground">{canViewCustomerPhone ? customer.phone || 'No phone on file' : customer.maskedPhone || '07xxxxxx'}</p>
+                        <p className="text-sm text-muted-foreground">{canViewCustomerEmail ? customer.email || 'No email on file' : customer.maskedEmail || 'x******@*****'}</p>
                       </div>
                     </div>
                     <div className="text-right">
@@ -1664,38 +1670,38 @@ export default function ReceivablesPage() {
                       <div className="mt-2">
                         <p className="text-sm text-muted-foreground">Trust Score</p>
                         <p className={`font-bold ${getTrustScoreColor(customer.trustScore || 0)}`}>
-                          {canViewCustomerBalance ? `${customer.trustScore || 0}/100` : 'Restricted'}
+                          {canViewCustomerBalance ? `${customer.trustScore || 0}/100` : '******'}
                         </p>
                       </div>
                     </div>
                   </div>
                   
-                  {canViewCustomerBalance && <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Credit Limit</p>
-                      <p className="font-semibold">{formatCurrency(customer.creditLimit || 0)}</p>
+                      <p className="font-semibold">{canViewCustomerBalance ? formatCurrency(customer.creditLimit || 0) : '******'}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Opening Balance</p>
-                      <p className="font-semibold">{formatCurrency(customer.openingBalance || 0)}</p>
-                      {customer.openingBalanceDate && (
+                      <p className="font-semibold">{canViewCustomerBalance ? formatCurrency(customer.openingBalance || 0) : '******'}</p>
+                      {canViewCustomerBalance && customer.openingBalanceDate && (
                         <p className="text-xs text-muted-foreground">{formatDisplayDate(customer.openingBalanceDate)}</p>
                       )}
                     </div>
                     <div>
                       <p className="text-muted-foreground">Balance</p>
-                      <p className="font-semibold text-red-600">{formatCurrency(customer.balance || 0)}</p>
+                      <p className="font-semibold text-red-600">{canViewCustomerBalance ? formatCurrency(customer.balance || 0) : '******'}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Available Credit</p>
                       <p className="font-semibold text-green-600">
-                        {formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}
+                        {canViewCustomerBalance ? formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0)) : '******'}
                       </p>
                     </div>
-                  </div>}
+                  </div>
                   
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
+                    {canRecordCustomerPayment && <Button
                       size="sm"
                       onClick={() => {
                         setSelectedCustomer(customer)
@@ -1705,7 +1711,7 @@ export default function ReceivablesPage() {
                     >
                       <DollarSign className="h-4 w-4 mr-1" />
                       Record Payment
-                    </Button>
+                    </Button>}
                     {canCreateWithdrawal && (
                       <Button
                         size="sm"
@@ -1728,17 +1734,17 @@ export default function ReceivablesPage() {
                         Withdrawal
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => setSelectedCustomerDetail(customer)}>
+                    <Button size="sm" variant="outline" onClick={() => openCustomerHistory(customer)}>
                       <Eye className="h-4 w-4 mr-1" />
-                      View Details
+                      Customer Profile
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => {
+                    {canEditCustomer && <Button size="sm" variant="outline" onClick={() => {
                       setEditingCustomer(customer)
                       setShowCustomerModal(true)
                     }}>
                       <Edit className="h-4 w-4 mr-1" />
                       Edit
-                    </Button>
+                    </Button>}
                     {canDeleteCustomer && customer.canDelete && (
                       <Button size="sm" variant="destructive" disabled={!online} onClick={() => deleteCustomer(customer)}>
                         <Trash2 className="h-4 w-4 mr-1" />
@@ -1805,7 +1811,7 @@ export default function ReceivablesPage() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {sale.customer && canRecordSalePayment(sale) && (
+                    {canRecordCustomerPayment && sale.customer && canRecordSalePayment(sale) && (
                       <Button
                         size="sm"
                         onClick={() => {
@@ -2016,6 +2022,25 @@ export default function ReceivablesPage() {
         open={!!historyCustomer}
         onOpenChange={(open) => {
           if (!open) setHistoryCustomer(null)
+        }}
+        onRecordPayment={(profile) => {
+          setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedSale(null)
+          setPaymentAmount('')
+          setHistoryCustomer(null)
+          setShowPaymentModal(true)
+        }}
+        onWithdraw={(profile) => {
+          setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedSale(null)
+          setWithdrawalAmount('')
+          setPaymentMethod('cash')
+          setMobileProvider('')
+          setPhoneNumber('')
+          setTransactionId('')
+          setSelectedCashAccountId(null)
+          setHistoryCustomer(null)
+          setShowWithdrawalModal(true)
         }}
       />
 
@@ -2631,45 +2656,22 @@ export default function ReceivablesPage() {
         </div>
       )}
 
-      {(selectedCustomerDetail || selectedSaleDetail) && (
+      {selectedSaleDetail && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-lg font-semibold">
-                  {selectedCustomerDetail ? selectedCustomerDetail.name : selectedSaleDetail?.receiptNo}
+                  {selectedSaleDetail.receiptNo}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {selectedCustomerDetail ? 'Customer details' : 'Sale details'}
+                  Sale details
                 </p>
               </div>
               <Button variant="outline" size="sm" onClick={closeDetails}>
                 Close
               </Button>
             </div>
-
-            {selectedCustomerDetail && (
-              <div>
-                <DetailRow label="Status" value={getStatusBadge(selectedCustomerDetail.status || 'active')} />
-                <DetailRow label="Phone" value={selectedCustomerDetail.phone} />
-                <DetailRow label="Email" value={selectedCustomerDetail.email} />
-                <DetailRow label="Address" value={selectedCustomerDetail.address} />
-                <DetailRow label="Credit Limit" value={formatCurrency(selectedCustomerDetail.creditLimit || 0)} />
-                <DetailRow label="Balance" value={formatCurrency(selectedCustomerDetail.balance || 0)} />
-                <DetailRow label="Opening Balance" value={formatCurrency(selectedCustomerDetail.openingBalance || 0)} />
-                <DetailRow
-                  label="Opening Balance Date"
-                  value={selectedCustomerDetail.openingBalanceDate ? formatDisplayDate(selectedCustomerDetail.openingBalanceDate) : 'Not set'}
-                />
-                <DetailRow label="Opening Balance Note" value={selectedCustomerDetail.openingBalanceNote} />
-                <DetailRow
-                  label="Available Credit"
-                  value={formatCurrency(Number(selectedCustomerDetail.creditLimit || 0) - Number(selectedCustomerDetail.balance || 0))}
-                />
-                <DetailRow label="Trust Score" value={`${selectedCustomerDetail.trustScore || 0}/100`} />
-                <DetailRow label="Notes" value={selectedCustomerDetail.notes} />
-              </div>
-            )}
 
             {selectedSaleDetail && (
               <div className="space-y-5">

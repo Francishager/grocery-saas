@@ -1,6 +1,14 @@
-import { calculateCustomerReceivableBalance, effectiveCreditNoteRows } from '../utils/customerBalance.js'
+import { calculateCustomerReceivableBalance, calculateCustomerReceivableBalanceBefore, effectiveCreditNoteRows } from '../utils/customerBalance.js'
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100
+
+export function availableAdvanceFromReceipt({ amount, allocatedToCustomer, alreadyApplied, balanceBefore }) {
+  const receiptAmount = money(amount)
+  const allocationCap = Math.min(receiptAmount, Math.max(0, money(allocatedToCustomer)))
+  const receivableSettled = Math.min(receiptAmount, Math.max(0, money(balanceBefore)))
+  const advancesRecognizable = money(receiptAmount - receivableSettled)
+  return money(Math.max(0, Math.min(allocationCap, advancesRecognizable) - money(alreadyApplied)))
+}
 
 export async function applyAvailableCustomerCredit(client, { scope, customerId, saleId, amountDue, availableCredit, userId, branchId }) {
   const balanceSnapshot = await calculateCustomerReceivableBalance(client, scope, customerId)
@@ -51,9 +59,21 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
   const sources = []
   for (const payment of payments) {
     const alreadyUsed = previouslyApplied.get(`payment:${payment.id}`) || 0
-    const available = payment.allocationMode === 'explicit'
-      ? money((accountAllocationByPayment.get(payment.id) || 0) - alreadyUsed)
-      : payment.saleId ? 0 : money(Number(payment.amount) - (allocationsByPayment.get(payment.id) || 0) - alreadyUsed)
+    if (payment.saleId) continue
+    const accountAllocation = payment.allocationMode === 'explicit'
+      ? accountAllocationByPayment.get(payment.id) || 0
+      : money(Number(payment.amount) - (allocationsByPayment.get(payment.id) || 0))
+    if (accountAllocation <= 0) continue
+    const beforeReceipt = await calculateCustomerReceivableBalanceBefore(
+      client, scope, customerId, payment.createdAt,
+    )
+    if (!beforeReceipt) continue
+    const available = availableAdvanceFromReceipt({
+      amount: payment.amount,
+      allocatedToCustomer: accountAllocation,
+      alreadyApplied: alreadyUsed,
+      balanceBefore: beforeReceipt.balance,
+    })
     if (available > 0.009) sources.push({ sourceType: 'payment', sourceId: payment.id, amount: available, createdAt: payment.createdAt })
   }
 

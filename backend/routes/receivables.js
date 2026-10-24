@@ -346,6 +346,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
+    const access = customerProfileAccess(req.user?.permissions)
 
     const customer = await prisma.customer.findFirst({
       where: scopedWhere(scope, { id }),
@@ -1017,6 +1018,12 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         creditNotes: access.creditNotes,
         withdrawals: access.withdrawals,
         businessActivity: access.businessActivity,
+        notes: access.notes,
+        recordPayment: access.recordPayment,
+        printReceipts: access.printReceipts,
+        edit: access.edit,
+        delete: access.delete,
+        withdraw: access.withdraw,
       },
       summary: {
         ...totals,
@@ -1029,6 +1036,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           openingBalanceNote: customer.openingBalanceNote,
           availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance),
         }),
+        ...(access.withdraw && { availableForWithdrawal: Math.max(0, -toMoney(reconciledCustomer.balance)) }),
         lastTransactionDate: transactions[0]?.date || null
       },
       transactions
@@ -1138,7 +1146,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
 })
 
 // Update customer
-router.put('/customers/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCustomer', 'canEditReceivable']), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -1971,7 +1979,7 @@ router.get('/payments', authenticateToken, requirePermission('canViewReceivable'
 })
 
 // Record customer payment
-router.post('/payments', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, loadUserPermissions, async (req, res) => {
+router.post('/payments', authenticateToken, requirePermission('canRecordCustomerPayment'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
