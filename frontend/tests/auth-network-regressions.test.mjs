@@ -36,3 +36,11 @@ test('active sessions expire after at least eight idle hours and activity cannot
   assert.match(context, /if \(isExpired\(currentTime\)\)\s*\{\s*expired = true\s*void logout\(\)\s*return\s*\}/);
   assert.match(context, /document\.addEventListener\('visibilitychange', checkInactivity\)/);
 });
+
+test('expired access tokens are refreshed before the session is cleared and refresh on tab return', () => {
+  const context = readFileSync(sourceRoot + '/contexts/JWTAuthContext.tsx', 'utf8');
+  assert.match(context, /if \(response\.status === 401\)\s*\{\s*const refreshed = await refreshTokens\(\)/);
+  assert.match(context, /refreshedTokens\.accessToken !== tokens\.accessToken/);
+  assert.match(context, /window\.addEventListener\('focus', refreshIfExpiring\)/);
+  assert.match(context, /document\.addEventListener\('visibilitychange', refreshIfExpiring\)/);
+});

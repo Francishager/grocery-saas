@@ -61,7 +61,7 @@ export interface JWTAuthContextValue {
   /** Register */
   register: (data: { email: string; password: string; name: string }) => Promise<void>
   /** Refresh tokens */
-  refreshTokens: () => Promise<void>
+  refreshTokens: () => Promise<boolean>
   /** Update user */
   updateUser: (updates: Partial<User>) => void
   /** Check if user has permission */
@@ -434,7 +434,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   }, [resolvedApiEndpoint, onLogin])
 
   const refreshTokens = useCallback(async () => {
-    if (!tokens?.refreshToken) return
+    if (!tokens?.refreshToken) return false
 
     try {
       const response = await fetch(`${resolvedApiEndpoint}/refresh`, {
@@ -456,7 +456,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           logout()
         }
         // Other status codes (5xx, etc.) — server issue, keep cached session
-        return
+        return false
       }
 
       const data = await response.json()
@@ -470,11 +470,14 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           persistAuth(user, data.tokens)
         }
         onTokenRefresh?.(data.tokens)
+        return true
       }
+      return false
     } catch {
       // Network error (offline, DNS failure, timeout, etc.) — keep cached session
       // The user can still use the app offline with their existing token
       // Silent
+      return false
     }
   }, [resolvedApiEndpoint, tokens, user, logout, onTokenRefresh])
 
@@ -558,15 +561,32 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       controller = new AbortController()
       const timeout = window.setTimeout(() => controller?.abort(), 15000)
       try {
-        const response = await fetch(`${resolvedApiEndpoint}/me`, {
+            let activeTokens = tokens
+        let response = await fetch(`${resolvedApiEndpoint}/me`, {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
           signal: controller.signal,
         })
+        if (response.status === 401) {
+          const refreshed = await refreshTokens()
+          if (!refreshed) return
+          try {
+            const refreshedTokens = JSON.parse(localStorage.getItem(tokenStorageKey) || 'null') as AuthTokens | null
+            if (refreshedTokens?.accessToken && refreshedTokens.accessToken !== tokens.accessToken) {
+                  activeTokens = refreshedTokens
+              response = await fetch(`${resolvedApiEndpoint}/me`, {
+                headers: { Authorization: `Bearer ${refreshedTokens.accessToken}` },
+                signal: controller.signal,
+              })
+            }
+          } catch {
+            // Keep the original response; the normal unauthorized handling below applies.
+          }
+        }
         const data = await response.json().catch(() => ({}))
         if (cancelled) return
         if (response.ok && data.user) {
           setUser(data.user)
-          persistAuth(data.user, tokens)
+              persistAuth(data.user, activeTokens)
           initialCheck = false
         } else if (response.status === 401 || response.status === 403) {
           revokeAccess(data.message || data.error || 'Please sign in again.')
@@ -595,7 +615,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       window.removeEventListener('online', refreshUser)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokens?.accessToken, user?.id, user?.role, user?.workingHoursAccess?.restricted, resolvedApiEndpoint])
+  }, [tokens?.accessToken, tokens?.refreshToken, user?.id, user?.role, user?.workingHoursAccess?.restricted, resolvedApiEndpoint, refreshTokens, tokenStorageKey])
 
   // Auto refresh tokens before expiry
   useEffect(() => {
@@ -603,12 +623,26 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
     const expiresIn = tokens.expiresIn * 1000 // Convert to milliseconds
     const refreshTime = expiresIn - refreshThreshold * 1000
+    const refreshIfExpiring = () => {
+      try {
+        const payload = JSON.parse(atob(tokens.accessToken.split('.')[1]))
+        if (payload.exp * 1000 - Date.now() <= refreshThreshold * 1000) refreshTokens()
+      } catch {
+        refreshTokens()
+      }
+    }
 
     const timeoutId = setTimeout(() => {
       refreshTokens()
     }, refreshTime)
+    window.addEventListener('focus', refreshIfExpiring)
+    document.addEventListener('visibilitychange', refreshIfExpiring)
 
-    return () => clearTimeout(timeoutId)
+    return () => {
+      clearTimeout(timeoutId)
+      window.removeEventListener('focus', refreshIfExpiring)
+      document.removeEventListener('visibilitychange', refreshIfExpiring)
+    }
   }, [autoRefresh, tokens, refreshThreshold, refreshTokens])
 
   const value: JWTAuthContextValue = {

@@ -1,6 +1,5 @@
 import { Router } from "express";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { permissionsForUser } from "../utils/permissions.js";
@@ -9,6 +8,7 @@ import { auditLog } from "../utils/audit.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 import { getJwtSecret } from "../utils/jwtSecret.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
+import { createSessionTokens } from "../utils/sessionTokens.js";
 
 const router = Router();
 const invitationAttemptLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 12, keyGenerator: (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown' });
@@ -54,13 +54,10 @@ function invitationPublicFields(inv, plan = null) {
 }
 
 function createTokens(user) {
-  const accessToken = jwt.sign(
+  return createSessionTokens(
     { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
-    getJwtSecret(),
-    { expiresIn: "15m" }
+    getJwtSecret()
   );
-  const refreshToken = jwt.sign({ id: user.id, type: "refresh" }, getJwtSecret(), { expiresIn: "7d" });
-  return { accessToken, refreshToken, expiresIn: 900, tokenType: "Bearer" };
 }
 
 // List invitations
