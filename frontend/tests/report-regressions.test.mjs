@@ -155,6 +155,19 @@ test('partially paid credit invoices split cash and credit card details without 
   assert.equal(amount(render(data), 'Credit Sales'), 800);
 });
 
+test('daily report drilldowns include branch and unrelated transactions do not inherit Walk-in customers', () => {
+  const data = { summary: { cashSales: 120 }, transactions: [
+    { id: 'sale', kind: 'sale', paymentMethod: 'cash', amount: 120, customer: 'Walk-in', branch: 'Main', staff: 'Amina' },
+    { id: 'expense', kind: 'expense', paymentMethod: 'cash', amount: 20, branch: 'Main', staff: 'Amina' },
+  ] };
+  let tree = render(data);
+  card(tree, 'Cash Sales').props.onClick();
+  tree = render(data);
+  assert.match(textOf(tree), /Branch/);
+  assert.match(textOf(tree), /Main/);
+  assert.doesNotMatch(textOf(render({ transactions: [{ id: 'payment', kind: 'collection', amount: 50 }] })), /Walk-in/);
+});
+
 test('sales returns and credit notes reduce net revenue and reverse returned inventory cost in profit drilldowns', () => {
   const data = { summary: { salesReturns: 300 }, profitability: {
     revenue: 700, salesReturns: 300, cogs: 250, returnedCogs: 350, grossProfit: 450, expenses: 50, netProfit: 400,

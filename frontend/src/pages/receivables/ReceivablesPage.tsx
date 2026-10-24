@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
+import { displayReference } from '@/lib/displayReference'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
@@ -1884,7 +1885,7 @@ export default function ReceivablesPage() {
                     )}
                     <div className="flex flex-wrap gap-2">
                       <TransactionReceiptButton data={{
-                        title: 'Customer payment receipt', reference: payment.reference || payment.transactionId || `CP-${String(payment.id).slice(-8)}`,
+                        title: 'Customer payment receipt', reference: displayReference(payment.reference || payment.transactionId, payment.id, 'PAY'),
                         date: payment.createdAt, amount: Number(payment.amount || 0), partyLabel: 'Received from', partyName: payment.customer?.name || 'Customer',
                         fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Transaction reference', value: payment.transactionId }, { label: 'Applied to sale', value: payment.sale?.receiptNo }, { label: 'Notes', value: payment.notes }],
                       }} />

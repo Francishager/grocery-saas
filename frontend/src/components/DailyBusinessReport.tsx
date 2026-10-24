@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatCurrency, formatDisplayDate } from '@/lib/utils'
+import { displayReference } from '@/lib/displayReference'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 
 export interface DailyBusinessData {
@@ -246,6 +247,7 @@ function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldo
                     <th className="px-3 py-2">Reference</th>
                     <th className="px-3 py-2">Customer</th>
                     <th className="px-3 py-2">Staff</th>
+                    <th className="px-3 py-2">Branch</th>
                     <th className="px-3 py-2">Method</th>
                     <th className="px-3 py-2 text-right">Debit</th>
                     <th className="px-3 py-2 text-right">Credit</th>
@@ -259,9 +261,10 @@ function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldo
                   {drilldown.rows.map((row, index) => (
                     <tr key={row.id || index} className="border-t hover:bg-muted/30">
                       <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                      <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => onTransaction(row)}>{row.reference || row.id}</button></td>
+                      <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => onTransaction(row)}>{displayReference(row.reference, row.id, row.type || row.kind || 'TRX')}</button></td>
                       <td className="px-3 py-2">{row.customer || '-'}</td>
                       <td className="px-3 py-2">{row.staff || '-'}</td>
+                      <td className="px-3 py-2">{row.branch || '-'}</td>
                       <td className="px-3 py-2 capitalize">{text(row.paymentMethod)}</td>
                       <td className="px-3 py-2 text-right">{money(row.debit)}</td>
                       <td className="px-3 py-2 text-right">{money(row.credit)}</td>
@@ -284,10 +287,10 @@ function DetailModal({ drilldown, onClose, onTransaction }: { drilldown: Drilldo
 function TransactionModal({ row, onClose }: { row: any; onClose: () => void }) {
   if (!row) return null
   const fields: [string, any][] = [
-    ['Reference', row.reference || row.id],
+    ['Reference', displayReference(row.reference, row.id, row.type || row.kind || 'TRX')],
     ['Date / Time', row.date ? new Date(row.date).toLocaleString() : '-'],
     ['Type', row.kind === 'credit-sale' ? 'Credit Sale' : row.kind === 'sales-adjustment' ? row.adjustmentType || 'Sales Return / Credit Note' : row.kind === 'collection' ? 'Customer Payment' : row.kind === 'expense' ? 'Expense' : row.kind === 'transfer' ? 'Cash Transfer' : 'Sale'],
-    ['Customer', row.customer || 'Walk-in'],
+    ['Customer', row.customer || '-'],
     ['Customer Balance', money(row.customerBalance)],
     ['Staff', row.staff || '-'],
     ['Branch', row.branch || '-'],
@@ -663,11 +666,34 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         </Card>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card>
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <Card className="min-w-0">
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><WalletCards className="h-4 w-4" />Cash Position Breakdown</CardTitle></CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto rounded-md border">
+          <CardContent className="min-w-0">
+            <div className="divide-y rounded-md border md:hidden">
+              {cashFormulaRows.map((row) => {
+                const inflow = numberValue(row.inflow)
+                const outflow = numberValue(row.outflow)
+                const effect = inflow - outflow
+                return (
+                  <div key={row.label} className="min-w-0 p-3">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <span className="min-w-0 break-words text-sm font-medium">{row.label}</span>
+                      <span className={effect < 0 ? 'shrink-0 text-right text-sm font-semibold tabular-nums text-red-600' : 'shrink-0 text-right text-sm font-semibold tabular-nums'}>{money(effect)}</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-3 text-xs">
+                      <div className="min-w-0"><span className="text-muted-foreground">Cash In</span><span className="mt-0.5 block break-words font-medium tabular-nums">{inflow ? money(inflow) : '-'}</span></div>
+                      <div className="min-w-0 text-right"><span className="text-muted-foreground">Cash Out</span><span className="mt-0.5 block break-words font-medium tabular-nums">{outflow ? money(outflow) : '-'}</span></div>
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="flex items-center justify-between gap-3 bg-primary/5 p-3 font-bold">
+                <span className="min-w-0">Cash at Hand</span>
+                <span className="shrink-0 text-right tabular-nums">{money(cardTotals.cashAtHand)}</span>
+              </div>
+            </div>
+            <div className="hidden overflow-x-auto rounded-md border md:block">
               <table className="min-w-[640px] w-full text-sm">
                 <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                   <tr><th className="px-3 py-2">Line</th><th className="px-3 py-2 text-right">Cash In</th><th className="px-3 py-2 text-right">Cash Out</th><th className="px-3 py-2 text-right">Effect</th></tr>
@@ -695,22 +721,22 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
               <span className="flex items-center gap-2"><ArrowDownToLine className="h-4 w-4" />Operating Expense Breakdown</span>
               <Badge variant="outline">{money(cardTotals.expenses)}</Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+          <CardContent className="min-w-0 space-y-4">
+            <div className="grid min-w-0 gap-3 lg:grid-cols-2">
               <div className="rounded-md border">
                 <div className="border-b px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">By Category</div>
                 <div className="divide-y">
                   {expenseByCategory.length ? expenseByCategory.map((row) => (
-                    <button key={row.key} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/40" onClick={() => openRows(`Expenses - ${row.label}`, expenseRows.filter((expense) => (expense.category || 'Uncategorized') === row.key))}>
+                    <button key={row.key} className="flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/40" onClick={() => openRows(`Expenses - ${row.label}`, expenseRows.filter((expense) => (expense.category || 'Uncategorized') === row.key))}>
                       <span className="min-w-0"><span className="block break-words font-medium">{row.label}</span><span className="text-xs text-muted-foreground">{row.count} transaction{row.count === 1 ? '' : 's'}</span></span>
-                      <span className="shrink-0 font-semibold">{money(row.amount)}</span>
+                      <span className="max-w-[46%] shrink-0 text-right text-sm font-semibold leading-tight tabular-nums [overflow-wrap:anywhere]">{money(row.amount)}</span>
                     </button>
                   )) : <p className="px-3 py-6 text-sm text-muted-foreground">No expenses recorded.</p>}
                 </div>
@@ -719,9 +745,9 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                 <div className="border-b px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">By Payment Method</div>
                 <div className="divide-y">
                   {expenseByMethod.length ? expenseByMethod.map((row) => (
-                    <button key={row.key} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left capitalize hover:bg-muted/40" onClick={() => openRows(`Expenses - ${row.label}`, expenseRows.filter((expense) => (expense.paymentMethod || 'cash') === row.key))}>
+                    <button key={row.key} className="flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left capitalize hover:bg-muted/40" onClick={() => openRows(`Expenses - ${row.label}`, expenseRows.filter((expense) => (expense.paymentMethod || 'cash') === row.key))}>
                       <span className="min-w-0"><span className="block break-words font-medium">{row.label}</span><span className="text-xs text-muted-foreground">{row.count} transaction{row.count === 1 ? '' : 's'}</span></span>
-                      <span className="shrink-0 font-semibold">{money(row.amount)}</span>
+                      <span className="max-w-[46%] shrink-0 text-right text-sm font-semibold leading-tight tabular-nums [overflow-wrap:anywhere]">{money(row.amount)}</span>
                     </button>
                   )) : <p className="px-3 py-6 text-sm text-muted-foreground">No expense payments recorded.</p>}
                 </div>
@@ -746,24 +772,25 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                       </span>
                       <span className="shrink-0 font-semibold">{money(row.amount)}</span>
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">{row.staff || 'Unknown'} - {row.reference || row.id}</div>
+                    <div className="mt-2 text-xs text-muted-foreground">{row.staff || 'Unknown'} - {displayReference(row.reference, row.id, row.type || row.kind || 'TRX')}</div>
                   </button>
                 ))}
               </div>
               <div className="hidden overflow-x-auto rounded-md border md:block">
-                <table className="min-w-[1120px] w-full text-sm">
+                <table className="min-w-[1200px] w-full text-sm">
                   <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                    <tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Category</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Paid From</th><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Outflow</th></tr>
+                    <tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Category</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Paid From</th><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Outflow</th></tr>
                   </thead>
                   <tbody>
                     {expenseRows.map((row: any, index: number) => (
                       <tr key={row.id || index} className="border-t hover:bg-muted/30">
                         <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                        <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{row.reference || row.id}</button></td>
+                        <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{displayReference(row.reference, row.id, row.type || row.kind || 'TRX')}</button></td>
                         <td className="px-3 py-2">{row.category || 'Uncategorized'}</td>
                         <td className="max-w-[320px] px-3 py-2"><span className="block break-words">{row.description || '-'}</span></td>
                         <td className="px-3 py-2">{row.account || '-'}</td>
                         <td className="px-3 py-2">{row.staff || '-'}</td>
+                        <td className="px-3 py-2">{row.branch || '-'}</td>
                         <td className="px-3 py-2 capitalize">{text(row.paymentMethod)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{money(row.amount)}</td>
                       </tr>
@@ -782,22 +809,23 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
           <div className="overflow-x-auto rounded-md border">
             <table className="min-w-[1080px] w-full text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                <tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Account</th><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Direction</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Amount</th></tr>
+                <tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Account</th><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Direction</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Amount</th></tr>
               </thead>
               <tbody>
                 {cashMovementRows.length ? cashMovementRows.map((row: any, index: number) => (
                   <tr key={row.id || index} className="border-t hover:bg-muted/30">
                     <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                    <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{row.reference || row.id}</button></td>
+                    <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{displayReference(row.reference, row.id, row.type || row.kind || 'TRX')}</button></td>
                     <td className="px-3 py-2 capitalize">{text(row.kind)}</td>
                     <td className="px-3 py-2">{row.account || '-'}</td>
                     <td className="px-3 py-2">{row.staff || '-'}</td>
+                    <td className="px-3 py-2">{row.branch || '-'}</td>
                     <td className="px-3 py-2 capitalize">{text(row.direction || row.paymentMethod)}</td>
                     <td className="px-3 py-2 text-right">{money(row.debit)}</td>
                     <td className="px-3 py-2 text-right">{money(row.credit)}</td>
                     <td className="px-3 py-2 text-right font-semibold">{money(row.amount)}</td>
                   </tr>
-                )) : <tr><td className="px-3 py-6 text-center text-muted-foreground" colSpan={9}>No separate cash or account movements for this day.</td></tr>}
+                )) : <tr><td className="px-3 py-6 text-center text-muted-foreground" colSpan={10}>No separate cash or account movements for this day.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -851,6 +879,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2">Customer / Account</th>
                   <th className="px-3 py-2">Staff</th>
+                  <th className="px-3 py-2">Branch</th>
                   <th className="px-3 py-2">Method</th>
                   <th className="px-3 py-2 text-right">Debit</th>
                   <th className="px-3 py-2 text-right">Credit</th>
@@ -862,7 +891,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                 {transactions.length ? transactions.map((row: any, index: number) => (
                   <tr key={row.id || index} className="border-t hover:bg-muted/30">
                     <td className="whitespace-nowrap px-3 py-2">{row.date ? new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                    <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{row.reference || row.id}</button></td>
+                    <td className="px-3 py-2"><button className="font-mono text-primary underline-offset-2 hover:underline" onClick={() => setTransaction(row)}>{displayReference(row.reference, row.id, row.type || row.kind || 'TRX')}</button></td>
                     <td className="px-3 py-2 capitalize">{text(row.kind)}</td>
                     <td className="px-3 py-2">
                       {row.customerId ? (
@@ -874,13 +903,14 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                       )}
                     </td>
                     <td className="px-3 py-2">{row.staff || '-'}</td>
+                    <td className="px-3 py-2">{row.branch || '-'}</td>
                     <td className="px-3 py-2 capitalize">{text(row.paymentMethod || row.direction)}</td>
                     <td className="px-3 py-2 text-right">{money(row.debit)}</td>
                     <td className="px-3 py-2 text-right">{money(row.credit)}</td>
                     <td className="px-3 py-2 text-right">{money(row.creditAmount)}</td>
                     <td className="px-3 py-2 text-right font-semibold">{money(row.amount)}</td>
                   </tr>
-                )) : <tr><td className="px-3 py-6 text-center text-muted-foreground" colSpan={10}>No transactions for this day.</td></tr>}
+                )) : <tr><td className="px-3 py-6 text-center text-muted-foreground" colSpan={11}>No transactions for this day.</td></tr>}
               </tbody>
             </table>
           </div>

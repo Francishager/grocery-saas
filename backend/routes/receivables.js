@@ -14,6 +14,7 @@ import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
 import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
+import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
 import { applyAvailableCustomerCredit, customerCreditOffset } from '../src/services/customerCreditApplicationService.js'
 import {
@@ -222,16 +223,6 @@ const withUser = (record) => {
 }
 
 const userName = (user) => [user?.fname, user?.lname].filter(Boolean).join(' ') || 'Staff'
-
-function customerPaymentDisplayReference(payment) {
-  const candidates = [payment.transactionId, payment.reference]
-    .map((value) => String(value || '').trim())
-    .filter((value) => value && value !== payment.id && !/^CP-customer-payment-/i.test(value))
-  if (candidates.length) return candidates[0].length > 48 ? `${candidates[0].slice(0, 40)}...` : candidates[0]
-  const date = new Date(payment.createdAt)
-  const datePart = Number.isNaN(date.getTime()) ? 'UNKNOWN' : date.toISOString().slice(0, 10).replace(/-/g, '')
-  return `PAY-${datePart}-${String(payment.id || '').slice(-6).toUpperCase()}`
-}
 
 const sortLedgerRows = (rows) => rows.sort((a, b) => {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
@@ -515,7 +506,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         date: payment.createdAt,
         amount: payment.amount,
         paymentMethod: payment.paymentMethod,
-        reference: payment.reference || payment.transactionId || '',
+        reference: customerPaymentDisplayReference(payment),
         notes: payment.notes || '',
         branch: payment.branch?.name || ''
       })) : []
@@ -1905,7 +1896,12 @@ router.get('/reconciliation/payment-allocations', authenticateToken, requirePerm
     const receiptsBySale = new Map()
     for (const receipt of receiptRows) {
       const list = receiptsBySale.get(receipt.saleId) || []
-      list.push({ ...receipt, amount: toMoney(receipt.amount) })
+      list.push({
+        ...receipt,
+        reference: customerPaymentDisplayReference(receipt),
+        transactionId: String(receipt.transactionId || '').slice(0, 40),
+        amount: toMoney(receipt.amount),
+      })
       receiptsBySale.set(receipt.saleId, list)
     }
     for (const row of rows) {
@@ -2113,7 +2109,7 @@ router.get('/payments', authenticateToken, requirePermission('canViewReceivable'
     ])
 
     res.json({
-      payments,
+      payments: payments.map((payment) => ({ ...payment, reference: customerPaymentDisplayReference(payment) })),
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -2143,7 +2139,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
     const resolvedPaymentMethod = paymentMethod || 'cash'
     const rawPaymentRequestKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim()
     const paymentRequestKey = rawPaymentRequestKey.replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160)
-    const paymentReference = String(reference || (paymentRequestKey ? `CP-${paymentRequestKey.slice(0, 80)}` : '')).trim() || null
+    const paymentReference = customerPaymentReceiptReference(reference, paymentRequestKey)
     const normalizedTransactionId = String(transactionId || '').trim() || null
 
     // Gate payment method by permission
@@ -2189,7 +2185,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
         }),
         orderBy: { createdAt: 'desc' },
       })
-      if (existingPayment) return res.status(200).json({ ...existingPayment, duplicate: true })
+      if (existingPayment) return res.status(200).json({ ...existingPayment, reference: customerPaymentDisplayReference(existingPayment), duplicate: true })
     }
 
     const recentDuplicate = await prisma.customerPayment.findFirst({
@@ -2203,7 +2199,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
       }),
       orderBy: { createdAt: 'desc' },
     })
-    if (recentDuplicate) return res.status(200).json({ ...recentDuplicate, duplicate: true })
+    if (recentDuplicate) return res.status(200).json({ ...recentDuplicate, reference: customerPaymentDisplayReference(recentDuplicate), duplicate: true })
 
     let payment
     try {
@@ -2357,12 +2353,12 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
     } catch (transactionError) {
       if (transactionError?.code === 'P2002' && paymentRequestKey) {
         const existingPayment = await prisma.customerPayment.findUnique({ where: { idempotencyKey: paymentRequestKey } })
-        if (existingPayment) return res.status(200).json({ ...existingPayment, duplicate: true })
+        if (existingPayment) return res.status(200).json({ ...existingPayment, reference: customerPaymentDisplayReference(existingPayment), duplicate: true })
       }
       throw transactionError
     }
 
-    res.status(201).json(payment)
+    res.status(201).json({ ...payment, reference: customerPaymentDisplayReference(payment) })
   } catch (error) {
     console.error('Record payment error:', error)
     handleBranchError(res, error, 'Failed to record payment')

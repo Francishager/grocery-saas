@@ -14,6 +14,7 @@ import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } 
 import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
 import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivablesJournal } from '../services/receivablesAccountingService.js';
 import { customerProfileAccess, customerProfilePayload } from '../utils/customerProfileAccess.js';
+import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -262,7 +263,7 @@ async function getCustomerCreditInfo(scope, customerId, access) {
       date: payment.createdAt,
       amount: payment.amount,
       paymentMethod: payment.paymentMethod,
-      reference: payment.reference || payment.transactionId || "",
+      reference: customerPaymentDisplayReference(payment),
       notes: payment.notes || "",
       branch: payment.branch?.name || "",
     })) : [],

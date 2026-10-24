@@ -1468,7 +1468,7 @@ export default function SalesPage() {
                       {creditInfo.recentPayments.slice(0, 5).map((payment) => (
                         <div key={payment.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
                           <span className="min-w-0">
-                            <span className="block font-medium">{payment.receiptNo || payment.reference || payment.id}</span>
+                            <span className="block font-medium">{payment.receiptNo || payment.reference || `PAY-${String(payment.id || '').slice(-8).toUpperCase()}`}</span>
                             <span className="text-xs text-muted-foreground">{new Date(payment.date).toLocaleString()} - {payment.paymentMethod?.replace(/_/g, ' ')}</span>
                           </span>
                           <span className="shrink-0 font-semibold">{formatCurrency(payment.amount)}</span>

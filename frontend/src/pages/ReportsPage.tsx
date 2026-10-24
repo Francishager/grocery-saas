@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
+import { displayReference } from '@/lib/displayReference'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
@@ -713,6 +714,11 @@ function FinancialDetailModal({ title, rows, onClose }: { title: string; rows: a
                       <div className="min-w-0">
                         <p className="font-medium break-words">{row?.description || row?.account || row?.type || 'Transaction'}</p>
                         <p className="text-xs text-muted-foreground">{formatValue(row?.date, 'date')} {row?.reference ? `- ${row.reference}` : ''}</p>
+                        {(row?.customer || row?.staff || row?.branch) && (
+                          <p className="mt-1 break-words text-xs text-muted-foreground">
+                            {[row?.customer && `Customer: ${row.customer}`, row?.staff && `Staff: ${row.staff}`, row?.branch && `Branch: ${row.branch}`].filter(Boolean).join(' | ')}
+                          </p>
+                        )}
                       </div>
                       <p className="shrink-0 text-right font-semibold">{formatCurrency(Number(row?.amount ?? row?.debit ?? row?.credit ?? row?.balance ?? 0))}</p>
                     </div>
@@ -2214,14 +2220,14 @@ export default function ReportsPage() {
       return acc
     }, {})
     Object.entries(expenseCategoryTotals).forEach(([category, value]) => rows.push({ section: 'Expense Breakdown', item: category, details: `${value.count} transaction${value.count === 1 ? '' : 's'}`, amount: value.total, cashAmount: null, creditAmount: null, balance: null }))
-    expenseRows.forEach((row: any) => rows.push({ section: 'Recognized Expenses', item: row.description || row.category || row.reference || row.id, details: `${row.category || 'Uncategorized'} - ${String(row.paymentMethod || 'cash').replace(/_/g, ' ')} - ${row.account || 'No account'} - ${row.staff || 'Unknown'}`, amount: row.amount || 0, cashAmount: 0, creditAmount: row.amount || 0, balance: null }))
+    expenseRows.forEach((row: any) => rows.push({ section: 'Recognized Expenses', item: row.description || row.category || displayReference(row.reference, row.id, 'EXP'), details: `${row.category || 'Uncategorized'} - ${String(row.paymentMethod || 'cash').replace(/_/g, ' ')} - ${row.account || 'No account'} - ${row.staff || 'Unknown'}`, amount: row.amount || 0, cashAmount: 0, creditAmount: row.amount || 0, balance: null }))
     ;(data?.customerActivity || []).forEach((row: any) => rows.push({ section: 'Customer Activity', item: row.name, details: row.phone || '', amount: Number(row.cashSales || 0) + Number(row.creditSales || 0), cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.currentBalance || 0 }))
     ;(data?.staffActivity || []).forEach((row: any) => rows.push({ section: 'Staff Activity', item: row.name, details: `Collections ${formatCurrency(row.collections || 0)}`, amount: row.sales || 0, cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.cashHeld || 0 }))
     ;(data?.productActivity || []).forEach((row: any) => rows.push({ section: 'Product Activity', item: row.name, details: `Qty ${row.quantitySold || 0}, Stock ${row.currentStock ?? ''}`, amount: row.salesValue || 0, cashAmount: row.cogs || 0, creditAmount: row.grossProfit || 0, balance: null }))
     ;(data?.staffTills || []).forEach((row: any) => rows.push({ section: 'Cash Accounts', item: row.name, details: `${String(row.type || '').replace(/_/g, ' ')} - ${row.staff || 'Unassigned'}`, amount: row.expectedClosing ?? row.balance ?? 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.openingCash || 0 }))
-    ;(data?.transactions || []).filter((row: any) => row.kind === 'cash-movement' || row.kind === 'transfer').forEach((row: any) => rows.push({ section: 'Cash and Account Movements', item: row.reference || row.id, details: `${row.account || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.direction ? `- ${String(row.direction).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.balanceAfter || null }))
-    ;(data?.cashLedger || []).forEach((row: any) => rows.push({ section: 'Cash Till Ledger', item: row.reference || row.id, details: [row.account, row.description].filter(Boolean).join(' - '), amount: row.amount, cashAmount: row.debit, creditAmount: row.credit, balance: row.balance }))
-    ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: row.reference || row.id, details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || row.cashAmount || 0, creditAmount: row.credit || row.creditAmount || 0, balance: row.customerBalance || 0 }))
+    ;(data?.transactions || []).filter((row: any) => row.kind === 'cash-movement' || row.kind === 'transfer').forEach((row: any) => rows.push({ section: 'Cash and Account Movements', item: displayReference(row.reference, row.id, row.type || 'MOV'), details: `${row.account || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.direction ? `- ${String(row.direction).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.balanceAfter || null }))
+    ;(data?.cashLedger || []).forEach((row: any) => rows.push({ section: 'Cash Till Ledger', item: displayReference(row.reference, row.id, row.type || 'MOV'), details: [row.account, row.description].filter(Boolean).join(' - '), amount: row.amount, cashAmount: row.debit, creditAmount: row.credit, balance: row.balance }))
+    ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: displayReference(row.reference, row.id, row.type || row.kind || 'TRX'), details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || row.cashAmount || 0, creditAmount: row.credit || row.creditAmount || 0, balance: row.customerBalance || 0 }))
     return rows
   }
 

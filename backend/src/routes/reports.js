@@ -2,6 +2,7 @@ import { SERVICE_REPORT_PERMISSIONS } from '../utils/servicePermissions.js';
 import { requireFeature as requireServiceFeature } from '../../middleware/featureCheck.js';
 import { Router } from "express";
 import prisma from "../db.js";
+import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { outstandingCustomerSummary } from '../utils/customerBalance.js';
 import { loadOutstandingReceivableRows } from '../utils/outstandingReceivables.js';
@@ -581,9 +582,10 @@ function financialCustomerPaymentRow(payment) {
     type: "Customer Payment",
     account: "Accounts Receivable",
     description: `Customer payment - ${payment?.customer?.name || "Customer"}`,
-    reference: sourceReference(payment, payment?.sale?.receiptNo),
+    reference: payment?.sale?.receiptNo || customerPaymentDisplayReference(payment),
     customer: payment?.customer?.name || "Unknown customer",
     branch: branchLabel(payment),
+    staff: payment?.staff || "",
     paymentMethod: normalizedPaymentMethod(payment?.paymentMethod),
     debit: amount,
     credit: amount,
@@ -649,6 +651,7 @@ function financialCashMovementRow(movement) {
     description: movement?.description || rawType,
     reference: movement?.reference || shortReference(movement),
     staff: userLabel(movement?.User),
+    branch: branchLabel(movement?.account),
     paymentMethod: normalizedPaymentMethod(movement?.account?.type || rawType),
     debit: isIn ? amount : 0,
     credit: isIn ? 0 : amount,
@@ -720,7 +723,7 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
     journalExpenseRows(scope, journalDateWhere),
     prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.supplierPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { supplier: { select: { id: true, name: true, phone: true } }, purchase: { select: { id: true, refNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
-    prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, ...createdWhere, account: { tenantId: scope.tenantId, ...(scope.branchId ? { OR: [{ branchId: scope.branchId }, { branchId: null }] } : {}) } }, include: { account: { select: { id: true, name: true, type: true, balance: true } }, User: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "asc" } }),
+    prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, ...createdWhere, account: { tenantId: scope.tenantId, ...(scope.branchId ? { OR: [{ branchId: scope.branchId }, { branchId: null }] } : {}) } }, include: { account: { select: { id: true, name: true, type: true, balance: true, branch: { select: { id: true, name: true } } } }, User: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.taxPayment.findMany({ where: taxWhere, include: { branch: { select: { id: true, name: true } } }, orderBy: { dateOfPayment: "asc" } }),
   ]);
 
@@ -732,7 +735,18 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
   const taxRows = [...sales.map((sale) => financialTaxRow(sale, "Sale")), ...saleRecords.map((sale) => financialTaxRow(sale, "Credit Sale"))].filter(Boolean);
   const discountRows = [...sales.map((sale) => financialDiscountRow(sale, "Sale")), ...saleRecords.map((sale) => financialDiscountRow(sale, "Credit Sale"))].filter(Boolean);
   const expenseRows = [...expenses, ...uniqueJournalRows].map(financialExpenseDetailRow).filter((row) => row.amount !== 0);
-  const customerPaymentRows = customerPayments.map(financialCustomerPaymentRow).filter((row) => row.amount > 0);
+  const movementByReference = new Map();
+  cashTransactions.forEach((movement) => {
+    if (movement.reference && !movementByReference.has(movement.reference)) movementByReference.set(movement.reference, movement);
+    if (!movementByReference.has(movement.id)) movementByReference.set(movement.id, movement);
+  });
+  const customerPaymentRows = customerPayments.map((payment) => {
+    const movement = [payment.reference, payment.id, payment.transactionId]
+      .filter(Boolean)
+      .map((reference) => movementByReference.get(reference))
+      .find(Boolean);
+    return financialCustomerPaymentRow({ ...payment, staff: movement ? userLabel(movement.User) : "" });
+  }).filter((row) => row.amount > 0);
   const supplierPaymentRows = supplierPayments.map(financialSupplierPaymentRow).filter((row) => row.amount > 0);
   const cashRows = cashTransactions.map(financialCashMovementRow).filter((row) => row.amount > 0);
   const taxPaymentRows = taxPayments.map(financialTaxPaymentRow).filter((row) => row.amount > 0);
@@ -1025,6 +1039,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         include: {
           customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
           sale: { select: { id: true, receiptNo: true } },
+          branch: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: "asc" },
       }),
@@ -1048,13 +1063,14 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
           name: true,
           type: true,
           balance: true,
+          branch: { select: { id: true, name: true } },
           AssignedUsers: { select: { id: true, fname: true, lname: true, email: true } },
         },
       }),
       prisma.cashTransaction.findMany({
         where: { tenantId: scope.tenantId, createdAt: dateWhere, account: cashAccountWhere },
         include: {
-          account: { select: { id: true, name: true, type: true } },
+          account: { select: { id: true, name: true, type: true, branch: { select: { id: true, name: true } } } },
           User: { select: { id: true, fname: true, lname: true, email: true } },
         },
         orderBy: { createdAt: "asc" },
@@ -1097,6 +1113,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         }),
         include: {
           items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true } } } },
+          branch: { select: { id: true, name: true } },
           sale: {
             include: {
               items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } } } },
@@ -1530,7 +1547,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         id: payment.id,
         kind: "collection",
         date: payment.createdAt,
-        reference: payment.reference || payment.id,
+        reference: customerPaymentDisplayReference(payment),
         customer: payment.customer?.name || "Unknown customer",
         customerId: payment.customerId,
         customerBalance: Number(payment.customer?.balance || 0),
@@ -1540,6 +1557,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         paymentMethod: method,
         staff: paymentStaff ? userLabel(paymentStaff) : "Recorded payment",
         staffId: paymentStaff?.id || null,
+        branch: payment.branch?.name || "",
         transactionId: payment.transactionId,
         linkedSale: payment.sale?.receiptNo || null,
       };
@@ -1614,6 +1632,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         description: movement.description,
         account: movement.account?.name,
         accountType,
+        branch: movement.account?.branch?.name || "",
         staff: userLabel(movement.User),
         staffId: movement.User?.id,
         amount: movement.amount,
@@ -3039,7 +3058,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     for (const payment of payments) {
       entries.push({
         date: payment.createdAt,
-        refNo: payment.reference || payment.id.slice(-6),
+        refNo: customerPaymentDisplayReference(payment),
         description: customerId ? "Payment" : `Payment — ${payment.customer?.name || 'N/A'}`,
         debit: 0,
         credit: payment.amount,
@@ -3160,7 +3179,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           description: `Payment Received - ${payment.customer?.name || "N/A"}`,
           debit: 0,
           credit: Number(payment.amount || 0),
-          reference: payment.reference || payment.id.substring(0, 8),
+          reference: customerPaymentDisplayReference(payment),
           details: `Method: ${payment.paymentMethod}`,
           paymentMethod: payment.paymentMethod,
         })),
@@ -3301,7 +3320,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         description: "Payment Received",
         debit: 0,
         credit: payment.amount,
-        reference: payment.reference || payment.id.substring(0, 8),
+        reference: customerPaymentDisplayReference(payment),
         details: `Method: ${payment.paymentMethod}`,
         paymentMethod: payment.paymentMethod,
         relatedId: payment.id,
@@ -3611,7 +3630,7 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
           description: `Payment Made - ${payment.supplier?.name || "Unknown"}`,
           debit: Number(payment.amount || 0),
           credit: 0,
-          reference: payment.reference || payment.purchase?.refNo || payment.id.substring(0, 8),
+          reference: customerPaymentDisplayReference(payment),
           details: `Method: ${payment.paymentMethod}`,
           paymentMethod: payment.paymentMethod,
         })),
@@ -3721,7 +3740,7 @@ router.get("/suppliers/statement", authenticateToken, async (req, res) => {
         description: "Payment Made",
         debit: Number(payment.amount || 0),
         credit: 0,
-        reference: payment.reference || payment.purchase?.refNo || payment.id.substring(0, 8),
+          reference: customerPaymentDisplayReference(payment),
         details: `Method: ${payment.paymentMethod}`,
         paymentMethod: payment.paymentMethod,
         relatedId: payment.id,
@@ -4213,7 +4232,7 @@ router.get("/receivables/aging", authenticateToken, async (req, res) => {
       dueDate: row.agingBasis === 'Due date' ? row.dueDate : null,
       originalAmount: Number(row.total || 0),
       paidAmount: Number(row.amountPaid || 0),
-      reference: row.reference || row.id,
+      reference: row.reference || `INV-${String(row.id || '').slice(-8).toUpperCase()}`,
       documentType: row.type,
       status: row.status,
     })), {
@@ -4225,20 +4244,34 @@ router.get("/receivables/aging", authenticateToken, async (req, res) => {
 router.get("/receivables/collection", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } } }, orderBy: { createdAt: "desc" } });
+    const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } });
     const accounts = await paymentAccountDetails(s.tenantId, payments, 'receipt');
+    const paymentReferences = payments.flatMap((payment) => [payment.reference, payment.id, payment.transactionId]).filter(Boolean);
+    const movements = paymentReferences.length ? await prisma.cashTransaction.findMany({
+      where: { tenantId: s.tenantId, OR: [{ id: { in: paymentReferences } }, { reference: { in: paymentReferences } }] },
+      include: { User: { select: { id: true, fname: true, lname: true, email: true } } },
+      orderBy: { createdAt: "asc" },
+    }) : [];
+    const movementByPaymentRef = new Map();
+    movements.forEach((movement) => {
+      if (movement.reference && !movementByPaymentRef.has(movement.reference)) movementByPaymentRef.set(movement.reference, movement);
+      if (!movementByPaymentRef.has(movement.id)) movementByPaymentRef.set(movement.id, movement);
+    });
     const data = payments.map((p) => {
       const account = accounts.get(p.id);
+      const movement = [p.reference, p.id, p.transactionId].filter(Boolean).map((ref) => movementByPaymentRef.get(ref)).find(Boolean);
       return {
         createdAt: p.createdAt,
-        customer: p.customer?.name || "Walk-in",
+        customer: p.customer?.name || "Unknown customer",
+        branch: p.branch?.name || "Unassigned",
+        staff: movement ? userLabel(movement.User) : "",
         invoice: p.sale?.receiptNo || '—',
         amount: p.amount,
         paymentMethod: p.paymentMethod || "cash",
         mobileProvider: p.mobileProvider || null,
         phoneNumber: p.phoneNumber || null,
-        transactionId: p.transactionId || null,
-        reference: p.reference || null,
+        transactionId: String(p.transactionId || '').slice(0, 40) || null,
+        reference: customerPaymentDisplayReference(p),
         accountName: account?.name || null,
         accountType: account?.type || null,
         accountNumber: account?.accountNumber || null,

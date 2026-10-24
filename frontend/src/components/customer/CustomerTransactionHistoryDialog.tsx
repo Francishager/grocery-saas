@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { apiFetch } from '@/lib/api'
 import { cn, formatCurrency, formatDisplayDate } from '@/lib/utils'
+import { displayReference } from '@/lib/displayReference'
 import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 
 export type CustomerHistoryTarget = {
@@ -262,7 +263,7 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
 
   return {
     title,
-    reference: row.reference || row.id,
+    reference: displayReference(row.reference, row.id, row.type || 'Transaction'),
     date: row.date || new Date(),
     amount,
     amountLabel: isPayment ? 'Payment received' : undefined,
@@ -508,7 +509,7 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2">
                         <Badge variant={row.affectsBalance ? 'default' : 'outline'}>{row.type}</Badge>
                       </td>
-                      <td className="px-3 py-2 font-mono text-xs">{row.reference || row.id}</td>
+                              <td className="px-3 py-2 font-mono text-xs">{displayReference(row.reference, row.id, row.type || 'Transaction')}</td>
                       <td className="px-3 py-2">
                         <p className="break-words">{row.description || '-'}</p>
                         {row.branch && <p className="mt-1 text-xs text-muted-foreground">{row.branch}</p>}
@@ -590,7 +591,7 @@ export default function CustomerTransactionHistoryDialog({
                       <tr key={row.id} className="border-t align-top hover:bg-muted/30">
                         <td className="whitespace-nowrap px-3 py-2">{row.date ? formatDisplayDate(row.date) : '-'}</td>
                         <td className="px-3 py-2"><Badge variant="outline">{row.type}</Badge></td>
-                        <td className="px-3 py-2 font-mono text-xs">{row.reference || row.id}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{displayReference(row.reference, row.id, row.type || 'Transaction')}</td>
                         <td className="px-3 py-2">{row.description || '-'}</td>
                         <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || row.debit || row.credit || 0))}</td>
                         {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment'].includes(row.source) && <TransactionReceiptButton
@@ -599,7 +600,7 @@ export default function CustomerTransactionHistoryDialog({
                             ? customerActivityReceipt(row, data.customer.name)
                             : {
                               title: row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
-                              reference: row.reference || row.id,
+                        reference: displayReference(row.reference, row.id, row.type || 'Transaction'),
                               date: row.date || new Date(),
                               amount: Number(row.amount || row.debit || row.credit || 0),
                               partyLabel: 'Customer',
