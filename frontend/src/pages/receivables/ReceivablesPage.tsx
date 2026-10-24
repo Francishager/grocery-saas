@@ -1606,6 +1606,7 @@ export default function ReceivablesPage() {
   const withdrawalAvailableFunds = availableCustomerFunds(selectedCustomer)
   const withdrawalCustomerFundsAfter = Math.max(0, withdrawalAvailableFunds - withdrawalValue)
   const withdrawalLimit = selectedWithdrawalAccount ? Math.min(withdrawalAvailableFunds, Math.max(0, withdrawalAccountBalance)) : withdrawalAvailableFunds
+  const customerTableMinWidth = 240 + (canViewCustomerPhone ? 150 : 0) + (canViewCustomerEmail ? 220 : 0) + (canViewCustomerBalance ? 710 : 0) + 115
 
   return (
     <div className="space-y-6">
@@ -1689,20 +1690,33 @@ export default function ReceivablesPage() {
             <p className="py-8 text-center text-sm text-muted-foreground">No customers found.</p>
           ) : (
             <div className="overflow-x-auto rounded-md border">
-              <table className="min-w-[900px] w-full text-sm">
+              <table className="w-full table-fixed text-sm" style={{ minWidth: customerTableMinWidth }}>
+                <colgroup>
+                  <col style={{ width: 240 }} />
+                  {canViewCustomerPhone && <col style={{ width: 150 }} />}
+                  {canViewCustomerEmail && <col style={{ width: 220 }} />}
+                  {canViewCustomerBalance && <>
+                    <col style={{ width: 155 }} />
+                    <col style={{ width: 155 }} />
+                    <col style={{ width: 155 }} />
+                    <col style={{ width: 155 }} />
+                    <col style={{ width: 90 }} />
+                  </>}
+                  <col style={{ width: 115 }} />
+                </colgroup>
                 <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                   <tr>
-                    <th scope="col" className="px-3 py-3">Customer</th>
-                    {canViewCustomerPhone && <th scope="col" className="px-3 py-3">Phone</th>}
-                    {canViewCustomerEmail && <th scope="col" className="px-3 py-3">Email</th>}
-                    <th scope="col" className="px-3 py-3">Status</th>
+                    <th scope="col" className="whitespace-nowrap px-3 py-3">Customer</th>
+                    {canViewCustomerPhone && <th scope="col" className="whitespace-nowrap px-3 py-3">Phone</th>}
+                    {canViewCustomerEmail && <th scope="col" className="whitespace-nowrap px-3 py-3">Email</th>}
                     {canViewCustomerBalance && <>
-                      <th scope="col" className="px-3 py-3 text-right">Credit limit</th>
-                      <th scope="col" className="px-3 py-3 text-right">Opening balance</th>
-                      <th scope="col" className="px-3 py-3 text-right">Balance</th>
-                      <th scope="col" className="px-3 py-3 text-right">Available credit</th>
-                      <th scope="col" className="px-3 py-3 text-right">Trust</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Credit limit</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Opening balance</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Balance</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Available credit</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Trust</th>
                     </>}
+                    <th scope="col" className="whitespace-nowrap px-3 py-3">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1723,14 +1737,13 @@ export default function ReceivablesPage() {
                         navigate(`/tenant/receivables/customers/${customer.id}`)
                       }}
                     >
-                      <td className="max-w-[280px] px-3 py-3">
-                        <span className="block break-words font-medium">{renderCustomerNameButton(customer, customer.name)}</span>
+                      <td className="px-3 py-3" title={customer.name}>
+                        <span className="block truncate font-medium">{renderCustomerNameButton(customer, customer.name)}</span>
                         {!canViewCustomerPhone && <span className="mt-1 block text-xs text-muted-foreground">{customer.maskedPhone || '07xxxxxx'}</span>}
                         {!canViewCustomerEmail && customer.maskedEmail && <span className="block break-all text-xs text-muted-foreground">{customer.maskedEmail}</span>}
                       </td>
-                      {canViewCustomerPhone && <td className="whitespace-nowrap px-3 py-3">{customer.phone || '—'}</td>}
-                      {canViewCustomerEmail && <td className="max-w-[240px] break-all px-3 py-3">{customer.email || '—'}</td>}
-                      <td className="px-3 py-3">{getStatusBadge(customer.status || 'active')}</td>
+                      {canViewCustomerPhone && <td className="whitespace-nowrap px-3 py-3" title={customer.phone || ''}><span className="block truncate">{customer.phone || '—'}</span></td>}
+                      {canViewCustomerEmail && <td className="px-3 py-3" title={customer.email || ''}><span className="block truncate">{customer.email || '—'}</span></td>}
                       {canViewCustomerBalance && <>
                         <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.openingBalance || 0)}</td>
@@ -1738,6 +1751,7 @@ export default function ReceivablesPage() {
                         <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>
                         <td className={`whitespace-nowrap px-3 py-3 text-right font-semibold ${getTrustScoreColor(customer.trustScore || 0)}`}>{customer.trustScore || 0}/100</td>
                       </>}
+                      <td className="whitespace-nowrap px-3 py-3">{getStatusBadge(customer.status || 'active')}</td>
                     </tr>
                   ))}
                 </tbody>
