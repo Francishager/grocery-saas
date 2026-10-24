@@ -2684,6 +2684,7 @@ model JournalLine {
   createdAt   DateTime     @default(now())
 
   @@index([entryId])
+  @@index([accountId, entryId])
   @@map("journal_lines")
 }
 

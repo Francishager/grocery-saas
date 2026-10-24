@@ -6,6 +6,7 @@ import {
   customerCreditApplicationLines,
   customerRefundLines,
   posReturnRecognitionLines,
+  postCustomerCreditApplicationJournal,
   receiptCollectionLines,
   saleRecognitionLines,
   validateReceivablesAccountingConfig,
@@ -73,6 +74,52 @@ test('applying a customer advance clears the liability into receivables without 
     { accountId: 'advances', debit: 75, credit: 0 },
     { accountId: 'ar', debit: 0, credit: 75 },
   ])
+})
+
+test('customer advance availability is checked with a database-side sum of prior posted applications', async () => {
+  const mapped = { ...config, isEnabled: true }
+  const roleTypes = {
+    receivableAccountId: 'asset', salesRevenueAccountId: 'revenue', taxPayableAccountId: 'liability',
+    salesReturnsAccountId: 'revenue', costOfGoodsSoldAccountId: 'expense', inventoryAccountId: 'asset',
+    customerAdvancesAccountId: 'liability', openingBalanceEquityAccountId: 'equity',
+  }
+  let journalCreated = false
+  const client = {
+    receivablesAccountingConfig: { findUnique: async () => mapped },
+    journalEntry: {
+      findFirst: async ({ where }) => where.sourceType === 'CUSTOMER_RECEIPT'
+        ? { lines: [{ accountId: 'advances', debit: 0, credit: 100 }] }
+        : null,
+      create: async ({ data }) => { journalCreated = true; return { id: 'new-journal', ...data } },
+    },
+    $queryRaw: async (parts, ...values) => {
+      assert.match(parts.join('?'), /SUM\(jl\."debit" - jl\."credit"\)/)
+      assert.deepEqual(values, ['tenant', 'payment-1', 'current-application', 'advances'])
+      return [{ amount: 30 }]
+    },
+    account: {
+      findMany: async ({ where }) => where.id.in.map((id) => ({
+        id,
+        type: Object.entries(roleTypes).find(([key]) => mapped[key] === id)?.[1] || 'asset',
+        name: id,
+        description: null,
+        subType: null,
+        isActive: true,
+        _count: { children: 0 },
+      })),
+      update: async () => ({}),
+    },
+  }
+
+  const result = await postCustomerCreditApplicationJournal(client, {
+    tenantId: 'tenant',
+    userId: 'user',
+    application: { id: 'current-application', sourceId: 'payment-1', amount: 70, createdAt: new Date() },
+    reference: 'SALE-1',
+  })
+
+  assert.equal(result.posted, true)
+  assert.equal(journalCreated, true)
 })
 
 test('customer opening balance is recognized as receivable against opening equity', async () => {

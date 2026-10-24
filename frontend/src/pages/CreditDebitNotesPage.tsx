@@ -13,6 +13,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
 import { creditNotesApi, debitNotesApi, apiFetch, branchesApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import { Plus, Search, FileText, Pencil, Ban, Loader2, ArrowDownCircle, ArrowUpCircle } from 'lucide-react'
 
 type NoteType = 'credit' | 'debit'
@@ -464,6 +465,13 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                       <td className="px-4 py-3">{new Date(note.createdAt).toLocaleDateString()}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
+                          <TransactionReceiptButton label="Print note" data={{
+                            title: activeTab === 'credit' ? 'Customer credit note' : 'Supplier debit note',
+                            reference: note.noteNo, date: note.createdAt, amount: note.amount,
+                            partyLabel: activeTab === 'credit' ? 'Customer' : 'Supplier',
+                            partyName: note.customer?.name || note.supplier?.name,
+                            fields: [{ label: 'Original document', value: note.sale?.receiptNo || note.purchase?.refNo }, { label: 'Reason', value: note.reason.replace(/_/g, ' ') }, { label: 'Branch', value: note.branch?.name }, { label: 'Status', value: note.status }, { label: 'Notes', value: note.notes }],
+                          }} />
                           {note.status !== 'cancelled' && (
                             <>
                               <Button variant="ghost" size="sm" onClick={() => openEdit(note)} title="Edit">

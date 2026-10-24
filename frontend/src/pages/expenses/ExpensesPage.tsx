@@ -13,6 +13,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalExpenses, getLocalCashAccounts, getLocalCashTransactions } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import { 
   Wallet, 
   TrendingUp, 
@@ -387,6 +388,11 @@ export default function ExpensesPage() {
                           Ref: {expense.reference}
                         </p>
                       )}
+                      <div className="mt-2"><TransactionReceiptButton data={{
+                        title: 'Expense payment voucher', reference: expense.reference || `EXP-${expense.id.slice(-8)}`,
+                        date: expense.date, amount: expense.amount, partyLabel: 'Payee / description', partyName: expense.description,
+                        fields: [{ label: 'Category', value: expense.category }, { label: 'Payment method', value: expense.paymentMethod }, { label: 'Paid from', value: expense.cashAccount?.name }, { label: 'Recorded by', value: `${expense.user?.fname || ''} ${expense.user?.lname || ''}`.trim() }, { label: 'Notes', value: expense.notes }],
+                      }} /></div>
                     </div>
                   </div>
                 </CardContent>
@@ -471,6 +477,12 @@ export default function ExpensesPage() {
                     <div className="text-sm text-muted-foreground">
                       Balance: {transaction.balanceAfter.toFixed(2)}
                     </div>
+                    <div className="mt-2"><TransactionReceiptButton data={{
+                      title: transaction.type === 'transfer' ? 'Cash account transfer record' : `Cash ${transaction.type} receipt`,
+                      reference: transaction.reference || `TXN-${transaction.id.slice(-8)}`, date: transaction.createdAt,
+                      amount: transaction.amount, partyLabel: 'Account', partyName: transaction.account?.name,
+                      fields: [{ label: 'Movement', value: transaction.type }, { label: 'Description', value: transaction.description }, { label: 'Balance after', value: transaction.balanceAfter }, { label: 'Recorded by', value: `${transaction.user?.fname || ''} ${transaction.user?.lname || ''}`.trim() }],
+                    }} /></div>
                   </div>
                 </div>
               </CardContent>

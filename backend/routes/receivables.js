@@ -122,6 +122,37 @@ const paymentMethodAccountLabel = (paymentMethod) => {
 
 const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
 
+const customerHistoryCounts = {
+  sales: true,
+  payments: true,
+  paymentAllocations: true,
+  creditApplications: true,
+  receivableReconciliationReviews: true,
+  withdrawals: true,
+  invoices: true,
+  rentals: true,
+  saleReturns: true,
+  reservations: true,
+  deliveries: true,
+  restaurantOrders: true,
+  appointments: true,
+  workOrders: true,
+  serviceContracts: true,
+  serviceFeedback: true,
+  fuelCards: true,
+  procurementSellerInvoices: true,
+  creditNotes: true,
+}
+
+const customerHistoryCount = (counts = {}) => Object.values(counts).reduce((sum, count) => sum + Number(count || 0), 0)
+
+const customerHasNoBalanceOrHistory = (customer) => (
+  Math.abs(toMoney(customer.balance)) < 0.005 &&
+  Math.abs(toMoney(customer.openingBalance)) < 0.005 &&
+  customerHistoryCount(customer._count) === 0 &&
+  !customer.procurementCounterpartyLink
+)
+
 const canManageOpeningBalance = (req) => (
   openingBalanceRoles.has(req.user?.role) ||
   req.user?.isPlatformUser ||
@@ -231,12 +262,21 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
         where,
         skip,
         take: Number(limit),
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: {
+          _count: { select: customerHistoryCounts },
+          procurementCounterpartyLink: { select: { id: true } },
+        },
       }),
       prisma.customer.count({ where })
     ])
     const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
-    const customers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
+    const scoredCustomers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
+    const customers = scoredCustomers.map((customer) => {
+      const canDelete = customerHasNoBalanceOrHistory(customer)
+      const { _count, procurementCounterpartyLink, ...publicCustomer } = customer
+      return { ...publicCustomer, canDelete }
+    })
 
     res.json({
       customers,
@@ -250,6 +290,52 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
   } catch (error) {
     console.error('Get customers error:', error)
     handleBranchError(res, error, 'Failed to fetch customers')
+  }
+})
+
+router.delete('/customers/:id', authenticateToken, requirePermission('canDeleteCustomer'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    await prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findFirst({
+        where: scopedWhere(scope, { id }),
+        include: {
+          _count: { select: customerHistoryCounts },
+          procurementCounterpartyLink: { select: { id: true } },
+        },
+      })
+
+      if (!customer) throw Object.assign(new Error('Customer not found'), { statusCode: 404 })
+      if (!customerHasNoBalanceOrHistory(customer)) {
+        throw Object.assign(new Error('This customer cannot be deleted because they have a balance or transaction history.'), { statusCode: 409 })
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: scope.tenantId,
+          userId: req.user.id,
+          userEmail: req.user.email || '',
+          branchId: customer.branchId || null,
+          action: 'delete',
+          model: 'Customer',
+          recordId: customer.id,
+          changes: { data: { name: customer.name, reason: 'No balance or linked history' } },
+          ip: req.ip || req.connection?.remoteAddress || null,
+        },
+      })
+      await tx.customer.delete({ where: { id: customer.id } })
+    }, { isolationLevel: 'Serializable' })
+
+    res.json({ message: 'Customer deleted successfully' })
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    if (error?.code === 'P2003' || error?.code === 'P2034') {
+      return res.status(409).json({ error: 'Customer activity was recorded while deleting. Refresh the list and try again.' })
+    }
+    console.error('Delete customer error:', error)
+    handleBranchError(res, error, 'Failed to delete customer')
   }
 })
 

@@ -15,11 +15,13 @@ import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import { appConfirm } from '@/lib/appFeedback'
 import { 
   Users, 
   Building2, 
@@ -58,6 +60,7 @@ interface Customer {
   status: 'active' | 'inactive' | 'blocked'
   trustScore: number
   notes?: string
+  canDelete?: boolean
 }
 
 interface FuelCard {
@@ -232,6 +235,7 @@ export default function ReceivablesPage() {
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
   const creditEnabled = hasPermission('canViewReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
+  const canDeleteCustomer = hasPermission('canDeleteCustomer')
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
   const hasLegacyAnyTransactionAccount = hasPermission('canUseAnyTransactionAccount')
   const hasLegacyOtherCashAccount = hasPermission('canUseOtherCashAccount')
@@ -337,6 +341,21 @@ export default function ReceivablesPage() {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to load customers', variant: 'destructive' })
     } finally {
       if (showPageLoading && requestId === customerRequestId.current) setLoading(false)
+    }
+  }
+
+  const deleteCustomer = async (customer: Customer) => {
+    if (!online || !canDeleteCustomer || !customer.canDelete) return
+    if (!(await appConfirm(`Delete ${customer.name}? This customer has no balance or transaction history. This cannot be undone.`))) return
+
+    try {
+      const response = await apiFetch(`/api/receivables/customers/${customer.id}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(await readResponseError(response, 'Failed to delete customer'))
+      toast({ title: 'Customer deleted', description: `${customer.name} was removed.` })
+      await Promise.all([loadCustomers(false), loadReceivablesSummary()])
+    } catch (error) {
+      toast({ title: 'Unable to delete customer', description: error instanceof Error ? error.message : 'Please refresh and try again.', variant: 'destructive' })
+      await loadCustomers(false)
     }
   }
 
@@ -1717,6 +1736,12 @@ export default function ReceivablesPage() {
                       <Edit className="h-4 w-4 mr-1" />
                       Edit
                     </Button>
+                    {canDeleteCustomer && customer.canDelete && (
+                      <Button size="sm" variant="destructive" disabled={!online} onClick={() => deleteCustomer(customer)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1844,6 +1869,11 @@ export default function ReceivablesPage() {
                       <p className="text-sm text-muted-foreground">Sale: {payment.sale.receiptNo}</p>
                     )}
                     <div className="flex flex-wrap gap-2">
+                      <TransactionReceiptButton data={{
+                        title: 'Customer payment receipt', reference: payment.reference || payment.transactionId || `CP-${String(payment.id).slice(-8)}`,
+                        date: payment.createdAt, amount: Number(payment.amount || 0), partyLabel: 'Received from', partyName: payment.customer?.name || 'Customer',
+                        fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Transaction reference', value: payment.transactionId }, { label: 'Applied to sale', value: payment.sale?.receiptNo }, { label: 'Notes', value: payment.notes }],
+                      }} />
                       <Button size="sm" variant="outline" onClick={() => printPaymentInvoice(payment)}>
                         <Printer className="h-4 w-4 mr-1" />
                         Print Invoice

@@ -15,6 +15,7 @@ import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalSuppliers, getLocalPurchases, getLocalPayablePayments, getLocalProducts } from '@/db/hybrid'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import { 
   Building2, 
   FileText, 
@@ -690,6 +691,11 @@ export default function PayablesPage() {
                       <FileText className="h-4 w-4 mr-1" />
                       View Details
                     </Button>
+                    <TransactionReceiptButton data={{
+                      title: 'Supplier purchase record', reference: purchase.refNo || `PUR-${purchase.id.slice(-8)}`,
+                      date: purchase.createdAt, amount: purchase.total, partyLabel: 'Supplier', partyName: purchase.supplier.name,
+                      fields: [{ label: 'Amount paid', value: purchase.amountPaid }, { label: 'Balance', value: purchase.balance }, { label: 'Payment status', value: purchase.paymentStatus }, { label: 'Recorded by', value: `${purchase.user?.fname || ''} ${purchase.user?.lname || ''}`.trim() }, { label: 'Notes', value: purchase.notes }],
+                    }} />
                   </div>
                 </CardContent>
               </Card>
@@ -736,6 +742,11 @@ export default function PayablesPage() {
                         Notes: {payment.notes}
                       </p>
                     )}
+                    <div className="mt-3"><TransactionReceiptButton data={{
+                      title: 'Supplier payment receipt', reference: payment.reference || `PAY-${payment.id.slice(-8)}`,
+                      date: payment.createdAt, amount: payment.amount, partyLabel: 'Supplier', partyName: payment.supplier.name,
+                      fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Purchase reference', value: payment.purchase?.refNo }, { label: 'Reference', value: payment.reference }, { label: 'Notes', value: payment.notes }],
+                    }} /></div>
                   </div>
                 </CardContent>
               </Card>

@@ -186,17 +186,22 @@ export async function postCustomerCreditApplicationJournal(client, { tenantId, b
   if (!receiptEntry) throw Object.assign(new Error('This customer credit comes from a receipt without a posted advances-account entry. Reconcile the original receipt before applying it.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_SOURCE_MISSING' })
   const advancesCredit = money(receiptEntry.lines.filter((line) => line.accountId === config.customerAdvancesAccountId)
     .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0))
-  const previousApplications = await client.customerCreditApplication.findMany({
-    where: { tenantId, sourceType: 'payment', sourceId: application.sourceId, id: { not: application.id } },
-    select: { id: true },
-  })
-  const previousApplicationEntries = previousApplications.length ? await client.journalEntry.findMany({
-    where: { tenantId, sourceType: 'CUSTOMER_CREDIT_APPLICATION', sourceId: { in: previousApplications.map((row) => row.id) }, status: 'posted' },
-    include: { lines: true },
-  }) : []
-  const alreadyApplied = money(previousApplicationEntries.reduce((sum, entry) => sum + entry.lines
-    .filter((line) => line.accountId === config.customerAdvancesAccountId)
-    .reduce((entrySum, line) => entrySum + money(line.debit) - money(line.credit), 0), 0))
+  const [previousApplicationBalance] = await client.$queryRaw`
+    SELECT COALESCE(SUM(jl."debit" - jl."credit"), 0)::double precision AS amount
+    FROM "customer_credit_applications" cca
+    JOIN "journal_entries" je
+      ON je."tenantId" = cca."tenantId"
+      AND je."sourceType" = 'CUSTOMER_CREDIT_APPLICATION'
+      AND je."sourceId" = cca."id"
+    JOIN "journal_lines" jl ON jl."entryId" = je."id"
+    WHERE cca."tenantId" = ${tenantId}
+      AND cca."sourceType" = 'payment'
+      AND cca."sourceId" = ${application.sourceId}
+      AND cca."id" <> ${application.id}
+      AND je."status" = 'posted'
+      AND jl."accountId" = ${config.customerAdvancesAccountId}
+  `
+  const alreadyApplied = money(previousApplicationBalance?.amount)
   if (money(advancesCredit - alreadyApplied) + 0.01 < money(application.amount)) {
     throw Object.assign(new Error('The original receipt does not have enough unapplied customer-advance balance in the general ledger. Reconcile the receipt before using this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_BALANCE_INSUFFICIENT' })
   }

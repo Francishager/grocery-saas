@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { apiFetch } from '@/lib/api'
 import { cn, formatCurrency, formatDisplayDate } from '@/lib/utils'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 
 export type CustomerHistoryTarget = {
   id?: string | null
@@ -224,6 +225,7 @@ export default function CustomerTransactionHistoryDialog({
                     <th className="px-3 py-2 text-right">Debit</th>
                     <th className="px-3 py-2 text-right">Credit</th>
                     <th className="px-3 py-2 text-right">Balance</th>
+                    <th className="px-3 py-2">Receipt</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -276,10 +278,18 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2 text-right">{Number(row.debit || 0) > 0 ? formatCurrency(Number(row.debit)) : '-'}</td>
                       <td className="px-3 py-2 text-right">{Number(row.credit || 0) > 0 ? formatCurrency(Number(row.credit)) : '-'}</td>
                       <td className={cn('px-3 py-2 text-right font-semibold', transactionTone(row))}>{formatCurrency(Number(row.balance || 0))}</td>
+                      <td className="px-3 py-2">
+                        {!/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton data={{
+                          title: `${row.type || 'Customer transaction'} receipt`, reference: row.reference || row.id,
+                          date: row.date || new Date(), amount: Number(row.amount || row.debit || row.credit || 0),
+                          partyLabel: 'Customer', partyName: data.customer.name,
+                          fields: [{ label: 'Transaction type', value: row.type }, { label: 'Description', value: row.description }, { label: 'Payment method', value: row.paymentMethod }, { label: 'Staff', value: row.staff }, { label: 'Debit', value: row.debit ? formatCurrency(Number(row.debit)) : '' }, { label: 'Credit', value: row.credit ? formatCurrency(Number(row.credit)) : '' }, { label: 'Status', value: row.status }],
+                        }} />}
+                      </td>
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
+                      <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
                         No transactions found for this customer.
                       </td>
                     </tr>
