@@ -16,6 +16,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
 import { displayReference } from '@/lib/displayReference'
+import { buildDailySalesTrend } from '@/lib/salesReportChartData'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
@@ -26,6 +27,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReportData } from '@/db/hybrid'
 import { EnrichedReport, type EnrichedReportData } from '@/components/EnrichedReportRenderer'
 import DailyBusinessReport from '@/components/DailyBusinessReport'
+import WeeklySalesCharts from '@/components/WeeklySalesCharts'
 import { canViewReportItem } from '@/lib/reportPermissions'
 
 type IconType = React.ComponentType<{ className?: string }>
@@ -56,6 +58,15 @@ const currencyCol = (key: string, label: string) => ({ key, label, format: 'curr
 const numberCol = (key: string, label: string) => ({ key, label, format: 'number' as const })
 const dateCol = (key: string, label: string) => ({ key, label, format: 'date' as const })
 const textCol = (key: string, label: string) => ({ key, label, format: 'text' as const })
+const weekRangeForInput = (offset = 0) => {
+  const start = new Date()
+  start.setHours(12, 0, 0, 0)
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * 7)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  const value = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return { from: value(start), to: value(end) }
+}
 const saleJobColumns = [dateCol('date', 'Date'), textCol('cardNo', 'Job Card'), textCol('receiptNo', 'Receipt'), textCol('customer', 'Customer'), textCol('product', 'Product / Service Sold'), textCol('service', 'Service'), textCol('source', 'Service Type'), numberCol('quantity', 'Quantity'), textCol('cashier', 'Cashier'), textCol('technician', 'Technician'), textCol('status', 'Job Status'), textCol('saleStatus', 'Sale Status'), textCol('description', 'Job Details'), textCol('completionNotes', 'Completion Notes'), currencyCol('totalCost', 'Service Costs')]
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
@@ -75,7 +86,7 @@ const CATEGORIES: ReportCategory[] = [
         ]
       },
       { id: 'salesDaily', label: 'Daily Sales Report', apiFn: reportsApiV2.dailyBusiness, renderType: 'dailyBusiness', showBranchFilter: true },
-      { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'enriched',
+      { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'enriched', showBranchFilter: true,
         summaryKeys: [
           { key: 'totalSales', label: 'Total Sales', format: 'number' },
           { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
@@ -2233,6 +2244,12 @@ export default function ReportsPage() {
 
   // Get data and columns for export based on report type
   const getExportData = () => {
+    if (currentReport?.id === 'salesWeekly') {
+      return {
+        data: reportData?.transactions || [],
+        columns: [dateCol('date', 'Date'), textCol('reference', 'Receipt'), textCol('customer', 'Customer'), textCol('staff', 'Staff'), textCol('branch', 'Branch'), textCol('paymentMethod', 'Method'), currencyCol('grossAmount', 'Gross Sales'), currencyCol('revenue', 'Net Revenue'), currencyCol('tax', 'Tax'), currencyCol('discount', 'Discount')],
+      }
+    }
     if (currentReport?.renderType === 'trialBalance') {
       return { data: reportData?.accounts || [], columns: currentReport.columns }
     }
@@ -2263,9 +2280,22 @@ export default function ReportsPage() {
     return currentReport?.label || 'Report'
   }
 
-  const getExportCharts = () => currentReport && [
-    'performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts',
-  ].includes(currentReport.id) ? getPerformanceChartSpecs(currentReport.id, reportData) : []
+  const getExportCharts = () => {
+    if (currentReport?.id === 'salesWeekly' && reportData?.weeklyTrend?.length) return [{
+      title: 'Weekly sales and net revenue', labelKey: 'label', rows: reportData.weeklyTrend,
+      series: [{ key: 'grossSales', label: 'Gross sales', color: '#0f9f6e', format: 'currency' as const }, { key: 'revenue', label: 'Net revenue', color: '#3987d7', format: 'currency' as const }],
+    }]
+    if (currentReport?.id === 'salesDaily') {
+      const rows = buildDailySalesTrend(reportData?.transactions || [])
+      return rows.length ? [{
+        title: 'Daily sales activity', labelKey: 'label', rows,
+        series: [{ key: 'sales', label: 'Sales', color: '#0f9f6e', format: 'currency' as const }, { key: 'collections', label: 'Customer repayments', color: '#e5a11a', format: 'currency' as const }, { key: 'returns', label: 'Returns', color: '#d65757', format: 'currency' as const }, { key: 'expenses', label: 'Operating expenses', color: '#8b6bc4', format: 'currency' as const }, { key: 'netRevenue', label: 'Net revenue', color: '#3987d7', format: 'currency' as const }],
+      }] : []
+    }
+    return currentReport && ['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id)
+      ? getPerformanceChartSpecs(currentReport.id, reportData)
+      : []
+  }
 
   const handlePrint = () => {
     const { data, columns } = getExportData()
@@ -2327,6 +2357,13 @@ export default function ReportsPage() {
                     <Button type="button" variant="ghost" size="sm" onClick={() => { const value = new Date().toISOString().slice(0, 10); setFrom(value); setTo(value) }}>Today</Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => { const date = new Date(); date.setDate(date.getDate() - 1); const value = date.toISOString().slice(0, 10); setFrom(value); setTo(value) }}>Yesterday</Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(''); setTo('') }}>Custom</Button>
+                  </div>
+                )}
+                {currentReport.id === 'salesWeekly' && (
+                  <div className="flex items-center gap-1 rounded-md border p-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const range = weekRangeForInput(0); setFrom(range.from); setTo(range.to) }}>This week</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const range = weekRangeForInput(-1); setFrom(range.from); setTo(range.to) }}>Last week</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(''); setTo('') }}>Current week</Button>
                   </div>
                 )}
                 {currentReport.entityType && (
@@ -2486,7 +2523,8 @@ export default function ReportsPage() {
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
-                    {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}
+                    {currentReport.id === 'salesWeekly' && <WeeklySalesCharts data={reportData} />}
+                    {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.id === 'salesWeekly' ? [] : currentReport.summaryKeys} />}
                     {currentReport.renderType === 'summary' && (
                       <>
                         {currentReport.id === 'salesSummary' ? (

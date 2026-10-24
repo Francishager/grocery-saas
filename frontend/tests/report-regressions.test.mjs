@@ -20,6 +20,7 @@ const bundle = await build({
   plugins: [{ name: 'report-test-presentation', setup(builder) {
     builder.onResolve({ filter: /^(react|@\/components\/ui\/.*|@\/lib\/utils|@\/components\/customer\/CustomerTransactionHistoryDialog)$/ },
       ({ path }) => ({ path, namespace: 'test' }));
+    builder.onResolve({ filter: /^recharts$/ }, ({ path }) => ({ path, namespace: 'test' }));
     builder.onLoad({ filter: /.*/, namespace: 'test' }, ({ path: name }) => {
       if (name === 'react') return { contents: `let state = []; let cursor = 0;
         export const reset = () => { state = []; cursor = 0; };
@@ -35,6 +36,7 @@ const bundle = await build({
       if (name.endsWith('/card')) return { contents: `export const Card='section', CardContent='div', CardHeader='header', CardTitle='h2';` };
       if (name.endsWith('/button')) return { contents: `export const Button='button';` };
       if (name.endsWith('/badge')) return { contents: `export const Badge='span';` };
+      if (name === 'recharts') return { contents: `export const Bar='div', CartesianGrid='div', ComposedChart='div', Legend='div', Line='div', ResponsiveContainer='div', Tooltip='div', XAxis='div', YAxis='div';` };
       return { contents: 'export default function CustomerHistory() { return null; }' };
     });
   } }],

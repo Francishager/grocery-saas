@@ -6,6 +6,7 @@ import { customerPaymentDisplayReference } from '../utils/customerPaymentReferen
 import { createReceivableSalesView } from '../utils/receivableSalesView.js';
 import { outstandingCustomerSummary } from '../utils/customerBalance.js';
 import { loadOutstandingReceivableRows } from '../utils/outstandingReceivables.js';
+import { buildWeeklySalesTrend, currentWeekRange, percentageChange } from '../utils/weeklySalesReport.js';
 import { buildAgingReport } from '../utils/agingReport.js';
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, visibleSalesUserId } from "../utils/branchAccess.js";
@@ -1844,10 +1845,21 @@ router.get("/sales/daily", authenticateToken, async (req, res) => {
 router.get("/sales/weekly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const where = scopedSaleWhere(req, s);
-    const [sales, saleRecords] = await Promise.all([
-      prisma.sale.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
-      salesView.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, tax: true, paymentStatus: true, status: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+    const tenant = await prisma.tenant.findUnique({ where: { id: s.tenantId }, select: { timezone: true } });
+    const timeZone = tenant?.timezone || "Africa/Kampala";
+    const defaults = currentWeekRange(localDateAt(new Date(), timeZone));
+    const from = req.query.from || defaults.from;
+    const to = req.query.to || (req.query.from ? req.query.from : defaults.to);
+    const { start, end } = dayRange(from, to, timeZone);
+    const duration = end.getTime() - start.getTime() + 1;
+    const previousWhere = { gte: new Date(start.getTime() - duration), lte: new Date(start.getTime() - 1) };
+    const where = scopedSaleWhere(req, s, { createdAt: { gte: start, lte: end } });
+    const priorWhere = scopedSaleWhere(req, s, { createdAt: previousWhere });
+    const [sales, saleRecords, previousSales, previousSaleRecords] = await Promise.all([
+      prisma.sale.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, cashDiscount: true, tax: true, status: true, createdAt: true, customerName: true, paymentMethod: true, user: { select: { id: true, fname: true, lname: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+      salesView.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, cashDiscount: true, tax: true, paymentStatus: true, amountPaid: true, customerId: true, customer: { select: { id: true, name: true } }, status: true, createdAt: true, paymentMethod: true, User: { select: { id: true, fname: true, lname: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+      prisma.sale.aggregate({ where: priorWhere, _sum: { total: true, tax: true }, _count: true }),
+      salesView.aggregate({ where: priorWhere, _sum: { total: true, tax: true }, _count: true }),
     ]);
     const allSales = [...sales, ...saleRecords].map(sale => ({
       ...sale,
@@ -1857,6 +1869,57 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
     })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const enriched = transformSalesData(allSales);
     enriched.title = 'Weekly Sales Report';
+    const saleById = new Map(allSales.map((sale) => [sale.id, sale]));
+    enriched.transactions = enriched.transactions.map((transaction) => {
+      const sale = saleById.get(transaction.id);
+      if (!sale) return transaction;
+      return {
+        ...transaction,
+        customer: sale.customer?.name || sale.customerName || 'Walk-in',
+        customerId: sale.customerId || null,
+        staff: userLabel(sale.user || sale.User),
+        branch: sale.branch?.name || 'Unassigned',
+        paymentMethod: normalizedPaymentMethod(sale.paymentMethod),
+        grossAmount: Number(sale.total || 0),
+        tax: Number(sale.tax || 0),
+        discount: Number(sale.discount || 0) + Number(sale.cashDiscount || 0),
+        revenue: saleNetRevenue(sale),
+      };
+    });
+    const previousGrossSales = Number(previousSales?._sum?.total || 0) + Number(previousSaleRecords?._sum?.total || 0);
+    const previousRevenue = aggregateNetRevenue(previousSales) + aggregateNetRevenue(previousSaleRecords);
+    const previousCount = Number(previousSales?._count || 0) + Number(previousSaleRecords?._count || 0);
+    const currentWeekSales = [...sales, ...saleRecords];
+    const weeklyTrend = buildWeeklySalesTrend(currentWeekSales, { from, to, timeZone });
+    const byBranch = new Map();
+    const byStaff = new Map();
+    currentWeekSales.forEach((sale) => {
+      const revenue = saleNetRevenue(sale);
+      const branchName = sale.branch?.name || 'Unassigned';
+      const staffName = userLabel(sale.user || sale.User);
+      const branchRow = byBranch.get(branchName) || { name: branchName, salesCount: 0, revenue: 0 };
+      branchRow.salesCount += 1;
+      branchRow.revenue += revenue;
+      byBranch.set(branchName, branchRow);
+      const staffRow = byStaff.get(staffName) || { name: staffName, salesCount: 0, revenue: 0 };
+      staffRow.salesCount += 1;
+      staffRow.revenue += revenue;
+      byStaff.set(staffName, staffRow);
+    });
+    enriched.weeklyTrend = weeklyTrend;
+    enriched.period = { from, to, timeZone };
+    enriched.comparison = {
+      previousGrossSales,
+      previousRevenue,
+      previousSalesCount: previousCount,
+      grossSalesChange: percentageChange(enriched.summary.grossSales, previousGrossSales),
+      revenueChange: percentageChange(enriched.summary.totalRevenue, previousRevenue),
+      salesCountChange: percentageChange(enriched.summary.totalSales, previousCount),
+    };
+    enriched.breakdowns = {
+      branches: [...byBranch.values()].map((row) => ({ ...row, revenue: toMoney(row.revenue) })).sort((a, b) => b.revenue - a.revenue),
+      staff: [...byStaff.values()].map((row) => ({ ...row, revenue: toMoney(row.revenue) })).sort((a, b) => b.revenue - a.revenue),
+    };
     res.json(enriched);
   } catch (err) { handleBranchError(res, err); }
 });

@@ -138,6 +138,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
       </div>
     )
   }
+  const isWeeklySalesReport = data.title === 'Weekly Sales Report'
 
   const toggleRow = (id: string) => {
     const newSet = new Set(expandedRows)
@@ -223,6 +224,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Type</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground flex-1">Description</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28">Reference</th>
+                  {isWeeklySalesReport && <><th className="px-4 py-3 text-left font-medium text-muted-foreground">Customer</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Staff</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Branch</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Payment Method</th></>}
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Debit</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Credit</th>
                   {data.transactions.some(t => t.balance !== undefined) && (
@@ -244,6 +246,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
                       {txn.details && <div className="text-xs text-muted-foreground truncate">{txn.details}</div>}
                     </td>
                     <td className="px-4 py-3 text-xs whitespace-nowrap font-mono">{txn.reference || '—'}</td>
+                    {isWeeklySalesReport && <><td className="px-4 py-3">{txn.customer || '—'}</td><td className="px-4 py-3">{txn.staff || '—'}</td><td className="px-4 py-3">{txn.branch || '—'}</td><td className="px-4 py-3 capitalize">{String(txn.paymentMethod || '—').replace(/_/g, ' ')}</td></>}
                     <td className="px-4 py-3 text-right font-semibold">
                       {txn.debit ? formatCurrency(txn.debit) : '—'}
                     </td>
@@ -285,6 +288,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
                   </div>
 
                   <p className="font-medium text-sm mb-2">{txn.description}</p>
+                  {isWeeklySalesReport && <p className="mb-2 break-words text-xs text-muted-foreground">{[txn.customer && `Customer: ${txn.customer}`, txn.staff && `Staff: ${txn.staff}`, txn.branch && `Branch: ${txn.branch}`, txn.paymentMethod && `Method: ${String(txn.paymentMethod).replace(/_/g, ' ')}`].filter(Boolean).join(' | ')}</p>}
                   {txn.details && expandedRows.has(txn.id || String(idx)) && (
                     <p className="text-xs text-muted-foreground mb-2 bg-muted/50 p-2 rounded">{txn.details}</p>
                   )}

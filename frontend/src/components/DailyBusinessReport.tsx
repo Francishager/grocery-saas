@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpFromLine, Banknote, BarChart3, BriefcaseBusiness, CreditCard, Package, ReceiptText, Smartphone, UserRound, UsersRound, WalletCards, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpFromLine, Banknote, BarChart3, BriefcaseBusiness, CreditCard, Package, ReceiptText, Smartphone, TrendingUp, UserRound, UsersRound, WalletCards, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatCurrency, formatDisplayDate } from '@/lib/utils'
 import { displayReference } from '@/lib/displayReference'
+import { buildDailySalesTrend } from '@/lib/salesReportChartData'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 export interface DailyBusinessData {
   header: {
@@ -366,6 +368,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
     creditAmount: row.creditAmount === undefined || row.creditAmount === null ? row.creditAmount : numberValue(row.creditAmount),
     amount: numberValue(row.amount),
   })), [data.transactions])
+  const salesTrend = useMemo(() => buildDailySalesTrend(transactions), [transactions])
   const summary = data.summary || {}
   const cash = data.cashMovement || {}
   const profitability = data.profitability || {}
@@ -644,6 +647,31 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
           ))}
         </div>
       </section>
+
+      <Card className="min-w-0 print:break-inside-avoid">
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="h-4 w-4 text-emerald-600" />Sales Activity Trend</CardTitle></CardHeader>
+        <CardContent className="min-w-0">
+          {salesTrend.length ? (
+            <div className="h-[300px] w-full min-w-0 sm:h-[350px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={salesTrend} margin={{ top: 8, right: 8, bottom: 4, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                  <YAxis tickLine={false} axisLine={false} width={78} tickFormatter={(value) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value)} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
+                  <Tooltip formatter={(value, name) => [money(value), name]} contentStyle={{ borderRadius: 8, borderColor: 'hsl(var(--border))', background: 'hsl(var(--background))' }} />
+                  <Legend />
+                  <Bar dataKey="sales" name="Sales" fill="#0f9f6e" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                  <Bar dataKey="collections" name="Customer repayments" fill="#e5a11a" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                  <Bar dataKey="returns" name="Returns / credit notes" fill="#d65757" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                  <Bar dataKey="expenses" name="Operating expenses" fill="#8b6bc4" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                  <Line type="monotone" dataKey="netRevenue" name="Net revenue" stroke="#3987d7" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <p className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No sales activity for this period.</p>}
+          <p className="mt-3 text-xs text-muted-foreground">Sales and net revenue exclude customer repayments; returns and operating expenses are shown as reductions.</p>
+        </CardContent>
+      </Card>
 
       <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
