@@ -11,7 +11,7 @@ import {
   saleRecognitionLines,
   validateReceivablesAccountingConfig,
 } from '../src/services/receivablesAccountingService.js'
-import { availableAdvanceFromReceipt } from '../src/services/customerCreditApplicationService.js'
+import { availableAdvanceFromReceipt, customerCreditOffset } from '../src/services/customerCreditApplicationService.js'
 
 const config = {
   receivableAccountId: 'ar',
@@ -82,6 +82,13 @@ test('legacy customer receipts expose only the amount left after settling receiv
   assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 500, alreadyApplied: 50, balanceBefore: 300 }), 150)
   assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 500, alreadyApplied: 0, balanceBefore: 900 }), 0)
   assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 150, alreadyApplied: 0, balanceBefore: 0 }), 150)
+})
+
+test('existing customer funds offset a credit sale before the remaining balance is checked', () => {
+  assert.equal(customerCreditOffset(100, 30), 30)
+  assert.equal(100 - customerCreditOffset(100, 30), 70)
+  assert.equal(customerCreditOffset(100, 150), 100)
+  assert.equal(customerCreditOffset(100, 0), 0)
 })
 
 test('customer advance availability is checked with a database-side sum of prior posted applications', async () => {

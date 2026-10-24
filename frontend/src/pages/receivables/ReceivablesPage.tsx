@@ -221,6 +221,7 @@ export default function ReceivablesPage() {
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
   const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
+  const [customerDetails, setCustomerDetails] = useState<CustomerHistoryTarget | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [withdrawalAmount, setWithdrawalAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
@@ -1101,7 +1102,7 @@ export default function ReceivablesPage() {
       <button
         type="button"
         className="break-words text-left font-medium text-primary underline-offset-2 hover:underline"
-        onClick={() => openCustomerHistory(customer)}
+        onClick={() => setCustomerDetails(customer)}
       >
         {customer.name || fallback}
       </button>
@@ -2041,6 +2042,14 @@ export default function ReceivablesPage() {
           setSelectedCashAccountId(null)
           setHistoryCustomer(null)
           setShowWithdrawalModal(true)
+        }}
+      />
+      <CustomerTransactionHistoryDialog
+        customer={customerDetails}
+        open={!!customerDetails}
+        viewMode="details"
+        onOpenChange={(open) => {
+          if (!open) setCustomerDetails(null)
         }}
       />
 

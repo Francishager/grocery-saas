@@ -15,7 +15,7 @@ import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalServ
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
 import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
-import { applyAvailableCustomerCredit } from '../src/services/customerCreditApplicationService.js'
+import { applyAvailableCustomerCredit, customerCreditOffset } from '../src/services/customerCreditApplicationService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -1463,7 +1463,9 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     if (balance > 0) {
       const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, customerId)
       const customerForCreditLimit = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance }
-      const creditLimitCheck = validateCreditSaleLimit(customerForCreditLimit, balance)
+      const availableCustomerCredit = Math.max(0, -toMoney(customerForCreditLimit.balance))
+      const newReceivable = Math.max(0, toMoney(balance) - customerCreditOffset(balance, availableCustomerCredit))
+      const creditLimitCheck = validateCreditSaleLimit(customerForCreditLimit, newReceivable)
       if (!creditLimitCheck.valid) {
         return res.status(creditLimitCheck.statusCode || 400).json({
           error: creditLimitCheck.message,
@@ -1475,9 +1477,10 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     const sale = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
       const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
-      const creditCheck = validateCreditSaleLimit({ ...customer, balance: customerBalanceBefore?.balance ?? customer.balance }, balance)
-      if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
       const availableCustomerCredit = Math.max(0, -toMoney(customerBalanceBefore?.balance))
+      const newReceivable = Math.max(0, toMoney(balance) - customerCreditOffset(balance, availableCustomerCredit))
+      const creditCheck = validateCreditSaleLimit({ ...customer, balance: customerBalanceBefore?.balance ?? customer.balance }, newReceivable)
+      if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
         const createdSale = await tx.saleRecord.create({
           data: {
           receiptNo,

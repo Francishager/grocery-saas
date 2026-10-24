@@ -2,6 +2,10 @@ import { calculateCustomerReceivableBalance, calculateCustomerReceivableBalanceB
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100
 
+export function customerCreditOffset(amountDue, availableCredit) {
+  return money(Math.min(Math.max(0, money(amountDue)), Math.max(0, money(availableCredit))))
+}
+
 export function availableAdvanceFromReceipt({ amount, allocatedToCustomer, alreadyApplied, balanceBefore }) {
   const receiptAmount = money(amount)
   const allocationCap = Math.min(receiptAmount, Math.max(0, money(allocatedToCustomer)))
@@ -13,7 +17,7 @@ export function availableAdvanceFromReceipt({ amount, allocatedToCustomer, alrea
 export async function applyAvailableCustomerCredit(client, { scope, customerId, saleId, amountDue, availableCredit, userId, branchId }) {
   const balanceSnapshot = await calculateCustomerReceivableBalance(client, scope, customerId)
   const creditAvailable = availableCredit == null ? Math.max(0, -money(balanceSnapshot?.balance)) : Math.max(0, money(availableCredit))
-  const target = Math.min(money(amountDue), creditAvailable)
+  const target = customerCreditOffset(amountDue, creditAvailable)
   if (target <= 0) return { amount: 0, applications: [] }
 
   const [payments, allocations, creditNotes, returns, existingApplications] = await Promise.all([

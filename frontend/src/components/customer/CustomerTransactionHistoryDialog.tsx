@@ -131,12 +131,14 @@ export default function CustomerTransactionHistoryDialog({
   onOpenChange,
   onRecordPayment,
   onWithdraw,
+  viewMode = 'profile',
 }: {
   customer: CustomerHistoryTarget | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onRecordPayment?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   onWithdraw?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
+  viewMode?: 'profile' | 'details'
 }) {
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -154,7 +156,7 @@ export default function CustomerTransactionHistoryDialog({
       setLoading(true)
       setError('')
       try {
-        const response = await apiFetch(`/api/receivables/customers/${customer.id}/history?limit=500`, {
+        const response = await apiFetch(`/api/receivables/customers/${customer.id}/history?limit=${viewMode === 'details' ? 1 : 500}`, {
           signal: controller.signal,
         } as RequestInit)
         const payload = await response.json().catch(() => ({}))
@@ -169,7 +171,7 @@ export default function CustomerTransactionHistoryDialog({
 
     loadHistory()
     return () => controller.abort()
-  }, [open, customer?.id])
+  }, [open, customer?.id, viewMode])
 
   const customerInfo = data?.customer || customer
   const transactions = data?.transactions || []
@@ -183,7 +185,7 @@ export default function CustomerTransactionHistoryDialog({
             <UserRound className="h-5 w-5 text-primary" />
             <span className="min-w-0 break-words">{customerInfo?.name || 'Customer'}</span>
           </DialogTitle>
-          <DialogDescription>Customer profile and the transaction history available to your role.</DialogDescription>
+          <DialogDescription>{viewMode === 'details' ? 'Customer details available to your role.' : 'Customer profile and the transaction history available to your role.'}</DialogDescription>
         </DialogHeader>
 
         {loading && (
@@ -199,8 +201,34 @@ export default function CustomerTransactionHistoryDialog({
           </div>
         )}
 
-        {!loading && !error && data && (
-          <Tabs defaultValue="overview" className="space-y-4">
+        {!loading && !error && data && viewMode === 'details' && (
+          <div className="grid gap-4 md:grid-cols-2">
+            <section className="rounded-md border p-4">
+              <h3 className="font-semibold">Contact details</h3>
+              <dl className="mt-3 divide-y">
+                <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Name</dt><dd className="font-medium">{data.customer.name}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Phone</dt><dd className="font-medium">{data.access.phone ? data.customer.phone || 'Not provided' : data.customer.maskedPhone || '07xxxxxx'}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Email</dt><dd className="break-all text-right font-medium">{data.access.email ? data.customer.email || 'Not provided' : data.customer.maskedEmail || 'x******@*****'}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Address</dt><dd className="max-w-[70%] text-right font-medium">{data.access.address ? data.customer.address || 'Not provided' : data.customer.maskedAddress || '******'}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Status</dt><dd><Badge variant="outline">{data.customer.status || 'active'}</Badge></dd></div>
+              </dl>
+              {data.access.notes && data.customer.notes && <p className="mt-3 whitespace-pre-wrap border-t pt-3 text-sm"><span className="font-medium">Notes: </span>{data.customer.notes}</p>}
+              {!data.access.notes && data.customer.maskedNotes && <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">Customer notes: {data.customer.maskedNotes}</p>}
+            </section>
+            <section className="rounded-md border p-4">
+              <h3 className="font-semibold">Account summary</h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {data.access.balance ? metric('Current Balance', data.summary.currentBalance) : maskedMetric('Current Balance')}
+                {data.access.balance ? metric('Credit Limit', data.customer.creditLimit) : maskedMetric('Credit Limit')}
+                {data.access.balance ? metric('Opening Balance', data.summary.openingBalance ?? data.customer.openingBalance) : maskedMetric('Opening Balance')}
+              </div>
+              {data.access.balance && (data.summary.openingBalanceDate || data.customer.openingBalanceDate) && <p className="mt-3 text-xs text-muted-foreground">Opening balance date: {formatDisplayDate(data.summary.openingBalanceDate || data.customer.openingBalanceDate || '')}</p>}
+            </section>
+          </div>
+        )}
+
+        {!loading && !error && data && viewMode === 'profile' && (
+          <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
             <TabsList className="grid h-auto w-full grid-cols-2 sm:w-fit">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="ledger">Transaction ledger ({Number(data.summary.transactionCount || 0).toLocaleString()})</TabsTrigger>
