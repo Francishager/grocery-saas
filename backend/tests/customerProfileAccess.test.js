@@ -58,3 +58,9 @@ test('customer history permission groups do not expose other transaction categor
   const access = customerProfileAccess(['canViewCustomerPaymentsHistory', 'canViewCustomerReturnsHistory'])
   assert.deepEqual(filterCustomerHistoryRows(rows, access).map((row) => row.source), ['customer_payment', 'sale_return'])
 })
+
+test('credit history requires balance visibility and a permitted credit activity domain', () => {
+  assert.equal(customerProfileAccess(['canViewCustomerSalesHistory']).creditHistory, false)
+  assert.equal(customerProfileAccess(['canViewCustomerBalance']).creditHistory, false)
+  assert.equal(customerProfileAccess(['canViewCustomerBalance', 'canViewCustomerPaymentsHistory']).creditHistory, true)
+})

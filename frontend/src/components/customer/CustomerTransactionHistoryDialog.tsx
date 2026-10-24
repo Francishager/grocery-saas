@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2 } from 'lucide-react'
+import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -49,6 +49,35 @@ type CustomerHistoryTransaction = {
   }>
 }
 
+type CustomerCreditHistory = {
+  asOf: string
+  currentBalance: number
+  receivableExposure: number
+  customerFunds: number
+  creditLimit: number
+  availableLimit: number
+  utilizationPercent: number | null
+  aging: {
+    notDue: number
+    days1To30: number
+    days31To60: number
+    days61To90: number
+    over90Days: number
+    noDueDate: number
+  }
+  openSales: Array<{
+    id: string
+    reference: string
+    date: string
+    dueDate?: string | null
+    total: number
+    amountPaid: number
+    balance: number
+    status: string
+    daysPastDue: number | null
+  }>
+}
+
 type CustomerHistoryResponse = {
   customer: CustomerHistoryTarget & {
     address?: string | null
@@ -91,6 +120,7 @@ type CustomerHistoryResponse = {
     creditNotes: boolean
     withdrawals: boolean
     businessActivity: boolean
+    creditHistory: boolean
     notes: boolean
     recordPayment: boolean
     printReceipts: boolean
@@ -98,6 +128,7 @@ type CustomerHistoryResponse = {
     delete: boolean
     withdraw: boolean
   }
+  creditHistory?: CustomerCreditHistory
   transactions: CustomerHistoryTransaction[]
 }
 
@@ -189,6 +220,11 @@ export default function CustomerTransactionHistoryDialog({
     data.access.withdrawals || data.access.businessActivity || data.access.balance
   ))
   const canViewSalesAndPayments = Boolean(data && (data.access.sales || data.access.payments))
+  const canViewCreditHistory = Boolean(data?.access.creditHistory && data.creditHistory)
+  const creditActivity = transactions.filter((row) => [
+    'opening_balance', 'receivable_sale', 'sale_payment_adjustment', 'customer_payment',
+    'customer_credit_application', 'credit_note', 'sale_return', 'customer_withdrawal',
+  ].includes(row.source))
   const lastDate = useMemo(() => data?.summary?.lastTransactionDate ? formatDisplayDate(data.summary.lastTransactionDate) : 'No activity yet', [data?.summary?.lastTransactionDate])
 
   const content = (
@@ -250,10 +286,11 @@ export default function CustomerTransactionHistoryDialog({
 
         {!loading && !error && data && viewMode === 'profile' && (
           <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
-            <TabsList className="grid h-auto w-full grid-cols-3 sm:w-fit">
+            <TabsList className="grid h-auto w-full grid-cols-2 sm:w-fit sm:grid-cols-4">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               {canViewLedger && <TabsTrigger value="ledger">Transaction ledger ({Number(data.summary.transactionCount || 0).toLocaleString()})</TabsTrigger>}
               {canViewSalesAndPayments && <TabsTrigger value="sales-payments">Sales &amp; Payments</TabsTrigger>}
+              {canViewCreditHistory && <TabsTrigger value="credit-history">Credit History</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
@@ -459,6 +496,98 @@ export default function CustomerTransactionHistoryDialog({
                   </tbody>
                 </table>
               </div>
+            </TabsContent>}
+
+            {canViewCreditHistory && <TabsContent value="credit-history" className="space-y-5">
+              <section aria-label="Customer credit position" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {metric('Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
+                {metric('Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
+                {metric('Credit limit', data.creditHistory!.creditLimit)}
+                <div className="rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">Limit utilization</p>
+                    <Gauge className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <p className="mt-1 text-sm font-semibold sm:text-base">
+                    {data.creditHistory!.utilizationPercent == null ? 'Not set' : `${data.creditHistory!.utilizationPercent.toLocaleString()}%`}
+                  </p>
+                  {data.creditHistory!.utilizationPercent != null && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`${data.creditHistory!.utilizationPercent}% of credit limit used`}>
+                    <div className={cn('h-full rounded-full', data.creditHistory!.utilizationPercent > 100 ? 'bg-red-600' : 'bg-emerald-600')} style={{ width: `${Math.min(100, Math.max(0, data.creditHistory!.utilizationPercent))}%` }} />
+                  </div>}
+                  {data.creditHistory!.utilizationPercent != null && <p className="mt-1 text-xs text-muted-foreground">{formatCurrency(data.creditHistory!.availableLimit)} limit remaining</p>}
+                </div>
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <Clock3 className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <h3 className="text-sm font-semibold">Receivables ageing</h3>
+                    <p className="text-xs text-muted-foreground">Outstanding credit sales grouped by recorded due date, as of {formatDisplayDate(data.creditHistory!.asOf)}.</p>
+                  </div>
+                </div>
+                {data.access.sales ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                  {[
+                    ['Not due', data.creditHistory!.aging.notDue],
+                    ['1–30 days overdue', data.creditHistory!.aging.days1To30],
+                    ['31–60 days overdue', data.creditHistory!.aging.days31To60],
+                    ['61–90 days overdue', data.creditHistory!.aging.days61To90],
+                    ['Over 90 days', data.creditHistory!.aging.over90Days],
+                    ['No due date recorded', data.creditHistory!.aging.noDueDate],
+                  ].map(([label, amount]) => <div key={String(label)} className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="mt-1 break-words text-sm font-semibold">{formatCurrency(Number(amount))}</p>
+                  </div>)}
+                </div> : <p className="rounded-md border p-4 text-sm text-muted-foreground">Credit sale details are restricted by your role.</p>}
+              </section>
+
+              {data.access.sales && <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <CircleDollarSign className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold">Open credit sales ({data.creditHistory!.openSales.length})</h3>
+                </div>
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="min-w-[760px] w-full text-sm">
+                    <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                      <tr><th className="px-3 py-2">Sale</th><th className="px-3 py-2">Sale date</th><th className="px-3 py-2">Due date</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Original amount</th><th className="px-3 py-2 text-right">Outstanding</th></tr>
+                    </thead>
+                    <tbody>
+                      {data.creditHistory!.openSales.map((sale) => <tr key={sale.id} className="border-t">
+                        <td className="px-3 py-2 font-mono text-xs">{sale.reference}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{formatDisplayDate(sale.date)}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{sale.dueDate ? formatDisplayDate(sale.dueDate) : 'Not recorded'}</td>
+                        <td className="px-3 py-2"><Badge variant={sale.daysPastDue && sale.daysPastDue > 0 ? 'destructive' : 'outline'}>{sale.daysPastDue == null ? 'No due date' : sale.daysPastDue > 0 ? `${sale.daysPastDue} days overdue` : 'Not due'}</Badge></td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right">{formatCurrency(sale.total)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-semibold text-red-700">{formatCurrency(sale.balance)}</td>
+                      </tr>)}
+                      {!data.creditHistory!.openSales.length && <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">No open credit sales.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </section>}
+
+              <section>
+                <h3 className="mb-3 text-sm font-semibold">Credit account activity</h3>
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="min-w-[760px] w-full text-sm">
+                    <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                      <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Activity</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2 text-right">Balance</th></tr>
+                    </thead>
+                    <tbody>
+                      {creditActivity.map((row) => <tr key={row.id} className="border-t align-top">
+                        <td className="whitespace-nowrap px-3 py-2">{row.date ? formatDisplayDate(row.date) : '—'}</td>
+                        <td className="px-3 py-2"><div className="font-medium">{row.type}</div><div className="text-xs text-muted-foreground">{row.description || ''}</div></td>
+                        <td className="px-3 py-2 font-mono text-xs">{row.reference || '—'}</td>
+                        <td className="px-3 py-2 capitalize">{normalizeText(row.paymentMethod) || '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right">{Number(row.debit || 0) ? formatCurrency(Number(row.debit)) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right">{Number(row.credit || 0) ? formatCurrency(Number(row.credit)) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-medium">{data.access.balance ? formatCurrency(Number(row.balance || 0)) : '******'}</td>
+                      </tr>)}
+                      {!creditActivity.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">No credit activity is available for this customer.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </TabsContent>}
           </Tabs>
         )}

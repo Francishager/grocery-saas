@@ -22,15 +22,21 @@ const maskText = (value) => String(value || '').trim() ? '******' : ''
 export function customerProfileAccess(permissions = []) {
   const granted = new Set(Array.isArray(permissions) ? permissions : [])
   const has = (permission) => granted.has('*') || granted.has(permission)
+  const balance = has('canViewCustomerBalance')
+  const sales = has('canViewCustomerSalesHistory')
+  const payments = has('canViewCustomerPaymentsHistory')
+  const returns = has('canViewCustomerReturnsHistory')
+  const creditNotes = has('canViewCustomerCreditNotesHistory')
   return {
     phone: has('canViewCustomerPhone'),
     email: has('canViewCustomerEmail'),
     address: has('canViewCustomerAddress'),
-    balance: has('canViewCustomerBalance'),
-    sales: has('canViewCustomerSalesHistory'),
-    payments: has('canViewCustomerPaymentsHistory'),
-    returns: has('canViewCustomerReturnsHistory'),
-    creditNotes: has('canViewCustomerCreditNotesHistory'),
+    balance,
+    sales,
+    payments,
+    returns,
+    creditNotes,
+    creditHistory: balance && (sales || payments || returns || creditNotes),
     withdrawals: has('canViewCustomerWithdrawalsHistory'),
     businessActivity: has('canViewCustomerBusinessActivity'),
     notes: has('canViewCustomerNotes'),

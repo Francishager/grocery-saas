@@ -992,6 +992,31 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       return publicRow
     }).reverse()
 
+    const openCreditSales = access.balance && access.sales ? await salesView.findMany({
+      where: scopedWhere(scope, { customerId: id, balance: { gt: 0 } }),
+      select: { id: true, receiptNo: true, createdAt: true, dueDate: true, total: true, amountPaid: true, balance: true, paymentStatus: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    }) : []
+    const now = new Date()
+    const aging = { notDue: 0, days1To30: 0, days31To60: 0, days61To90: 0, over90Days: 0, noDueDate: 0 }
+    for (const sale of openCreditSales) {
+      const amount = toMoney(sale.balance)
+      if (!sale.dueDate) aging.noDueDate += amount
+      else {
+        const dueDate = new Date(sale.dueDate)
+        const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+        const dueDay = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate())
+        const overdueDays = Math.floor((today - dueDay) / 86400000)
+        if (overdueDays <= 0) aging.notDue += amount
+        else if (overdueDays <= 30) aging.days1To30 += amount
+        else if (overdueDays <= 60) aging.days31To60 += amount
+        else if (overdueDays <= 90) aging.days61To90 += amount
+        else aging.over90Days += amount
+      }
+    }
+    Object.keys(aging).forEach((key) => { aging[key] = toMoney(aging[key]) })
+
     const totals = visibleRows.reduce((acc, row) => {
       acc.debit += toMoney(row.debit)
       acc.credit += toMoney(row.credit)
@@ -1018,6 +1043,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         creditNotes: access.creditNotes,
         withdrawals: access.withdrawals,
         businessActivity: access.businessActivity,
+        creditHistory: access.creditHistory,
         notes: access.notes,
         recordPayment: access.recordPayment,
         printReceipts: access.printReceipts,
@@ -1039,6 +1065,31 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         ...(access.withdraw && { availableForWithdrawal: Math.max(0, -toMoney(reconciledCustomer.balance)) }),
         lastTransactionDate: transactions[0]?.date || null
       },
+      ...(access.creditHistory && {
+        creditHistory: {
+          asOf: now,
+          currentBalance: toMoney(reconciledCustomer.balance),
+          receivableExposure: Math.max(0, toMoney(reconciledCustomer.balance)),
+          customerFunds: Math.max(0, -toMoney(reconciledCustomer.balance)),
+          creditLimit: toMoney(customer.creditLimit),
+          availableLimit: Math.max(0, toMoney(customer.creditLimit) - Math.max(0, toMoney(reconciledCustomer.balance))),
+          utilizationPercent: toMoney(customer.creditLimit) > 0
+            ? Math.round((Math.max(0, toMoney(reconciledCustomer.balance)) / toMoney(customer.creditLimit)) * 10000) / 100
+            : null,
+          aging,
+          openSales: access.sales ? openCreditSales.map((sale) => ({
+            id: sale.id,
+            reference: sale.receiptNo,
+            date: sale.createdAt,
+            dueDate: sale.dueDate,
+            total: toMoney(sale.total),
+            amountPaid: toMoney(sale.amountPaid),
+            balance: toMoney(sale.balance),
+            status: sale.paymentStatus,
+            daysPastDue: sale.dueDate ? Math.max(0, Math.floor((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - Date.UTC(new Date(sale.dueDate).getUTCFullYear(), new Date(sale.dueDate).getUTCMonth(), new Date(sale.dueDate).getUTCDate())) / 86400000)) : null,
+          })) : [],
+        },
+      }),
       transactions
     })
   } catch (error) {
