@@ -113,6 +113,7 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
       status: { not: "cancelled" },
     }),
     select: {
+      id: true,
       customerId: true,
       total: true,
       amountPaid: true,

@@ -271,8 +271,21 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
       }),
       prisma.customer.count({ where })
     ])
-    const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
-    const scoredCustomers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
+    const enrichmentWarnings = []
+    let balancedCustomers = customersRaw
+    try {
+      balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
+    } catch (error) {
+      console.error('Customer balance enrichment failed:', error)
+      enrichmentWarnings.push('Some balances could not be refreshed; showing the last saved customer balances.')
+    }
+    let scoredCustomers = balancedCustomers
+    try {
+      scoredCustomers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
+    } catch (error) {
+      console.error('Customer repayment score enrichment failed:', error)
+      enrichmentWarnings.push('Repayment scores could not be refreshed.')
+    }
     const profileAccess = customerProfileAccess(req.user?.permissions)
     const customers = scoredCustomers.map((customer) => {
       const canDelete = customerHasNoBalanceOrHistory(customer)
@@ -282,6 +295,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
 
     res.json({
       customers,
+      ...(enrichmentWarnings.length ? { warnings: enrichmentWarnings } : {}),
       pagination: {
         page: Number(page),
         limit: Number(limit),

@@ -369,6 +369,9 @@ export default function ReceivablesPage() {
         const response = await apiFetch(`/api/receivables/customers?${params}`)
         if (!response.ok) throw new Error(await readResponseError(response, 'Failed to load customers'))
         const data = await response.json()
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+          toast({ title: 'Customer data loaded with a warning', description: data.warnings.join(' '), variant: 'destructive' })
+        }
         rows = data.customers || []
         total = Number(data.pagination?.total ?? rows.length)
       } else {
