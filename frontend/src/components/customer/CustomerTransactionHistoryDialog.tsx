@@ -228,16 +228,20 @@ function transactionTone(row: CustomerHistoryTransaction) {
 function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?: string | null) {
   const isCreditNote = row.source === 'credit_note'
   const isReturn = row.source === 'sale_return'
+  const isPayment = row.source === 'customer_payment'
   const amount = Number(row.amount || row.debit || row.credit || 0)
   const title = isCreditNote
     ? 'Customer Credit Note'
     : isReturn
       ? row.paymentMethod === 'credit' ? 'Sales Return Credit Receipt' : 'Sales Return Refund Receipt'
+      : isPayment
+        ? 'Customer Payment Receipt'
       : `${row.type || 'Customer transaction'} receipt`
   const fields = [
     { label: 'Transaction type', value: row.type },
-    ...(row.originalReference ? [{ label: 'Original sale', value: row.originalReference }] : []),
+    ...(row.originalReference && !isPayment ? [{ label: 'Original sale', value: row.originalReference }] : []),
     ...(row.reason ? [{ label: 'Reason', value: row.reason }] : []),
+    ...(isPayment ? [{ label: 'Payment applied to', value: row.originalReference || 'Customer account' }] : []),
     ...(isCreditNote ? [
       { label: 'Credit note value', value: formatCurrency(amount) },
       { label: 'Refund recorded', value: formatCurrency(Number(row.refundAmount || 0)) },
@@ -261,8 +265,10 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
     reference: row.reference || row.id,
     date: row.date || new Date(),
     amount,
+    amountLabel: isPayment ? 'Payment received' : undefined,
     partyLabel: 'Customer',
     partyName: customerName || undefined,
+    itemsLabel: isPayment && row.items?.length ? 'Items on linked invoice' : undefined,
     items: row.items?.map((item) => ({
       name: item.productName || 'Item',
       quantity: Number(item.quantity || 0),
@@ -546,7 +552,7 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2 text-right">{Number(row.credit || 0) > 0 ? formatCurrency(Number(row.credit)) : '-'}</td>
                       <td className={cn('px-3 py-2 text-right font-semibold', data.access.balance ? transactionTone(row) : 'text-muted-foreground')}>{data.access.balance ? formatCurrency(Number(row.balance || 0)) : '******'}</td>
                       <td className="px-3 py-2">
-                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton data={customerActivityReceipt(row, data.customer.name)} />)}
+                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton label={row.source === 'customer_payment' ? 'Print payment receipt' : 'Print transaction'} data={customerActivityReceipt(row, data.customer.name)} />)}
                       </td>
                     </tr>
                   )) : (
@@ -589,25 +595,25 @@ export default function CustomerTransactionHistoryDialog({
                         <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || row.debit || row.credit || 0))}</td>
                         {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment'].includes(row.source) && <TransactionReceiptButton
                           label={row.source === 'customer_payment' ? 'Reprint receipt' : row.source === 'pos_sale' ? 'Reprint receipt' : 'Reprint invoice'}
-                          data={{
-                            title: row.source === 'customer_payment' ? 'Customer Payment Receipt' : row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
-                            reference: row.reference || row.id,
-                            date: row.date || new Date(),
-                            amount: Number(row.amount || row.debit || row.credit || 0),
-                            partyLabel: 'Customer',
-                            partyName: data.customer.name,
-                            items: row.source === 'customer_payment' ? undefined : row.items?.map((item) => ({
-                              name: item.productName || 'Item', quantity: Number(item.quantity || 0), unitName: item.unitName || '',
-                              unitPrice: Number(item.unitPrice || 0), discount: Number(item.discount || 0), total: Number(item.total || 0),
-                            })),
-                            fields: row.source === 'customer_payment'
-                              ? [{ label: 'Payment method', value: row.paymentMethod }, { label: 'Description', value: row.description }, { label: 'Status', value: row.status }]
-                              : [
+                          data={row.source === 'customer_payment'
+                            ? customerActivityReceipt(row, data.customer.name)
+                            : {
+                              title: row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
+                              reference: row.reference || row.id,
+                              date: row.date || new Date(),
+                              amount: Number(row.amount || row.debit || row.credit || 0),
+                              partyLabel: 'Customer',
+                              partyName: data.customer.name,
+                              items: row.items?.map((item) => ({
+                                name: item.productName || 'Item', quantity: Number(item.quantity || 0), unitName: item.unitName || '',
+                                unitPrice: Number(item.unitPrice || 0), discount: Number(item.discount || 0), total: Number(item.total || 0),
+                              })),
+                              fields: [
                                 { label: 'Payment status', value: row.status },
                                 ...(row.source === 'receivable_sale' || row.source === 'customer_invoice' ? [{ label: 'Paid to date', value: formatCurrency(Number(row.amountPaid || 0)) }, { label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
                                 { label: 'Payment method', value: row.paymentMethod }, { label: 'Served by', value: row.staff },
                               ],
-                          }}
+                            }}
                         />}</td>}
                       </tr>
                     ))}

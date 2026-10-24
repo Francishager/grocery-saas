@@ -223,6 +223,16 @@ const withUser = (record) => {
 
 const userName = (user) => [user?.fname, user?.lname].filter(Boolean).join(' ') || 'Staff'
 
+function customerPaymentDisplayReference(payment) {
+  const candidates = [payment.transactionId, payment.reference]
+    .map((value) => String(value || '').trim())
+    .filter((value) => value && value !== payment.id && !/^CP-customer-payment-/i.test(value))
+  if (candidates.length) return candidates[0].length > 48 ? `${candidates[0].slice(0, 40)}...` : candidates[0]
+  const date = new Date(payment.createdAt)
+  const datePart = Number.isNaN(date.getTime()) ? 'UNKNOWN' : date.toISOString().slice(0, 10).replace(/-/g, '')
+  return `PAY-${datePart}-${String(payment.id || '').slice(-6).toUpperCase()}`
+}
+
 const sortLedgerRows = (rows) => rows.sort((a, b) => {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
   const aTime = a.date ? new Date(a.date).getTime() : 0
@@ -552,7 +562,25 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { id: true, name: true } },
-          sale: { select: { id: true, receiptNo: true } }
+          sale: {
+            select: {
+              id: true,
+              receiptNo: true,
+              ...(access.sales && { items: {
+                select: {
+                  id: true,
+                  productId: true,
+                  quantity: true,
+                  unitName: true,
+                  price: true,
+                  discount: true,
+                  cashDiscount: true,
+                  total: true,
+                  product: { select: { name: true, sku: true, itemType: true } },
+                },
+              } }),
+            },
+          }
         },
         orderBy: { createdAt: 'asc' },
         take: limit
@@ -812,7 +840,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         source: 'customer_payment',
         type: 'Payment',
         date: payment.createdAt,
-        reference: payment.reference || payment.transactionId || payment.sale?.receiptNo || payment.id,
+        reference: customerPaymentDisplayReference(payment),
+        originalReference: payment.sale?.receiptNo || null,
         description: payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : (payment.notes || 'Customer payment'),
         debit: 0,
         credit: toMoney(payment.amount),
@@ -823,7 +852,18 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         status: 'paid',
         branch: payment.branch?.name || '',
         staff: '',
-        items: [],
+        items: (payment.sale?.items || []).map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total,
+        })),
         sortOrder: 20
       })
     })
