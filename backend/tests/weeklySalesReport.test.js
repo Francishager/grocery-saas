@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWeeklySalesTrend, currentWeekRange, percentageChange } from '../src/utils/weeklySalesReport.js';
+import { transformSalesData } from '../src/utils/enrichedReportTransform.js';
 
 test('current weekly range starts Monday and ends Sunday', () => {
   assert.deepEqual(currentWeekRange('2026-10-24'), { from: '2026-10-19', to: '2026-10-25' });
@@ -20,4 +21,10 @@ test('weekly trend fills quiet days and separates gross, net revenue, tax, disco
 test('week comparisons distinguish a newly active period from a zero change', () => {
   assert.deepEqual(percentageChange(250, 0), { amount: 250, percent: null, direction: 'new' });
   assert.deepEqual(percentageChange(250, 250), { amount: 0, percent: 0, direction: 'unchanged' });
+});
+
+test('sales report item details count array entries instead of stringifying objects', () => {
+  const report = transformSalesData([{ id: 'sale-1', items: [{ name: 'Rice' }, { name: 'Beans' }] }]);
+  assert.match(report.transactions[0].details, /^Items: 2,/);
+  assert.doesNotMatch(report.transactions[0].details, /\[object Object\]/);
 });

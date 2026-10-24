@@ -16,6 +16,7 @@ export function transformSalesData(data) {
   const transactions = salesArray.map((sale) => {
     const saleGross = Number(sale.grossSales || sale.total || 0);
     const saleRevenue = Number(sale.revenue ?? Math.max(0, saleGross - Number(sale.tax || 0)));
+    const itemCount = Array.isArray(sale.items) ? sale.items.length : sale.itemCount ?? (typeof sale.items === 'number' ? sale.items : 1);
     grossSales += saleGross;
     totalRevenue += saleRevenue;
     totalDiscount += Number(sale.discount || 0);
@@ -27,7 +28,7 @@ export function transformSalesData(data) {
       date: sale.date || sale.createdAt,
       type: 'Sale',
       description: `Sale Invoice ${sale.receiptNo || sale.id?.substring(0, 8) || ''}`,
-      details: `Items: ${sale.items || sale.itemCount || 1}, Status: ${sale.status || 'Completed'}`,
+      details: `Items: ${itemCount}, Status: ${sale.status || 'Completed'}`,
       debit: saleRevenue,
       credit: 0,
       reference: sale.receiptNo || sale.id?.substring(0, 8) || '',

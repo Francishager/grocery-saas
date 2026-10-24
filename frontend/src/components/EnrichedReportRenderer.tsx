@@ -243,7 +243,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
                     </td>
                     <td className="px-4 py-3">
                       <div className="truncate">{txn.description}</div>
-                      {txn.details && <div className="text-xs text-muted-foreground truncate">{txn.details}</div>}
+                    {!isWeeklySalesReport && txn.details && <div className="text-xs text-muted-foreground truncate">{txn.details}</div>}
                     </td>
                     <td className="px-4 py-3 text-xs whitespace-nowrap font-mono">{txn.reference || '—'}</td>
                     {isWeeklySalesReport && <><td className="px-4 py-3">{txn.customer || '—'}</td><td className="px-4 py-3">{txn.staff || '—'}</td><td className="px-4 py-3">{txn.branch || '—'}</td><td className="px-4 py-3 capitalize">{String(txn.paymentMethod || '—').replace(/_/g, ' ')}</td></>}
@@ -289,7 +289,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
 
                   <p className="font-medium text-sm mb-2">{txn.description}</p>
                   {isWeeklySalesReport && <p className="mb-2 break-words text-xs text-muted-foreground">{[txn.customer && `Customer: ${txn.customer}`, txn.staff && `Staff: ${txn.staff}`, txn.branch && `Branch: ${txn.branch}`, txn.paymentMethod && `Method: ${String(txn.paymentMethod).replace(/_/g, ' ')}`].filter(Boolean).join(' | ')}</p>}
-                  {txn.details && expandedRows.has(txn.id || String(idx)) && (
+                  {!isWeeklySalesReport && txn.details && expandedRows.has(txn.id || String(idx)) && (
                     <p className="text-xs text-muted-foreground mb-2 bg-muted/50 p-2 rounded">{txn.details}</p>
                   )}
 

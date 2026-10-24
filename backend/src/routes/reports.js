@@ -1875,6 +1875,7 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
       if (!sale) return transaction;
       return {
         ...transaction,
+        details: null,
         customer: sale.customer?.name || sale.customerName || 'Walk-in',
         customerId: sale.customerId || null,
         staff: userLabel(sale.user || sale.User),
