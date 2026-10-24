@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -148,6 +148,58 @@ function maskedMetric(label: string) {
     <div className="rounded-md border bg-muted/20 p-3" aria-label={`${label} hidden by permissions`}>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm font-semibold tracking-[0.18em] text-muted-foreground sm:text-base">******</p>
+    </div>
+  )
+}
+
+function CreditUtilizationGauge({ percent, availableLimit }: { percent: number | null; availableLimit: number }) {
+  const gradientId = `credit-utilization-${useId().replace(/:/g, '')}`
+  const value = percent == null ? 0 : Math.max(0, percent)
+  const needlePercent = Math.min(100, value)
+  const angle = Math.PI - (needlePercent / 100) * Math.PI
+  const centerX = 120
+  const centerY = 120
+  const needleX = centerX + 76 * Math.cos(angle)
+  const needleY = centerY - 76 * Math.sin(angle)
+  const status = percent == null ? 'No limit set' : value > 100 ? 'Over limit' : value >= 80 ? 'Near limit' : 'Within limit'
+  const statusTone = percent == null ? 'text-muted-foreground' : value > 100 ? 'text-red-700' : value >= 80 ? 'text-amber-700' : 'text-emerald-700'
+
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Limit utilization</p>
+        <Gauge className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <svg viewBox="0 0 240 158" className="mx-auto mt-1 h-32 w-full max-w-[250px]" role="img" aria-label={percent == null ? 'No customer credit limit is set' : `Credit limit utilization ${value.toLocaleString()} percent, ${status}`}>
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#15803d" />
+            <stop offset="72%" stopColor="#65a30d" />
+            <stop offset="86%" stopColor="#d97706" />
+            <stop offset="100%" stopColor="#dc2626" />
+          </linearGradient>
+        </defs>
+        <path d="M 20 120 A 100 100 0 0 1 220 120" fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="15" strokeLinecap="round" />
+        <path d="M 20 120 A 100 100 0 0 1 220 120" fill="none" stroke={`url(#${gradientId})`} strokeWidth="15" strokeLinecap="round" />
+        {[0, 25, 50, 75, 100].map((mark) => {
+          const markAngle = Math.PI - (mark / 100) * Math.PI
+          const x1 = centerX + 82 * Math.cos(markAngle)
+          const y1 = centerY - 82 * Math.sin(markAngle)
+          const x2 = centerX + 91 * Math.cos(markAngle)
+          const y2 = centerY - 91 * Math.sin(markAngle)
+          return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeOpacity="0.58" strokeWidth="2" />
+        })}
+        <line x1={centerX} y1={centerY} x2={needleX} y2={needleY} stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        <circle cx={centerX} cy={centerY} r="7" fill="currentColor" />
+        <text x="20" y="146" textAnchor="start" className="fill-muted-foreground" fontSize="11">0%</text>
+        <text x="120" y="24" textAnchor="middle" className="fill-muted-foreground" fontSize="11">50%</text>
+        <text x="220" y="146" textAnchor="end" className="fill-muted-foreground" fontSize="11">100%</text>
+      </svg>
+      <div className="-mt-2 text-center">
+        <p className="text-xl font-semibold tabular-nums">{percent == null ? '—' : `${value.toLocaleString()}%`}</p>
+        <p className={cn('text-xs font-medium', statusTone)}>{status}</p>
+        {percent != null && <p className="mt-1 text-xs text-muted-foreground">{formatCurrency(availableLimit)} limit remaining</p>}
+      </div>
     </div>
   )
 }
@@ -503,19 +555,7 @@ export default function CustomerTransactionHistoryDialog({
                 {metric('Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
                 {metric('Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
                 {metric('Credit limit', data.creditHistory!.creditLimit)}
-                <div className="rounded-md border p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">Limit utilization</p>
-                    <Gauge className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <p className="mt-1 text-sm font-semibold sm:text-base">
-                    {data.creditHistory!.utilizationPercent == null ? 'Not set' : `${data.creditHistory!.utilizationPercent.toLocaleString()}%`}
-                  </p>
-                  {data.creditHistory!.utilizationPercent != null && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`${data.creditHistory!.utilizationPercent}% of credit limit used`}>
-                    <div className={cn('h-full rounded-full', data.creditHistory!.utilizationPercent > 100 ? 'bg-red-600' : 'bg-emerald-600')} style={{ width: `${Math.min(100, Math.max(0, data.creditHistory!.utilizationPercent))}%` }} />
-                  </div>}
-                  {data.creditHistory!.utilizationPercent != null && <p className="mt-1 text-xs text-muted-foreground">{formatCurrency(data.creditHistory!.availableLimit)} limit remaining</p>}
-                </div>
+                <CreditUtilizationGauge percent={data.creditHistory!.utilizationPercent} availableLimit={data.creditHistory!.availableLimit} />
               </section>
 
               <section>

@@ -344,7 +344,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     }
   }, [resolvedApiEndpoint, tokens, onLogout])
 
-  // Keep active sessions usable while ending sessions after a full day of inactivity.
+  // Keep active sessions usable while ending sessions after 24 hours of inactivity.
   useEffect(() => {
     if (!user || !tokens) return
 
@@ -357,26 +357,48 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     if (!storedActivity) localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(now))
 
     let lastSavedAt = now
+    let lastCheckedAt = 0
+    let expired = false
+    const readLastActivity = () => Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY))
+    const isExpired = (currentTime: number) => {
+      const lastActivity = readLastActivity()
+      return Number.isFinite(lastActivity) && lastActivity > 0 && currentTime - lastActivity >= SESSION_IDLE_TIMEOUT_MS
+    }
     const recordActivity = () => {
       const currentTime = Date.now()
+      if (expired) return
+      if (currentTime - lastCheckedAt >= 1_000) {
+        lastCheckedAt = currentTime
+        if (isExpired(currentTime)) {
+          expired = true
+          void logout()
+          return
+        }
+      }
       if (currentTime - lastSavedAt < 60_000) return
       lastSavedAt = currentTime
       localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(currentTime))
     }
     const checkInactivity = () => {
-      const lastActivity = Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY))
-      if (Number.isFinite(lastActivity) && lastActivity > 0 && Date.now() - lastActivity >= SESSION_IDLE_TIMEOUT_MS) {
+      const currentTime = Date.now()
+      lastCheckedAt = currentTime
+      if (isExpired(currentTime)) {
+        expired = true
         void logout()
       }
     }
-    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'click']
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'click', 'mousemove', 'scroll', 'wheel']
     activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }))
     const interval = window.setInterval(checkInactivity, 60_000)
     window.addEventListener('storage', checkInactivity)
+    window.addEventListener('focus', checkInactivity)
+    document.addEventListener('visibilitychange', checkInactivity)
     return () => {
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity))
       window.clearInterval(interval)
       window.removeEventListener('storage', checkInactivity)
+      window.removeEventListener('focus', checkInactivity)
+      document.removeEventListener('visibilitychange', checkInactivity)
     }
   }, [user?.id, Boolean(tokens), logout])
 
