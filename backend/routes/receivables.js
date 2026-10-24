@@ -523,7 +523,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 
     const [receivableSales, payments, withdrawals, posSales, creditNotes, saleReturns, invoices, rentals, restaurantOrders, reservations, deliveries, appointments, workOrders, serviceContracts, balanceSnapshot] = await Promise.all([
       access.sales ? prisma.saleRecord.findMany({
-        where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
+        where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { id: true, name: true } },
           User: userSelect,
@@ -554,7 +554,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         take: limit
       }) : Promise.resolve([]),
       access.sales ? prisma.sale.findMany({
-        where: scopedWhere(scope, { ...customerNameFilter, status: { not: 'cancelled' } }),
+        where: scopedWhere(scope, customerNameFilter),
         include: {
           branch: { select: { id: true, name: true } },
           user: userSelect,
@@ -664,6 +664,15 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       paymentTotalBySale.set(payment.saleId, toMoney(paymentTotalBySale.get(payment.saleId)) + toMoney(payment.amount))
     })
 
+    const adjustedSaleIds = new Set([
+      ...effectiveCreditNoteRows(creditNotes)
+        .filter((note) => note.effectiveAmount > 0 && note.saleId)
+        .map((note) => note.saleId),
+      ...saleReturns
+        .filter((ret) => ret.refundMethod !== 'credit_note_stock' && ret.saleId)
+        .map((ret) => ret.saleId),
+    ])
+
     if (access.balance && toMoney(customer.openingBalance) > 0) {
       rows.push({
         id: `opening-${customer.id}`,
@@ -687,21 +696,28 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     }
 
     receivableSales.forEach((sale) => {
+      const cancelled = sale.status === 'cancelled'
+      const adjusted = adjustedSaleIds.has(sale.id)
       rows.push({
         id: sale.id,
         source: 'receivable_sale',
-        type: toMoney(sale.balance) > 0 ? 'Credit Sale' : 'Customer Sale',
+        type: cancelled ? 'Cancelled Sale' : toMoney(sale.balance) > 0 ? 'Credit Sale' : 'Customer Sale',
+        receiptStatus: cancelled ? 'cancelled' : adjusted ? 'adjusted' : null,
         date: sale.createdAt,
         dueDate: sale.dueDate,
         reference: sale.receiptNo,
-        description: sale.fuelSale ? `${sale.fuelSale.litres} L ${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}` : `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold`,
-        debit: toMoney(sale.total),
+        description: cancelled
+          ? `Cancelled sale; retained for customer history${sale.receiptNo ? ` (${sale.receiptNo})` : ''}`
+          : adjusted
+            ? `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold; adjusted by return or credit note`
+            : sale.fuelSale ? `${sale.fuelSale.litres} L ${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}` : `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold`,
+        debit: cancelled ? 0 : toMoney(sale.total),
         credit: 0,
         amount: toMoney(sale.total),
         amountPaid: toMoney(sale.amountPaid),
         remainingBalance: toMoney(sale.balance),
-        balanceImpact: toMoney(sale.total),
-        affectsBalance: true,
+        balanceImpact: cancelled ? 0 : toMoney(sale.total),
+        affectsBalance: !cancelled,
         paymentMethod: sale.paymentMethod,
         status: sale.paymentStatus,
         branch: sale.branch?.name || '',
@@ -731,7 +747,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       })
 
       const saleCreditApplied = (sale.creditApplications || []).reduce((sum, application) => sum + toMoney(application.amount), 0)
-      const missingPayment = Math.max(0, Math.round((toMoney(sale.amountPaid) - toMoney(paymentTotalBySale.get(sale.id)) - saleCreditApplied) * 100) / 100)
+      const missingPayment = cancelled ? 0 : Math.max(0, Math.round((toMoney(sale.amountPaid) - toMoney(paymentTotalBySale.get(sale.id)) - saleCreditApplied) * 100) / 100)
       if (missingPayment > 0) {
         rows.push({
           id: `${sale.id}-paid-at-sale`,
@@ -820,13 +836,23 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       })
     })
 
+    const stockReturnByCreditNote = new Map(
+      saleReturns
+        .filter((ret) => ret.refundMethod === 'credit_note_stock')
+        .map((ret) => [String(ret.returnNo || '').replace(/^RET-/, ''), ret])
+    )
+
     effectiveCreditNoteRows(creditNotes).filter((note) => note.effectiveAmount > 0).forEach((note) => {
+      const stockReturn = stockReturnByCreditNote.get(note.noteNo)
       rows.push({
         id: note.id,
         source: 'credit_note',
         type: 'Credit Note',
         date: note.createdAt,
         reference: note.noteNo,
+        originalReference: note.sale?.receiptNo || null,
+        reason: note.reason || note.notes || null,
+        refundAmount: toMoney(note.refundAmount),
         description: `${note.notes || note.reason || 'Customer credit note'}${note.effectiveAmount !== toMoney(note.amount) ? ` (adjusted from recorded ${note.amount})` : ''}`,
         debit: 0,
         credit: toMoney(note.effectiveAmount),
@@ -838,12 +864,22 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         status: note.status,
         branch: note.branch?.name || '',
         staff: '',
-        items: [],
+        items: access.returns ? (stockReturn?.items || []).map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitPrice: item.price,
+          total: item.total,
+        })) : [],
         sortOrder: 30
       })
     })
 
     saleReturns.forEach((ret) => {
+      if (ret.refundMethod === 'credit_note_stock') return
       const affectsBalance = ret.refundMethod === 'credit'
       rows.push({
         id: ret.id,
@@ -851,6 +887,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         type: 'Sale Return',
         date: ret.createdAt,
         reference: ret.returnNo,
+        originalReference: ret.sale?.receiptNo || null,
+        reason: ret.reason || null,
+        refundAmount: affectsBalance ? 0 : toMoney(ret.total),
         description: ret.sale?.receiptNo ? `Return for ${ret.sale.receiptNo}` : (ret.reason || 'Returned goods'),
         debit: 0,
         credit: affectsBalance ? toMoney(ret.total) : 0,
@@ -876,13 +915,15 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     })
 
     posSales.forEach((sale) => {
+      const cancelled = sale.status === 'cancelled'
       rows.push({
         id: sale.id,
         source: 'pos_sale',
-        type: 'Cash Sale',
+        type: cancelled ? 'Cancelled POS Sale' : 'Cash Sale',
+        receiptStatus: cancelled ? 'cancelled' : null,
         date: sale.createdAt,
         reference: sale.receiptNo,
-        description: `${sale.items.length || 0} POS item${sale.items.length === 1 ? '' : 's'} sold`,
+        description: cancelled ? 'Cancelled sale; retained for customer history' : `${sale.items.length || 0} POS item${sale.items.length === 1 ? '' : 's'} sold`,
         debit: 0,
         credit: 0,
         amount: toMoney(sale.total),

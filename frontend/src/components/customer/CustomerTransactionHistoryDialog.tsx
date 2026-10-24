@@ -25,11 +25,15 @@ type CustomerHistoryTransaction = {
   date?: string | null
   dueDate?: string | null
   reference?: string | null
+  originalReference?: string | null
+  receiptStatus?: 'cancelled' | 'adjusted' | null
   description?: string | null
+  reason?: string | null
   debit?: number
   credit?: number
   amount?: number
   amountPaid?: number
+  refundAmount?: number
   remainingBalance?: number
   balance?: number
   affectsBalance?: boolean
@@ -152,7 +156,7 @@ function maskedMetric(label: string) {
   )
 }
 
-function CreditUtilizationGauge({ percent, availableLimit }: { percent: number | null; availableLimit: number }) {
+function CreditUtilizationGauge({ percent, availableLimit, trustScore }: { percent: number | null; availableLimit: number; trustScore: number }) {
   const gradientId = `credit-utilization-${useId().replace(/:/g, '')}`
   const value = percent == null ? 0 : Math.max(0, percent)
   const needlePercent = Math.min(100, value)
@@ -161,6 +165,7 @@ function CreditUtilizationGauge({ percent, availableLimit }: { percent: number |
   const centerY = 120
   const needleX = centerX + 76 * Math.cos(angle)
   const needleY = centerY - 76 * Math.sin(angle)
+  const normalizedTrustScore = Math.min(100, Math.max(0, Number(trustScore) || 0))
   const status = percent == null ? 'No limit set' : value > 100 ? 'Over limit' : value >= 80 ? 'Near limit' : 'Within limit'
   const statusTone = percent == null ? 'text-muted-foreground' : value > 100 ? 'text-red-700' : value >= 80 ? 'text-amber-700' : 'text-emerald-700'
 
@@ -170,7 +175,7 @@ function CreditUtilizationGauge({ percent, availableLimit }: { percent: number |
         <p className="text-xs text-muted-foreground">Limit utilization</p>
         <Gauge className="h-4 w-4 text-muted-foreground" />
       </div>
-      <svg viewBox="0 0 240 158" className="mx-auto mt-1 h-32 w-full max-w-[250px]" role="img" aria-label={percent == null ? 'No customer credit limit is set' : `Credit limit utilization ${value.toLocaleString()} percent, ${status}`}>
+      <svg viewBox="0 0 240 158" className="mx-auto mt-1 h-36 w-full max-w-[290px]" role="img" aria-label={percent == null ? 'No customer credit limit is set' : `Credit limit utilization ${value.toLocaleString()} percent, ${status}`}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="#15803d" />
@@ -180,7 +185,7 @@ function CreditUtilizationGauge({ percent, availableLimit }: { percent: number |
           </linearGradient>
         </defs>
         <path d="M 20 120 A 100 100 0 0 1 220 120" fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="15" strokeLinecap="round" />
-        <path d="M 20 120 A 100 100 0 0 1 220 120" fill="none" stroke={`url(#${gradientId})`} strokeWidth="15" strokeLinecap="round" />
+        <path d="M 20 120 A 100 100 0 0 1 220 120" fill="none" stroke={`url(#${gradientId})`} strokeWidth="15" strokeLinecap="round" pathLength="100" strokeDasharray={`${percent == null ? 0 : needlePercent} 100`} />
         {[0, 25, 50, 75, 100].map((mark) => {
           const markAngle = Math.PI - (mark / 100) * Math.PI
           const x1 = centerX + 82 * Math.cos(markAngle)
@@ -200,6 +205,16 @@ function CreditUtilizationGauge({ percent, availableLimit }: { percent: number |
         <p className={cn('text-xs font-medium', statusTone)}>{status}</p>
         {percent != null && <p className="mt-1 text-xs text-muted-foreground">{formatCurrency(availableLimit)} limit remaining</p>}
       </div>
+      <div className="mt-4 border-t pt-3" aria-label={`Repayment trust score ${normalizedTrustScore} out of 100`}>
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="font-medium">Repayment trust</span>
+          <span className="font-semibold tabular-nums">{normalizedTrustScore}/100</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Repayment trust score" aria-valuemin={0} aria-valuemax={100} aria-valuenow={normalizedTrustScore}>
+          <div className="h-full rounded-full bg-emerald-600 transition-[width]" style={{ width: `${normalizedTrustScore}%` }} />
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Limit use shows current exposure; trust reflects repayment history. Consider both together.</p>
+      </div>
     </div>
   )
 }
@@ -208,6 +223,56 @@ function transactionTone(row: CustomerHistoryTransaction) {
   if (Number(row.debit || 0) > 0) return 'text-red-700'
   if (Number(row.credit || 0) > 0) return 'text-green-700'
   return 'text-foreground'
+}
+
+function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?: string | null) {
+  const isCreditNote = row.source === 'credit_note'
+  const isReturn = row.source === 'sale_return'
+  const amount = Number(row.amount || row.debit || row.credit || 0)
+  const title = isCreditNote
+    ? 'Customer Credit Note'
+    : isReturn
+      ? row.paymentMethod === 'credit' ? 'Sales Return Credit Receipt' : 'Sales Return Refund Receipt'
+      : `${row.type || 'Customer transaction'} receipt`
+  const fields = [
+    { label: 'Transaction type', value: row.type },
+    ...(row.originalReference ? [{ label: 'Original sale', value: row.originalReference }] : []),
+    ...(row.reason ? [{ label: 'Reason', value: row.reason }] : []),
+    ...(isCreditNote ? [
+      { label: 'Credit note value', value: formatCurrency(amount) },
+      { label: 'Refund recorded', value: formatCurrency(Number(row.refundAmount || 0)) },
+      { label: 'Returned items', value: row.items?.length ? 'Listed below' : 'No item quantities recorded on this note' },
+    ] : []),
+    ...(isReturn ? row.paymentMethod === 'credit'
+      ? [{ label: 'Customer balance credit', value: formatCurrency(amount) }]
+      : [{ label: 'Refund method', value: row.paymentMethod }, { label: 'Refund amount', value: formatCurrency(amount) }]
+      : []),
+    ...(!isCreditNote && !isReturn ? [{ label: 'Payment method', value: row.paymentMethod }] : []),
+    { label: 'Staff', value: row.staff },
+    ...(!isCreditNote && !isReturn ? [
+      { label: 'Debit', value: row.debit ? formatCurrency(Number(row.debit)) : '' },
+      { label: 'Credit', value: row.credit ? formatCurrency(Number(row.credit)) : '' },
+    ] : []),
+    { label: 'Status', value: row.status },
+  ]
+
+  return {
+    title,
+    reference: row.reference || row.id,
+    date: row.date || new Date(),
+    amount,
+    partyLabel: 'Customer',
+    partyName: customerName || undefined,
+    items: row.items?.map((item) => ({
+      name: item.productName || 'Item',
+      quantity: Number(item.quantity || 0),
+      unitName: item.unitName || '',
+      unitPrice: Number(item.unitPrice || 0),
+      discount: Number(item.discount || 0),
+      total: Number(item.total || 0),
+    })),
+    fields,
+  }
 }
 
 export default function CustomerTransactionHistoryDialog({
@@ -369,7 +434,6 @@ export default function CustomerTransactionHistoryDialog({
 
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {data.access.balance ? metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700') : maskedMetric('Current Balance')}
-                {data.access.balance ? metric('Opening Balance', data.summary.openingBalance ?? data.customer.openingBalance) : maskedMetric('Opening Balance')}
                 {data.access.balance ? metric('Available Credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700') : maskedMetric('Available Credit')}
                 {data.access.sales && metric('Credit / Customer Sales', data.summary.receivableSales)}
                 {data.access.sales && metric('Cash POS Sales', data.summary.cashSales)}
@@ -411,16 +475,6 @@ export default function CustomerTransactionHistoryDialog({
               </div>
             )}
 
-            {data.access.balance && Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0) > 0 && (
-              <div className="rounded-md border bg-muted/30 p-4 text-sm">
-                <p className="font-medium">Opening Balance</p>
-                <p className="mt-1 text-muted-foreground">
-                  {formatCurrency(Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0))}
-                  {' '}from {data.summary.openingBalanceDate || data.customer.openingBalanceDate ? formatDisplayDate(data.summary.openingBalanceDate || data.customer.openingBalanceDate || '') : 'the recorded opening date'}
-                  {(data.summary.openingBalanceNote || (data.customer as any).openingBalanceNote) ? ` - ${data.summary.openingBalanceNote || (data.customer as any).openingBalanceNote}` : ''}
-                </p>
-              </div>
-            )}
             </TabsContent>
 
             {canViewLedger && <TabsContent value="ledger" className="space-y-4">
@@ -492,12 +546,7 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2 text-right">{Number(row.credit || 0) > 0 ? formatCurrency(Number(row.credit)) : '-'}</td>
                       <td className={cn('px-3 py-2 text-right font-semibold', data.access.balance ? transactionTone(row) : 'text-muted-foreground')}>{data.access.balance ? formatCurrency(Number(row.balance || 0)) : '******'}</td>
                       <td className="px-3 py-2">
-                        {data.access.printReceipts && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton data={{
-                          title: `${row.type || 'Customer transaction'} receipt`, reference: row.reference || row.id,
-                          date: row.date || new Date(), amount: Number(row.amount || row.debit || row.credit || 0),
-                          partyLabel: 'Customer', partyName: data.customer.name,
-                          fields: [{ label: 'Transaction type', value: row.type }, { label: 'Description', value: row.description }, { label: 'Payment method', value: row.paymentMethod }, { label: 'Staff', value: row.staff }, { label: 'Debit', value: row.debit ? formatCurrency(Number(row.debit)) : '' }, { label: 'Credit', value: row.credit ? formatCurrency(Number(row.credit)) : '' }, { label: 'Status', value: row.status }],
-                        }} />}
+                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton data={customerActivityReceipt(row, data.customer.name)} />)}
                       </td>
                     </tr>
                   )) : (
@@ -526,9 +575,9 @@ export default function CustomerTransactionHistoryDialog({
                 {data.access.balance ? metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700') : maskedMetric('Current Balance')}
               </div>
               <div className="overflow-x-auto rounded-md border">
-                <table className="min-w-[760px] w-full text-sm">
+                <table className="min-w-[860px] w-full text-sm">
                   <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                    <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Description</th><th className="px-3 py-2 text-right">Amount</th></tr>
+                    <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Description</th><th className="px-3 py-2 text-right">Amount</th>{data.access.printReceipts && <th className="px-3 py-2 text-right">Reprint</th>}</tr>
                   </thead>
                   <tbody>
                     {transactions.filter((row) => ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'sale_payment_adjustment'].includes(row.source)).map((row) => (
@@ -538,10 +587,32 @@ export default function CustomerTransactionHistoryDialog({
                         <td className="px-3 py-2 font-mono text-xs">{row.reference || row.id}</td>
                         <td className="px-3 py-2">{row.description || '-'}</td>
                         <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || row.debit || row.credit || 0))}</td>
+                        {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment'].includes(row.source) && <TransactionReceiptButton
+                          label={row.source === 'customer_payment' ? 'Reprint receipt' : row.source === 'pos_sale' ? 'Reprint receipt' : 'Reprint invoice'}
+                          data={{
+                            title: row.source === 'customer_payment' ? 'Customer Payment Receipt' : row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
+                            reference: row.reference || row.id,
+                            date: row.date || new Date(),
+                            amount: Number(row.amount || row.debit || row.credit || 0),
+                            partyLabel: 'Customer',
+                            partyName: data.customer.name,
+                            items: row.source === 'customer_payment' ? undefined : row.items?.map((item) => ({
+                              name: item.productName || 'Item', quantity: Number(item.quantity || 0), unitName: item.unitName || '',
+                              unitPrice: Number(item.unitPrice || 0), discount: Number(item.discount || 0), total: Number(item.total || 0),
+                            })),
+                            fields: row.source === 'customer_payment'
+                              ? [{ label: 'Payment method', value: row.paymentMethod }, { label: 'Description', value: row.description }, { label: 'Status', value: row.status }]
+                              : [
+                                { label: 'Payment status', value: row.status },
+                                ...(row.source === 'receivable_sale' || row.source === 'customer_invoice' ? [{ label: 'Paid to date', value: formatCurrency(Number(row.amountPaid || 0)) }, { label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
+                                { label: 'Payment method', value: row.paymentMethod }, { label: 'Served by', value: row.staff },
+                              ],
+                          }}
+                        />}</td>}
                       </tr>
                     ))}
                     {!transactions.some((row) => ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'sale_payment_adjustment'].includes(row.source)) && (
-                      <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                      <tr><td colSpan={data.access.printReceipts ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground">
                         {data.access.sales || data.access.payments ? 'No sales or payment activity is available.' : 'Sales and payment activity is not assigned to your role.'}
                       </td></tr>
                     )}
@@ -551,11 +622,28 @@ export default function CustomerTransactionHistoryDialog({
             </TabsContent>}
 
             {canViewCreditHistory && <TabsContent value="credit-history" className="space-y-5">
-              <section aria-label="Customer credit position" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {metric('Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
-                {metric('Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
-                {metric('Credit limit', data.creditHistory!.creditLimit)}
-                <CreditUtilizationGauge percent={data.creditHistory!.utilizationPercent} availableLimit={data.creditHistory!.availableLimit} />
+              <section aria-label="Customer credit position" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+                <div className="grid content-start gap-3 sm:grid-cols-2">
+                  {metric('Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
+                  {metric('Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
+                  {metric('Credit limit', data.creditHistory!.creditLimit)}
+                  {metric('Limit remaining', data.creditHistory!.availableLimit, 'text-emerald-700')}
+                  <div className="rounded-md border bg-muted/20 p-4 sm:col-span-2">
+                    <h3 className="text-sm font-semibold">Credit position at a glance</h3>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge variant={data.creditHistory!.utilizationPercent != null && data.creditHistory!.utilizationPercent > 100 ? 'destructive' : 'outline'}>
+                        {data.creditHistory!.utilizationPercent == null ? 'No limit set' : data.creditHistory!.utilizationPercent > 100 ? 'Over limit' : data.creditHistory!.utilizationPercent >= 80 ? 'Near limit' : 'Within limit'}
+                      </Badge>
+                      {data.access.sales && (() => {
+                        const overdue = data.creditHistory!.aging.days1To30 + data.creditHistory!.aging.days31To60 + data.creditHistory!.aging.days61To90 + data.creditHistory!.aging.over90Days
+                        return <Badge variant={overdue > 0 ? 'destructive' : 'outline'}>{overdue > 0 ? `${formatCurrency(overdue)} overdue` : 'No recorded overdue balance'}</Badge>
+                      })()}
+                      <Badge variant="secondary">Repayment trust {Number(data.customer.trustScore || 0)}/100</Badge>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Limit use measures exposure, ageing shows what is past due, and trust summarizes repayment behavior. Read these signals together; high utilization alone does not mean late payment.</p>
+                  </div>
+                </div>
+                <CreditUtilizationGauge percent={data.creditHistory!.utilizationPercent} availableLimit={data.creditHistory!.availableLimit} trustScore={Number(data.customer.trustScore || 0)} />
               </section>
 
               <section>

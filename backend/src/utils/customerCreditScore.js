@@ -19,21 +19,13 @@ const monthsBetween = (later, earlier) => {
   return days == null ? 0 : days / 30.4375;
 };
 
-const utilizationScore = (utilization) => {
-  if (utilization <= 0) return 30;
-  if (utilization <= 0.3) return 30;
-  if (utilization <= 0.5) return 24;
-  if (utilization <= 0.75) return 18;
-  if (utilization <= 1) return 10;
-  return 0;
-};
-
 export const calculateRepaymentTrustScore = ({
   customer = {},
   sales = [],
   paymentTotal = 0,
   paymentCount = 0,
   lastPaymentAt = null,
+  latePaymentAmount = 0,
 } = {}) => {
   const activeSales = sales.filter((sale) => sale?.status !== "cancelled");
   const openingBalance = Math.max(0, toMoney(customer.openingBalance));
@@ -77,7 +69,7 @@ export const calculateRepaymentTrustScore = ({
   const outstanding = Math.min(totalCreditExposure, Math.max(customerOutstanding, saleOutstanding));
   const repaymentRate = totalPaid / totalCreditExposure;
   const settlementRate = activeSales.length > 0 ? settledSaleCount / activeSales.length : repaymentRate >= 1 ? 1 : 0;
-  const overdueRate = Math.min(1, overdueOutstanding / totalCreditExposure);
+  const overdueRate = outstanding > 0 ? Math.min(1, overdueOutstanding / outstanding) : 0;
   const severeDelinquencyFactor =
     maxDaysOverdue >= 90 ? 1 :
     maxDaysOverdue >= 60 ? 0.75 :
@@ -85,8 +77,6 @@ export const calculateRepaymentTrustScore = ({
     maxDaysOverdue > 0 ? 0.25 :
     0;
 
-  const creditLimit = Math.max(0, toMoney(customer.creditLimit));
-  const utilization = creditLimit > 0 ? outstanding / creditLimit : outstanding / totalCreditExposure;
   const firstCreditDate = creditDates
     .filter(Boolean)
     .map((value) => new Date(value))
@@ -97,9 +87,8 @@ export const calculateRepaymentTrustScore = ({
 
   const paymentHistoryScore = Math.max(
     0,
-    (repaymentRate * 24.5) + (settlementRate * 10.5) - Math.min(25, overdueRate * 25 + severeDelinquencyFactor * 10)
+    (repaymentRate * 24.5) + (settlementRate * 10.5) - Math.min(25, overdueRate * 25 + severeDelinquencyFactor * 10 + (Math.min(1, Math.max(0, toMoney(latePaymentAmount)) / Math.max(1, totalPaid)) * 8))
   );
-  const amountsOwedScore = utilizationScore(utilization);
   const historyScore = Math.min(10, relationshipMonths / 12 * 10) + Math.min(5, settledSaleCount * 1.25);
   const recentBehaviorBase =
     lastPaymentDays == null ? 2 :
@@ -108,9 +97,9 @@ export const calculateRepaymentTrustScore = ({
     lastPaymentDays <= 180 ? 4 :
     2;
   const recentBehaviorScore = Math.max(0, recentBehaviorBase - (maxDaysOverdue > 0 ? 4 : 0));
-  const statusScore = customer.status === "active" ? 10 : customer.status === "inactive" ? 5 : 0;
-
-  return clampScore(paymentHistoryScore + amountsOwedScore + historyScore + recentBehaviorScore + statusScore);
+  // Trust measures repayment behavior and history; current limit use is shown separately.
+  const behavioralScore = paymentHistoryScore + historyScore + recentBehaviorScore;
+  return clampScore((behavioralScore / 60) * 100);
 };
 
 export async function getRepaymentTrustScores(client, scope, customers = []) {
@@ -143,10 +132,30 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
   });
 
   const salesByCustomer = new Map();
+  const salesById = new Map();
   for (const sale of sales) {
     const list = salesByCustomer.get(sale.customerId) || [];
     list.push(sale);
     salesByCustomer.set(sale.customerId, list);
+    salesById.set(sale.id, sale);
+  }
+
+  const saleIds = [...salesById.keys()];
+  const allocations = saleIds.length ? await client.customerPaymentAllocation.findMany({
+    where: { tenantId: scope.tenantId, saleId: { in: saleIds }, targetType: "sale" },
+    select: { saleId: true, amount: true, payment: { select: { createdAt: true } } },
+  }) : [];
+  const latePaymentsByCustomer = new Map();
+  for (const allocation of allocations) {
+    const sale = salesById.get(allocation.saleId);
+    const dueDate = sale?.dueDate ? new Date(sale.dueDate) : null;
+    const paidAt = allocation.payment?.createdAt ? new Date(allocation.payment.createdAt) : null;
+    if (!sale || !dueDate || !paidAt || Number.isNaN(dueDate.getTime()) || Number.isNaN(paidAt.getTime())) continue;
+    const dueDay = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate());
+    const paidDay = Date.UTC(paidAt.getUTCFullYear(), paidAt.getUTCMonth(), paidAt.getUTCDate());
+    if (paidDay <= dueDay) continue;
+    latePaymentsByCustomer.set(sale.customerId,
+      toMoney(latePaymentsByCustomer.get(sale.customerId)) + Math.max(0, toMoney(allocation.amount)));
   }
 
   const paymentMetricsByCustomer = new Map(
@@ -171,6 +180,7 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
           paymentTotal: paymentMetrics.total || 0,
           paymentCount: paymentMetrics.count || 0,
           lastPaymentAt: paymentMetrics.lastPaymentAt || null,
+          latePaymentAmount: latePaymentsByCustomer.get(customer.id) || 0,
         }),
       ];
     })
