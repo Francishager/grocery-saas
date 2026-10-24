@@ -70,6 +70,18 @@ type CustomerHistoryResponse = {
     openingBalanceNote?: string | null
     lastTransactionDate?: string | null
   }
+  access: {
+    phone: boolean
+    email: boolean
+    address: boolean
+    balance: boolean
+    sales: boolean
+    payments: boolean
+    returns: boolean
+    creditNotes: boolean
+    withdrawals: boolean
+    businessActivity: boolean
+  }
   transactions: CustomerHistoryTransaction[]
 }
 
@@ -144,9 +156,7 @@ export default function CustomerTransactionHistoryDialog({
             <UserRound className="h-5 w-5 text-primary" />
             <span className="min-w-0 break-words">{customerInfo?.name || 'Customer'}</span>
           </DialogTitle>
-          <DialogDescription>
-            Balances, payments, credit notes, sold goods, and customer activity.
-          </DialogDescription>
+          <DialogDescription>Customer profile and the transaction history available to your role.</DialogDescription>
         </DialogHeader>
 
         {loading && (
@@ -169,13 +179,13 @@ export default function CustomerTransactionHistoryDialog({
                 <p className="text-xs font-semibold uppercase text-muted-foreground">Customer</p>
                 <h3 className="mt-2 break-words text-lg font-semibold">{data.customer.name}</h3>
                 <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                  {data.customer.phone && <p>{data.customer.phone}</p>}
-                  {data.customer.email && <p className="break-words">{data.customer.email}</p>}
-                  {data.customer.address && <p className="break-words">{data.customer.address}</p>}
+                  <p>{data.access.phone ? data.customer.phone || 'No phone' : 'Phone restricted'}</p>
+                  <p className="break-words">{data.access.email ? data.customer.email || 'No email' : 'Email restricted'}</p>
+                  <p className="break-words">{data.access.address ? data.customer.address || 'No address' : 'Address restricted'}</p>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {data.customer.status && <Badge variant="outline">{data.customer.status}</Badge>}
-                  <Badge variant="secondary">Trust {Number(data.customer.trustScore || 0)}/100</Badge>
+                  {data.access.balance && <Badge variant="secondary">Trust {Number(data.customer.trustScore || 0)}/100</Badge>}
                   <Badge variant="outline" className="gap-1">
                     <CalendarClock className="h-3 w-3" />
                     Last {lastDate}
@@ -184,15 +194,15 @@ export default function CustomerTransactionHistoryDialog({
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
-                {metric('Opening Balance', data.summary.openingBalance ?? data.customer.openingBalance)}
-                {metric('Available Credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700')}
-                {metric('Credit / Customer Sales', data.summary.receivableSales)}
-                {metric('Cash POS Sales', data.summary.cashSales)}
-                {metric('Payments', data.summary.payments, 'text-green-700')}
-                {metric('Withdrawals', data.summary.withdrawals)}
-                {metric('Credit Notes', data.summary.creditNotes, 'text-green-700')}
-                {metric('Returns', data.summary.returns)}
+                {data.access.balance && metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
+                {data.access.balance && metric('Opening Balance', data.summary.openingBalance ?? data.customer.openingBalance)}
+                {data.access.balance && metric('Available Credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700')}
+                {data.access.sales && metric('Credit / Customer Sales', data.summary.receivableSales)}
+                {data.access.sales && metric('Cash POS Sales', data.summary.cashSales)}
+                {data.access.payments && metric('Payments', data.summary.payments, 'text-green-700')}
+                {data.access.withdrawals && metric('Withdrawals', data.summary.withdrawals)}
+                {data.access.creditNotes && metric('Credit Notes', data.summary.creditNotes, 'text-green-700')}
+                {data.access.returns && metric('Returns', data.summary.returns)}
                 <div className="rounded-md border p-3">
                   <p className="text-xs text-muted-foreground">Transactions</p>
                   <p className="mt-1 text-sm font-semibold sm:text-base">{Number(data.summary.transactionCount || 0).toLocaleString()}</p>
@@ -200,7 +210,7 @@ export default function CustomerTransactionHistoryDialog({
               </div>
             </div>
 
-            {Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0) > 0 && (
+            {data.access.balance && Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0) > 0 && (
               <div className="rounded-md border bg-muted/30 p-4 text-sm">
                 <p className="font-medium">Opening Balance</p>
                 <p className="mt-1 text-muted-foreground">
@@ -224,7 +234,7 @@ export default function CustomerTransactionHistoryDialog({
                     <th className="px-3 py-2 text-right">Amount</th>
                     <th className="px-3 py-2 text-right">Debit</th>
                     <th className="px-3 py-2 text-right">Credit</th>
-                    <th className="px-3 py-2 text-right">Balance</th>
+                    {data.access.balance && <th className="px-3 py-2 text-right">Balance</th>}
                     <th className="px-3 py-2">Receipt</th>
                   </tr>
                 </thead>
@@ -277,7 +287,7 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || 0))}</td>
                       <td className="px-3 py-2 text-right">{Number(row.debit || 0) > 0 ? formatCurrency(Number(row.debit)) : '-'}</td>
                       <td className="px-3 py-2 text-right">{Number(row.credit || 0) > 0 ? formatCurrency(Number(row.credit)) : '-'}</td>
-                      <td className={cn('px-3 py-2 text-right font-semibold', transactionTone(row))}>{formatCurrency(Number(row.balance || 0))}</td>
+                      {data.access.balance && <td className={cn('px-3 py-2 text-right font-semibold', transactionTone(row))}>{formatCurrency(Number(row.balance || 0))}</td>}
                       <td className="px-3 py-2">
                         {!/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton data={{
                           title: `${row.type || 'Customer transaction'} receipt`, reference: row.reference || row.id,
@@ -289,8 +299,8 @@ export default function CustomerTransactionHistoryDialog({
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
-                        No transactions found for this customer.
+                      <td colSpan={data.access.balance ? 11 : 10} className="px-3 py-8 text-center text-muted-foreground">
+                        {Object.values(data.access).some(Boolean) ? 'No transactions are available for this customer and your assigned permissions.' : 'No customer profile details or history are assigned to your role.'}
                       </td>
                     </tr>
                   )}
@@ -299,12 +309,9 @@ export default function CustomerTransactionHistoryDialog({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <ReceiptText className="h-4 w-4" />
-              <span>Debit increases the customer balance. Credit reduces the customer balance.</span>
-              <Wallet className="ml-2 h-4 w-4" />
-              <span>Cash POS sales are shown as activity but do not change receivables.</span>
-              <CreditCard className="ml-2 h-4 w-4" />
-              <span>Current balance comes from the customer account.</span>
+              {data.access.balance && <><ReceiptText className="h-4 w-4" /><span>Debit increases the customer balance. Credit reduces the customer balance.</span></>}
+              {data.access.sales && <><Wallet className="ml-2 h-4 w-4" /><span>Cash POS sales are shown as activity but do not change receivables.</span></>}
+              {data.access.balance && <><CreditCard className="ml-2 h-4 w-4" /><span>Current balance comes from the customer account.</span></>}
             </div>
           </div>
         )}

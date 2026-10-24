@@ -13,6 +13,7 @@ import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
+import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
 import { applyAvailableCustomerCredit } from '../src/services/customerCreditApplicationService.js'
 import {
@@ -272,10 +273,11 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
     ])
     const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
     const scoredCustomers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
+    const profileAccess = customerProfileAccess(req.user?.permissions)
     const customers = scoredCustomers.map((customer) => {
       const canDelete = customerHasNoBalanceOrHistory(customer)
       const { _count, procurementCounterpartyLink, ...publicCustomer } = customer
-      return { ...publicCustomer, canDelete }
+      return { ...customerProfilePayload(publicCustomer, profileAccess), canDelete }
     })
 
     res.json({
@@ -365,7 +367,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
 
     const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
-      salesView.findMany({
+      access.sales ? salesView.findMany({
         where: scopedWhere(scope, {
           customerId: id,
           balance: { gt: 0 },
@@ -382,8 +384,8 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
           fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } }
         },
         orderBy: { createdAt: 'asc' }
-      }),
-      prisma.customerPayment.findMany({
+      }) : Promise.resolve([]),
+      access.payments ? prisma.customerPayment.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           sale: { select: { id: true, receiptNo: true } },
@@ -391,13 +393,13 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         },
         orderBy: { createdAt: 'desc' },
         take: 20
-      }),
-      calculateCustomerReceivableBalance(prisma, scope, id)
+      }) : Promise.resolve([]),
+      access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
     ])
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
     const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
 
-    const outstandingItems = outstandingSales.flatMap((sale) => sale.fuelSale ? [{
+    const outstandingItems = access.sales ? outstandingSales.flatMap((sale) => sale.fuelSale ? [{
         id: sale.fuelSale.id,
         saleId: sale.id,
         receiptNo: sale.receiptNo,
@@ -410,9 +412,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         unitPrice: sale.fuelSale.unitPrice,
         total: sale.total,
         saleTotal: sale.total,
-        amountPaid: sale.amountPaid,
-        saleBalance: sale.balance,
-        paymentStatus: sale.paymentStatus,
+        ...(access.balance && { amountPaid: sale.amountPaid, saleBalance: sale.balance, paymentStatus: sale.paymentStatus }),
         staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
         branch: sale.branch?.name || '',
       }] : sale.items.map((item) => ({
@@ -430,35 +430,35 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         discount: toMoney(item.discount) + toMoney(item.cashDiscount),
         total: item.total,
         saleTotal: sale.total,
-        amountPaid: sale.amountPaid,
-        saleBalance: sale.balance,
-        paymentStatus: sale.paymentStatus,
+        ...(access.balance && { amountPaid: sale.amountPaid, saleBalance: sale.balance, paymentStatus: sale.paymentStatus }),
         staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
         branch: sale.branch?.name || ''
       }))
-    )
+    ) : []
 
     res.json({
-      customer: { ...reconciledCustomer, trustScore },
+      customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
       summary: {
-        balance: toMoney(reconciledCustomer.balance),
-        creditLimit: toMoney(customer.creditLimit),
-        trustScore,
-        openingBalance: toMoney(customer.openingBalance),
-        outstandingSalesCount: outstandingSales.length,
-        outstandingItemsCount: outstandingItems.length,
-        overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
-        oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null
+        ...(access.balance && {
+          balance: toMoney(reconciledCustomer.balance),
+          creditLimit: toMoney(customer.creditLimit),
+          trustScore,
+          openingBalance: toMoney(customer.openingBalance),
+        }),
+        ...(access.balance && {
+          outstandingSalesCount: outstandingSales.length,
+          outstandingItemsCount: outstandingItems.length,
+          overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
+          oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null,
+        }),
       },
-      outstandingSales: outstandingSales.map((sale) => ({
+      outstandingSales: access.sales ? outstandingSales.map((sale) => ({
         id: sale.id,
         receiptNo: sale.receiptNo,
         date: sale.createdAt,
         dueDate: sale.dueDate,
         total: sale.total,
-        amountPaid: sale.amountPaid,
-        balance: sale.balance,
-        paymentStatus: sale.paymentStatus,
+        ...(access.balance && { amountPaid: sale.amountPaid, balance: sale.balance, paymentStatus: sale.paymentStatus }),
         paymentMethod: sale.paymentMethod,
         staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
         branch: sale.branch?.name || '',
@@ -481,9 +481,9 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
           discount: toMoney(item.discount) + toMoney(item.cashDiscount),
           total: item.total
         }))
-      })),
+      })) : [],
       outstandingItems,
-      recentPayments: recentPayments.map((payment) => ({
+      recentPayments: access.payments ? recentPayments.map((payment) => ({
         id: payment.id,
         saleId: payment.saleId,
         receiptNo: payment.sale?.receiptNo || '',
@@ -493,7 +493,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         reference: payment.reference || payment.transactionId || '',
         notes: payment.notes || '',
         branch: payment.branch?.name || ''
-      }))
+      })) : []
     })
   } catch (error) {
     console.error('Customer credit info error:', error)
@@ -506,6 +506,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
+    const access = customerProfileAccess(req.user?.permissions)
     const limit = Math.min(Math.max(Number(req.query.limit || 250), 25), 1000)
 
     const customer = await prisma.customer.findFirst({
@@ -519,8 +520,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       ? { customerName: { equals: customer.name, mode: 'insensitive' } }
       : { id: '__no_matching_customer_name__' }
 
-    const [receivableSales, payments, withdrawals, posSales, creditNotes, saleReturns, balanceSnapshot] = await Promise.all([
-      prisma.saleRecord.findMany({
+    const [receivableSales, payments, withdrawals, posSales, creditNotes, saleReturns, invoices, rentals, restaurantOrders, reservations, deliveries, appointments, workOrders, serviceContracts, balanceSnapshot] = await Promise.all([
+      access.sales ? prisma.saleRecord.findMany({
         where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
         include: {
           branch: { select: { id: true, name: true } },
@@ -531,8 +532,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit
-      }),
-      prisma.customerPayment.findMany({
+      }) : Promise.resolve([]),
+      access.payments ? prisma.customerPayment.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { id: true, name: true } },
@@ -540,8 +541,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit
-      }),
-      prisma.customerWithdrawal.findMany({
+      }) : Promise.resolve([]),
+      access.withdrawals ? prisma.customerWithdrawal.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { id: true, name: true } },
@@ -550,8 +551,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit
-      }),
-      prisma.sale.findMany({
+      }) : Promise.resolve([]),
+      access.sales ? prisma.sale.findMany({
         where: scopedWhere(scope, { ...customerNameFilter, status: { not: 'cancelled' } }),
         include: {
           branch: { select: { id: true, name: true } },
@@ -560,8 +561,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit
-      }),
-      prisma.creditNote.findMany({
+      }) : Promise.resolve([]),
+      access.creditNotes ? prisma.creditNote.findMany({
         where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
         include: {
           branch: { select: { id: true, name: true } },
@@ -569,8 +570,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit
-      }),
-      prisma.saleReturn.findMany({
+      }) : Promise.resolve([]),
+      access.returns ? prisma.saleReturn.findMany({
         where: scopedWhere(scope, { customerId: id, status: 'completed' }),
         include: {
           branch: { select: { id: true, name: true } },
@@ -580,8 +581,77 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit
-      }),
-      calculateCustomerReceivableBalance(prisma, scope, id)
+      }) : Promise.resolve([]),
+      access.sales ? prisma.invoice.findMany({
+        where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.rental.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          User: userSelect,
+          items: { include: { product: { select: { name: true, sku: true } } } },
+        },
+        orderBy: { hireDate: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.restaurantOrder.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          user: userSelect,
+          table: { select: { name: true } },
+          items: { include: { product: { select: { name: true } } } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.reservation.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: { branch: { select: { name: true } }, table: { select: { name: true } } },
+        orderBy: { date: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.delivery.findMany({
+        where: {
+          tenantId: scope.tenantId,
+          customerId: id,
+          ...(scope.branchId ? { order: { is: { branchId: scope.branchId } } } : {}),
+        },
+        include: { order: { select: { orderNo: true, branch: { select: { name: true } } } } },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.appointment.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          product: { select: { name: true } },
+          technician: { select: { fname: true, lname: true } },
+        },
+        orderBy: { scheduledDate: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.workOrder.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          product: { select: { name: true } },
+          technician: { select: { fname: true, lname: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? prisma.serviceContract.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: { branch: { select: { name: true } } },
+        orderBy: { startDate: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
     ])
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
     const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
@@ -593,7 +663,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       paymentTotalBySale.set(payment.saleId, toMoney(paymentTotalBySale.get(payment.saleId)) + toMoney(payment.amount))
     })
 
-    if (toMoney(customer.openingBalance) > 0) {
+    if (access.balance && toMoney(customer.openingBalance) > 0) {
       rows.push({
         id: `opening-${customer.id}`,
         source: 'opening_balance',
@@ -837,13 +907,91 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       })
     })
 
+    invoices.forEach((invoice) => rows.push({
+      id: invoice.id, source: 'customer_invoice', type: 'Invoice', date: invoice.createdAt,
+      dueDate: invoice.dueDate, reference: invoice.invoiceNo,
+      description: invoice.saleId ? `Invoice for sale ${invoice.saleId}` : 'Customer invoice',
+      debit: toMoney(invoice.total), credit: 0, amount: toMoney(invoice.total),
+      amountPaid: toMoney(invoice.amountPaid), remainingBalance: toMoney(invoice.balance),
+      balanceImpact: 0, affectsBalance: false, paymentMethod: null, status: invoice.status,
+      branch: invoice.branch?.name || '', staff: '', items: [], sortOrder: 55,
+    }))
+
+    rentals.forEach((rental) => rows.push({
+      id: rental.id, source: 'customer_activity', type: 'Rental', date: rental.hireDate,
+      dueDate: rental.expectedReturnDate, reference: rental.rentalNo,
+      description: `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`,
+      debit: toMoney(rental.totalAmount), credit: 0, amount: toMoney(rental.totalAmount),
+      remainingBalance: toMoney(rental.balance), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: rental.paymentMethod, status: rental.paymentStatus, branch: rental.branch?.name || '',
+      staff: userName(rental.User), items: rental.items.map((item) => ({
+        productName: item.product?.name || 'Rental item', sku: item.product?.sku || '', quantity: item.quantity,
+        unitPrice: item.unitHirePrice, total: item.totalAmount,
+      })), sortOrder: 60,
+    }))
+
+    restaurantOrders.forEach((order) => rows.push({
+      id: order.id, source: 'customer_activity', type: 'Restaurant Order', date: order.createdAt,
+      reference: order.orderNo, description: `${String(order.orderType).replace('_', ' ')}${order.table?.name ? ` · ${order.table.name}` : ''}`,
+      debit: 0, credit: 0, amount: toMoney(order.total), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: order.paymentMethod, status: order.status, branch: order.branch?.name || '',
+      staff: userName(order.user), items: order.items.map((item) => ({
+        productName: item.product?.name || 'Menu item', quantity: item.quantity,
+        unitPrice: item.price, discount: item.discount, total: item.total,
+      })), sortOrder: 61,
+    }))
+
+    reservations.forEach((reservation) => rows.push({
+      id: reservation.id, source: 'customer_activity', type: 'Reservation', date: reservation.date,
+      reference: reservation.id, description: `${reservation.guests} guest${reservation.guests === 1 ? '' : 's'} · ${reservation.time}${reservation.table?.name ? ` · ${reservation.table.name}` : ''}`,
+      amount: 0, balanceImpact: 0, affectsBalance: false, paymentMethod: null, status: reservation.status,
+      branch: reservation.branch?.name || '', staff: '', items: [], sortOrder: 62,
+    }))
+
+    deliveries.forEach((delivery) => rows.push({
+      id: delivery.id, source: 'customer_activity', type: 'Delivery', date: delivery.createdAt,
+      reference: delivery.order?.orderNo || delivery.id,
+      description: `Delivery${delivery.order?.orderNo ? ` for ${delivery.order.orderNo}` : ''}`,
+      amount: toMoney(delivery.deliveryFee), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: null, status: delivery.status, branch: delivery.order?.branch?.name || '', staff: '', items: [], sortOrder: 63,
+    }))
+
+    appointments.forEach((appointment) => rows.push({
+      id: appointment.id, source: 'customer_activity', type: 'Appointment', date: appointment.scheduledDate,
+      reference: appointment.title, description: appointment.product?.name || appointment.description || 'Service appointment',
+      amount: toMoney(appointment.actualPrice || appointment.price), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: null, status: appointment.status, branch: appointment.branch?.name || '',
+      staff: userName(appointment.technician), items: [], sortOrder: 64,
+    }))
+
+    workOrders.forEach((workOrder) => rows.push({
+      id: workOrder.id, source: 'customer_activity', type: workOrder.serviceKind === 'job_card' ? 'Job Card' : 'Work Order',
+      date: workOrder.createdAt, reference: workOrder.orderNo,
+      description: workOrder.product?.name || workOrder.title || 'Service work order',
+      amount: 0, balanceImpact: 0, affectsBalance: false, paymentMethod: null, status: workOrder.status,
+      branch: workOrder.branch?.name || '', staff: userName(workOrder.technician), items: [], sortOrder: 65,
+    }))
+
+    serviceContracts.forEach((contract) => rows.push({
+      id: contract.id, source: 'customer_activity', type: 'Service Contract', date: contract.startDate,
+      dueDate: contract.endDate, reference: contract.contractNo, description: contract.title,
+      amount: toMoney(contract.value), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: contract.billingCycle, status: contract.status, branch: contract.branch?.name || '', staff: '', items: [], sortOrder: 66,
+    }))
+
     let runningBalance = 0
-    const transactions = sortLedgerRows(rows).map(({ sortOrder, ...row }) => {
-      runningBalance = Math.round((runningBalance + toMoney(row.balanceImpact)) * 100) / 100
-      return { ...row, balance: runningBalance }
+    const visibleRows = filterCustomerHistoryRows(rows, access)
+
+    const transactions = sortLedgerRows(visibleRows).map(({ sortOrder, balanceImpact, ...row }) => {
+      runningBalance = Math.round((runningBalance + toMoney(balanceImpact)) * 100) / 100
+      const publicRow = { ...row }
+      if (access.balance) publicRow.balance = runningBalance
+      else delete publicRow.remainingBalance
+      if (!access.payments) delete publicRow.amountPaid
+      return publicRow
     }).reverse()
 
-    const totals = rows.reduce((acc, row) => {
+    const totals = visibleRows.reduce((acc, row) => {
       acc.debit += toMoney(row.debit)
       acc.credit += toMoney(row.credit)
       acc.amount += toMoney(row.amount)
@@ -857,29 +1005,30 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, withdrawals: 0, creditNotes: 0, returns: 0 })
 
     res.json({
-      customer: {
-        id: customer.id,
-        name: customer.name,
-        phone: customer.phone,
-        email: customer.email,
-        address: customer.address,
-        status: customer.status,
-        creditLimit: toMoney(customer.creditLimit),
-        balance: toMoney(reconciledCustomer.balance),
-        openingBalance: toMoney(customer.openingBalance),
-        openingBalanceDate: customer.openingBalanceDate,
-        openingBalanceNote: customer.openingBalanceNote,
-        trustScore
+      customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
+      access: {
+        phone: access.phone,
+        email: access.email,
+        address: access.address,
+        balance: access.balance,
+        sales: access.sales,
+        payments: access.payments,
+        returns: access.returns,
+        creditNotes: access.creditNotes,
+        withdrawals: access.withdrawals,
+        businessActivity: access.businessActivity,
       },
       summary: {
         ...totals,
         transactionCount: transactions.length,
-        currentBalance: toMoney(reconciledCustomer.balance),
-        computedBalance: balanceSnapshot?.balance ?? runningBalance,
-        openingBalance: toMoney(customer.openingBalance),
-        openingBalanceDate: customer.openingBalanceDate,
-        openingBalanceNote: customer.openingBalanceNote,
-        availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance),
+        ...(access.balance && {
+          currentBalance: toMoney(reconciledCustomer.balance),
+          computedBalance: balanceSnapshot?.balance ?? runningBalance,
+          openingBalance: toMoney(customer.openingBalance),
+          openingBalanceDate: customer.openingBalanceDate,
+          openingBalanceNote: customer.openingBalanceNote,
+          availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance),
+        }),
         lastTransactionDate: transactions[0]?.date || null
       },
       transactions

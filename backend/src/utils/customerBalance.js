@@ -362,6 +362,74 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   };
 }
 
+export async function calculateCustomerReceivableBalanceBefore(client, scope, customerId, cutoff) {
+  if (!scope?.tenantId || !customerId || !cutoff) return null
+  const createdBefore = { createdAt: { lt: cutoff } }
+  const tenantCustomerWhere = { tenantId: scope.tenantId, customerId }
+  const [customer, sales, payments, allocations, withdrawals, notes, returns, applications] = await Promise.all([
+    client.customer.findFirst({
+      where: { id: customerId, tenantId: scope.tenantId },
+      select: { id: true, openingBalance: true, openingBalanceDate: true, createdAt: true },
+    }),
+    client.saleRecord.findMany({
+      where: { ...tenantCustomerWhere, ...createdBefore, status: { not: 'cancelled' } },
+      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
+    }),
+    client.customerPayment.findMany({
+      where: { ...tenantCustomerWhere, ...createdBefore },
+      select: { id: true, customerId: true, saleId: true, allocationMode: true, amount: true },
+    }),
+    client.customerPaymentAllocation.findMany({
+      where: { ...tenantCustomerWhere, ...createdBefore },
+      select: { id: true, paymentId: true, customerId: true, saleId: true, targetType: true, amount: true },
+    }),
+    client.customerWithdrawal.aggregate({
+      where: { ...tenantCustomerWhere, ...createdBefore },
+      _sum: { amount: true },
+    }),
+    client.creditNote.findMany({
+      where: { ...tenantCustomerWhere, ...createdBefore, status: { not: 'cancelled' } },
+      select: {
+        id: true, customerId: true, saleId: true, amount: true, createdAt: true,
+        sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, status: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+    client.saleReturn.findMany({
+      where: { ...tenantCustomerWhere, ...createdBefore, status: 'completed', refundMethod: 'credit' },
+      select: { id: true, customerId: true, total: true },
+    }),
+    client.customerCreditApplication.findMany({
+      where: { ...tenantCustomerWhere, ...createdBefore },
+      select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
+    }),
+  ])
+  if (!customer) return null
+
+  const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer } =
+    summarizeSaleAndCustomerPayments(sales, payments, allocations, applications)
+  const appliedByNote = new Map()
+  applications.filter((row) => row.sourceType === 'credit_note').forEach((row) => {
+    appliedByNote.set(row.sourceId, roundMoney(toMoney(appliedByNote.get(row.sourceId)) + toMoney(row.amount)))
+  })
+  const effectiveCreditNotes = effectiveCreditNoteRows(notes).reduce((sum, note) =>
+    roundMoney(sum + Math.max(0, note.effectiveAmount - toMoney(appliedByNote.get(note.id)))), 0)
+  const appliedByReturn = applications.filter((row) => row.sourceType === 'sale_return')
+    .reduce((sum, row) => roundMoney(sum + toMoney(row.amount)), 0)
+  const creditReturns = roundMoney(returns.reduce((sum, row) => sum + toMoney(row.total), 0) - appliedByReturn)
+  const openingBalanceDate = customer.openingBalanceDate || customer.createdAt
+  const openingBalance = openingBalanceDate && new Date(openingBalanceDate) < cutoff ? Math.max(0, toMoney(customer.openingBalance)) : 0
+  const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0) + (customerAccountAllocationsByCustomer.get(customerId) || 0))
+
+  return {
+    customerId,
+    balance: roundMoney(
+      openingBalance + (salesByCustomer.get(customerId) || 0) - (salePaymentsByCustomer.get(customerId) || 0) +
+      toMoney(withdrawals._sum?.amount) - customerPayments - effectiveCreditNotes - creditReturns,
+    ),
+  }
+}
+
 export async function reconcileCustomerReceivableBalance(client, scope, customerId) {
   const result = await calculateCustomerReceivableBalance(client, scope, customerId);
   if (!result) return null;

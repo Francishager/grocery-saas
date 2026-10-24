@@ -13,6 +13,7 @@ import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
 import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
 import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
 import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivablesJournal } from '../services/receivablesAccountingService.js';
+import { customerProfileAccess } from '../utils/customerProfileAccess.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -146,7 +147,7 @@ async function checkedSaleItems(items, scope) {
   });
 }
 
-async function getCustomerCreditInfo(scope, customerId) {
+async function getCustomerCreditInfo(scope, customerId, access) {
   const customer = await prisma.customer.findFirst({
     where: scopedWhere(scope, { id: customerId }),
     select: {
@@ -167,7 +168,7 @@ async function getCustomerCreditInfo(scope, customerId) {
   if (!customer) return null;
 
   const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
-    salesView.findMany({
+    access.sales ? salesView.findMany({
       where: scopedWhere(scope, {
         customerId,
         balance: { gt: 0 },
@@ -183,8 +184,8 @@ async function getCustomerCreditInfo(scope, customerId) {
         branch: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "asc" },
-    }),
-    prisma.customerPayment.findMany({
+    }) : Promise.resolve([]),
+    access.payments ? prisma.customerPayment.findMany({
       where: scopedWhere(scope, { customerId }),
       include: {
         sale: { select: { id: true, receiptNo: true } },
@@ -192,8 +193,8 @@ async function getCustomerCreditInfo(scope, customerId) {
       },
       orderBy: { createdAt: "desc" },
       take: 20,
-    }),
-    calculateCustomerReceivableBalance(prisma, scope, customerId),
+    }) : Promise.resolve([]),
+    access.balance ? calculateCustomerReceivableBalance(prisma, scope, customerId) : Promise.resolve(null),
   ]);
   const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance };
   const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer);
@@ -219,42 +220,56 @@ async function getCustomerCreditInfo(scope, customerId) {
       date: sale.createdAt,
       dueDate: sale.dueDate,
       saleTotal: sale.total,
-      amountPaid: sale.amountPaid,
-      saleBalance: sale.balance,
-      paymentStatus: sale.paymentStatus,
+      ...(access.balance && { amountPaid: sale.amountPaid, saleBalance: sale.balance, paymentStatus: sale.paymentStatus }),
       staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(" ") || "Staff",
       branch: sale.branch?.name || "",
     }))
   );
 
   return {
-    customer: { ...reconciledCustomer, trustScore },
-    summary: {
-      balance: toMoney(reconciledCustomer.balance),
-      creditLimit: toMoney(customer.creditLimit),
-      trustScore,
-      openingBalance: toMoney(customer.openingBalance),
-      outstandingSalesCount: outstandingSales.length,
-      outstandingItemsCount: outstandingItems.length,
-      overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
-      oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null,
+    customer: {
+      id: customer.id,
+      name: customer.name,
+      ...(access.phone && { phone: customer.phone }),
+      ...(access.email && { email: customer.email }),
+      ...(access.address && { address: customer.address }),
+      ...(access.balance && {
+        creditLimit: toMoney(customer.creditLimit),
+        balance: toMoney(reconciledCustomer.balance),
+        openingBalance: toMoney(customer.openingBalance),
+        openingBalanceDate: customer.openingBalanceDate,
+        openingBalanceNote: customer.openingBalanceNote,
+        trustScore,
+      }),
     },
-    outstandingSales: outstandingSales.map((sale) => ({
+    summary: {
+      ...(access.balance && {
+        balance: toMoney(reconciledCustomer.balance),
+        creditLimit: toMoney(customer.creditLimit),
+        trustScore,
+        openingBalance: toMoney(customer.openingBalance),
+      }),
+      ...(access.balance && {
+        outstandingSalesCount: outstandingSales.length,
+        outstandingItemsCount: outstandingItems.length,
+        overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
+        oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null,
+      }),
+    },
+    outstandingSales: access.sales ? outstandingSales.map((sale) => ({
       id: sale.id,
       receiptNo: sale.receiptNo,
       date: sale.createdAt,
       dueDate: sale.dueDate,
       total: sale.total,
-      amountPaid: sale.amountPaid,
-      balance: sale.balance,
-      paymentStatus: sale.paymentStatus,
+      ...(access.balance && { amountPaid: sale.amountPaid, balance: sale.balance, paymentStatus: sale.paymentStatus }),
       paymentMethod: sale.paymentMethod,
       staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(" ") || "Staff",
       branch: sale.branch?.name || "",
       items: saleItems(sale),
-    })),
-    outstandingItems,
-    recentPayments: recentPayments.map((payment) => ({
+    })) : [],
+    outstandingItems: access.sales ? outstandingItems : [],
+    recentPayments: access.payments ? recentPayments.map((payment) => ({
       id: payment.id,
       saleId: payment.saleId,
       receiptNo: payment.sale?.receiptNo || "",
@@ -264,7 +279,7 @@ async function getCustomerCreditInfo(scope, customerId) {
       reference: payment.reference || payment.transactionId || "",
       notes: payment.notes || "",
       branch: payment.branch?.name || "",
-    })),
+    })) : [],
   };
 }
 
@@ -300,7 +315,20 @@ router.get("/customers/credit-options", authenticateToken, requirePermission("ca
       orderBy: { name: "asc" },
       take: limit,
     });
-    const customers = await attachCustomerReceivableBalances(prisma, scope, customersRaw);
+    const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw);
+    const access = customerProfileAccess(req.user?.permissions);
+    const customers = balancedCustomers.map((customer) => ({
+      id: customer.id,
+      name: customer.name,
+      ...(access.phone && { phone: customer.phone }),
+      ...(access.balance && {
+        balance: toMoney(customer.balance),
+        creditLimit: toMoney(customer.creditLimit),
+        openingBalance: toMoney(customer.openingBalance),
+        openingBalanceDate: customer.openingBalanceDate,
+        openingBalanceNote: customer.openingBalanceNote,
+      }),
+    }));
     res.json({ customers });
   } catch (err) {
     console.error("Sales customer credit options error:", err);
@@ -311,7 +339,7 @@ router.get("/customers/credit-options", authenticateToken, requirePermission("ca
 router.get("/customers/:id/credit-info", authenticateToken, requirePermission("canCreateSale"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
-    const payload = await getCustomerCreditInfo(scope, req.params.id);
+    const payload = await getCustomerCreditInfo(scope, req.params.id, customerProfileAccess(req.user?.permissions));
     if (!payload) return res.status(404).json({ error: "Customer not found" });
     res.json(payload);
   } catch (err) {
@@ -604,7 +632,10 @@ router.get("/", authenticateToken, requirePermission("canViewSale"), async (req,
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { from, to, page = 1, limit = 50, userId, staffId } = req.query;
-    const where = scopedWhere(scope, salesUserWhere(req, userId || staffId));
+    const where = scopedWhere(scope, {
+      ...salesUserWhere(req, userId || staffId),
+      status: { notIn: ['cancelled', 'refunded'] },
+    });
     if (from || to) {
       where.createdAt = {};
       if (from) where.createdAt.gte = new Date(from);

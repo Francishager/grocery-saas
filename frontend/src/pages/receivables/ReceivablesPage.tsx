@@ -52,13 +52,13 @@ interface Customer {
   email?: string
   phone?: string
   address?: string
-  creditLimit: number
-  balance: number
+  creditLimit?: number
+  balance?: number
   openingBalance?: number
   openingBalanceDate?: string | null
   openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
-  trustScore: number
+  trustScore?: number
   notes?: string
   canDelete?: boolean
 }
@@ -234,6 +234,9 @@ export default function ReceivablesPage() {
   })
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
   const creditEnabled = hasPermission('canViewReceivable')
+  const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
+  const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
+  const canViewCustomerBalance = hasPermission('canViewCustomerBalance') || creditEnabled
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
   const canDeleteCustomer = hasPermission('canDeleteCustomer')
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
@@ -1652,8 +1655,8 @@ export default function ReceivablesPage() {
                       </div>
                       <div className="min-w-0 break-words">
                         <h3>{renderCustomerNameButton(customer, customer.name)}</h3>
-                        <p className="text-sm text-muted-foreground">{customer.phone}</p>
-                        <p className="text-sm text-muted-foreground">{customer.email}</p>
+                        <p className="text-sm text-muted-foreground">{canViewCustomerPhone ? customer.phone || 'No phone' : 'Phone restricted'}</p>
+                        <p className="text-sm text-muted-foreground">{canViewCustomerEmail ? customer.email || 'No email' : 'Email restricted'}</p>
                       </div>
                     </div>
                     <div className="text-right">
@@ -1661,13 +1664,13 @@ export default function ReceivablesPage() {
                       <div className="mt-2">
                         <p className="text-sm text-muted-foreground">Trust Score</p>
                         <p className={`font-bold ${getTrustScoreColor(customer.trustScore || 0)}`}>
-                          {customer.trustScore || 0}/100
+                          {canViewCustomerBalance ? `${customer.trustScore || 0}/100` : 'Restricted'}
                         </p>
                       </div>
                     </div>
                   </div>
                   
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                  {canViewCustomerBalance && <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Credit Limit</p>
                       <p className="font-semibold">{formatCurrency(customer.creditLimit || 0)}</p>
@@ -1689,7 +1692,7 @@ export default function ReceivablesPage() {
                         {formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}
                       </p>
                     </div>
-                  </div>
+                  </div>}
                   
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button

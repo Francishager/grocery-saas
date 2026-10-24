@@ -122,6 +122,97 @@ test('customer advance availability is checked with a database-side sum of prior
   assert.equal(journalCreated, true)
 })
 
+test('missing historical receipt journal is reconstructed from dated ledger and matching cash evidence', async () => {
+  const mapped = { ...config, isEnabled: true }
+  const roleTypes = {
+    receivableAccountId: 'asset', salesRevenueAccountId: 'revenue', taxPayableAccountId: 'liability',
+    salesReturnsAccountId: 'revenue', costOfGoodsSoldAccountId: 'expense', inventoryAccountId: 'asset',
+    customerAdvancesAccountId: 'liability', openingBalanceEquityAccountId: 'equity',
+  }
+  const receiptDate = new Date('2026-10-20T10:00:00Z')
+  const entries = new Map()
+  const payment = {
+    id: 'payment-legacy', tenantId: 'tenant', customerId: 'customer-1', saleId: null,
+    amount: 100, allocationMode: 'explicit', branchId: null, reference: 'RCPT-1', createdAt: receiptDate,
+    allocations: [{ targetType: 'customer_account', saleId: null, amount: 100 }],
+  }
+  const client = {
+    $queryRaw: async (parts) => parts.join('?').includes('SUM(jl."debit" - jl."credit")') ? [{ amount: 0 }] : [],
+    receivablesAccountingConfig: { findUnique: async () => mapped },
+    customer: { findFirst: async () => ({ id: 'customer-1', openingBalance: 0, openingBalanceDate: null, createdAt: receiptDate }) },
+    saleRecord: { findMany: async () => [] },
+    customerPayment: { findFirst: async () => payment, findMany: async () => [] },
+    customerPaymentAllocation: { findMany: async () => [] },
+    customerWithdrawal: { aggregate: async () => ({ _sum: { amount: 0 } }) },
+    creditNote: { findMany: async () => [] },
+    saleReturn: { findMany: async () => [] },
+    customerCreditApplication: { findMany: async () => [] },
+    cashTransaction: { findMany: async () => [{ id: 'cash-row', accountId: 'cash-1', amount: 100, userId: 'cashier', createdAt: receiptDate, reference: 'RCPT-1' }] },
+    cashAccount: { findFirst: async () => ({ id: 'cash-1', tenantId: 'tenant', branchId: null }) },
+    account: {
+      findFirst: async () => ({ id: 'till', description: 'Linked transaction account cashAccount:cash-1', isActive: true }),
+      findMany: async ({ where }) => where.id.in.map((id) => ({
+        id,
+        type: id === 'till' ? 'asset' : Object.entries(roleTypes).find(([key]) => mapped[key] === id)?.[1] || 'asset',
+        name: id,
+        description: id === 'till' ? 'Linked transaction account cashAccount:cash-1' : null,
+        subType: null,
+        isActive: true,
+        _count: { children: 0 },
+      })),
+      update: async () => ({}),
+    },
+    journalEntry: {
+      findFirst: async ({ where }) => entries.get(`${where.sourceType}:${where.sourceId}`) || null,
+      create: async ({ data }) => {
+        const entry = { id: `journal-${entries.size + 1}`, ...data, lines: data.lines.create }
+        entries.set(`${data.sourceType}:${data.sourceId}`, entry)
+        return entry
+      },
+    },
+  }
+
+  const result = await postCustomerCreditApplicationJournal(client, {
+    tenantId: 'tenant', userId: 'user',
+    application: { id: 'application-1', sourceId: payment.id, customerId: payment.customerId, amount: 40, createdAt: new Date('2026-10-24T10:00:00Z') },
+    reference: 'SALE-1',
+  })
+
+  const receipt = entries.get(`CUSTOMER_RECEIPT:${payment.id}`)
+  assert.ok(receipt)
+  assert.equal(receipt.lines.find((line) => line.accountId === 'till').debit, 100)
+  assert.equal(receipt.lines.find((line) => line.accountId === 'advances').credit, 100)
+  assert.equal(result.posted, true)
+})
+
+test('historical receipt reconciliation refuses ambiguous or missing cash evidence', async () => {
+  const mapped = { ...config, isEnabled: true }
+  const receiptDate = new Date('2026-10-20T10:00:00Z')
+  const client = {
+    $queryRaw: async (parts) => parts.join('?').includes('SUM(jl."debit" - jl."credit")') ? [{ amount: 0 }] : [],
+    receivablesAccountingConfig: { findUnique: async () => mapped },
+    journalEntry: { findFirst: async () => null },
+    customerPayment: { findFirst: async () => ({
+      id: 'payment-legacy', customerId: 'customer-1', saleId: null, amount: 100,
+      allocationMode: 'explicit', reference: 'RCPT-1', createdAt: receiptDate,
+      allocations: [{ targetType: 'customer_account', amount: 100 }],
+    }), findMany: async () => [] },
+    customer: { findFirst: async () => ({ id: 'customer-1', openingBalance: 0, createdAt: receiptDate }) },
+    saleRecord: { findMany: async () => [] }, customerPaymentAllocation: { findMany: async () => [] },
+    customerWithdrawal: { aggregate: async () => ({ _sum: { amount: 0 } }) }, creditNote: { findMany: async () => [] },
+    saleReturn: { findMany: async () => [] }, customerCreditApplication: { findMany: async () => [] },
+    cashTransaction: { findMany: async () => [] },
+  }
+  await assert.rejects(
+    postCustomerCreditApplicationJournal(client, {
+      tenantId: 'tenant', userId: 'user',
+      application: { id: 'application-1', sourceId: 'payment-legacy', customerId: 'customer-1', amount: 40, createdAt: new Date() },
+      reference: 'SALE-1',
+    }),
+    (error) => error.code === 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' && /no unique matching cash transaction/i.test(error.message),
+  )
+})
+
 test('customer opening balance is recognized as receivable against opening equity', async () => {
   const { customerOpeningBalanceLines } = await import('../src/services/receivablesAccountingService.js')
   const lines = customerOpeningBalanceLines(config, 450000, 'Opening receivable for John Traders')

@@ -1,4 +1,5 @@
 import { linkedCashAccountId } from '../utils/accountingSync.js'
+import { calculateCustomerReceivableBalanceBefore } from '../utils/customerBalance.js'
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100
 const sourceName = (type, id) => `${type}-${id}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
@@ -176,14 +177,92 @@ export function customerCreditApplicationLines(config, { amount, reference }) {
   ]
 }
 
+async function ensureCustomerReceiptAdvanceJournal(client, { tenantId, application, config }) {
+  await client.$queryRaw`SELECT "id" FROM "customer_payments" WHERE "id" = ${application.sourceId} AND "tenantId" = ${tenantId} FOR UPDATE`
+  const payment = await client.customerPayment.findFirst({
+    where: { id: application.sourceId, tenantId, customerId: application.customerId, allocationMode: 'explicit' },
+    include: { allocations: true },
+  })
+  const accountAllocations = (payment?.allocations || []).filter((row) => row.targetType === 'customer_account' && !row.saleId)
+  if (!payment || !accountAllocations.length || payment.saleId) {
+    throw Object.assign(new Error('This customer credit receipt has no explicit customer-account allocation. Review its receipt allocation before applying the credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+
+  const allocatedCredit = money(accountAllocations.reduce((sum, row) => sum + money(row.amount), 0))
+  if (allocatedCredit <= 0 || allocatedCredit - money(payment.amount) > 0.01) {
+    throw Object.assign(new Error('The customer receipt allocation does not match its recorded amount. Reconcile the receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+
+  const cutoffBalance = await calculateCustomerReceivableBalanceBefore(
+    client, { tenantId }, payment.customerId, payment.createdAt,
+  )
+  if (!cutoffBalance) {
+    throw Object.assign(new Error('The customer balance before this receipt could not be reconstructed. Reconcile the original receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+  const receivableApplied = Math.min(money(payment.amount), Math.max(0, money(cutoffBalance.balance)))
+  const advancesAmount = money(payment.amount - receivableApplied)
+  if (advancesAmount + 0.01 < money(application.amount)) {
+    throw Object.assign(new Error('The original receipt does not contain enough unapplied customer advance for this sale. Review the receipt allocation and customer ledger.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_BALANCE_INSUFFICIENT' })
+  }
+
+  const references = [...new Set([payment.reference, payment.id].filter(Boolean))]
+  const cashRows = await client.cashTransaction.findMany({
+    where: { tenantId, type: { in: ['receipt', 'income'] }, reference: { in: references } },
+    select: { id: true, accountId: true, amount: true, userId: true, createdAt: true, reference: true },
+  })
+  const candidates = cashRows.filter((row) =>
+    Math.abs(money(row.amount) - money(payment.amount)) <= 0.01 &&
+    Math.abs(new Date(row.createdAt).getTime() - new Date(payment.createdAt).getTime()) <= 5 * 60 * 1000,
+  )
+  if (candidates.length !== 1) {
+    throw Object.assign(new Error('The original customer receipt has no unique matching cash transaction. Reconcile the receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+
+  const cashRow = candidates[0]
+  const cashAccount = await client.cashAccount.findFirst({ where: { id: cashRow.accountId, tenantId } })
+  if (!cashAccount) {
+    throw Object.assign(new Error('The transaction account for the original customer receipt is unavailable. Reconcile the receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+  const transactionAccount = await client.account.findFirst({
+    where: { tenantId, description: { contains: `cashAccount:${cashAccount.id}` }, isActive: true },
+  })
+  if (!transactionAccount || linkedCashAccountId(transactionAccount) !== cashAccount.id) {
+    throw Object.assign(new Error('The original receipt account is not linked to an active accounting transaction account. Link it in Accounting before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  }
+
+  await postReceivablesJournal(client, {
+    tenantId,
+    branchId: payment.branchId || cashAccount.branchId || null,
+    userId: cashRow.userId,
+    sourceType: 'CUSTOMER_RECEIPT',
+    sourceId: payment.id,
+    date: payment.createdAt,
+    reference: payment.reference || payment.id,
+    description: `Customer receipt ${payment.reference || payment.id} (historical receipt reconciliation)`,
+    lines: receiptCollectionLines(config, {
+      transactionAccountId: transactionAccount.id,
+      amount: payment.amount,
+      receivableApplied,
+      reference: payment.reference || payment.id,
+    }),
+  })
+}
+
 export async function postCustomerCreditApplicationJournal(client, { tenantId, branchId = null, userId, application, reference }) {
   const config = await getReceivablesAccountingConfig(client, tenantId)
   if (!config?.isEnabled) return { posted: false, disabled: true }
-  const receiptEntry = await client.journalEntry.findFirst({
+  let receiptEntry = await client.journalEntry.findFirst({
     where: { tenantId, sourceType: 'CUSTOMER_RECEIPT', sourceId: application.sourceId, status: 'posted' },
     include: { lines: true },
   })
-  if (!receiptEntry) throw Object.assign(new Error('This customer credit comes from a receipt without a posted advances-account entry. Reconcile the original receipt before applying it.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_SOURCE_MISSING' })
+  if (!receiptEntry) {
+    await ensureCustomerReceiptAdvanceJournal(client, { tenantId, application, config })
+    receiptEntry = await client.journalEntry.findFirst({
+      where: { tenantId, sourceType: 'CUSTOMER_RECEIPT', sourceId: application.sourceId, status: 'posted' },
+      include: { lines: true },
+    })
+  }
+  if (!receiptEntry) throw Object.assign(new Error('The original customer receipt could not be reconciled to the general ledger. No credit was applied.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_GL_SOURCE_MISSING' })
   const advancesCredit = money(receiptEntry.lines.filter((line) => line.accountId === config.customerAdvancesAccountId)
     .reduce((sum, line) => sum + money(line.credit) - money(line.debit), 0))
   const [previousApplicationBalance] = await client.$queryRaw`

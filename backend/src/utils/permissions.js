@@ -98,6 +98,16 @@ const PERMISSION_TO_FEATURES = {
   canViewStaffTillSheet: ['accounting', 'expenses'],
   canCreateCustomer: ['customers', 'crm'],
   canViewCustomer: ['customers', 'crm'],
+  canViewCustomerPhone: ['customers', 'crm'],
+  canViewCustomerEmail: ['customers', 'crm'],
+  canViewCustomerAddress: ['customers', 'crm'],
+  canViewCustomerBalance: ['customers', 'crm'],
+  canViewCustomerSalesHistory: ['customers', 'crm'],
+  canViewCustomerPaymentsHistory: ['customers', 'crm'],
+  canViewCustomerReturnsHistory: ['customers', 'crm'],
+  canViewCustomerCreditNotesHistory: ['customers', 'crm'],
+  canViewCustomerWithdrawalsHistory: ['customers', 'crm'],
+  canViewCustomerBusinessActivity: ['customers', 'crm'],
   canEditCustomer: ['customers', 'crm'],
   canDeleteCustomer: ['customers', 'crm'],
   canCreateReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
@@ -271,6 +281,9 @@ export const ALL_PERMISSION_KEYS = [
   "canCreateExpense", "canViewExpense", "canEditExpense", "canDeleteExpense", "canViewStaffTillSheet",
   // Customers / Receivables
   "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
+  "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerAddress", "canViewCustomerBalance",
+  "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
+  "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
   "canCreateReceivable", "canViewReceivable", "canEditReceivable", "canDeleteReceivable",
   "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
@@ -516,7 +529,47 @@ const PERMISSION_DETAIL_OVERRIDES = {
   },
   canViewCustomer: {
     name: 'View customers',
-    description: 'See customer profiles, balances, trust score, and contact details.',
+    description: 'See customer names and open profiles. Contact, balance, and history access are controlled separately.',
+  },
+  canViewCustomerPhone: {
+    name: 'View customer phone numbers',
+    description: 'See full customer phone numbers in customer lists and profiles.',
+  },
+  canViewCustomerEmail: {
+    name: 'View customer email addresses',
+    description: 'See customer email addresses in customer lists and profiles.',
+  },
+  canViewCustomerAddress: {
+    name: 'View customer addresses',
+    description: 'See customer physical addresses in profiles.',
+  },
+  canViewCustomerBalance: {
+    name: 'View customer balances and credit limits',
+    description: 'See customer opening/current balances, credit limits, trust scores, and balance summaries.',
+  },
+  canViewCustomerSalesHistory: {
+    name: 'View customer sales history',
+    description: 'See cash and credit sales, sale items, amounts, and sale receipts in customer profiles.',
+  },
+  canViewCustomerPaymentsHistory: {
+    name: 'View customer payment history',
+    description: 'See customer payment transactions, methods, amounts, and payment receipts.',
+  },
+  canViewCustomerReturnsHistory: {
+    name: 'View customer returns history',
+    description: 'See returned sales, returned items, and refund details.',
+  },
+  canViewCustomerCreditNotesHistory: {
+    name: 'View customer credit note history',
+    description: 'See credit notes and related customer balance adjustments.',
+  },
+  canViewCustomerWithdrawalsHistory: {
+    name: 'View customer withdrawal history',
+    description: 'See customer withdrawals, amounts, payment methods, and receipts.',
+  },
+  canViewCustomerBusinessActivity: {
+    name: 'View customer service and order activity',
+    description: 'See customer rentals, restaurant orders, reservations, deliveries, appointments, work orders, and service contracts.',
   },
   canEditCustomer: {
     name: 'Edit customers',

@@ -110,6 +110,16 @@ export const permissions: Permission[] = [
   
   // Customers / Receivables
   { id: 'canViewCustomer', name: 'View Customers', description: 'View customers list', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerPhone', name: 'View Customer Phone Numbers', description: 'View full customer phone numbers', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerEmail', name: 'View Customer Email Addresses', description: 'View customer email addresses', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerAddress', name: 'View Customer Addresses', description: 'View customer physical addresses', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerBalance', name: 'View Customer Balances & Credit Limits', description: 'View opening/current balances, limits, and trust scores', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerSalesHistory', name: 'View Customer Sales History', description: 'View customer sales, items, amounts, and receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerPaymentsHistory', name: 'View Customer Payment History', description: 'View customer payments, methods, amounts, and receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerReturnsHistory', name: 'View Customer Returns History', description: 'View customer returns, returned items, and refunds', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerCreditNotesHistory', name: 'View Customer Credit Note History', description: 'View customer credit notes and adjustments', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerWithdrawalsHistory', name: 'View Customer Withdrawal History', description: 'View customer withdrawals and receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerBusinessActivity', name: 'View Customer Service & Order Activity', description: 'View customer service and operational activity', category: 'customers', accessesBusinessData: true },
   { id: 'canCreateCustomer', name: 'Create Customers', description: 'Create new customers', category: 'customers', accessesBusinessData: true },
   { id: 'canEditCustomer', name: 'Edit Customers', description: 'Edit existing customers', category: 'customers', accessesBusinessData: true },
   { id: 'canDeleteCustomer', name: 'Delete Customers', description: 'Delete customer records', category: 'customers', accessesBusinessData: true },

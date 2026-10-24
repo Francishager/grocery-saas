@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission, loadUserPermissions, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
+import { customerProfileAccess } from "../src/utils/customerProfileAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 import { fuelDeliveryValuation, fuelMeterSaleValuation, fuelShiftReconciliation } from "../src/utils/fuelAccounting.js";
 import { ensureFuelAccountingAccounts, ensureFuelLinkedAccount, fuelMeterSaleLines, fuelOpeningLines, fuelShiftJournalLines, postFuelJournal } from "../src/services/fuelAccountingService.js";
@@ -66,7 +67,13 @@ router.get('/customers', authenticateToken, loadUserPermissions, requirePermissi
       select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
       orderBy: { name: 'asc' },
     });
-    res.json(customers);
+    const access = customerProfileAccess(req.user?.permissions);
+    res.json(customers.map((customer) => ({
+      id: customer.id,
+      name: customer.name,
+      ...(access.phone && { phone: customer.phone }),
+      ...(access.balance && { balance: customer.balance, creditLimit: customer.creditLimit }),
+    })));
   } catch (e) { res.status(500).json({ error: 'Could not load customers for fuel credit invoices.' }); }
 });
 

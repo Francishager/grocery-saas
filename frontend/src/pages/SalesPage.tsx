@@ -620,16 +620,16 @@ export default function SalesPage() {
     try {
       if (online) {
         const data = await salesApi.list()
-        setRecentSales(Array.isArray(data) ? data : [])
+        setRecentSales((Array.isArray(data) ? data : []).filter((sale: RecentSale) => !['cancelled', 'refunded'].includes(String((sale as any).status || '').toLowerCase())))
       } else {
         const local = await getLocalSales(50)
-        setRecentSales(local)
+        setRecentSales(local.filter((sale: RecentSale) => !['cancelled', 'refunded'].includes(String((sale as any).status || '').toLowerCase())))
       }
     } catch {
       // API failed — try local
       try {
         const local = await getLocalSales(50)
-        setRecentSales(local)
+        setRecentSales(local.filter((sale: RecentSale) => !['cancelled', 'refunded'].includes(String((sale as any).status || '').toLowerCase())))
       } catch {
         // silently fail — sales history is secondary
       }
