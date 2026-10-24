@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -132,6 +133,7 @@ export default function CustomerTransactionHistoryDialog({
   onRecordPayment,
   onWithdraw,
   viewMode = 'profile',
+  presentation = 'dialog',
 }: {
   customer: CustomerHistoryTarget | null
   open: boolean
@@ -139,7 +141,9 @@ export default function CustomerTransactionHistoryDialog({
   onRecordPayment?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   onWithdraw?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   viewMode?: 'profile' | 'details'
+  presentation?: 'dialog' | 'page'
 }) {
+  const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -177,16 +181,23 @@ export default function CustomerTransactionHistoryDialog({
   const transactions = data?.transactions || []
   const lastDate = useMemo(() => data?.summary?.lastTransactionDate ? formatDisplayDate(data.summary.lastTransactionDate) : 'No activity yet', [data?.summary?.lastTransactionDate])
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
-        <DialogHeader>
+  const content = (
+    <div className="space-y-4">
+        {presentation === 'page' ? (
+          <div className="flex flex-wrap items-start gap-3 border-b pb-4">
+            <Button variant="outline" onClick={() => navigate('/tenant/receivables/customers')}>Back to customers</Button>
+            <div>
+              <h1 className="text-xl font-semibold">{customerInfo?.name || 'Customer'}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">Customer profile and transaction ledger available to your role.</p>
+            </div>
+          </div>
+        ) : <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-2 pr-8 text-lg">
             <UserRound className="h-5 w-5 text-primary" />
             <span className="min-w-0 break-words">{customerInfo?.name || 'Customer'}</span>
           </DialogTitle>
           <DialogDescription>{viewMode === 'details' ? 'Customer details available to your role.' : 'Customer profile and the transaction history available to your role.'}</DialogDescription>
-        </DialogHeader>
+        </DialogHeader>}
 
         {loading && (
           <div className="flex min-h-48 items-center justify-center rounded-md border">
@@ -397,9 +408,20 @@ export default function CustomerTransactionHistoryDialog({
           </Tabs>
         )}
 
-        <div className="flex justify-end">
+        {presentation === 'dialog' && <div className="flex justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-        </div>
+        </div>}
+    </div>
+  )
+
+  if (presentation === 'page') {
+    return <main className="mx-auto w-full max-w-[1800px] p-3 sm:p-5 lg:p-6">{content}</main>
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
+        {content}
       </DialogContent>
     </Dialog>
   )

@@ -1653,7 +1653,22 @@ export default function ReceivablesPage() {
             <p className="py-8 text-center text-sm text-muted-foreground">No customers found.</p>
           ) : (
             customers.map((customer) => (
-              <Card key={customer.id}>
+              <Card
+                key={customer.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${customer.name} account overview and transaction ledger`}
+                className="cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={(event) => {
+                  if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="combobox"]')) return
+                  navigate(`/tenant/receivables/customers/${customer.id}`)
+                }}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+                  event.preventDefault()
+                  navigate(`/tenant/receivables/customers/${customer.id}`)
+                }}
+              >
                 <CardContent className="p-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-4">
@@ -1735,10 +1750,6 @@ export default function ReceivablesPage() {
                         Withdrawal
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => openCustomerHistory(customer)}>
-                      <Eye className="h-4 w-4 mr-1" />
-                      Customer Profile
-                    </Button>
                     {canEditCustomer && <Button size="sm" variant="outline" onClick={() => {
                       setEditingCustomer(customer)
                       setShowCustomerModal(true)
