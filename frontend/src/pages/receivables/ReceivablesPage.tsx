@@ -2,7 +2,7 @@ import { Pagination } from '@/components/Pagination'
 import React, { useState, useEffect } from 'react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -205,6 +205,8 @@ export default function ReceivablesPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const { tab: urlTab } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  const handledCustomerActionRef = React.useRef<string | null>(null)
   const activeTab = (urlTab === 'sales' || urlTab === 'payments' || urlTab === 'fuel-cards' || urlTab === 'credit-accounts') ? urlTab : 'customers'
   const [summary, setSummary] = useState<any>(null)
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -304,6 +306,40 @@ export default function ReceivablesPage() {
     if (creditEnabled && activeTab === 'customers') loadCustomers()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [creditEnabled, activeTab, searchTerm, statusFilter, customerPage, customerPageSize, online])
+
+  useEffect(() => {
+    const request = (location.state as any)?.customerAction
+    if (!request?.type || !request.customer?.id) return
+    const actionKey = `${location.key}:${request.type}:${request.customer.id}`
+    if (handledCustomerActionRef.current === actionKey) return
+    handledCustomerActionRef.current = actionKey
+
+    const customer = request.customer as Customer
+    if (request.type === 'payment') {
+      setSelectedCustomer(customer)
+      setSelectedSale(null)
+      setPaymentAmount('')
+      setShowPaymentModal(true)
+    } else if (request.type === 'withdrawal') {
+      setSelectedCustomer(customer)
+      setSelectedSale(null)
+      setWithdrawalAmount('')
+      setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      setSelectedCashAccountId(null)
+      setShowWithdrawalModal(true)
+    } else if (request.type === 'edit') {
+      setEditingCustomer(customer)
+      setShowCustomerModal(true)
+    } else if (request.type === 'delete') {
+      void deleteCustomer(customer)
+    }
+
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key, location.pathname, location.search, location.state, navigate])
 
   useEffect(() => {
     if (!showSaleModal) return
@@ -1646,127 +1682,67 @@ export default function ReceivablesPage() {
             </label>
           </div>
           {loading ? (
-            <div className="col-span-full text-center py-8">
+            <div className="py-8 text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
           ) : customers.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No customers found.</p>
           ) : (
-            customers.map((customer) => (
-              <Card
-                key={customer.id}
-                role="button"
-                tabIndex={0}
-                aria-label={`Open ${customer.name} account overview and transaction ledger`}
-                className="cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={(event) => {
-                  if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="combobox"]')) return
-                  navigate(`/tenant/receivables/customers/${customer.id}`)
-                }}
-                onKeyDown={(event) => {
-                  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
-                  event.preventDefault()
-                  navigate(`/tenant/receivables/customers/${customer.id}`)
-                }}
-              >
-                <CardContent className="p-6">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Users className="h-5 w-5 text-primary" />
-                      </div>
-                      <div className="min-w-0 break-words">
-                        <h3>{renderCustomerNameButton(customer, customer.name)}</h3>
-                        <p className="text-sm text-muted-foreground">{canViewCustomerPhone ? customer.phone || 'No phone on file' : customer.maskedPhone || '07xxxxxx'}</p>
-                        <p className="text-sm text-muted-foreground">{canViewCustomerEmail ? customer.email || 'No email on file' : customer.maskedEmail || 'x******@*****'}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      {getStatusBadge(customer.status || 'active')}
-                      <div className="mt-2">
-                        <p className="text-sm text-muted-foreground">Trust Score</p>
-                        <p className={`font-bold ${getTrustScoreColor(customer.trustScore || 0)}`}>
-                          {canViewCustomerBalance ? `${customer.trustScore || 0}/100` : '******'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Credit Limit</p>
-                      <p className="font-semibold">{canViewCustomerBalance ? formatCurrency(customer.creditLimit || 0) : '******'}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Opening Balance</p>
-                      <p className="font-semibold">{canViewCustomerBalance ? formatCurrency(customer.openingBalance || 0) : '******'}</p>
-                      {canViewCustomerBalance && customer.openingBalanceDate && (
-                        <p className="text-xs text-muted-foreground">{formatDisplayDate(customer.openingBalanceDate)}</p>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Balance</p>
-                      <p className="font-semibold text-red-600">{canViewCustomerBalance ? formatCurrency(customer.balance || 0) : '******'}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Available Credit</p>
-                      <p className="font-semibold text-green-600">
-                        {canViewCustomerBalance ? formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0)) : '******'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {canRecordCustomerPayment && <Button
-                      size="sm"
-                      onClick={() => {
-                        setSelectedCustomer(customer)
-                        setSelectedSale(null)
-                        setShowPaymentModal(true)
+            <div className="overflow-x-auto rounded-md border">
+              <table className="min-w-[900px] w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-3 py-3">Customer</th>
+                    {canViewCustomerPhone && <th scope="col" className="px-3 py-3">Phone</th>}
+                    {canViewCustomerEmail && <th scope="col" className="px-3 py-3">Email</th>}
+                    <th scope="col" className="px-3 py-3">Status</th>
+                    {canViewCustomerBalance && <>
+                      <th scope="col" className="px-3 py-3 text-right">Credit limit</th>
+                      <th scope="col" className="px-3 py-3 text-right">Opening balance</th>
+                      <th scope="col" className="px-3 py-3 text-right">Balance</th>
+                      <th scope="col" className="px-3 py-3 text-right">Available credit</th>
+                      <th scope="col" className="px-3 py-3 text-right">Trust</th>
+                    </>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.map((customer) => (
+                    <tr
+                      key={customer.id}
+                      role="link"
+                      tabIndex={0}
+                      aria-label={`Open ${customer.name} customer profile`}
+                      className="cursor-pointer border-t transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="combobox"]')) return
+                        navigate(`/tenant/receivables/customers/${customer.id}`)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+                        event.preventDefault()
+                        navigate(`/tenant/receivables/customers/${customer.id}`)
                       }}
                     >
-                      <DollarSign className="h-4 w-4 mr-1" />
-                      Record Payment
-                    </Button>}
-                    {canCreateWithdrawal && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!online || savingWithdrawal || customer.status !== 'active' || availableCustomerFunds(customer) <= 0}
-                        title={availableCustomerFunds(customer) > 0 ? `Customer funds: ${formatCurrency(availableCustomerFunds(customer))}` : 'No customer funds available to withdraw'}
-                        onClick={() => {
-                          setSelectedCustomer(customer)
-                          setSelectedSale(null)
-                          setWithdrawalAmount('')
-                          setPaymentMethod('cash')
-                          setMobileProvider('')
-                          setPhoneNumber('')
-                          setTransactionId('')
-                          setSelectedCashAccountId(null)
-                          setShowWithdrawalModal(true)
-                        }}
-                      >
-                        <ArrowDownCircle className="h-4 w-4 mr-1" />
-                        Withdrawal
-                      </Button>
-                    )}
-                    {canEditCustomer && <Button size="sm" variant="outline" onClick={() => {
-                      setEditingCustomer(customer)
-                      setShowCustomerModal(true)
-                    }}>
-                      <Edit className="h-4 w-4 mr-1" />
-                      Edit
-                    </Button>}
-                    {canDeleteCustomer && customer.canDelete && (
-                      <Button size="sm" variant="destructive" disabled={!online} onClick={() => deleteCustomer(customer)}>
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        Delete
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                      <td className="max-w-[280px] px-3 py-3">
+                        <span className="block break-words font-medium">{renderCustomerNameButton(customer, customer.name)}</span>
+                        {!canViewCustomerPhone && <span className="mt-1 block text-xs text-muted-foreground">{customer.maskedPhone || '07xxxxxx'}</span>}
+                        {!canViewCustomerEmail && customer.maskedEmail && <span className="block break-all text-xs text-muted-foreground">{customer.maskedEmail}</span>}
+                      </td>
+                      {canViewCustomerPhone && <td className="whitespace-nowrap px-3 py-3">{customer.phone || '—'}</td>}
+                      {canViewCustomerEmail && <td className="max-w-[240px] break-all px-3 py-3">{customer.email || '—'}</td>}
+                      <td className="px-3 py-3">{getStatusBadge(customer.status || 'active')}</td>
+                      {canViewCustomerBalance && <>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.openingBalance || 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(customer.balance || 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>
+                        <td className={`whitespace-nowrap px-3 py-3 text-right font-semibold ${getTrustScoreColor(customer.trustScore || 0)}`}>{customer.trustScore || 0}/100</td>
+                      </>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           <fieldset disabled={loading}>
             <Pagination currentPage={customerPage} totalPages={Math.ceil(customerTotal / customerPageSize)} totalItems={customerTotal} pageSize={customerPageSize} onPageChange={setCustomerPage} />

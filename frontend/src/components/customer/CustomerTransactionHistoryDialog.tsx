@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet } from 'lucide-react'
+import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -62,6 +62,7 @@ type CustomerHistoryResponse = {
     openingBalanceDate?: string | null
     trustScore?: number
     availableForWithdrawal?: number
+    canDelete?: boolean
   }
   summary: {
     currentBalance?: number
@@ -132,6 +133,8 @@ export default function CustomerTransactionHistoryDialog({
   onOpenChange,
   onRecordPayment,
   onWithdraw,
+  onEditCustomer,
+  onDeleteCustomer,
   viewMode = 'profile',
   presentation = 'dialog',
 }: {
@@ -140,6 +143,8 @@ export default function CustomerTransactionHistoryDialog({
   onOpenChange: (open: boolean) => void
   onRecordPayment?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   onWithdraw?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
+  onEditCustomer?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
+  onDeleteCustomer?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   viewMode?: 'profile' | 'details'
   presentation?: 'dialog' | 'page'
 }) {
@@ -179,6 +184,11 @@ export default function CustomerTransactionHistoryDialog({
 
   const customerInfo = data?.customer || customer
   const transactions = data?.transactions || []
+  const canViewLedger = Boolean(data && (
+    data.access.sales || data.access.payments || data.access.returns || data.access.creditNotes ||
+    data.access.withdrawals || data.access.businessActivity || data.access.balance
+  ))
+  const canViewSalesAndPayments = Boolean(data && (data.access.sales || data.access.payments))
   const lastDate = useMemo(() => data?.summary?.lastTransactionDate ? formatDisplayDate(data.summary.lastTransactionDate) : 'No activity yet', [data?.summary?.lastTransactionDate])
 
   const content = (
@@ -240,9 +250,10 @@ export default function CustomerTransactionHistoryDialog({
 
         {!loading && !error && data && viewMode === 'profile' && (
           <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
-            <TabsList className="grid h-auto w-full grid-cols-2 sm:w-fit">
+            <TabsList className="grid h-auto w-full grid-cols-3 sm:w-fit">
               <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="ledger">Transaction ledger ({Number(data.summary.transactionCount || 0).toLocaleString()})</TabsTrigger>
+              {canViewLedger && <TabsTrigger value="ledger">Transaction ledger ({Number(data.summary.transactionCount || 0).toLocaleString()})</TabsTrigger>}
+              {canViewSalesAndPayments && <TabsTrigger value="sales-payments">Sales &amp; Payments</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
@@ -284,7 +295,7 @@ export default function CustomerTransactionHistoryDialog({
               </div>
             </div>
 
-            {(data.access.recordPayment || data.access.withdraw) && (
+            {(data.access.recordPayment || data.access.withdraw || data.access.edit || data.access.delete) && (
               <div className="flex flex-wrap gap-2 border-b pb-4">
                 {data.access.recordPayment && onRecordPayment && (
                   <Button size="sm" onClick={() => onRecordPayment({ ...data.customer, ...data.summary })}>
@@ -294,6 +305,18 @@ export default function CustomerTransactionHistoryDialog({
                 {data.access.withdraw && onWithdraw && (
                   <Button size="sm" variant="outline" disabled={Number(data.summary.availableForWithdrawal ?? data.customer.availableForWithdrawal ?? 0) <= 0} onClick={() => onWithdraw({ ...data.customer, ...data.summary })}>
                     Withdraw Customer Funds
+                  </Button>
+                )}
+                {data.access.edit && onEditCustomer && (
+                  <Button size="sm" variant="outline" onClick={() => onEditCustomer({ ...data.customer, ...data.summary })}>
+                    <Edit className="mr-1 h-4 w-4" />
+                    Edit Customer
+                  </Button>
+                )}
+                {data.access.delete && onDeleteCustomer && Number(data.summary.currentBalance || 0) === 0 && Number(data.summary.transactionCount || 0) === 0 && (
+                  <Button size="sm" variant="destructive" onClick={() => onDeleteCustomer({ ...data.customer, ...data.summary, canDelete: true })}>
+                    <Trash2 className="mr-1 h-4 w-4" />
+                    Delete Customer
                   </Button>
                 )}
               </div>
@@ -311,7 +334,7 @@ export default function CustomerTransactionHistoryDialog({
             )}
             </TabsContent>
 
-            <TabsContent value="ledger" className="space-y-4">
+            {canViewLedger && <TabsContent value="ledger" className="space-y-4">
             <div className="overflow-x-auto rounded-md border">
               <table className="min-w-[1320px] w-full text-sm">
                 <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
@@ -404,7 +427,39 @@ export default function CustomerTransactionHistoryDialog({
               {data.access.sales && <><Wallet className="ml-2 h-4 w-4" /><span>Cash POS sales are shown as activity but do not change receivables.</span></>}
               {data.access.balance && <><CreditCard className="ml-2 h-4 w-4" /><span>Current balance comes from the customer account.</span></>}
             </div>
-            </TabsContent>
+            </TabsContent>}
+
+            {canViewSalesAndPayments && <TabsContent value="sales-payments" className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {data.access.sales && metric('Credit / Customer Sales', data.summary.receivableSales)}
+                {data.access.sales && metric('Cash POS Sales', data.summary.cashSales)}
+                {data.access.payments ? metric('Payments Received', data.summary.payments, 'text-green-700') : maskedMetric('Payments Received')}
+                {data.access.balance ? metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700') : maskedMetric('Current Balance')}
+              </div>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="min-w-[760px] w-full text-sm">
+                  <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                    <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Description</th><th className="px-3 py-2 text-right">Amount</th></tr>
+                  </thead>
+                  <tbody>
+                    {transactions.filter((row) => ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'sale_payment_adjustment'].includes(row.source)).map((row) => (
+                      <tr key={row.id} className="border-t align-top hover:bg-muted/30">
+                        <td className="whitespace-nowrap px-3 py-2">{row.date ? formatDisplayDate(row.date) : '-'}</td>
+                        <td className="px-3 py-2"><Badge variant="outline">{row.type}</Badge></td>
+                        <td className="px-3 py-2 font-mono text-xs">{row.reference || row.id}</td>
+                        <td className="px-3 py-2">{row.description || '-'}</td>
+                        <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || row.debit || row.credit || 0))}</td>
+                      </tr>
+                    ))}
+                    {!transactions.some((row) => ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'sale_payment_adjustment'].includes(row.source)) && (
+                      <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                        {data.access.sales || data.access.payments ? 'No sales or payment activity is available.' : 'Sales and payment activity is not assigned to your role.'}
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>}
           </Tabs>
         )}
 
