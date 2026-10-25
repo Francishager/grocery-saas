@@ -29,6 +29,7 @@ COPY start.sh ./
 # Fail the image build on reporting regressions; tests use an injected database.
 COPY tests ./tests
 RUN npm run test:reports
+RUN npm run test:property
 
 # Production stage
 FROM base AS runner

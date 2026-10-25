@@ -166,6 +166,11 @@ const MODULES = [
     ]
   },
   {
+    id: 'property_management', name: 'Property Management', features: [
+      { name: 'property_management', displayName: 'Property & Rent Management' },
+    ]
+  },
+  {
     id: 'restaurant', name: 'Restaurant & Bar', features: [
       { name: 'restaurant', displayName: 'Restaurant Module' },
       { name: 'restaurant.tables', displayName: 'Table Management' },

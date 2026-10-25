@@ -29,6 +29,7 @@ import payablesRouter from "../routes/payables.js";
 import expensesRouter from "../routes/expenses.js";
 import platformNewRouter from "../routes/platform-new.js";
 import rentalsRouter from "../routes/rentals.js";
+import propertyManagementRouter, { runPropertyRentAutomation } from "./routes/propertyManagement.js";
 import returnsRouter from "../routes/returns.js";
 import accountingRouter from "../routes/accounting.js";
 import hrRouter from "../routes/hr.js";
@@ -208,6 +209,11 @@ app.use("/api/inventory", inventoryRoutes);
 app.use("/api/trash", trashRoutes);
 const trashExpiryTimer = setInterval(() => { expireTrash().catch(error => console.error('Trash expiry failed:', error.code || error.message)); }, 60 * 60 * 1000);
 trashExpiryTimer.unref();
+const propertyRentAutomationTimer = setInterval(() => {
+  runPropertyRentAutomation().catch(error => console.error('Property rent automation failed:', error.code || error.message));
+}, 6 * 60 * 60 * 1000);
+propertyRentAutomationTimer.unref();
+setTimeout(() => runPropertyRentAutomation().catch(error => console.error('Initial property rent automation failed:', error.code || error.message)), 30_000).unref();
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/ai", businessAdvisorRoutes);
 app.use("/api/reports", reportRoutes);
@@ -228,6 +234,7 @@ app.use("/api/receivables", receivablesRouter);
 app.use("/api/payables", payablesRouter);
 app.use("/api/expenses", expensesRouter);
 app.use("/api/rentals", rentalsRouter);
+app.use("/api/property-management", propertyManagementRouter);
 app.use("/api/returns", returnsRouter);
 app.use("/api/accounting", accountingRouter);
 

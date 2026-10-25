@@ -164,6 +164,14 @@ model Tenant {
   expenses                        Expense[]
   cashTransactions                CashTransaction[]
   rentals                         Rental[]
+  propertyOwners                  PropertyOwner[]
+  managedProperties               ManagedProperty[]
+  propertyTenancies               PropertyTenancy[]
+  rentCharges                     RentCharge[]
+  propertyRentPayments            PropertyRentPayment[]
+  rentReminders                   PropertyRentReminder[]
+  propertyAccountingConfig       PropertyAccountingConfig?
+  propertyOwnerPayouts            PropertyOwnerPayout[]
   saleReturns                     SaleReturn[]
   accounts                        Account[]
   journalEntries                  JournalEntry[]
@@ -489,6 +497,7 @@ model User {
   onboardingCompletedAt  DateTime? // When user completed the onboarding guide
   cashAccountId          String? // Assigned cash account for cash handling accountability
   cashAccount            CashAccount? @relation("UserCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
+  propertyOwnerPayouts   PropertyOwnerPayout[] @relation("PropertyOwnerPayoutCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2384,6 +2393,8 @@ model CashAccount {
   Expense         Expense[]
   withdrawals     CustomerWithdrawal[]
   AssignedUsers   User[]               @relation("UserCashAccount")
+  propertyRentPayments PropertyRentPayment[]
+  propertyOwnerPayouts PropertyOwnerPayout[]
 
   @@unique([tenantId, name])
   @@index([tenantId, branchId])
@@ -2550,6 +2561,228 @@ model RentalItem {
   @@map("rental_items")
 }
 
+// Property management is distinct from equipment hire (Rental / RentalItem).
+model PropertyOwner {
+  id          String            @id @default(cuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  notes       String?
+  isActive    Boolean           @default(true)
+  properties  ManagedProperty[]
+  payouts     PropertyOwnerPayout[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([tenantId, name])
+  @@map("property_owners")
+}
+
+model ManagedProperty {
+  id             String           @id @default(cuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId        String?
+  owner          PropertyOwner?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  name           String
+  propertyType   String           @default("residential")
+  address        String
+  city           String?
+  notes          String?
+  status         String           @default("active")
+  units          PropertyUnit[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([tenantId, ownerId, status])
+  @@map("managed_properties")
+}
+
+model PropertyUnit {
+  id             String           @id @default(cuid())
+  propertyId     String
+  property       ManagedProperty  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unitCode       String
+  unitType       String?
+  bedrooms       Int?
+  bathrooms      Int?
+  rentAmount     Float            @default(0)
+  currency       String           @default("UGX")
+  status         String           @default("vacant")
+  notes          String?
+  tenancies      PropertyTenancy[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([propertyId, unitCode])
+  @@index([propertyId, status])
+  @@map("property_units")
+}
+
+model PropertyTenancy {
+  id                String                 @id @default(cuid())
+  agreementRef      String?
+  tenantId          String
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unitId            String
+  unit              PropertyUnit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  tenantName        String
+  email             String?
+  phone             String?
+  nationalId        String?
+  startDate         DateTime
+  endDate           DateTime?
+  dueDay            Int                    @default(1)
+  rentAmount        Float
+  currency          String                 @default("UGX")
+  depositRequired   Float                  @default(0)
+  depositHeld       Float                  @default(0)
+  status            String                 @default("active")
+  agreementNotes    String?
+  charges           RentCharge[]
+  payments          PropertyRentPayment[]
+  reminders         PropertyRentReminder[]
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([tenantId, status, dueDay])
+  @@index([unitId, status])
+  @@map("property_tenancies")
+}
+
+model RentCharge {
+  id             String                 @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId      String
+  tenancy        PropertyTenancy        @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  period         String
+  dueDate        DateTime
+  description    String                 @default("Monthly rent")
+  amount         Float
+  amountPaid     Float                  @default(0)
+  status         String                 @default("unpaid")
+  allocations    RentPaymentAllocation[]
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([tenancyId, period])
+  @@index([tenantId, dueDate, status])
+  @@index([tenancyId, dueDate])
+  @@map("rent_charges")
+}
+
+model PropertyRentPayment {
+  id               String                 @id @default(cuid())
+  tenantId         String
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId        String
+  tenancy          PropertyTenancy        @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  cashAccountId    String?
+  cashAccount      CashAccount?            @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  receiptNo        String
+  idempotencyKey   String?
+  amount           Float
+  paymentDate      DateTime               @default(now())
+  paymentMethod    String                 @default("cash")
+  transactionRef   String?
+  notes            String?
+  status           String                 @default("posted")
+  paymentType      String                 @default("rent")
+  voidReason       String?
+  voidedAt         DateTime?
+  allocations      RentPaymentAllocation[]
+  createdAt        DateTime               @default(now())
+
+  @@unique([tenantId, receiptNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, paymentDate])
+  @@index([tenancyId, paymentDate])
+  @@map("property_rent_payments")
+}
+
+model PropertyOwnerPayout {
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId        String
+  owner          PropertyOwner @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  cashAccountId  String
+  cashAccount    CashAccount   @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  amount         Float
+  payoutDate     DateTime      @default(now())
+  reference      String?
+  notes          String?
+  status         String        @default("posted")
+  voidReason     String?
+  voidedAt       DateTime?
+  idempotencyKey String?
+  createdById    String
+  createdBy      User          @relation("PropertyOwnerPayoutCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime      @default(now())
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, ownerId, payoutDate])
+  @@map("property_owner_payouts")
+}
+
+model PropertyAccountingConfig {
+  id                        String   @id @default(cuid())
+  tenantId                  String   @unique
+  tenant                    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rentReceivableAccountId   String
+  rentReceivableAccount     Account  @relation("PropertyRentReceivableAccount", fields: [rentReceivableAccountId], references: [id], onDelete: Restrict)
+  rentIncomeAccountId       String
+  rentIncomeAccount         Account  @relation("PropertyRentIncomeAccount", fields: [rentIncomeAccountId], references: [id], onDelete: Restrict)
+  ownerPayableAccountId     String
+  ownerPayableAccount       Account  @relation("PropertyOwnerPayableAccount", fields: [ownerPayableAccountId], references: [id], onDelete: Restrict)
+  depositLiabilityAccountId String
+  depositLiabilityAccount   Account  @relation("PropertyDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id], onDelete: Restrict)
+  depositOpeningEquityAccountId String
+  depositOpeningEquityAccount Account @relation("PropertyDepositOpeningEquityAccount", fields: [depositOpeningEquityAccountId], references: [id], onDelete: Restrict)
+  isEnabled                 Boolean  @default(true)
+  isSystemManaged           Boolean  @default(true)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@map("property_accounting_configs")
+}
+
+model RentPaymentAllocation {
+  id             String              @id @default(cuid())
+  paymentId      String
+  payment        PropertyRentPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  chargeId       String
+  charge         RentCharge          @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  amount         Float
+  createdAt      DateTime            @default(now())
+
+  @@unique([paymentId, chargeId])
+  @@index([chargeId])
+  @@map("rent_payment_allocations")
+}
+
+model PropertyRentReminder {
+  id             String          @id @default(cuid())
+  tenantId       String
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId      String
+  tenancy        PropertyTenancy @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  period         String
+  reminderType   String
+  scheduledFor   DateTime
+  sentAt         DateTime?
+  status         String          @default("pending")
+  createdAt      DateTime        @default(now())
+
+  @@unique([tenancyId, period, reminderType])
+  @@index([tenantId, status, scheduledFor])
+  @@map("property_rent_reminders")
+}
+
 // =====================================================
 // SALE RETURNS & REFUNDS
 // =====================================================
@@ -2638,6 +2871,11 @@ model Account {
   payablesInputTaxConfigs                 PayablesAccountingConfig[]    @relation("PayablesInputTaxAccount")
   payablesFreightInventoryConfigs         PayablesAccountingConfig[]    @relation("PayablesFreightInventoryAccount")
   payablesFreightExpenseConfigs           PayablesAccountingConfig[]    @relation("PayablesFreightExpenseAccount")
+  propertyRentReceivableConfigs            PropertyAccountingConfig[]    @relation("PropertyRentReceivableAccount")
+  propertyRentIncomeConfigs                PropertyAccountingConfig[]    @relation("PropertyRentIncomeAccount")
+  propertyOwnerPayableConfigs              PropertyAccountingConfig[]    @relation("PropertyOwnerPayableAccount")
+  propertyDepositLiabilityConfigs          PropertyAccountingConfig[]    @relation("PropertyDepositLiabilityAccount")
+  propertyDepositOpeningEquityConfigs      PropertyAccountingConfig[]    @relation("PropertyDepositOpeningEquityAccount")
   createdAt                               DateTime                      @default(now())
   updatedAt                               DateTime                      @updatedAt
 

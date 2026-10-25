@@ -43,6 +43,7 @@ export const permissionCategories = [
   { id: 'tax', name: 'Tax' },
   { id: 'services', name: 'Services' },
   { id: 'rentals', name: 'Rentals' },
+  { id: 'property_management', name: 'Property Management' },
   { id: 'restaurant', name: 'Restaurant & Bar' },
   { id: 'fuel_station', name: 'Fuel Station' },
   { id: 'manufacturing', name: 'Manufacturing' },
@@ -243,6 +244,15 @@ export const permissions: Permission[] = [
   { id: 'canEditRental', name: 'Edit Rentals', description: 'Edit existing rental records', category: 'rentals', accessesBusinessData: true },
   { id: 'canDeleteRental', name: 'Cancel Rentals', description: 'Cancel rental bookings', category: 'rentals', accessesBusinessData: true },
   { id: 'canProcessRentalReturn', name: 'Process Returns', description: 'Process return of hired items', category: 'rentals', accessesBusinessData: true },
+  { id: 'canViewPropertyManagement', name: 'View Property Management', description: 'View owner, property, unit, tenancy, and rent records', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManagePropertyOwners', name: 'Manage Property Owners', description: 'Create and update landlord/owner records', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageProperties', name: 'Manage Properties', description: 'Create and update managed properties', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManagePropertyUnits', name: 'Manage Units', description: 'Create and update rental units and rent terms', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageTenancies', name: 'Manage Tenancies', description: 'Create and manage tenancy agreements and occupancy', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordRentPayment', name: 'Record Rent Payments', description: 'Record rent receipts and allocate to rent periods', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageRentPayment', name: 'Manage Rent Payments', description: 'Void or correct payment records using controlled reversals', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyReports', name: 'View Property Reports', description: 'View rent collection, balances, arrears, and statements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordOwnerPayout', name: 'Record Landlord Payouts', description: 'Pay collected rent to property owners and record cash and payable movements', category: 'property_management', accessesBusinessData: true },
   
   // Restaurant & Bar
   { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },

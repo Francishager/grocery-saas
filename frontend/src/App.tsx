@@ -36,6 +36,7 @@ import CustomerProfilePage from '@/pages/receivables/CustomerProfilePage'
 import ReceivableReconciliationPage from '@/pages/receivables/ReceivableReconciliationPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import RentalsPage from '@/pages/RentalsPage'
+import PropertyManagementPage from '@/pages/PropertyManagementPage'
 import ReturnsPage from '@/pages/ReturnsPage'
 import AccountingPage from '@/pages/accounting/AccountingPage'
 import TransactionAccountsPage from '@/pages/accounting/TransactionAccountsPage'
@@ -200,6 +201,7 @@ function App() {
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
+          <Route path="property-management" element={<FeatureGuard feature="property_management" permission="canViewPropertyManagement"><PropertyManagementPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts']}><AccountingPage /></FeatureGuard>} />
           <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense']}><ExpensesPage /></FeatureGuard>} />

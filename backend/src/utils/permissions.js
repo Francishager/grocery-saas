@@ -205,6 +205,15 @@ const PERMISSION_TO_FEATURES = {
   canEditRental: ['rentals', 'inventory.rentals'],
   canDeleteRental: ['rentals', 'inventory.rentals'],
   canProcessRentalReturn: ['rentals', 'inventory.rentals'],
+  canViewPropertyManagement: ['property_management'],
+  canManagePropertyOwners: ['property_management'],
+  canManageProperties: ['property_management'],
+  canManagePropertyUnits: ['property_management'],
+  canManageTenancies: ['property_management'],
+  canRecordRentPayment: ['property_management'],
+  canManageRentPayment: ['property_management'],
+  canViewPropertyReports: ['property_management'],
+  canRecordOwnerPayout: ['property_management'],
   canViewRestaurant: ['restaurant', 'restaurant.orders'],
   canCreateRestaurant: ['restaurant', 'restaurant.orders'],
   canEditRestaurant: ['restaurant', 'restaurant.orders'],
@@ -332,6 +341,9 @@ export const ALL_PERMISSION_KEYS = [
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
   "canProcessRentalReturn",
+  "canViewPropertyManagement", "canManagePropertyOwners", "canManageProperties",
+  "canManagePropertyUnits", "canManageTenancies", "canRecordRentPayment",
+  "canManageRentPayment", "canViewPropertyReports", "canRecordOwnerPayout",
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
   // Fuel Station
@@ -902,6 +914,15 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Process rental returns',
     description: 'Receive returned rental items, update availability, and record charges or balances.',
   },
+  canViewPropertyManagement: { name: 'View property management', description: 'View managed landlords, properties, units, tenancies, rent records, and property portfolio summaries.' },
+  canManagePropertyOwners: { name: 'Manage property owners', description: 'Create and update landlord or portfolio-owner records.' },
+  canManageProperties: { name: 'Manage properties', description: 'Create and update property records and addresses.' },
+  canManagePropertyUnits: { name: 'Manage rental units', description: 'Create and update units, rent terms, and availability.' },
+  canManageTenancies: { name: 'Manage tenancies', description: 'Create tenancy agreements and update occupancy or tenancy status.' },
+  canRecordRentPayment: { name: 'Record rent payments', description: 'Record tenant rent receipts and allocate them against outstanding rent periods.' },
+  canManageRentPayment: { name: 'Manage rent payments', description: 'Correct or void rent payment records with audit-safe reversals.' },
+  canViewPropertyReports: { name: 'View property reports', description: 'View collections, outstanding rent, arrears aging, statements, and persistent arrears.' },
+  canRecordOwnerPayout: { name: 'Record landlord payouts', description: 'Pay collected rent to property owners and record the corresponding payable and cash movement.' },
   canViewRestaurant: {
     name: 'View restaurant operations',
     description: 'Open restaurant orders, tables, kitchen activity, and restaurant summaries.',
@@ -1147,6 +1168,7 @@ function permissionCategoryForKey(key) {
   if (key.includes('ServiceBusiness')) return 'service_business';
   if (key.includes('Service')) return 'services';
   if (key.includes('Rental')) return 'rentals';
+  if (key.includes('Property') || key.includes('Tenancy') || key.includes('RentPayment')) return 'property_management';
   if (key.includes('Restaurant')) return 'restaurant';
   if (key.includes('FuelStation')) return 'fuel_station';
   if (key.includes('Manufacturing')) return 'manufacturing';

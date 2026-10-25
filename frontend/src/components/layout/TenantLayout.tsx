@@ -101,6 +101,7 @@ const navItems = [
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
   { to: '/tenant/procurement', label: 'Procurement Network', icon: Truck, permission: 'canViewProcurement', isProcurement: true },
   { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/property-management', label: 'Property Management', icon: Building2, permission: 'canViewPropertyManagement', feature: 'property_management' },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
   { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },

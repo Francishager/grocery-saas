@@ -146,6 +146,11 @@ const MODULES = [
     ]
   },
   {
+    id: 'property_management', name: 'Property Management', icon: Building2, color: 'text-emerald-700 bg-emerald-100', features: [
+      { name: 'property_management', displayName: 'Property & Rent Management' },
+    ]
+  },
+  {
     id: 'restaurant', name: 'Restaurant & Bar', icon: UtensilsCrossed, color: 'text-orange-600 bg-orange-100', features: [
       { name: 'restaurant', displayName: 'Restaurant Module' },
       { name: 'restaurant.tables', displayName: 'Table Management' },
@@ -284,7 +289,7 @@ const MODULES = [
 
 const FEATURE_SECTIONS = [
   { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
-  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'service', 'rentals', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets'] },
+  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for property, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets'] },
   { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, integrations, administration, security and developer tools.', modules: ['hr', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
 ]
 
