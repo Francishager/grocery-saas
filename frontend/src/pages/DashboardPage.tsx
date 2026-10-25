@@ -11,8 +11,7 @@ import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 import { useOnlineStatus } from '@/db/hooks'
 import { SupportContactLinks } from '@/components/SupportContactLinks'
-import { Link, useSearchParams } from 'react-router-dom'
-import ReportsPage from '@/pages/ReportsPage'
+import { Link } from 'react-router-dom'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
@@ -25,12 +24,10 @@ function ModuleMetric({ label, value, detail }: { label: string; value: string |
 }
 
 export default function DashboardPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
   const { user, hasPermission } = useJWTAuth()
   const { hasFeature, hasAnyFeature } = useFeatureAccess()
   const hasLandlordWorkspace = hasFeature('property_management.landlord')
   const hasAgentWorkspace = hasFeature('property_management.agent')
-  const showReports = searchParams.get('view') === 'reports' && hasFeature('reports')
   const [billingReminder, setBillingReminder] = useState<any>(null)
   const [showBillingPrompt, setShowBillingPrompt] = useState(false)
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: user?.phone || '', email: user?.email || '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
@@ -322,11 +319,6 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
-      {hasFeature('reports') && <div role="tablist" aria-label="Business dashboard views" className="inline-flex rounded-md border bg-muted/40 p-1">
-        <button role="tab" aria-selected={!showReports} onClick={() => { const next = new URLSearchParams(searchParams); next.delete('view'); next.delete('report'); setSearchParams(next) }} className={`rounded px-3 py-2 text-sm font-medium ${!showReports ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Overview</button>
-        <button role="tab" aria-selected={showReports} onClick={() => { const next = new URLSearchParams(searchParams); next.set('view', 'reports'); setSearchParams(next) }} className={`rounded px-3 py-2 text-sm font-medium ${showReports ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Reports</button>
-      </div>}
-      {showReports ? <ReportsPage /> : <>
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
       {!Object.values(dashboardAccess).some(Boolean) && !hasPermission('canViewCustomer') && !hasPermission('canViewPayable') && !hasPermission('canViewPurchase') && !hasPermission('canViewTax') && !canViewProperty && !canViewRestaurant && !canViewHR && (
         <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">Your dashboard is ready. Ask your business admin to grant the module viewing permissions for the insights you need.</p>
@@ -703,8 +695,6 @@ export default function DashboardPage() {
         </Card>
         )}
       </div>}
-
-      </>}
 
       {showBillingPrompt && billingReminder && !billingReminder.isTrial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

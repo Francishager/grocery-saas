@@ -94,9 +94,7 @@ export function useDashboardData(enabled: boolean, online: boolean, scopeKey: st
     })
     const section = <T,>(request: Promise<T>, update: (value: T) => void) => request.then((value) => {
       if (current()) update(value)
-    }).catch(() => {
-      if (current()) setError((previous) => previous || 'Some charts could not be refreshed. Please retry.')
-    })
+    }).catch(() => undefined)
     await Promise.allSettled([
       kpiRequest,
       ...(access.sales || access.expenses ? [section(dashboardApi.getSalesChart(controller.signal), setSalesChart)] : []),
