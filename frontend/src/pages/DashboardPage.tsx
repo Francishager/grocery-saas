@@ -352,7 +352,6 @@ export default function DashboardPage() {
         {moduleSnapshots.property && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">{hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property portfolio'}</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, landlord clients, and managed-unit health.</p></div>
-            <Link to="/tenant/property-management/portfolio" className="text-sm font-medium text-primary hover:underline">Open Property Management</Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {hasAgentWorkspace && <ModuleMetric label="Landlord clients" value={moduleSnapshots.property.landlordClients ?? '—'} />}

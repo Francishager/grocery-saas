@@ -234,14 +234,15 @@ router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canV
 })
 
 router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requireAnyPermission(['canCreateTenancies', 'canManageTenancies']), async (req, res) => {
-  const tenantName = String(req.body?.tenantName || '').trim()
+  const requestedTenantName = String(req.body?.tenantName || '').trim()
+  const existingCustomerId = String(req.body?.customerId || '').trim()
   const startDate = new Date(req.body?.startDate)
   const rentAmount = Number(req.body?.rentAmount)
   const dueDay = Number(req.body?.dueDay || 1)
   const depositRequired = Number(req.body?.depositRequired || 0)
   const depositHeld = Number(req.body?.depositHeld || 0)
   const endDate = req.body?.endDate ? new Date(req.body.endDate) : null
-  if (!tenantName || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (endDate && (!Number.isFinite(endDate.getTime()) || endDate < startDate)) || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return badRequest(res, 'Enter a tenant, valid unit and agreement dates, positive monthly rent, deposits where amount already held does not exceed deposit required, and due day (1–31).')
+  if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (endDate && (!Number.isFinite(endDate.getTime()) || endDate < startDate)) || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return badRequest(res, 'Enter a tenant, valid unit and agreement dates, positive monthly rent, deposits where amount already held does not exceed deposit required, and due day (1–31).')
   try {
     const identity = await uploadRenterIdentity(req)
     const unit = await prisma.propertyUnit.findFirst({ where: { id: req.body.unitId, property: { tenantId: tenantIdOf(req), status: 'active' } } })
@@ -250,12 +251,16 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
     const result = await prisma.$transaction(async tx => {
       const claim = await tx.propertyUnit.updateMany({ where: { id: unit.id, status: 'vacant' }, data: { status: 'occupied' } })
       if (claim.count !== 1) throw Object.assign(new Error('This unit has just been assigned. Refresh and choose another vacant unit.'), { statusCode: 409 })
-      const customer = await findOrCreateRenterCustomer(tx, tenantIdOf(req), req.body)
-      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName, email: req.body.email?.trim() || null, phone: req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || null, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
+      const customer = existingCustomerId
+        ? await tx.customer.findFirst({ where: { id: existingCustomerId, tenantId: tenantIdOf(req) } })
+        : await findOrCreateRenterCustomer(tx, tenantIdOf(req), req.body)
+      if (!customer) throw Object.assign(new Error('Select a tenant from this business, or create a new tenant.'), { statusCode: 400 })
+      const renterName = customer.name
+      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName: renterName, email: customer.email || req.body.email?.trim() || null, phone: customer.phone || req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || customer.nin || null, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
       if (Object.values(identity).some(Boolean)) await tx.propertyTenantIdentity.create({ data: { tenantId: tenantIdOf(req), tenancyId: tenancy.id, profilePhotoUrl: identity.profilePhoto, nationalIdFrontUrl: identity.nationalIdFront, nationalIdBackUrl: identity.nationalIdBack } })
       if (depositHeld > 0) {
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
-        await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_DEPOSIT_OPENING', sourceId: tenancy.id, date: startDate, reference: tenancy.agreementRef || tenancy.id, description: `Opening tenant security deposit for ${tenantName}`, lines: propertyOpeningDepositLines(config, { amount: depositHeld, reference: tenancy.agreementRef || tenancy.id }) })
+        await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_DEPOSIT_OPENING', sourceId: tenancy.id, date: startDate, reference: tenancy.agreementRef || tenancy.id, description: `Opening tenant security deposit for ${renterName}`, lines: propertyOpeningDepositLines(config, { amount: depositHeld, reference: tenancy.agreementRef || tenancy.id }) })
       }
       const currentPeriod = monthKey(new Date())
       const currentDueDate = dueDateFor(currentPeriod, dueDay)
@@ -263,7 +268,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
         const currentUnit = await tx.propertyUnit.findUnique({ where: { id: unit.id }, include: { property: { select: { name: true, ownerId: true } } } })
         const charge = await tx.rentCharge.upsert({ where: { tenancyId_period: { tenancyId: tenancy.id, period: currentPeriod } }, update: {}, create: { tenantId: tenantIdOf(req), tenancyId: tenancy.id, period: currentPeriod, dueDate: currentDueDate, amount: money(rentAmount), description: `Rent for ${currentPeriod}` } })
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
-        await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_RENT_CHARGE', sourceId: charge.id, date: currentDueDate, reference: `RENT-${tenancy.id}-${currentPeriod}`, description: `Rent charge for ${tenantName}, ${currentUnit.property.name} / ${currentUnit.unitCode}`, lines: propertyRentChargeLines(config, { amount: charge.amount, managed: Boolean(currentUnit.property.ownerId), description: `Rent ${currentPeriod}` }) })
+        await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_RENT_CHARGE', sourceId: charge.id, date: currentDueDate, reference: `RENT-${tenancy.id}-${currentPeriod}`, description: `Rent charge for ${renterName}, ${currentUnit.property.name} / ${currentUnit.unitCode}`, lines: propertyRentChargeLines(config, { amount: charge.amount, managed: Boolean(currentUnit.property.ownerId), description: `Rent ${currentPeriod}` }) })
       }
       return tenancy
     })
