@@ -617,6 +617,7 @@ export function TenantLayout() {
       ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/reports', label: 'Client & Portfolio Reports', icon: BarChart3, permission: 'canViewPropertyReports' }] : []),
     ] : []),
   ].filter(subItemVisible)
+  const visiblePropertyManagementSubItems = propertyManagementSubItems
   const visibleProcurementBuyerItems = procurementBuyerItems.filter(subItemVisible)
   const visibleProcurementSellerItems = procurementSellerItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
